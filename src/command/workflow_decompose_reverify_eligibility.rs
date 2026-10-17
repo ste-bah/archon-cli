@@ -16,12 +16,13 @@ pub(super) fn check_run_status(
     store: &WorkflowStore,
     run_dir: &Path,
     run_id: &str,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
     status: RunStatus,
     latest: Option<&crate::command::workflow_decompose_latest_report::LatestReport>,
     v2: &WorkflowV2ResultStore,
 ) -> Result<bool> {
     let reverify_paused = if status == RunStatus::Paused {
-        paused_reverify_is_unconsumed(store, run_dir, run_id, latest, v2)?
+        paused_reverify_is_unconsumed(store, run_dir, run_id, lease, latest, v2)?
     } else {
         false
     };
@@ -85,6 +86,7 @@ pub(crate) fn recover_accepted_report_status(
 pub(crate) fn recover_accepted_reverify_before_resume(
     store: &WorkflowStore,
     run_id: &str,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
     latest: Option<&crate::command::workflow_decompose_latest_report::LatestReport>,
 ) -> Result<Option<String>> {
     let observed = store.load_state(run_id)?;
@@ -94,7 +96,8 @@ pub(crate) fn recover_accepted_reverify_before_resume(
         return Ok(None);
     };
     let v2 = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
-    let Some((_, _)) = authenticate_reverify_report(store, run_id, report, &v2, true)? else {
+    let Some((_, _)) = authenticate_reverify_report(store, run_id, lease, report, &v2, true)?
+    else {
         return Ok(None);
     };
     #[cfg(test)]
@@ -126,13 +129,15 @@ pub(crate) fn paused_reverify_is_unconsumed(
     store: &WorkflowStore,
     run_dir: &Path,
     run_id: &str,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
     latest: Option<&crate::command::workflow_decompose_latest_report::LatestReport>,
     v2: &WorkflowV2ResultStore,
 ) -> Result<bool> {
     let Some(latest) = latest.filter(|report| report.id.starts_with("reverify-")) else {
         return Ok(false);
     };
-    let Some((report, _)) = authenticate_reverify_report(store, run_id, latest, v2, false)? else {
+    let Some((report, _)) = authenticate_reverify_report(store, run_id, lease, latest, v2, false)?
+    else {
         return Ok(false);
     };
     let outcome = report["outcome"].as_str().unwrap_or("");
@@ -177,6 +182,7 @@ pub(crate) fn paused_reverify_is_unconsumed(
 fn authenticate_reverify_report(
     store: &WorkflowStore,
     run_id: &str,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
     latest: &crate::command::workflow_decompose_latest_report::LatestReport,
     v2: &WorkflowV2ResultStore,
     require_last_event: bool,
@@ -203,16 +209,25 @@ fn authenticate_reverify_report(
         .iter()
         .filter(|event| event.seq > report_event.seq)
         .collect::<Vec<_>>();
-    let abandoned = later_events
+    let holder = lease.holder();
+    if !lease.is_held_by(holder.pid, &holder.acquired_at) {
+        return Err(anyhow!(
+            "cannot authenticate reverify report without holding the workflow executor lease"
+        ));
+    }
+    let mut abandoned_starts = std::collections::BTreeSet::new();
+    let mut abandoned_invocations = std::collections::BTreeSet::new();
+    for event in later_events
         .iter()
         .filter(|event| event.kind == WorkflowEventKind::DecompositionReverifyStarted)
-        .filter_map(|event| {
-            let invocation = event.detail.get("invocation_id")?.as_str()?;
-            if !invocation.starts_with("reverify-") {
-                return None;
-            }
+    {
+        let invocation = event
+            .detail
+            .get("invocation_id")
+            .and_then(serde_json::Value::as_str);
+        let completed = invocation.is_some_and(|invocation| {
             let expected_report_id = format!("{invocation}-report");
-            let completed = events.iter().any(|candidate| {
+            events.iter().any(|candidate| {
                 candidate.kind == WorkflowEventKind::DecompositionReverified
                     && (candidate
                         .detail
@@ -224,36 +239,22 @@ fn authenticate_reverify_report(
                             .get("report_id")
                             .and_then(serde_json::Value::as_str)
                             == Some(expected_report_id.as_str()))
-            });
-            let lease_live = event
-                .detail
-                .get("lease_pid")
-                .and_then(serde_json::Value::as_u64)
-                .zip(
-                    event
-                        .detail
-                        .get("lease_acquired_at")
-                        .and_then(serde_json::Value::as_str),
-                )
-                .is_some_and(|(pid, acquired_at)| {
-                    crate::command::workflow_executor_lease::is_held_by(
-                        &store
-                            .run_dir(run_id)
-                            .join(crate::command::workflow_executor_lease::LEASE),
-                        pid as u32,
-                        acquired_at,
-                    )
-                });
-            (!completed && !lease_live).then(|| invocation.to_string())
-        })
-        .collect::<std::collections::BTreeSet<_>>();
+            })
+        });
+        if completed {
+            continue;
+        }
+        // This invocation holds the exclusive run lease, so no prior
+        // reverify can still be executing. Older start events need no lease
+        // identity fields for this proof.
+        abandoned_starts.insert(event.seq);
+        if let Some(invocation) = invocation {
+            abandoned_invocations.insert(invocation.to_string());
+        }
+    }
     let has_non_abandoned_activity = later_events.iter().any(|event| {
         event.kind != WorkflowEventKind::DecompositionReverifyStarted
-            || !event
-                .detail
-                .get("invocation_id")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|invocation| abandoned.contains(invocation))
+            || !abandoned_starts.contains(&event.seq)
     });
     if has_non_abandoned_activity {
         if require_last_event {
@@ -314,7 +315,7 @@ fn authenticate_reverify_report(
         ));
     }
     let abandoned_call_ids = |record_id: &str| {
-        abandoned.iter().any(|invocation| {
+        abandoned_invocations.iter().any(|invocation| {
             record_id
                 .strip_prefix(invocation)
                 .is_some_and(|suffix| suffix.starts_with('-'))

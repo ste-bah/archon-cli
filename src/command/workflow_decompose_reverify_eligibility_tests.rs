@@ -361,11 +361,14 @@ async fn legacy_report_without_snapshot_is_eligible_when_reverified_event_is_las
     )
     .unwrap();
     let v2 = WorkflowV2ResultStore::new(run_dir.join("v2"));
+    let lease =
+        crate::command::workflow_executor_lease::acquire(&run_dir, &fixture.run_id).unwrap();
     assert!(
         super::super::workflow_decompose_reverify::eligibility::paused_reverify_is_unconsumed(
             &fixture.store,
             &run_dir,
             &fixture.run_id,
+            &lease,
             latest.as_ref(),
             &v2,
         )
@@ -384,6 +387,7 @@ async fn legacy_report_without_snapshot_is_eligible_when_reverified_event_is_las
             &fixture.store,
             &run_dir,
             &fixture.run_id,
+            &lease,
             latest.as_ref(),
             &v2,
         );

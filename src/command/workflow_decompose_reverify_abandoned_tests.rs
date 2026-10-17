@@ -61,3 +61,44 @@ async fn abandoned_started_invocation_with_gate_records_is_ignored_on_next_rever
         String::from_utf8_lossy(&next.stderr)
     );
 }
+
+#[tokio::test]
+async fn legacy_started_invocation_without_lease_identity_is_ignored_on_next_reverify() {
+    let fixture = fixture();
+    crate::command::workflow::workflow_decompose_reverify::persist::set_after_persist_hook(|| true);
+    let stopped = crate::command::workflow::workflow_decompose_reverify::reverify(
+        &fixture.project,
+        &fixture.run_id,
+        &archon_core::config::ArchonConfig::default(),
+        &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
+    )
+    .await;
+    assert!(stopped.unwrap_err().to_string().contains("test crash seam"));
+
+    let event_path = fixture.store.events_path(&fixture.run_id);
+    let lines = std::fs::read_to_string(&event_path)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let mut event: serde_json::Value = serde_json::from_str(line).unwrap();
+            if event["kind"] == "decomposition_reverify_started" {
+                event["detail"].as_object_mut().unwrap().remove("lease_pid");
+                event["detail"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("lease_acquired_at");
+            }
+            serde_json::to_string(&event).unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(event_path, lines).unwrap();
+
+    let next = invoke_reverify(&archon_binary(), &fixture);
+    assert!(
+        String::from_utf8_lossy(&next.stderr).contains("reverify gate started"),
+        "legacy start was not admitted: {}",
+        String::from_utf8_lossy(&next.stderr)
+    );
+}

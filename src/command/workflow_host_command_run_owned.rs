@@ -10,8 +10,7 @@ use crate::command::workflow_host_command_supervisor::HostCommandSignal;
 pub(crate) struct PausedRunAuthorization {
     pub(crate) invocation_id: String,
     pub(crate) expected_generation: u64,
-    pub(crate) lease_pid: u32,
-    pub(crate) lease_acquired_at: String,
+    lease_held: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl PausedRunAuthorization {
@@ -23,8 +22,7 @@ impl PausedRunAuthorization {
         Self {
             invocation_id,
             expected_generation,
-            lease_pid: lease.holder().pid,
-            lease_acquired_at: lease.holder().acquired_at.clone(),
+            lease_held: lease.held_token(),
         }
     }
 
@@ -54,14 +52,12 @@ impl PausedRunAuthorization {
                             == Some(self.invocation_id.as_str())
                 })
             });
-        let lease_path = store
-            .run_dir(&run.id)
-            .join(crate::command::workflow_executor_lease::LEASE);
-        let lease_matches = crate::command::workflow_executor_lease::is_held_by(
-            &lease_path,
-            self.lease_pid,
-            &self.lease_acquired_at,
-        );
+        // This authorization is issued in-process by the reverify that owns
+        // the lease guard. Keep its guard token: probing the lock with a new
+        // handle can conflict with that same guard on Windows. Abandoned
+        // invocations, which run in a later process, still use the kernel
+        // lock probe in workflow_decompose_reverify_eligibility.
+        let lease_matches = self.lease_held.load(std::sync::atomic::Ordering::Acquire);
         invocation_started && lease_matches
     }
 }

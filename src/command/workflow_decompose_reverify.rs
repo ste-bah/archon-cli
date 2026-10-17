@@ -66,8 +66,15 @@ pub(crate) async fn reverify(
     }
     let v2 = WorkflowV2ResultStore::new(run_dir.join("v2"));
     let latest = crate::command::workflow_decompose_latest_report::latest_report(&store, run_id)?;
-    let reverify_paused =
-        eligibility::check_run_status(&store, &run_dir, run_id, run.status, latest.as_ref(), &v2)?;
+    let reverify_paused = eligibility::check_run_status(
+        &store,
+        &run_dir,
+        run_id,
+        &_lease,
+        run.status,
+        latest.as_ref(),
+        &v2,
+    )?;
     if let Some(response) = eligibility::recover_accepted_report_status(
         &store,
         run_id,

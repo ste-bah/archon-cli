@@ -280,7 +280,9 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         anchored_digest,
     )?;
     upgrade::validate_result_state(&store, run_id)?;
-    if let Some(recovery) = recovery::accepted_reverify(&store, run_id, run.status.clone())? {
+    if let Some(recovery) =
+        recovery::accepted_reverify(&store, run_id, &execution_lease, run.status.clone())?
+    {
         return Ok(recovery);
     }
     landing_reconcile::resume(&project_root, &store.run_dir(run_id), &task_root, &ui_sink).await?;

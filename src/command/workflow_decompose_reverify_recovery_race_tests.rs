@@ -52,9 +52,15 @@ async fn resume_recovery_does_not_overwrite_concurrent_cancel() {
             .apply(&run_id, archon_workflow::LifecycleAction::Cancel)
             .unwrap();
     });
+    let lease = crate::command::workflow_executor_lease::acquire(
+        &fixture.store.run_dir(&fixture.run_id),
+        &fixture.run_id,
+    )
+    .unwrap();
     let recovered = crate::command::workflow::workflow_decompose_reverify::eligibility::recover_accepted_reverify_before_resume(
         &fixture.store,
         &fixture.run_id,
+        &lease,
         latest.as_ref(),
     )
     .unwrap();

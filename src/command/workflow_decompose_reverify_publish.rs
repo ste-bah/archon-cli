@@ -52,7 +52,7 @@ pub(crate) fn set_before_final_publication_hook(hook: impl FnOnce() + 'static) {
 pub(super) fn final_report(
     store: &WorkflowStore,
     run_id: &str,
-    run_dir: &Path,
+    _run_dir: &Path,
     lease: &crate::command::workflow_executor_lease::ExecutionLease,
     generation: u64,
     status: &RunStatus,
@@ -74,9 +74,7 @@ pub(super) fn final_report(
 
     store.with_run_lock(run_id, |locked| {
         let mut current = locked.load_state(run_id)?;
-        let lease_path = run_dir.join(crate::command::workflow_executor_lease::LEASE);
-        let lease_held = crate::command::workflow_executor_lease::is_held_by(
-            &lease_path,
+        let lease_held = lease.is_held_by(
             lease.holder().pid,
             &lease.holder().acquired_at,
         );
@@ -114,7 +112,7 @@ pub(super) fn final_report(
 pub(super) fn persist_owned_call(
     store: &WorkflowStore,
     run_id: &str,
-    run_dir: &Path,
+    _run_dir: &Path,
     lease: &crate::command::workflow_executor_lease::ExecutionLease,
     generation: u64,
     status: &RunStatus,
@@ -123,9 +121,7 @@ pub(super) fn persist_owned_call(
 ) -> Result<()> {
     store.with_run_lock(run_id, |locked| {
         let current = locked.load_state(run_id)?;
-        let lease_path = run_dir.join(crate::command::workflow_executor_lease::LEASE);
-        let lease_held = crate::command::workflow_executor_lease::is_held_by(
-            &lease_path,
+        let lease_held = lease.is_held_by(
             lease.holder().pid,
             &lease.holder().acquired_at,
         );
