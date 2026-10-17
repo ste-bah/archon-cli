@@ -249,32 +249,18 @@ fn recreating_reading_and_deleting_an_input_cannot_hide_behind_restored_parent_m
     std::fs::remove_file(dir.path().join(".parent-time-ref")).unwrap();
 
     let names = names_of(&["data/state.txt"]);
-    let recreates = "set -e; : > .check-started; touch -r data .parent-time-ref; sleep 1; printf 'other' > data/state.txt; cat data/state.txt >/dev/null; rm data/state.txt; touch -m -r .parent-time-ref data; rm .parent-time-ref; : > .check-mtime-restored; exit 0";
+    let recreates = "set -e; touch -r data .parent-time-before; touch -r data .parent-time-ref; sleep 1; printf 'other' > data/state.txt; cat data/state.txt >/dev/null; rm data/state.txt; touch -m -r .parent-time-ref data; touch -r data .parent-time-after; rm .parent-time-ref; exit 0";
     let markers = Markers::new();
-    let project = dir.path().to_path_buf();
-    let mtime_observer = std::thread::spawn(move || {
-        let wait_for = |name: &str| {
-            let marker = project.join(name);
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while !marker.exists() {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "timed out waiting for {name}"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            std::fs::metadata(project.join("data"))
-                .unwrap()
-                .modified()
-                .unwrap()
-        };
-        let before = wait_for(".check-started");
-        let after = wait_for(".check-mtime-restored");
-        (before, after)
-    });
     let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &markers));
     assert_eq!(recreated.exit_code, Some(0));
-    let (parent_mtime_before, parent_mtime_after) = mtime_observer.join().unwrap();
+    let parent_mtime_before = std::fs::metadata(dir.path().join(".parent-time-before"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let parent_mtime_after = std::fs::metadata(dir.path().join(".parent-time-after"))
+        .unwrap()
+        .modified()
+        .unwrap();
     assert_eq!(parent_mtime_before, parent_mtime_after);
     assert_eq!(
         markers.recreated(&recreated),
