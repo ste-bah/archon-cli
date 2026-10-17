@@ -85,6 +85,10 @@ pub(crate) fn release_lock(file: &File) {
 }
 
 impl ExecutionLease {
+    pub(crate) fn holder(&self) -> &LeaseHolder {
+        &self.holder
+    }
+
     /// The last process that executed the run before this lease was taken.
     /// `None` for a new run, or for a lock file that an older build left
     /// empty.
@@ -159,6 +163,27 @@ pub(crate) fn read_record(file: &mut File) -> Option<LeaseRecord> {
     file.seek(SeekFrom::Start(0)).ok()?;
     file.read_to_string(&mut text).ok()?;
     serde_json::from_str(&text).ok()
+}
+
+/// Confirms both the persisted holder identity and that its kernel lock is
+/// still live. The record alone survives release of the lease.
+pub(crate) fn is_held_by(path: &Path, pid: u32, acquired_at: &str) -> bool {
+    let Ok(mut file) = OpenOptions::new().read(true).write(true).open(path) else {
+        return false;
+    };
+    let matches = read_record(&mut file)
+        .is_some_and(|record| record.holder.pid == pid && record.holder.acquired_at == acquired_at);
+    if !matches {
+        return false;
+    }
+    match file.try_lock() {
+        Ok(()) => {
+            release_lock(&file);
+            false
+        }
+        Err(TryLockError::WouldBlock) => true,
+        Err(TryLockError::Error(_)) => false,
+    }
 }
 
 fn live_owner_message(id: &str, path: &Path) -> String {

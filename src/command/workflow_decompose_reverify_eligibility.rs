@@ -2,6 +2,16 @@ use anyhow::{Context, Result, anyhow};
 use archon_workflow::{RunStatus, WorkflowEventKind, WorkflowStore, WorkflowV2ResultStore};
 use std::path::Path;
 
+#[cfg(test)]
+thread_local! {
+    static BEFORE_RECOVERY_LOCK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn set_before_recovery_lock_hook(hook: impl FnOnce() + 'static) {
+    BEFORE_RECOVERY_LOCK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
 pub(super) fn check_run_status(
     store: &WorkflowStore,
     run_dir: &Path,
@@ -36,28 +46,34 @@ pub(super) fn check_run_status(
     )
 }
 
-pub(super) fn set_reverify_run_status(
-    store: &WorkflowStore,
-    run_id: &str,
-    status: RunStatus,
-) -> Result<()> {
-    store.with_run_lock(run_id, |locked| {
-        let mut latest = locked.load_state(run_id)?;
-        latest.status = status;
-        latest.updated_at = chrono::Utc::now();
-        locked.save_state(&latest)
-    })?;
-    Ok(())
-}
-
-pub(super) fn recover_accepted_report_status(
+pub(crate) fn recover_accepted_report_status(
     store: &WorkflowStore,
     run_id: &str,
     paused_reverify: bool,
+    generation: u64,
+    observed_status: &RunStatus,
     latest: Option<&crate::command::workflow_decompose_latest_report::LatestReport>,
 ) -> Result<Option<String>> {
     if let Some(report) = latest.filter(|report| paused_reverify && report.outcome == "accepted") {
-        set_reverify_run_status(store, run_id, RunStatus::Completed)?;
+        #[cfg(test)]
+        BEFORE_RECOVERY_LOCK.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().take() {
+                hook();
+            }
+        });
+        let recovered = store.with_run_lock(run_id, |locked| {
+            let mut current = locked.load_state(run_id)?;
+            if current.generation != generation || &current.status != observed_status {
+                return Ok(false);
+            }
+            current.status = RunStatus::Completed;
+            current.updated_at = chrono::Utc::now();
+            locked.save_state(&current)?;
+            Ok(true)
+        })?;
+        if !recovered {
+            return Ok(None);
+        }
         return Ok(Some(format!(
             "Recovered accepted reverify report: {}\nOutcome: accepted",
             report.id
@@ -71,6 +87,7 @@ pub(crate) fn recover_accepted_reverify_before_resume(
     run_id: &str,
     latest: Option<&crate::command::workflow_decompose_latest_report::LatestReport>,
 ) -> Result<Option<String>> {
+    let observed = store.load_state(run_id)?;
     let Some(report) =
         latest.filter(|report| report.id.starts_with("reverify-") && report.outcome == "accepted")
     else {
@@ -80,7 +97,25 @@ pub(crate) fn recover_accepted_reverify_before_resume(
     let Some((_, _)) = authenticate_reverify_report(store, run_id, report, &v2, true)? else {
         return Ok(None);
     };
-    set_reverify_run_status(store, run_id, RunStatus::Completed)?;
+    #[cfg(test)]
+    BEFORE_RECOVERY_LOCK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+    let recovered = store.with_run_lock(run_id, |locked| {
+        let mut current = locked.load_state(run_id)?;
+        if current.generation != observed.generation || current.status != observed.status {
+            return Ok(false);
+        }
+        current.status = RunStatus::Completed;
+        current.updated_at = chrono::Utc::now();
+        locked.save_state(&current)?;
+        Ok(true)
+    })?;
+    if !recovered {
+        return Ok(None);
+    }
     Ok(Some(format!(
         "Recovered accepted reverify report: {}\nOutcome: accepted\nRun status: Completed; execution was not started",
         report.id
@@ -164,7 +199,63 @@ fn authenticate_reverify_report(
     }) else {
         return Ok(None);
     };
-    if events.iter().any(|event| event.seq > report_event.seq) {
+    let later_events = events
+        .iter()
+        .filter(|event| event.seq > report_event.seq)
+        .collect::<Vec<_>>();
+    let abandoned = later_events
+        .iter()
+        .filter(|event| event.kind == WorkflowEventKind::DecompositionReverifyStarted)
+        .filter_map(|event| {
+            let invocation = event.detail.get("invocation_id")?.as_str()?;
+            if !invocation.starts_with("reverify-") {
+                return None;
+            }
+            let expected_report_id = format!("{invocation}-report");
+            let completed = events.iter().any(|candidate| {
+                candidate.kind == WorkflowEventKind::DecompositionReverified
+                    && (candidate
+                        .detail
+                        .get("invocation_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(invocation)
+                        || candidate
+                            .detail
+                            .get("report_id")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(expected_report_id.as_str()))
+            });
+            let lease_live = event
+                .detail
+                .get("lease_pid")
+                .and_then(serde_json::Value::as_u64)
+                .zip(
+                    event
+                        .detail
+                        .get("lease_acquired_at")
+                        .and_then(serde_json::Value::as_str),
+                )
+                .is_some_and(|(pid, acquired_at)| {
+                    crate::command::workflow_executor_lease::is_held_by(
+                        &store
+                            .run_dir(run_id)
+                            .join(crate::command::workflow_executor_lease::LEASE),
+                        pid as u32,
+                        acquired_at,
+                    )
+                });
+            (!completed && !lease_live).then(|| invocation.to_string())
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let has_non_abandoned_activity = later_events.iter().any(|event| {
+        event.kind != WorkflowEventKind::DecompositionReverifyStarted
+            || !event
+                .detail
+                .get("invocation_id")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|invocation| abandoned.contains(invocation))
+    });
+    if has_non_abandoned_activity {
         if require_last_event {
             return Ok(None);
         }
@@ -222,6 +313,13 @@ fn authenticate_reverify_report(
             latest.id
         ));
     }
+    let abandoned_call_ids = |record_id: &str| {
+        abandoned.iter().any(|invocation| {
+            record_id
+                .strip_prefix(invocation)
+                .is_some_and(|suffix| suffix.starts_with('-'))
+        })
+    };
     if let Some(snapshot_value) = report.get("call_record_ids_at_report") {
         let snapshot = snapshot_value.as_array().ok_or_else(|| {
             anyhow!(
@@ -238,6 +336,7 @@ fn authenticate_reverify_report(
             .load_call_records()?
             .into_iter()
             .map(|record| record.call.id)
+            .filter(|id| !abandoned_call_ids(id))
             .collect::<std::collections::BTreeSet<_>>();
         if expected.len() != snapshot.len() || expected != actual {
             return Err(anyhow!(
@@ -251,6 +350,18 @@ fn authenticate_reverify_report(
         // lifecycle transition (and appends its event) before invoking the
         // executor, so no v2 call record can be created without a later event.
         // workflow_decompose_resume_event_precedes_any_v2_call_record_on_a_paused_fixed_run pins it.
+        // The only records tolerated beyond that snapshot are invocation-scoped
+        // records whose durable start event proves the invocation was abandoned.
+        let records = v2.load_call_records()?;
+        if records
+            .iter()
+            .any(|record| abandoned_call_ids(&record.call.id))
+        {
+            return Err(anyhow!(
+                "legacy reverify report {} cannot authenticate invocation-scoped records without a call-record snapshot",
+                latest.id
+            ));
+        }
     }
     Ok(Some((report, report_event.seq)))
 }

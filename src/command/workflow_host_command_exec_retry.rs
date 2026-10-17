@@ -4,7 +4,7 @@
 use super::*;
 use crate::command::workflow_host_command_operational::{
     NextStep, OperationalAttempt, OperationalReport, next_step, pause_for_stall,
-    pause_for_unsettled_publish, pause_run, record_retry, require_run_owned,
+    pause_for_unsettled_publish, pause_run, record_retry, require_run_owned_authorized,
 };
 use crate::command::workflow_host_command_supervisor::HostCommandControlHandle;
 
@@ -66,10 +66,11 @@ impl FixedHostCommandExecutor {
             })?
             .to_string();
         // A run paused meanwhile reports the pause, never a cancellation.
-        crate::command::workflow_host_command_operational::require_run_owned(
+        crate::command::workflow_host_command_operational::require_run_owned_authorized(
             &store,
             &run_id,
             expected_generation,
+            self.paused_run_authorization.as_ref(),
         )?;
         let work = self.process.execute(request, control);
         tokio::pin!(work);
@@ -82,10 +83,11 @@ impl FixedHostCommandExecutor {
                     let Ok(run) = store.load_state(&run_id) else {
                         continue;
                     };
-                    if let Some(signal) = crate::command::workflow_host_command_operational::supervisor_signal(
+                    if let Some(signal) = crate::command::workflow_host_command_operational::supervisor_signal_authorized(
                         &store,
                         &run,
                         expected_generation,
+                        self.paused_run_authorization.as_ref(),
                     ) {
                         handle.signal(signal)?;
                         return work.await;
@@ -126,7 +128,12 @@ impl FixedHostCommandExecutor {
         loop {
             let attempt = history.len() as u32 + 1;
             if attempt > 1 {
-                require_run_owned(&store, &run_id, expected_generation)?;
+                require_run_owned_authorized(
+                    &store,
+                    &run_id,
+                    expected_generation,
+                    self.paused_run_authorization.as_ref(),
+                )?;
                 // The killed attempt's partial staging must not reach the
                 // audit, which requires the staged set to match the manifest.
                 // Cleared through the anchor: a link the killed attempt left

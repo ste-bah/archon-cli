@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "workflow_decompose_reverify_recovery_race_tests.rs"]
+mod race_tests;
+
 #[tokio::test]
 async fn workflow_decompose_resume_recovers_accepted_report_without_execution() {
     let fixture = resume_fixture().await;

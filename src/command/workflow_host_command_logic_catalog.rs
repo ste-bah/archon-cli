@@ -87,7 +87,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
         // #457: baseline-passing checks may use a bound accepted judge verdict; the can-fail proof remains required.
         // #457 follow-up re-pin only: transient recreation of moved check inputs invalidates a stored verdict; freeze-acceptance remains version 28 (unreleased).
-        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+        // Re-pin: generic run ownership permits one already-authorized paused
+        // observer to proceed; this capability's policy verdict is unchanged.
+        sources_digest: "d7a608cf9c084f46b8cf7a284949e8d8859ab85005a31b3a0e4a99c904636abf",
         build_bound: false,
     },
     CapabilityLogic {
@@ -131,7 +133,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
         // #457 re-pin only: acceptance probe changes do not affect skeleton freeze verdicts.
         // #457 follow-up re-pin only: this closure is shared; the skeleton verdict is unchanged.
-        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+        // Re-pin: generic run ownership permits one already-authorized paused
+        // observer to proceed; this capability's policy verdict is unchanged.
+        sources_digest: "d7a608cf9c084f46b8cf7a284949e8d8859ab85005a31b3a0e4a99c904636abf",
         build_bound: false,
     },
     CapabilityLogic {
@@ -188,7 +192,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not body verdicts.
-        sources_digest: "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+        // Re-pin: generic run ownership permits one already-authorized paused
+        // observer to proceed; this capability's policy verdict is unchanged.
+        sources_digest: "6bda63b96440a8b14770278e0c31b106fc6bd3f41d7a36906517c8b55550ccd5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -237,7 +243,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not lint verdicts.
-        sources_digest: "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+        // Re-pin: generic run ownership permits one already-authorized paused
+        // observer to proceed; this capability's policy verdict is unchanged.
+        sources_digest: "6bda63b96440a8b14770278e0c31b106fc6bd3f41d7a36906517c8b55550ccd5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -308,7 +316,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
         // #457 re-pin only: frozen-chain verification does not run the can-fail probe or read named inputs.
-        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
+        // Re-pin: generic run ownership permits one already-authorized paused
+        // observer to proceed; this capability's policy verdict is unchanged.
+        sources_digest: "1e4af477f78d3578f0e83273f3e9b421ce2914f6f0b86253eede292a52bcd19f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -350,7 +360,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
         // #457 re-pin only: frozen verification runs no check and judges no probe result.
-        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
+        // Re-pin: generic run ownership permits one already-authorized paused
+        // observer to proceed; this capability's policy verdict is unchanged.
+        sources_digest: "1e4af477f78d3578f0e83273f3e9b421ce2914f6f0b86253eede292a52bcd19f",
         build_bound: true,
     },
 ];
