@@ -20,6 +20,9 @@ use crate::command::workflow_host_command_exec::FixedHostCommandExecutor;
 const REPORT_PATH: &str = "decomposition/reverify/reports";
 const STATE_PATH: &str = "decomposition/state.json";
 
+#[path = "workflow_decompose_reverify_eligibility.rs"]
+pub(crate) mod eligibility;
+
 #[path = "workflow_decompose_reverify_persist_call.rs"]
 mod persist;
 pub(super) use persist::persist_call;
@@ -31,6 +34,10 @@ struct ReverifyReport {
     supersedes_id: String,
     supersedes_digest: String,
     outcome: String,
+    #[serde(default)]
+    report_event_seq: u64,
+    #[serde(default)]
+    call_record_ids_at_report: Vec<String>,
     calls: Vec<String>,
     subjects: Vec<SubjectResult>,
     set_gates: Vec<GateResult>,
@@ -80,9 +87,6 @@ pub(crate) async fn reverify(
     let run_dir = store.run_dir(run_id);
     let _lease = crate::command::workflow_executor_lease::acquire(&run_dir, run_id)?;
     let run = store.load_state(run_id)?;
-    if run.status != RunStatus::Completed {
-        return Err(anyhow!("workflow {run_id} is not completed"));
-    }
     let state_path = run_dir.join(STATE_PATH);
     let state: FixedDecompositionStateV1 = serde_json::from_slice(
         &std::fs::read(&state_path).with_context(|| format!("reading {}", state_path.display()))?,
@@ -95,8 +99,19 @@ pub(crate) async fn reverify(
         ));
     }
     let v2 = WorkflowV2ResultStore::new(run_dir.join("v2"));
-    let latest = crate::command::workflow_decompose_latest_report::latest_report(&store, run_id)?
-        .ok_or_else(|| anyhow!("workflow {run_id} has no valid prior final report"))?;
+    let latest = crate::command::workflow_decompose_latest_report::latest_report(&store, run_id)?;
+    let reverify_paused =
+        eligibility::check_run_status(&store, &run_dir, run_id, run.status, latest.as_ref(), &v2)?;
+    if let Some(response) = eligibility::recover_accepted_report_status(
+        &store,
+        run_id,
+        reverify_paused,
+        latest.as_ref(),
+    )? {
+        return Ok(response);
+    }
+    let latest =
+        latest.ok_or_else(|| anyhow!("workflow {run_id} has no valid prior final report"))?;
     let prior = v2
         .load_call_records()?
         .into_iter()
@@ -335,13 +350,23 @@ pub(crate) async fn reverify(
     } else {
         "needs_remediation"
     };
+    let report_event_seq = store.next_event_seq(run_id)?;
     let report_id = format!("reverify-{event_seq}-report");
+    let mut call_record_ids_at_report = v2
+        .load_call_records()?
+        .into_iter()
+        .map(|record| record.call.id)
+        .collect::<Vec<_>>();
+    call_record_ids_at_report.push(report_id.clone());
+    call_record_ids_at_report.sort();
     let report = ReverifyReport {
         schema_version: 1,
         id: report_id.clone(),
         supersedes_id: prior.call.id.clone(),
         supersedes_digest: prior_digest,
         outcome: outcome.to_string(),
+        report_event_seq,
+        call_record_ids_at_report,
         calls: call_ids.clone(),
         subjects,
         set_gates,
@@ -390,10 +415,9 @@ pub(crate) async fn reverify(
         ));
     }
     v2.save_call_record(&report_record)?;
-    let seq = store.next_event_seq(run_id)?;
     WorkflowEventLog::new(store.clone()).emit(
         run_id,
-        seq,
+        report_event_seq,
         WorkflowEventKind::DecompositionReverified,
         serde_json::json!({"report_id": report_id, "report_digest": report_digest,
             "supersedes_id": prior.call.id, "outcome": outcome}),
@@ -409,12 +433,6 @@ pub(crate) async fn reverify(
                 "schema_version": 1, "report_id": report_id, "subjects": failed_subjects,
             }),
         )?;
-        store.with_run_lock(run_id, |locked| {
-            let mut latest = locked.load_state(run_id)?;
-            latest.status = RunStatus::Paused;
-            latest.updated_at = chrono::Utc::now();
-            locked.save_state(&latest)
-        })?;
     }
     if operational_failure {
         let causes = report
@@ -440,7 +458,11 @@ pub(crate) async fn reverify(
         ));
     }
     if all_accepted {
-        // Completion remains authoritative only when the current disk passes.
+        if reverify_paused {
+            eligibility::set_reverify_run_status(&store, run_id, RunStatus::Completed)?;
+        }
+    } else if !operational_failure && outcome == "needs_remediation" {
+        eligibility::set_reverify_run_status(&store, run_id, RunStatus::Paused)?;
     }
     let verdicts = report
         .subjects

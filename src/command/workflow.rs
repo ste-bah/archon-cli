@@ -30,7 +30,7 @@ mod workflow_cli_lint;
 #[path = "workflow_decompose_cli.rs"]
 mod workflow_decompose_cli;
 #[path = "workflow_decompose_reverify.rs"]
-mod workflow_decompose_reverify;
+pub(crate) mod workflow_decompose_reverify;
 #[path = "workflow_decompose_reverify_assessment.rs"]
 mod workflow_decompose_reverify_assessment;
 #[cfg(test)]
