@@ -4,6 +4,7 @@ use anyhow::Result;
 use archon_pipeline::gametheory;
 use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
 use cozo::{DbInstance, ScriptMutability};
+use std::path::{Path, PathBuf};
 
 use crate::command::gametheory_inspect;
 use crate::command::registry::{CommandContext, CommandHandler};
@@ -237,6 +238,18 @@ fn render_usage_line(reason: &str) -> String {
 
 fn open_db() -> Result<std::sync::Arc<DbInstance>> {
     crate::command::store_paths::open_evidence_db("gametheory", &["ARCHON_GAMETHEORY_DB_PATH"])
+}
+
+fn open_db_at(cwd: &Path) -> Result<std::sync::Arc<DbInstance>> {
+    let path =
+        crate::command::store_paths::evidence_db_path_for_dir(cwd, &["ARCHON_GAMETHEORY_DB_PATH"]);
+    crate::command::store_paths::open_sqlite_db(&path, "gametheory")
+}
+
+fn working_dir(ctx: &CommandContext) -> PathBuf {
+    ctx.working_dir
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 #[cfg(test)]

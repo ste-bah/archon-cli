@@ -39,6 +39,25 @@ pub async fn handle_gametheory(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
+    let replay_mutates = matches!(
+        action,
+        Some(GametheoryAction::Replay {
+            reclassify: true,
+            ..
+        }) | Some(GametheoryAction::Replay {
+            rerun_specialist: Some(_),
+            ..
+        })
+    );
+    if replay_mutates
+        || matches!(
+            action,
+            Some(GametheoryAction::Run { .. } | GametheoryAction::Resume { .. })
+        )
+        || (action.is_none() && shorthand_situation.is_some())
+    {
+        preflight_run(&std::env::current_dir()?)?;
+    }
     maybe_print_resume_hint(action)?;
     match action {
         Some(GametheoryAction::Run {
@@ -53,6 +72,7 @@ pub async fn handle_gametheory(
             enable_tier11,
         }) => {
             handle_run(
+                &std::env::current_dir()?,
                 situation,
                 *classify_only,
                 spec_path.as_deref(),
@@ -103,6 +123,7 @@ pub async fn handle_gametheory(
                 )
             })?;
             handle_run(
+                &std::env::current_dir()?,
                 situation,
                 shorthand_classify_only,
                 shorthand_spec_path,
@@ -165,6 +186,7 @@ pub(crate) fn open_memory_context(debug: bool) -> Result<gametheory::GameTheoryM
 // ── run ──────────────────────────────────────────────────────────────────────
 
 async fn handle_run(
+    cwd: &std::path::Path,
     situation: &str,
     classify_only: bool,
     spec_path: Option<&str>,
@@ -177,11 +199,8 @@ async fn handle_run(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
-    crate::command::pipeline_agents::preflight(
-        &std::env::current_dir()?,
-        archon_pipeline::runner::PipelineType::GameTheory,
-    )?;
-    let db = open_db()?;
+    preflight_run(cwd)?;
+    let db = open_db_at(cwd)?;
     if classify_only {
         run_classify_only(&db, situation, config, env_vars).await
     } else {
@@ -207,6 +226,13 @@ async fn handle_run(
     }
 }
 
+pub(crate) fn preflight_run(cwd: &std::path::Path) -> Result<()> {
+    crate::command::pipeline_agents::preflight(
+        cwd,
+        archon_pipeline::runner::PipelineType::GameTheory,
+    )
+}
+
 async fn run_classify_only(
     db: &DbInstance,
     situation: &str,
@@ -218,7 +244,8 @@ async fn run_classify_only(
     let cwd = std::env::current_dir()?;
     let (mut learning, _) = build_pipeline_learning_stack(config, &cwd);
 
-    match gametheory::classify_with_learning(db, situation, llm_ref, learning.as_mut()).await {
+    match gametheory::classify_with_learning(db, situation, llm_ref, learning.as_mut(), &cwd).await
+    {
         Ok(fp) => {
             print_fingerprint(&fp);
             println!("Fingerprint persisted to Cozo (gt_runs, gt_fingerprints).");
@@ -261,6 +288,7 @@ async fn run_full(
     let (mut learning, _) = build_pipeline_learning_stack(config, &cwd);
     let tier11_allowed = resolve_tier11_policy(enable_tier11)?;
     let options = gametheory::GameTheoryRunOptions {
+        project_root: cwd.clone(),
         budget_usd: budget,
         max_concurrent,
         style_profile_id: Some(style.to_string()),
@@ -432,6 +460,10 @@ async fn handle_replay(
         anyhow::bail!("--reclassify and --rerun-specialist cannot be combined");
     }
 
+    if reclassify || rerun_specialist.is_some() {
+        preflight_run(&std::env::current_dir()?)?;
+    }
+
     let db = open_db()?;
 
     if reclassify {
@@ -466,7 +498,10 @@ async fn handle_replay(
             agent_key,
             llm_ref,
             open_memory_context(false)?,
-            gametheory::GameTheoryRunOptions::default(),
+            gametheory::GameTheoryRunOptions {
+                project_root: cwd,
+                ..gametheory::GameTheoryRunOptions::default()
+            },
             learning.as_mut(),
         )
         .await
@@ -517,8 +552,25 @@ async fn handle_resume(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
-    crate::command::pipeline_agents::preflight(
+    handle_resume_with_cwd(
         &std::env::current_dir()?,
+        run_id,
+        spec_path,
+        config,
+        env_vars,
+    )
+    .await
+}
+
+async fn handle_resume_with_cwd(
+    cwd: &std::path::Path,
+    run_id: &str,
+    spec_path: Option<&str>,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
+    crate::command::pipeline_agents::preflight(
+        cwd,
         archon_pipeline::runner::PipelineType::GameTheory,
     )?;
     let db = open_db()?;
@@ -530,7 +582,10 @@ async fn handle_resume(
         spec_path.map(std::path::Path::new),
         llm_ref,
         open_memory_context(false)?,
-        gametheory::GameTheoryRunOptions::default(),
+        gametheory::GameTheoryRunOptions {
+            project_root: cwd.to_path_buf(),
+            ..gametheory::GameTheoryRunOptions::default()
+        },
     )
     .await
     .map_err(|e| anyhow::anyhow!("gametheory resume failed: {e}"))?;
@@ -712,6 +767,12 @@ pub(crate) fn open_db() -> Result<Arc<DbInstance>> {
     crate::command::store_paths::open_evidence_db("gametheory", &["ARCHON_GAMETHEORY_DB_PATH"])
 }
 
+fn open_db_at(cwd: &std::path::Path) -> Result<Arc<DbInstance>> {
+    let path =
+        crate::command::store_paths::evidence_db_path_for_dir(cwd, &["ARCHON_GAMETHEORY_DB_PATH"]);
+    crate::command::store_paths::open_sqlite_db(&path, "gametheory")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -743,6 +804,108 @@ mod tests {
         )
         .unwrap();
         assert!(resolve_tier11_policy_for_workspace(true, tmp.path()).unwrap());
+    }
+
+    #[tokio::test]
+    async fn gametheory_run_preflight_failure_creates_no_project_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = ArchonConfig::default();
+        let env_vars = archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new());
+        let error = handle_run(
+            tmp.path(),
+            "test situation",
+            false,
+            None,
+            None,
+            false,
+            1.0,
+            1,
+            "",
+            false,
+            &config,
+            &env_vars,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("GameTheory"));
+        assert!(error.contains("archon agent sync"));
+        for key in archon_pipeline::required_builtin_agent_keys(
+            archon_pipeline::runner::PipelineType::GameTheory,
+        ) {
+            assert!(
+                error.contains(&key),
+                "missing key {key} absent from {error}"
+            );
+        }
+        assert!(!tmp.path().join(".archon/archon-data.db").exists());
+        assert!(!tmp.path().join(".archon").exists());
+    }
+
+    #[tokio::test]
+    async fn gametheory_run_rejects_frontmatter_only_before_database_or_state_creation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (key, relative) = archon_pipeline::required_builtin_agent_assets(
+            archon_pipeline::runner::PipelineType::GameTheory,
+        )
+        .into_iter()
+        .next()
+        .unwrap();
+        let asset = tmp.path().join(relative);
+        std::fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        std::fs::write(&asset, "---\nname: test\n---\n").unwrap();
+        let error = handle_run(
+            tmp.path(),
+            "test situation",
+            false,
+            None,
+            None,
+            false,
+            1.0,
+            1,
+            "",
+            false,
+            &ArchonConfig::default(),
+            &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(key), "{error}");
+        assert!(error.contains(relative), "{error}");
+        assert!(error.contains("GameTheory"), "{error}");
+        assert!(error.contains("archon agent sync"), "{error}");
+        assert!(!tmp.path().join(".archon/archon-data.db").exists());
+        assert!(!tmp.path().join(".pipeline-state").exists());
+    }
+
+    #[tokio::test]
+    async fn gametheory_resume_rejects_frontmatter_only_before_database_creation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (key, relative) = archon_pipeline::required_builtin_agent_assets(
+            archon_pipeline::runner::PipelineType::GameTheory,
+        )
+        .into_iter()
+        .next()
+        .unwrap();
+        let asset = tmp.path().join(relative);
+        std::fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        std::fs::write(&asset, "---\nname: test\n---\n").unwrap();
+        let error = handle_resume_with_cwd(
+            tmp.path(),
+            "missing-run",
+            None,
+            &ArchonConfig::default(),
+            &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(key), "{error}");
+        assert!(error.contains(relative), "{error}");
+        assert!(error.contains("GameTheory"), "{error}");
+        assert!(error.contains("archon agent sync"), "{error}");
+        assert!(!tmp.path().join(".archon/archon-data.db").exists());
     }
 
     #[test]

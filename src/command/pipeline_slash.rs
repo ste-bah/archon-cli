@@ -416,7 +416,7 @@ mod tests {
                 "missing key {key} must be reported: {error}"
             );
         }
-        assert!(error.contains("archon agents sync"));
+        assert!(error.contains("archon agent sync"));
     }
 
     #[test]

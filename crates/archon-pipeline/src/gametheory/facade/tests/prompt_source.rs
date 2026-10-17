@@ -22,7 +22,7 @@ use crate::gametheory::facade::specialists::load_agent_prompt_body;
         };
 
         assert!(matches!(
-            load_agent_prompt_body(&agent),
+            load_agent_prompt_body(&agent, std::path::Path::new("/tmp/nonexistent-project-root")),
             Err(GameTheoryError::MissingAgentFile { .. })
         ));
     }

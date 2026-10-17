@@ -2,17 +2,16 @@ use anyhow::Result;
 use futures_util::future::join_all;
 use std::collections::HashMap;
 
-use crate::learning::integration::{LearningContext, LearningIntegration};
-use crate::runner::{
-    AgentExecutionRequest, AgentInfo, LlmClient, LlmResponse, PipelineType, ToolAccessLevel,
-};
-
 use super::super::errors::GameTheoryError;
 use super::super::fingerprint::{AxisVerdict, GameTheoryFingerprint};
 use super::super::registry::GAMETHEORY_AGENTS;
 use super::memory_context::recall_prior_context_for_agent;
 use super::types::Tier1AgentOutput;
 use super::{GameTheoryMemoryContext, MemoryRecallAudit, TIER1_MEMORY_AGENT_KEYS};
+use crate::learning::integration::{LearningContext, LearningIntegration};
+use crate::runner::{
+    AgentExecutionRequest, AgentInfo, LlmClient, LlmResponse, PipelineType, ToolAccessLevel,
+};
 
 /// Execute real Tier 1 classification via the four mandatory Tier 1 agents.
 ///
@@ -26,6 +25,7 @@ pub(super) async fn execute_tier1_real(
     situation: &str,
     now: &str,
     memory_ctx: &GameTheoryMemoryContext,
+    project_root: &std::path::Path,
     mut learning: Option<&mut LearningIntegration>,
 ) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
     let mut audits = Vec::new();
@@ -54,6 +54,7 @@ pub(super) async fn execute_tier1_real(
             situation,
             &prior_context,
             learning_contexts.get(*agent_key),
+            project_root,
         )
     });
     let responses = join_all(tier1_calls).await;
@@ -95,10 +96,49 @@ async fn execute_tier1_agent(
     situation: &str,
     prior_context: &str,
     learning_context: Option<&LearningContext>,
+    project_root: &std::path::Path,
 ) -> Result<Tier1AgentOutput, GameTheoryError> {
+    let agent = GAMETHEORY_AGENTS
+        .iter()
+        .find(|agent| agent.key == agent_key)
+        .ok_or_else(|| GameTheoryError::Tier1Execution {
+            message: format!(
+                "GameTheory pipeline agent '{agent_key}' has no registry definition; run `archon agent sync`"
+            ),
+        })?;
+    let prompt = super::specialists::load_agent_prompt_body(agent, project_root).map_err(|error| {
+        GameTheoryError::Tier1Execution {
+            message: format!(
+                "GameTheory pipeline agent '{}' prompt '{}' failed: {error}; run `archon agent sync`",
+                agent.key, agent.prompt_source_path
+            ),
+        }
+    })?;
+    execute_tier1_agent_with_prompt(
+        llm,
+        run_id,
+        agent,
+        situation,
+        prior_context,
+        learning_context,
+        &prompt,
+    )
+    .await
+}
+
+async fn execute_tier1_agent_with_prompt(
+    llm: &dyn LlmClient,
+    run_id: &str,
+    agent: &crate::gametheory::GameTheoryAgent,
+    situation: &str,
+    prior_context: &str,
+    learning_context: Option<&LearningContext>,
+    prompt: &str,
+) -> Result<Tier1AgentOutput, GameTheoryError> {
+    let agent_key = agent.key;
     let system = vec![serde_json::json!({
         "type": "text",
-        "text": tier1_system_prompt(agent_key)
+        "text": prompt
     })];
 
     let combined_context = combine_prior_and_learning_context(prior_context, learning_context);
@@ -116,30 +156,11 @@ async fn execute_tier1_agent(
         "content": user_content
     })];
 
-    let (display_name, model, allowed_tools) = GAMETHEORY_AGENTS
-        .iter()
-        .find(|agent| agent.key == agent_key)
-        .map(|agent| {
-            (
-                agent.display_name.to_string(),
-                agent.model.to_string(),
-                agent.allowed_tool_names(),
-            )
-        })
-        .unwrap_or_else(|| {
-            (
-                agent_key.to_string(),
-                // Tier alias — resolved per provider from config, so an agent
-                // with no definition does not get pinned to one release.
-                "sonnet".to_string(),
-                vec![
-                    "Read".into(),
-                    "Grep".into(),
-                    "Glob".into(),
-                    "memory_recall".into(),
-                ],
-            )
-        });
+    let (display_name, model, allowed_tools) = (
+        agent.display_name.to_string(),
+        agent.model.to_string(),
+        agent.allowed_tool_names(),
+    );
 
     let response: LlmResponse = llm
         .run_agent(AgentExecutionRequest {
@@ -202,26 +223,6 @@ fn combine_prior_and_learning_context(
         }
     }
     parts.join("\n\n---\n\n")
-}
-
-fn tier1_system_prompt(agent_key: &str) -> &'static str {
-    match agent_key {
-        "game-classifier" => {
-            "You are the game-classifier Tier 1 foundation agent. Analyze the given strategic situation and output a JSON object with exactly these fields: cooperation (cooperative/non-cooperative), payoff_sum (zero-sum/positive-sum/variable-sum), symmetry (symmetric/asymmetric/unknown), timing (simultaneous/sequential/repeated), perfect_info (perfect/imperfect), complete_info (complete/incomplete), cardinality (2-player/n-player), strategy_space (continuous/discrete), horizon (one-shot/repeated), primary_family (short label like \"Bertrand competition\"), nearest_classic (classic game name or null). For each axis also include a confidence (low/medium/high) and a brief rationale. Output ONLY the JSON object, no markdown wrapping."
-        }
-        "payoff-elicitor" => {
-            "You are the payoff-elicitor Tier 1 foundation agent. Identify players, incentives, payoff dimensions, likely payoff conflicts, and missing payoff assumptions. Output concise markdown."
-        }
-        "strategy-space-enumerator" => {
-            "You are the strategy-space-enumerator Tier 1 foundation agent. Enumerate each player's feasible actions, strategies, constraints, and whether the strategy space is discrete or continuous. Output concise markdown."
-        }
-        "information-structure-mapper" => {
-            "You are the information-structure-mapper Tier 1 foundation agent. Map who knows what, what is hidden, signalling channels, beliefs, and information asymmetries. Output concise markdown."
-        }
-        _ => {
-            "You are a Tier 1 game-theory foundation agent. Analyze the strategic situation from your assigned perspective."
-        }
-    }
 }
 
 fn parse_tier1_fingerprint(
@@ -289,4 +290,108 @@ fn parse_tier1_fingerprint(
         ambiguities: vec![],
         created_at: now.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Runtime::new().unwrap().block_on(future)
+    }
+
+    struct PromptCapture {
+        calls: AtomicUsize,
+        systems: Mutex<Vec<Vec<serde_json::Value>>>,
+    }
+
+    impl PromptCapture {
+        fn new() -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+                systems: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmClient for PromptCapture {
+        async fn send_message(
+            &self,
+            _messages: Vec<serde_json::Value>,
+            system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> Result<LlmResponse, anyhow::Error> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.systems.lock().unwrap().push(system);
+            Ok(LlmResponse {
+                content: "captured output".into(),
+                tool_uses: Vec::new(),
+                tokens_in: None,
+                tokens_out: None,
+                stop_reason: None,
+            })
+        }
+    }
+
+    #[test]
+    fn edited_game_classifier_asset_reaches_tier1_request() {
+        let root = tempfile::tempdir().unwrap();
+        let agent = GAMETHEORY_AGENTS
+            .iter()
+            .find(|agent| agent.key == "game-classifier")
+            .unwrap();
+        let prompt_path = root.path().join(agent.prompt_source_path);
+        std::fs::create_dir_all(prompt_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            prompt_path,
+            "---\nname: game-classifier\n---\nEdited project classifier prompt sentinel.\n",
+        )
+        .unwrap();
+
+        let llm = PromptCapture::new();
+        let prompt = crate::gametheory::load_agent_prompt_body(agent, root.path()).unwrap();
+        block_on(execute_tier1_agent_with_prompt(
+            &llm,
+            "run-edited-prompt",
+            agent,
+            "Two firms choose prices.",
+            "",
+            None,
+            &prompt,
+        ))
+        .unwrap();
+
+        let systems = llm.systems.lock().unwrap();
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            systems[0][0]["text"],
+            "Edited project classifier prompt sentinel."
+        );
+    }
+
+    #[test]
+    fn unknown_tier1_key_errors_before_provider_call() {
+        let llm = PromptCapture::new();
+
+        let error = block_on(execute_tier1_agent(
+            &llm,
+            "run-unknown-tier1",
+            "unknown-tier1-agent",
+            "A situation.",
+            "",
+            None,
+            std::path::Path::new("."),
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("GameTheory pipeline agent 'unknown-tier1-agent'"));
+        assert!(error.contains("archon agent sync"));
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+    }
 }

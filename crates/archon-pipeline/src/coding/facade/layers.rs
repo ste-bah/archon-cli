@@ -11,17 +11,18 @@ impl CodingFacade {
     /// Build the 11-layer prompt for a given agent.
     ///
     /// Layers:
-    /// - L1  base_prompt: agent-specific system prompt (fallback if file missing)
-    /// - L2  task_context: the user's task description
-    /// - L3  leann_semantic_context: LEANN semantic code context
-    /// - L4  rlm_namespace_context: RLM store reads for the agent's memory_reads
-    /// - L5  desc_episodes: DESC episodic memory (when learning active)
-    /// - L6  sona_patterns: SONA trajectory patterns (when learning active)
-    /// - L7  reflexion_trajectories: Reflexion self-correction (when learning active)
-    /// - L8  pattern_matcher_results: reasoning context (when learning active)
-    /// - L9  sherlock_verdicts: (reserved — wired via SherlockLearningIntegration)
-    /// - L10 algorithm_strategy: algorithm prompt snippet
-    /// - L11 prompt_cap: token budget enforcement via truncation
+    /// - L1  base_prompt: agent metadata and role context
+    /// - L2  agent_instructions: required source prompt file
+    /// - L3  task_context: the user's task description
+    /// - L4  leann_semantic_context: LEANN semantic code context
+    /// - L5  rlm_namespace_context: RLM store reads for the agent's memory_reads
+    /// - L6  desc_episodes: DESC episodic memory (when learning active)
+    /// - L7  sona_patterns: SONA trajectory patterns (when learning active)
+    /// - L8  reflexion_trajectories: Reflexion self-correction (when learning active)
+    /// - L9  pattern_matcher_results: reasoning context (when learning active)
+    /// - L10 sherlock_verdicts: (reserved — wired via SherlockLearningIntegration)
+    /// - L11 algorithm_strategy: algorithm prompt snippet
+    /// - L12 prompt_cap: token budget enforcement via truncation
     pub(super) fn build_layers(
         &self,
         session: &PipelineSession,
@@ -66,21 +67,33 @@ impl CodingFacade {
             required: true,
         }];
 
-        if let Some(ca) = coding_agent {
-            let md_path = std::path::Path::new(ca.prompt_source_path);
-            if md_path.exists()
-                && let Ok(content) = std::fs::read_to_string(md_path)
-                && let Ok((_frontmatter, body)) = crate::agent_loader::parse_frontmatter(&content)
-                && !body.trim().is_empty()
-            {
-                layers.push(PromptLayer {
-                    name: "agent_instructions".to_string(),
-                    content: body,
-                    priority: TruncationPriority::AgentInstructions,
-                    required: false,
-                });
+        let prompt_path = coding_agent
+            .map(|ca| ca.prompt_source_path.to_string())
+            .unwrap_or_else(|| format!(".archon/agents/coding/{}.md", agent.key));
+        let prompt_root = &self.project_root;
+        let body = if let Some(coding_agent) = coding_agent {
+            crate::coding::load_agent_prompt_body(coding_agent, prompt_root)?
+        } else {
+            let read_path = prompt_root.join(&prompt_path);
+            let content = std::fs::read_to_string(&read_path).map_err(|error| {
+                anyhow::anyhow!("Coding pipeline agent '{}' prompt '{}' is unavailable: {error}; run `archon agent sync`.", agent.key, prompt_path)
+            })?;
+            let (_frontmatter, body) = crate::agent_loader::parse_frontmatter(&content)?;
+            if body.trim().is_empty() {
+                anyhow::bail!(
+                    "Coding pipeline agent '{}' prompt '{}' has an empty body; run `archon agent sync`.",
+                    agent.key,
+                    prompt_path
+                );
             }
-        }
+            body
+        };
+        layers.push(PromptLayer {
+            name: "agent_instructions".to_string(),
+            content: body,
+            priority: TruncationPriority::AgentInstructions,
+            required: true,
+        });
 
         layers.push(PromptLayer {
             name: "task_context".to_string(),
@@ -156,5 +169,42 @@ impl CodingFacade {
         }
 
         Ok(layers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn missing_runtime_prompt_fails_layer_build_with_sync_guidance() {
+        let facade = CodingFacade::new();
+        let session = PipelineSession {
+            id: "prompt-test".into(),
+            pipeline_type: crate::runner::PipelineType::Coding,
+            task: "task".into(),
+            started_at: Instant::now(),
+            agent_results: Vec::new(),
+            leann_context: String::new(),
+        };
+        let agent = AgentInfo {
+            key: "missing-runtime-prompt-for-test".into(),
+            display_name: "Test Agent".into(),
+            model: "test".into(),
+            phase: 1,
+            critical: false,
+            parallelizable: false,
+            quality_threshold: 0.0,
+            tool_access_level: crate::runner::ToolAccessLevel::ReadOnly,
+        };
+        let error = facade
+            .build_layers(&session, &agent)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Coding pipeline"));
+        assert!(error.contains(&agent.key));
+        assert!(error.contains(".archon/agents/coding/missing-runtime-prompt-for-test.md"));
+        assert!(error.contains("archon agent sync"));
     }
 }

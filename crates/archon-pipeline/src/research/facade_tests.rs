@@ -1,6 +1,7 @@
 use super::*;
 use crate::runner::{AgentResult, QualityScore};
 use archon_memory::graph::MemoryGraph;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -41,8 +42,36 @@ fn make_memory() -> Arc<dyn MemoryTrait> {
     Arc::new(MemoryGraph::in_memory().expect("in-memory graph created"))
 }
 
+fn research_test_project_root() -> &'static std::path::Path {
+    static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let root = std::env::temp_dir().join(format!(
+            "archon-research-facade-test-project-{}",
+            uuid::Uuid::new_v4()
+        ));
+        for agent in RESEARCH_AGENTS {
+            let path = root.join(agent.prompt_source_path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!(
+                    "---\nname: {}\n---\nResearch facade test prompt.",
+                    agent.key
+                ),
+            )
+            .unwrap();
+        }
+        root
+    })
+}
+
 fn make_facade() -> ResearchFacade {
-    ResearchFacade::new(make_memory(), None, String::new(), None)
+    ResearchFacade::new(
+        make_memory(),
+        None,
+        research_test_project_root().display().to_string(),
+        None,
+    )
 }
 
 fn make_facade_with_leann(response: &str) -> (ResearchFacade, Arc<MockLeannSearcher>) {
@@ -50,7 +79,7 @@ fn make_facade_with_leann(response: &str) -> (ResearchFacade, Arc<MockLeannSearc
     let facade = ResearchFacade::new(
         make_memory(),
         Some(leann.clone() as Arc<dyn LeannSearcher>),
-        String::new(),
+        research_test_project_root().display().to_string(),
         None,
     );
     (facade, leann)
@@ -394,7 +423,7 @@ async fn style_prompt_passed_to_phase6() {
     let facade = ResearchFacade::new(
         make_memory(),
         None,
-        String::new(),
+        research_test_project_root().display().to_string(),
         Some("Use British English spelling".to_string()),
     );
     let session = facade.init_session("test").await.unwrap();

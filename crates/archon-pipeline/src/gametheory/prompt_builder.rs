@@ -3,6 +3,8 @@
 //! Assembles prompts from agent templates, the situation string, Tier 1
 //! classification outputs, and dependency specialist outputs.
 
+use anyhow::{Result, bail};
+
 /// Assemble a specialist prompt from constituent parts.
 ///
 /// The prompt follows the 5-part structure:
@@ -17,7 +19,7 @@ pub fn build_specialist_prompt(
     situation: &str,
     fingerprint_summary: &str,
     dependency_outputs: &[(&str, &str)], // (dep_agent_key, dep_output)
-) -> String {
+) -> Result<String> {
     build_specialist_prompt_with_prior_context(
         agent_key,
         agent_display_name,
@@ -36,7 +38,7 @@ pub fn build_specialist_prompt_with_prior_context(
     fingerprint_summary: &str,
     prior_context: &str,
     dependency_outputs: &[(&str, &str)], // (dep_agent_key, dep_output)
-) -> String {
+) -> Result<String> {
     build_specialist_prompt_with_template(
         agent_key,
         agent_display_name,
@@ -58,7 +60,14 @@ pub fn build_specialist_prompt_with_template(
     fingerprint_summary: &str,
     prior_context: &str,
     dependency_outputs: &[(&str, &str)], // (dep_agent_key, dep_output)
-) -> String {
+) -> Result<String> {
+    if agent_template.trim().is_empty() {
+        bail!(
+            "GameTheory pipeline agent '{}' has no loaded prompt template; expected '.archon/agents/gametheory/{}.md'; run `archon agent sync`.",
+            agent_key,
+            agent_key
+        );
+    }
     let mut parts = Vec::new();
 
     // Part 1: Role
@@ -67,9 +76,7 @@ pub fn build_specialist_prompt_with_template(
         display = agent_display_name,
         key = agent_key,
     ));
-    if !agent_template.trim().is_empty() {
-        parts.push(format!("## Agent Source Instructions\n\n{agent_template}"));
-    }
+    parts.push(format!("## Agent Source Instructions\n\n{agent_template}"));
 
     // Part 2: Situation
     parts.push(format!("## Situation\n\n{situation}"));
@@ -107,7 +114,7 @@ pub fn build_specialist_prompt_with_template(
             .to_string(),
     );
 
-    parts.join("\n\n")
+    Ok(parts.join("\n\n"))
 }
 
 fn safe_truncate(text: &str, max_chars: usize) -> String {
@@ -160,13 +167,16 @@ mod tests {
 
     #[test]
     fn test_build_specialist_prompt_has_all_sections() {
-        let prompt = build_specialist_prompt(
+        let prompt = build_specialist_prompt_with_template(
             "gt-nash",
             "Nash Equilibrium Finder",
+            "Find Nash equilibria and explain the strategic reasoning.",
             "Two firms set quantities.",
             "Primary family: Cournot competition\nCooperation: non-cooperative",
+            "",
             &[("gt-payoff", "Payoff matrix: [[5,3],[3,5]]")],
-        );
+        )
+        .unwrap();
 
         assert!(prompt.contains("gt-nash"));
         assert!(prompt.contains("Nash Equilibrium Finder"));
@@ -179,13 +189,16 @@ mod tests {
 
     #[test]
     fn test_build_specialist_prompt_no_dependencies() {
-        let prompt = build_specialist_prompt(
+        let prompt = build_specialist_prompt_with_template(
             "gt-standalone",
             "Standalone Analyst",
+            "Analyze the strategic interaction independently.",
             "A simple game.",
             "Primary family: Strategic interaction",
+            "",
             &[],
-        );
+        )
+        .unwrap();
 
         assert!(prompt.contains("gt-standalone"));
         assert!(!prompt.contains("## Preceding Analysis"));
@@ -193,17 +206,35 @@ mod tests {
 
     #[test]
     fn test_build_specialist_prompt_includes_prior_context() {
-        let prompt = build_specialist_prompt_with_prior_context(
+        let prompt = build_specialist_prompt_with_template(
             "nash-equilibrium-finder",
             "Nash Equilibrium Finder",
+            "Find Nash equilibria using the supplied evidence.",
             "Two firms set prices.",
             "Primary family: Bertrand competition",
             "Prior payoff evidence from memory",
             &[],
-        );
+        )
+        .unwrap();
 
         assert!(prompt.contains("## Prior Context"));
         assert!(prompt.contains("Prior payoff evidence from memory"));
+    }
+
+    #[test]
+    fn test_build_specialist_prompt_without_template_returns_actionable_error() {
+        let error = build_specialist_prompt(
+            "gt-nash",
+            "Nash Equilibrium Finder",
+            "Two firms set quantities.",
+            "Primary family: Cournot competition",
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("GameTheory pipeline agent 'gt-nash'"));
+        assert!(error.contains("archon agent sync"));
     }
 
     #[test]

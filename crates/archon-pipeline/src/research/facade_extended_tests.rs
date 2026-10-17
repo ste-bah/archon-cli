@@ -5,7 +5,13 @@ use super::*;
 fn facade_with_learning_implements_trait() {
     use crate::learning::integration::PhDLearningIntegration;
     let learning = PhDLearningIntegration::new();
-    let facade = ResearchFacade::with_learning(make_memory(), None, String::new(), None, learning);
+    let facade = ResearchFacade::with_learning(
+        make_memory(),
+        None,
+        super::research_test_project_root().display().to_string(),
+        None,
+        learning,
+    );
     let _: &dyn PipelineFacade = &facade;
 }
 
@@ -71,8 +77,9 @@ async fn leann_not_called_when_key_exists() {
 #[tokio::test]
 async fn memory_persists_across_facades_with_same_backend() {
     let memory = make_memory();
-    let facade_a = ResearchFacade::new(Arc::clone(&memory), None, String::new(), None);
-    let facade_b = ResearchFacade::new(Arc::clone(&memory), None, String::new(), None);
+    let project_root = super::research_test_project_root().display().to_string();
+    let facade_a = ResearchFacade::new(Arc::clone(&memory), None, project_root.clone(), None);
+    let facade_b = ResearchFacade::new(Arc::clone(&memory), None, project_root, None);
 
     // Store via facade A
     let mut session = facade_a.init_session("test").await.unwrap();

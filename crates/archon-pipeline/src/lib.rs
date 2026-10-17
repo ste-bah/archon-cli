@@ -40,6 +40,63 @@ pub fn required_builtin_agent_keys(kind: runner::PipelineType) -> Vec<&'static s
         _ => Vec::new(),
     }
 }
+
+/// Exact bundled prompt files required by a built-in pipeline. Keys alone are
+/// insufficient because separate pipelines may use the same key for different agents.
+pub fn required_builtin_agent_assets(
+    kind: runner::PipelineType,
+) -> Vec<(&'static str, &'static str)> {
+    match kind {
+        runner::PipelineType::Research => research::agents::get_all_agents()
+            .iter()
+            .map(|agent| (agent.key, agent.prompt_source_path))
+            .collect(),
+        runner::PipelineType::Coding => coding::agents::AGENTS
+            .iter()
+            .map(|agent| (agent.key, agent.prompt_source_path))
+            .collect(),
+        runner::PipelineType::GameTheory => gametheory::GAMETHEORY_AGENTS
+            .iter()
+            .map(|agent| (agent.key, agent.prompt_source_path))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Validate one built-in prompt with the loader used by that pipeline at
+/// runtime. Preflight callers use this to guarantee runtime cannot later
+/// reject the same prompt for parsing or an empty body.
+pub fn validate_builtin_agent_asset(
+    kind: runner::PipelineType,
+    key: &str,
+    root: &std::path::Path,
+) -> anyhow::Result<()> {
+    match kind {
+        runner::PipelineType::Research => {
+            let agent = research::agents::get_all_agents()
+                .into_iter()
+                .find(|agent| agent.key == key)
+                .ok_or_else(|| anyhow::anyhow!("unknown research pipeline agent '{key}'"))?;
+            research::prompt_builder::load_agent_prompt_body(agent, root)?;
+        }
+        runner::PipelineType::Coding => {
+            let agent = coding::agents::AGENTS
+                .iter()
+                .find(|agent| agent.key == key)
+                .ok_or_else(|| anyhow::anyhow!("unknown coding pipeline agent '{key}'"))?;
+            coding::load_agent_prompt_body(agent, root)?;
+        }
+        runner::PipelineType::GameTheory => {
+            let agent = gametheory::GAMETHEORY_AGENTS
+                .iter()
+                .find(|agent| agent.key == key)
+                .ok_or_else(|| anyhow::anyhow!("unknown GameTheory pipeline agent '{key}'"))?;
+            gametheory::load_agent_prompt_body(agent, root)?;
+        }
+        _ => return Ok(()),
+    }
+    Ok(())
+}
 pub mod retry;
 pub mod runner;
 pub mod session;
