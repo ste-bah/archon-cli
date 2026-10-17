@@ -32,6 +32,7 @@ fn context(
         task_root: set.tasks.clone(),
         repository: set.project.path().to_path_buf(),
         binding: None,
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         launch: Some(launch.clone()),
         // Launched before lineage recording, unless a test says otherwise.
         launch_lineage: LaunchLineage::Predates,

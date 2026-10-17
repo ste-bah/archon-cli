@@ -52,6 +52,9 @@ pub(super) struct GeneratedV2Metadata {
     pub(super) governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) generated_config: Option<archon_core::config::GeneratedWorkflowConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cargo_resource_limits:
+        Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) tuning_decisions: Vec<archon_core::config::GeneratedTuningDecision>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -114,6 +117,7 @@ pub(super) fn save_generated_v2_metadata(
             .task_universe
             .as_ref()
             .map(|_| plan.generated_config.clone()),
+        cargo_resource_limits: None,
         tuning_decisions: plan.tuning_decisions.clone(),
         shape_decisions: plan.shape_decisions.clone(),
         // Only task-universe runs can enter the authored-script lifecycle.
@@ -140,11 +144,47 @@ pub(crate) fn save_fixed_decomposition_metadata(
         script_args: plan.script_args.clone(),
         governed_learning_context: Vec::new(),
         generated_config: None,
+        cargo_resource_limits: None,
         tuning_decisions: Vec::new(),
         shape_decisions: Vec::new(),
         script_lifecycle: Some(true),
     };
     persist_with_check_policy(store, run_id, plan, &metadata)
+}
+
+pub(super) fn save_cargo_resource_limits(
+    store: &WorkflowStore,
+    run_id: &str,
+    limits: &archon_tools::workflow_resource_env::CargoResourceLimits,
+) -> archon_workflow::WorkflowResult<()> {
+    let path = store.run_dir(run_id).join(GENERATED_V2_METADATA_PATH);
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).map_err(|err| WorkflowError::Io {
+            path: path.clone(),
+            source: err,
+        })?)?;
+    value["cargo_resource_limits"] = serde_json::to_value(limits).expect("limits serialize");
+    store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &value)
+}
+
+pub(super) fn load_cargo_resource_limits(
+    store: &WorkflowStore,
+    run_id: &str,
+) -> archon_workflow::WorkflowResult<Option<archon_tools::workflow_resource_env::CargoResourceLimits>>
+{
+    let path = store.run_dir(run_id).join(GENERATED_V2_METADATA_PATH);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(WorkflowError::Io { path, source }),
+    };
+    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+    value
+        .get("cargo_resource_limits")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(Into::into)
 }
 
 fn persist_with_check_policy(

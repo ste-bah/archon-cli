@@ -32,6 +32,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     let store = &owner_store;
     let execution_generation = run.generation;
     let pause_executor = host_command_executor.clone();
+    let cargo_limits = archon_tools::workflow_resource_env::CargoResourceLimits::default();
     let runner = fixed_runner(
         &run,
         &plan,
@@ -41,6 +42,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         host_command_executor,
         store,
         &v2_store,
+        cargo_limits.clone(),
     );
     let summary = match runner.run(&plan.harness_source).await {
         Ok(summary) => summary,
@@ -151,7 +153,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             }
         }
     };
-    super::workflow_live_v2_finalizer::finalize_summary(
+    super::workflow_live_v2_finalizer::finalize_summary_with_limits(
         store,
         &run.id,
         archon_workflow::WorkflowRunKind::FixedDecompositionV1,
@@ -160,6 +162,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         &v2_store,
         None,
         Some(execution_generation),
+        cargo_limits,
     )
     .await?;
     crate::command::workflow_decompose_learning::fold_best_effort(
@@ -222,10 +225,12 @@ pub(super) fn fixed_runner(
     >,
     store: &WorkflowStore,
     v2_store: &WorkflowV2ResultStore,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> WorkflowV2ScriptRunner {
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: None,
         generated_config: plan.generated_config.clone(),
+        cargo_limits,
     };
     // The fixed decomposition author gets the SAME configured host-call timeout
     // as a generated run (`workflow_live_v2_run.rs`), not a literal.

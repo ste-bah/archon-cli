@@ -29,10 +29,10 @@ pub(super) fn operational_input(cwd: &Path, source: &LintSource) -> Result<()> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading TASK file {}", path.display()))?;
         archon_workflow::task_universe::parsing::parse_task_file(path, &raw).map_err(|error| {
-            anyhow!(
-                "{} is malformed: {error}; make the parser-required edit and retry",
+            anyhow::Error::new(error).context(format!(
+                "{} is malformed; make the parser-required edit and retry",
                 path.display()
-            )
+            ))
         })?;
     }
     if let LintSource::TaskFile(path) = source {

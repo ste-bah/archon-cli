@@ -13,7 +13,7 @@
 //!
 //! So: a task file must carry a fenced ```yaml block (or `---` front matter)
 //! that parses as a mapping and declares every key in
-//! [`REQUIRED_TASK_KEYS`]. Anything else is a [`WorkflowError::SpecInvalid`]
+//! [`REQUIRED_TASK_KEYS`]. Anything else is a [`WorkflowError::TaskBodyInvalid`]
 //! naming the file path and the specific keys that are missing. There is no
 //! partial-parse path left.
 
@@ -79,7 +79,7 @@ pub(super) const REQUIRED_TASK_KEYS: &[&str] = &[
 
 pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskUniverseTask> {
     let path_task_id = task_id_from_task_path(path).ok_or_else(|| {
-        WorkflowError::SpecInvalid(format!(
+        WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow could not parse canonical task_id from {}",
             path.display()
         ))
@@ -92,19 +92,19 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
     }
 
     let field_task_id = metadata_string(&metadata, "task_id").ok_or_else(|| {
-        WorkflowError::SpecInvalid(format!(
+        WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow has a non-string task_id in {}",
             path.display()
         ))
     })?;
     let canonical_task_id = canonical_task_id_from_ref(&field_task_id).ok_or_else(|| {
-        WorkflowError::SpecInvalid(format!(
+        WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow has invalid task_id '{field_task_id}' in {}",
             path.display()
         ))
     })?;
     if canonical_task_id != path_task_id {
-        return Err(WorkflowError::SpecInvalid(format!(
+        return Err(WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow task_id '{canonical_task_id}' does not match filename task id '{path_task_id}' in {}",
             path.display()
         )));
@@ -119,7 +119,7 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
             &expand_plural_artifact_paths(declared),
         ))
         .map_err(|error| {
-            WorkflowError::SpecInvalid(format!(
+            WorkflowError::TaskBodyInvalid(format!(
                 "generated decomposed PRD workflow has an unreadable deliverable_contracts block in {}: {error}",
                 path.display()
             ))
@@ -179,20 +179,20 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
 /// a task with no declarations.
 fn task_metadata(path: &Path, raw: &str) -> WorkflowResult<serde_json::Value> {
     let Some(yaml) = yaml_block(raw) else {
-        return Err(WorkflowError::SpecInvalid(format!(
+        return Err(WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow found no fenced ```yaml task block in {}; a task file must declare {}",
             path.display(),
             REQUIRED_TASK_KEYS.join(", ")
         )));
     };
     let metadata: serde_json::Value = serde_yaml_ng::from_str(&yaml).map_err(|error| {
-        WorkflowError::SpecInvalid(format!(
+        WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow could not parse the task YAML block in {}: {error}",
             path.display()
         ))
     })?;
     if !metadata.is_object() {
-        return Err(WorkflowError::SpecInvalid(format!(
+        return Err(WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow task YAML block in {} is not a mapping",
             path.display()
         )));
@@ -209,7 +209,7 @@ fn require_declared_keys(path: &Path, metadata: &serde_json::Value) -> WorkflowR
     if missing.is_empty() {
         return Ok(());
     }
-    Err(WorkflowError::SpecInvalid(format!(
+    Err(WorkflowError::TaskBodyInvalid(format!(
         "generated decomposed PRD workflow task file {} is missing required key(s): {}",
         path.display(),
         missing.join(", ")

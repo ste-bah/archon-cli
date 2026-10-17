@@ -61,6 +61,36 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     append_provider_route(store, run_id, &mut out)?;
     append_call_summary(&records, &mut out);
     append_interrupted_calls(store, run_id, &records, &mut out);
+    if let Some(report) =
+        crate::command::workflow_decompose_latest_report::latest_report(store, run_id)?
+    {
+        out.push_str(&format!(
+            "latest_report: id={} outcome={} superseded_id={}\n",
+            report.id,
+            report.outcome,
+            report.superseded_id.as_deref().unwrap_or("none")
+        ));
+        if report.outcome == "needs_remediation" {
+            let ledger = crate::command::workflow_decompose_remediation::read(
+                &store.run_dir(run_id),
+                &report.id,
+            )?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "latest report {} needs remediation but its ledger is missing",
+                    report.id
+                )
+            })?;
+            if ledger.report_id != report.id {
+                anyhow::bail!(
+                    "latest report {} does not match remediation ledger {}",
+                    report.id,
+                    ledger.report_id
+                );
+            }
+            out.push_str(&format!("needs_remediation: subjects={}\nresume_command: archon workflow resume --live --yes {}\n", ledger.subjects.join(","), run_id));
+        }
+    }
     if !state.attempts.is_empty() {
         out.push_str("attempts:\n");
         for (subject, attempt) in state.attempts {

@@ -238,6 +238,8 @@ async fn logic_361_unversioned_checks_and_landing_run_again_then_reuse() {
         // This harness pins task-set-lint to version 4 in `launched`; other
         // check versions come from the production catalog.
         let expected = match check {
+            // This harness pins task-set-lint to version 4 in `launched`;
+            // unrelated production bumps remain isolated.
             "task-set-lint" => 4,
             "verify-frozen-acceptance" | "requirements-trace" => {
                 u64::from(crate::command::workflow_host_command_logic::versions()[check])

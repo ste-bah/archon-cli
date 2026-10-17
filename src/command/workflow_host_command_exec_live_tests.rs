@@ -9,6 +9,16 @@ mod successor_reuse_tests {
         PublishedArtifactReceipt, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2Status,
     };
 
+    #[test]
+    fn windows_landing_receipt_paths_use_publication_separator_normalization() {
+        assert_eq!(
+            crate::command::workflow_host_command_publish::path_text(std::path::Path::new(
+                r"C:\Users\RUNNER~1\AppData\Local\Temp\project\tasks\TASK-X-010.md",
+            )),
+            "C:/Users/RUNNER~1/AppData/Local/Temp/project/tasks/TASK-X-010.md"
+        );
+    }
+
     fn record(status: WorkflowV2Status, invalidated: bool) -> WorkflowV2CallRecord {
         let call = WorkflowV2HostCall {
             id: "call".into(),
@@ -302,6 +312,7 @@ mod successor_reuse_tests {
                 satisfied: true,
                 summary: "published".into(),
             }),
+            observed_only: false,
         };
         let mut data = serde_json::to_value(&outcome).unwrap();
         let logic_version = executor.logic_version_for(successor_command).unwrap();
@@ -359,6 +370,63 @@ mod successor_reuse_tests {
                 .receipt_matches_live_with_successors(&original, Some(&receipt), false)
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn landing_liveness_does_not_use_successor_extension_for_its_own_receipt() {
+        let (_root, executor, _original, receipt, pin_path) =
+            successor_fixture("freeze-acceptance", "freeze-skeleton", true, false);
+        let live_bytes = std::fs::read(&pin_path).unwrap();
+        let original_pin_digest = receipt
+            .entries
+            .iter()
+            .find(|entry| entry.destination_path == pin_path)
+            .unwrap()
+            .blake3
+            .clone();
+        assert_ne!(
+            archon_workflow::task_set_contract::content_digest(&live_bytes),
+            original_pin_digest
+        );
+        let request = archon_workflow::HostCommandRequest::new(
+            "freeze-acceptance",
+            Some("earlier landing".into()),
+        )
+        .unwrap();
+        let call = WorkflowV2HostCall {
+            id: "original-call".into(),
+            method: WorkflowV2HostMethod::HostCommand,
+            write_mode: None,
+            options: archon_workflow::WorkflowV2HostOptions {
+                host_command: Some(request),
+                ..Default::default()
+            },
+        };
+        let outcome = archon_workflow::HostCommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            timed_out: false,
+            interrupted: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
+            gate_envelope: None,
+            publication_receipt: Some(receipt.clone()),
+            subjects: vec![],
+            postcondition: None,
+            observed_only: false,
+        };
+        let mut result = archon_workflow::WorkflowV2Result::accepted("earlier landing");
+        result.data = serde_json::to_value(outcome).unwrap();
+        let record = WorkflowV2CallRecord::new("run", call, 1, "input".into(), result, vec![]);
+        assert!(
+            executor
+                .receipt_matches_live_with_successors(&record, Some(&receipt), true)
+                .unwrap()
+        );
+        assert!(!executor.landing_receipt_matches_disk_live(&record).unwrap());
     }
 
     #[test]

@@ -193,10 +193,11 @@ pub(super) fn probe(site: &Site<'_>) -> Result<HostProbe, String> {
             context.repository.display()
         )
     })?;
-    Ok(HostProbe::at(
+    Ok(HostProbe::at_with_limits(
         context.project.clone(),
         context.repository.clone(),
         context.binding.clone(),
+        context.cargo_limits.clone(),
     )
     .with_baseline(baseline))
 }

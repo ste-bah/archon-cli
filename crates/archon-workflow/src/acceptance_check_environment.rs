@@ -48,6 +48,9 @@ use crate::acceptance_scratch::ScratchPolicy;
 #[path = "acceptance_check_environment_note_tests.rs"]
 mod note_channel_tests;
 
+#[path = "acceptance_check_resource_limits.rs"]
+mod resource_limits;
+
 /// Host variables every site keeps, when the host has them: what a process
 /// needs to start on this platform. None outside Windows.
 pub const SYSTEM_VARIABLES: &[&str] = if cfg!(windows) {

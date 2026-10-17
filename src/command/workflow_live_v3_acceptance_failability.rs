@@ -175,10 +175,11 @@ pub(super) async fn hold_passing(
     }
     if !probe_ids.is_empty() {
         let context = round.context;
-        let probe = HostProbe::at(
+        let probe = HostProbe::at_with_limits(
             context.project.clone(),
             context.repository.clone(),
             context.binding.clone(),
+            context.cargo_limits.clone(),
         )
         .with_baseline(Baseline {
             commit: base.clone(),

@@ -1,6 +1,7 @@
+use super::workflow_decompose_learning::journal::read_journal;
 use super::workflow_decompose_learning::{
-    finish_journal_dispatch, lesson_records, read_journal, redact_lesson, stable_lesson_key,
-    stage_journal, write_journal,
+    finish_journal_dispatch, lesson_records, redact_lesson, stable_lesson_key, stage_journal,
+    write_journal,
 };
 
 #[path = "workflow_decompose_learning_evidence_tests.rs"]
@@ -67,6 +68,18 @@ fn learning_content_is_redacted_before_storage() {
 }
 
 #[test]
+fn secret_crossing_the_storage_boundary_is_redacted_before_truncation() {
+    let secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+    let source = format!("{}token={secret}", "x".repeat(1190));
+    let stored = redact_lesson(&source);
+    assert!(!stored.contains(secret));
+    assert!(
+        !stored.contains("ghp_"),
+        "partial credential escaped: {stored}"
+    );
+}
+
+#[test]
 fn learning_decompose_task_context_is_redacted_before_topology_fold() {
     let secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
     let safe =
@@ -87,7 +100,7 @@ fn learning_decompose_disabled_learning_yields_no_hooks() {
 }
 
 #[test]
-fn learning_decompose_run_end_keeps_judged_findings_without_a_sinkless_hook() {
+fn learning_decompose_run_end_routes_judged_findings_to_both_sinks() {
     let mut config = archon_core::config::LearningConfig::default();
     config.reasoning_bank.enabled = true;
     config.desc.enabled = true;
@@ -113,7 +126,7 @@ fn learning_decompose_run_end_keeps_judged_findings_without_a_sinkless_hook() {
     assert!(
         records
             .iter()
-            .all(|record| !record.hooks.contains(&"reasoning_bank".to_string()))
+            .all(|record| record.hooks.contains(&"reasoning_bank".to_string()))
     );
 }
 

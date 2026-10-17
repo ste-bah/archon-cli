@@ -22,9 +22,14 @@ use archon_workflow::acceptance_scratch::{nested_repository, nested_repository_s
 
 use super::*;
 
+#[path = "workflow_acceptance_executability_siblings.rs"]
+pub(super) mod siblings;
+
 #[path = "workflow_acceptance_executability_hermetic_layout.rs"]
 mod layout;
-pub(super) use layout::{CheckEvidence, CopyLayout, CopyRun, deferred, warm_target};
+pub(crate) use layout::{
+    CheckEvidence, CopyLayout, CopyRun, SiblingRevision, deferred, warm_target,
+};
 
 /// The largest project copy a probe makes without a scratch policy naming
 /// what the checks read.
@@ -67,6 +72,7 @@ impl HermeticCopy {
             root: self.root.clone(),
             repository: self.repository.clone(),
             project: self.project.clone(),
+            siblings: Vec::new(),
         }
     }
 }
@@ -159,7 +165,6 @@ pub(super) fn data_digest_scoped(
         ))
     })?;
     let task_root_relative = task_root_relative(&project, task_root)?;
-    // Issue 440: the one nested-repository rule the copies apply.
     let nested = nested_repository(&project, &repository);
     let mut lines = Vec::new();
     let mut stack = vec![scope.to_path_buf()];
@@ -418,19 +423,24 @@ pub(super) async fn run_in_copy(
     })
     .await
     .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
-    let layout = copy.layout();
+    let mut layout = copy.layout();
+    layout.siblings = siblings::copy_for_checks(
+        &copy.project,
+        &probe.project,
+        &copy.repository,
+        repository,
+        contract,
+    )?;
     *observed_layout.lock().expect("observation layout lock") = Some(layout.clone());
     let target = warm_target(&probe.copy_parent, repository);
     let mut site = DirectSite {
         repository: copy.repository.clone(),
         project: copy.project.clone(),
-        // The direct site's default policy; a probe never builds into the
-        // host's own target directory.
         host: probe.host.clone(),
         policy: None,
+        resource_limits: probe.resource_limits.clone(),
         target: Some(target),
         fresh_home: true,
-        // Issue 323: the probe's one per-check bound, as at every site.
         timeout_secs: probe.check_bound_secs(),
         output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
     };
@@ -438,8 +448,6 @@ pub(super) async fn run_in_copy(
     let mut results = Vec::new();
     let mut failure = None;
     for (index, reference) in refs.iter().enumerate() {
-        // Issue 255: the freeze's budget bounds each check, as the scratch
-        // observation's hooks do there.
         let allowance = hooks.allowance.as_ref().map(|allowance| allowance());
         let cut = match allowance {
             Some(CheckAllowance::Defer) => {
@@ -484,7 +492,6 @@ pub(super) async fn run_in_copy(
         None => Ok(CopyRun { results, layout }),
     }
 }
-
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_nested_repository_tests.rs"]
 mod nested_repository_tests;

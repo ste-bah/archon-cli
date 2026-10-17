@@ -151,16 +151,24 @@ pub struct HostCommandResult {
     pub gate_envelope: Option<super::gate_envelope::GateEnvelopeV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_receipt: Option<super::publication::PublicationReceiptV1>,
+    /// The command observed and judged staged bytes without publishing them.
+    /// This is used by fixed-run re-verification; it is not a landing receipt.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub observed_only: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subjects: Vec<HostCommandSubject>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postcondition: Option<CommandPostconditionEvaluation>,
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 impl HostCommandResult {
     pub fn reusable(&self) -> bool {
         self.exit_code == Some(0)
-            && self.publication_receipt.is_some()
+            && (self.publication_receipt.is_some() || self.observed_only)
             && self.gate_envelope.as_ref().is_some_and(|envelope| {
                 envelope.operational_error.is_none() && envelope.policy_findings.is_empty()
             })
@@ -172,5 +180,47 @@ impl HostCommandResult {
             && !self.interrupted
             && !self.stdout_truncated
             && !self.stderr_truncated
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use super::HostCommandResult;
+
+    #[test]
+    fn observed_only_is_omitted_unless_true() {
+        let ordinary: HostCommandResult = serde_json::from_value(serde_json::json!({
+            "exitCode": 0,
+            "stdout": "",
+            "stderr": "",
+            "stdoutBytes": 0,
+            "stderrBytes": 0,
+            "timedOut": false,
+            "interrupted": false,
+            "stdoutTruncated": false,
+            "stderrTruncated": false
+        }))
+        .unwrap();
+        let ordinary_json = serde_json::to_value(ordinary).unwrap();
+        assert!(ordinary_json.get("observedOnly").is_none());
+
+        let observed: HostCommandResult = serde_json::from_value(serde_json::json!({
+            "exitCode": 0,
+            "stdout": "",
+            "stderr": "",
+            "stdoutBytes": 0,
+            "stderrBytes": 0,
+            "timedOut": false,
+            "interrupted": false,
+            "stdoutTruncated": false,
+            "stderrTruncated": false,
+            "observedOnly": true
+        }))
+        .unwrap();
+        let observed_json = serde_json::to_value(observed).unwrap();
+        assert_eq!(
+            observed_json.get("observedOnly"),
+            Some(&serde_json::json!(true))
+        );
     }
 }

@@ -149,7 +149,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -209,7 +209,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -269,7 +269,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -329,7 +329,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -389,7 +389,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -451,7 +451,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -486,7 +486,7 @@
               "command": "hostCommand:freeze-acceptance",
               "exit_code": 0,
               "kind": "inspect",
-              "output_summary": "trusted symbolic capability completed with 678 stdout bytes and 357 stderr bytes",
+              "output_summary": "trusted symbolic capability completed with 678 stdout bytes and 439 stderr bytes",
               "status": "succeeded"
             }
           ],
@@ -533,8 +533,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-            "logicVersion": 21,
+            "logicDigest": "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+            "logicVersion": 28,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -723,8 +723,8 @@
               ],
               "schema_version": 1
             },
-            "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\nacceptance judge: 1 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (0 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 3\n",
-            "stderrBytes": 357,
+            "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\nacceptance judge: 1 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (0 verdict(s) reused)\nacceptance judge batch started checks=1\narchon-host-activity: child making progress\narchon-host-progress: 3\nacceptance judge batch completed checks=1\n",
+            "stderrBytes": 439,
             "stderrTruncated": false,
             "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"<receipt-digest-with-compared-content>\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"<receipt-digest-with-compared-content>\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"6d86dd92f6fa785df66ff6d11971167872aa3ce1bc6bd34162c1f3e9acc2693e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 678,
@@ -734,7 +734,7 @@
           "evidence": [
             {
               "kind": "implementation",
-              "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=678, stderr_bytes=357"
+              "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=678, stderr_bytes=439"
             }
           ],
           "files_changed": [],
@@ -745,7 +745,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -780,7 +780,7 @@
               "command": "hostCommand:freeze-acceptance",
               "exit_code": 0,
               "kind": "inspect",
-              "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 497 stderr bytes",
+              "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 579 stderr bytes",
               "status": "succeeded"
             }
           ],
@@ -800,8 +800,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-            "logicVersion": 21,
+            "logicDigest": "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+            "logicVersion": 28,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -966,8 +966,8 @@
               ],
               "schema_version": 1
             },
-            "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
-            "stderrBytes": 497,
+            "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\nacceptance judge batch completed checks=2\n",
+            "stderrBytes": 579,
             "stderrTruncated": false,
             "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"df492cde15abbc438ef61cc9c25a5673ce89d5094f1a7b8b3ffb8d44f99cc8ac\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 676,
@@ -977,7 +977,7 @@
           "evidence": [
             {
               "kind": "implementation",
-              "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=497"
+              "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=579"
             }
           ],
           "files_changed": [],
@@ -988,7 +988,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1043,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
+            "logicDigest": "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
             "logicVersion": 3,
             "postcondition": {
               "satisfied": true,
@@ -1218,7 +1218,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1281,8 +1281,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 13,
+            "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+            "logicVersion": 19,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1338,7 +1338,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1401,8 +1401,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 13,
+            "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+            "logicVersion": 19,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1458,7 +1458,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1512,8 +1512,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
-            "logicVersion": 4,
+            "logicDigest": "82860cd934b1173968563bd548c96bd1ada1360dcd70a4ab3c3f633a69462ad1",
+            "logicVersion": 5,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative requirements-trace postcondition evaluated"
@@ -1567,7 +1567,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1621,8 +1621,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 12,
+            "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+            "logicVersion": 15,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative task-set-lint postcondition evaluated"
@@ -1676,7 +1676,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1707,8 +1707,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-                  "logicVersion": 21,
+                  "logicDigest": "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+                  "logicVersion": 28,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1750,7 +1750,7 @@
                         "command": "hostCommand:freeze-acceptance",
                         "exit_code": 0,
                         "kind": "inspect",
-                        "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 497 stderr bytes",
+                        "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 579 stderr bytes",
                         "status": "succeeded"
                       }
                     ],
@@ -1770,8 +1770,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-                      "logicVersion": 21,
+                      "logicDigest": "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+                      "logicVersion": 28,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1806,8 +1806,8 @@
                         ],
                         "schema_version": 1
                       },
-                      "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
-                      "stderrBytes": 497,
+                      "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\nacceptance judge batch completed checks=2\n",
+                      "stderrBytes": 579,
                       "stderrTruncated": false,
                       "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"df492cde15abbc438ef61cc9c25a5673ce89d5094f1a7b8b3ffb8d44f99cc8ac\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 676,
@@ -1817,7 +1817,7 @@
                     "evidence": [
                       {
                         "kind": "implementation",
-                        "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=497"
+                        "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=579"
                       }
                     ],
                     "files_changed": [],
@@ -1828,8 +1828,8 @@
                     "task_coverage": []
                   },
                   "status": "accepted",
-                  "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
-                  "stderrBytes": 497,
+                  "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\nacceptance judge batch completed checks=2\n",
+                  "stderrBytes": 579,
                   "stderrTruncated": false,
                   "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"df492cde15abbc438ef61cc9c25a5673ce89d5094f1a7b8b3ffb8d44f99cc8ac\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 676,
@@ -1853,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
+                  "logicDigest": "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
                   "logicVersion": 3,
                   "postcondition": {
                     "satisfied": true,
@@ -1914,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
+                      "logicDigest": "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
                       "logicVersion": 3,
                       "postcondition": {
                         "satisfied": true,
@@ -2015,8 +2015,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 13,
+                  "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+                  "logicVersion": 19,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2065,8 +2065,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 13,
+                      "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+                      "logicVersion": 19,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2147,8 +2147,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 13,
+                  "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+                  "logicVersion": 19,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2197,8 +2197,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 13,
+                      "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+                      "logicVersion": 19,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2279,8 +2279,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 12,
+                  "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+                  "logicVersion": 15,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2324,8 +2324,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 12,
+                      "logicDigest": "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+                      "logicVersion": 15,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2409,8 +2409,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
-                  "logicVersion": 4,
+                  "logicDigest": "82860cd934b1173968563bd548c96bd1ada1360dcd70a4ab3c3f633a69462ad1",
+                  "logicVersion": 5,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2454,8 +2454,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
-                      "logicVersion": 4,
+                      "logicDigest": "82860cd934b1173968563bd548c96bd1ada1360dcd70a4ab3c3f633a69462ad1",
+                      "logicVersion": 5,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2552,7 +2552,7 @@
                 "command": "hostCommand:freeze-acceptance",
                 "exit_code": 0,
                 "kind": "inspect",
-                "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 497 stderr bytes",
+                "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 579 stderr bytes",
                 "status": "succeeded"
               },
               {
@@ -2623,7 +2623,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }

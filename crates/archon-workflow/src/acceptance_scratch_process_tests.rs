@@ -11,6 +11,7 @@ fn site(root: &Path, scratch: bool, timeout_secs: u64) -> CommandSite<'_> {
         project: root,
         repository: root,
         environment: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
+        resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         audit_root: scratch.then_some(root),
         audit_target: None,
         scratch_bytes: u64::MAX,

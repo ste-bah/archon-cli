@@ -157,6 +157,7 @@ async fn evaluate_inner(
             pin_path,
             expected_pin_digest: archon_workflow::task_set_contract::content_digest(&bytes),
             evidence: evidence.clone(),
+            resource_limits: Some(context.cargo_limits.clone()),
         }),
     )
     .await;

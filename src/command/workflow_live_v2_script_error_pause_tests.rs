@@ -3,7 +3,6 @@
 //! reuses the calls it recorded complete. A deterministic crash that recurs
 //! at the same point pauses again, naming the recurrence. A source that
 //! cannot be evaluated at all still fails the run.
-
 use super::*;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -333,6 +332,7 @@ fn runner(
     let runner = WorkflowV2ScriptRunner::new(
         "script error pause probe".to_string(),
         WorkflowV2ScriptRuntime {
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             target_repository_root: None,
             generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
         },

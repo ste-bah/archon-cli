@@ -67,6 +67,7 @@ pub(super) async fn finalize_run(
         v2_store,
         None,
         None,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
 }
@@ -83,6 +84,7 @@ pub(super) async fn finalize_run_reentering(
     v2_store: &WorkflowV2ResultStore,
     reentry: Option<AcceptanceReentry<'_>>,
     expected_generation: Option<u64>,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<WorkflowV2ScriptSummary> {
     let observer =
         super::workflow_run_end_observer::FixedRunEndAcceptanceObserver::new(store.clone());
@@ -96,6 +98,7 @@ pub(super) async fn finalize_run_reentering(
         &observer,
         reentry,
         expected_generation,
+        cargo_limits,
     )
     .await
 }
@@ -111,6 +114,7 @@ pub(super) async fn finalize_run_observed(
     observer: &dyn super::workflow_live_v2_finalizer::WorkflowRunEndObserver,
     reentry: Option<AcceptanceReentry<'_>>,
     expected_generation: Option<u64>,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<WorkflowV2ScriptSummary> {
     let (summary, gate) = if run_kind == WorkflowRunKind::AuthoredTaskWorkflow {
         apply_acceptance_gate(store, run_id, v2_store, summary)?
@@ -135,6 +139,7 @@ pub(super) async fn finalize_run_observed(
         reopen
             .as_ref()
             .map(|reopen| reopen as &dyn super::workflow_live_v2_finalizer::RunEndReopen),
+        cargo_limits,
     )
     .await;
     // Issue 316: a refused pause is never written as a cancellation.

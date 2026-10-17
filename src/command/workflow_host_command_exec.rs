@@ -41,6 +41,7 @@ pub(super) use note::append_host_note;
 
 #[path = "workflow_host_command_exec_trait.rs"]
 mod executor_trait;
+pub(crate) use executor_trait::LandingRejudgeOutcome;
 pub(crate) use executor_trait::WorkflowHostCommandExecutor;
 
 #[async_trait]
@@ -149,6 +150,29 @@ impl FixedHostCommandExecutor {
     ) -> WorkflowResult<ResolvedHostCommand> {
         resolve_host_command(request, &self.catalog, context, call_id)
     }
+
+    pub(crate) async fn execute_judge_only(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+    ) -> WorkflowResult<HostCommandResult> {
+        if request.command_id != "land-task-body" {
+            return Err(WorkflowError::SpecInvalid(
+                "judge-only body execution requires land-task-body".into(),
+            ));
+        }
+        self.execute_observed_only(request, expected_generation)
+            .await
+    }
+
+    pub(crate) async fn execute_observed_only(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+    ) -> WorkflowResult<HostCommandResult> {
+        self.execute_inner(request, expected_generation, None, true)
+            .await
+    }
 }
 
 #[path = "workflow_host_command_exec_destinations.rs"]
@@ -203,6 +227,30 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         self.record_is_reusable_live(record, true)
     }
 
+    fn landing_receipt_matches_disk(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.landing_receipt_matches_disk_live(record)
+    }
+
+    async fn rejudge_landing(
+        &self,
+        record: &WorkflowV2CallRecord,
+        expected_generation: Option<u64>,
+        allow_restore: bool,
+    ) -> WorkflowResult<Option<LandingRejudgeOutcome>> {
+        self.rejudge_landing_without_publication(record, expected_generation, allow_restore)
+            .await
+    }
+
+    async fn repair_landing_mismatch(
+        &self,
+        record: &WorkflowV2CallRecord,
+        expected_generation: Option<u64>,
+        allow_restore: bool,
+    ) -> WorkflowResult<(bool, Option<HostCommandResult>, bool)> {
+        self.repair_landing_mismatch_live(record, expected_generation, allow_restore)
+            .await
+    }
+
     fn outcome_limits_hold(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.outcome_limits_hold_for(record)
     }
@@ -232,269 +280,14 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 
     async fn execute(
         &self,
-        mut request: HostCommandRequest,
+        request: HostCommandRequest,
         expected_generation: Option<u64>,
     ) -> WorkflowResult<HostCommandResult> {
-        let expected_generation = expected_generation.ok_or_else(|| {
-            WorkflowError::StateCorrupt(
-                "fixed HostCommand execution has no dispatch generation".into(),
-            )
-        })?;
-        crate::command::workflow_host_command_integrity::require_launch_prd_unchanged(
-            &self.context,
-            &request.command_id,
-        )?;
-        // A body the host cannot bind to a frozen subject is the author's
-        // artifact being wrong, not the host failing: it belongs in the findings
-        // channel that gives the author its next attempt, exactly like a
-        // candidate the gate refuses.
-        let bound = super::workflow_host_command_binding::bind_request(
-            &self.context,
-            &self.run_root,
-            &request,
-        );
-        let context = match bound {
-            Ok(Ok(context)) => context,
-            Ok(Err(unbound)) => return unbound.refused(&request.command_id),
-            Err(WorkflowError::SpecInvalid(reason)) => {
-                return Ok(unpublished(
-                    Some(0),
-                    String::new(),
-                    String::new(),
-                    (0, 0),
-                    candidate_refusal_envelope(&request.command_id, &reason),
-                    "candidate refused before staging",
-                ));
-            }
-            Err(error) => return Err(error),
-        };
-        let call_id = self.content_identity(&request, &context)?;
-        let stamped_fields = match stamp::stamp_request(&mut request, &context)? {
-            Ok(notes) => notes,
-            Err(unstampable) => return unstampable.refused(&request.command_id),
-        };
-        let pause = super::workflow_host_staging_pause::StagingPause::new(
-            &self.context.project_root,
-            &self.run_root,
-            expected_generation,
-            &call_id,
-            &request.command_id,
-        )?;
-        // Stale staging a cancelled call left is cleared, or the run pauses (#297).
-        let staging = pause.prepare(&self.run_root)?;
-        let command = self.resolved(&request, &context, &call_id)?;
-        if command
-            .declared_write_set
-            .iter()
-            .any(|path| !path.starts_with(&staging.root))
-        {
-            return Err(WorkflowError::SpecInvalid(
-                "resolved host command write set escaped prepared staging root".to_string(),
-            ));
-        }
-        let destinations = self.destinations(&context, &command, &call_id)?;
-        let sentinels =
-            LiveMutationSentinels::capture(&destinations.values().cloned().collect::<Vec<_>>())
-                .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-        // What the call records never holds a secret value the child was given.
-        let secrets = Arc::new(HostSecrets::of(&context, &command.environment));
-        let pause = Arc::new(pause);
-        let teardown = TeardownLatch::default();
-        let staged_envelope = staging.root.join(ENVELOPE_FILE);
-        let cleanup = EnvelopeCleanup {
-            anchor: staging.anchor.clone(),
-            secrets: secrets.clone(),
-            pause: pause.clone(),
-            teardown: teardown.clone(),
-            armed: true,
-        };
-        let result = async {
-            // Issue #255: an operational ending is retried or pauses the run.
-            let sealed = self
-                .execute_with_operational_retry(
-                    &command,
-                    &call_id,
-                    expected_generation,
-                    &secrets,
-                    &staging.anchor,
-                    &pause,
-                    &teardown,
-                )
-                .await?;
-            let truncated = sealed.truncated;
-            let prepared = sealed.prepared;
-            let observed = sealed.output;
-            let stdout = utf8(observed.stdout, "stdout")?;
-            let stderr = utf8(observed.stderr, "stderr")?;
-            if observed.exit_code != Some(0) {
-                return Ok(HostCommandResult {
-                    exit_code: observed.exit_code,
-                    stdout,
-                    stderr,
-                    stdout_bytes: observed.stdout_bytes,
-                    stderr_bytes: observed.stderr_bytes,
-                    timed_out: observed.timed_out,
-                    interrupted: false,
-                    stdout_truncated: truncated.0,
-                    stderr_truncated: truncated.1,
-                    gate_envelope: None,
-                    publication_receipt: None,
-                    subjects: Vec::new(),
-                    postcondition: None,
-                });
-            }
-            let Some(prepared) = prepared else {
-                return Err(WorkflowError::StateCorrupt(
-                    "successful host call has no manifest".into(),
-                ));
-            };
-            let staged = staging.anchor.read_file(ENVELOPE_FILE).and_then(|bytes| {
-                bytes.ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "the staged envelope is not a regular file",
-                    )
-                })
-            });
-            let envelope: GateEnvelopeV1 = secrets.parse_json(
-                &staged.map_err(|source| WorkflowError::Io {
-                    path: staged_envelope.clone(),
-                    source,
-                })?,
-                "host command returned malformed gate envelope",
-            )?;
-            let envelope = secrets.envelope(envelope);
-            if envelope.policy_findings.iter().any(|finding| {
-                !command
-                    .remediation_scopes
-                    .contains(&finding.remediation_scope)
-            }) {
-                return Err(WorkflowError::PolicyDenied(format!(
-                    "host command '{}' returned a remediation scope outside its catalog",
-                    request.command_id
-                )));
-            }
-            if envelope.operational_error.is_some() {
-                // The script stops on `operational_error` itself, and it can only do
-                // that if the envelope reaches it. Failing the call here instead
-                // discarded the envelope and left the bridge with an error it could
-                // not render as an outcome, so the operator saw a conversion
-                // complaint rather than the reason the phase stopped.
-                return Ok(unpublished(
-                    observed.exit_code,
-                    stdout,
-                    stderr,
-                    (observed.stdout_bytes, observed.stderr_bytes),
-                    envelope,
-                    "host gate reported an operational failure",
-                ));
-            }
-            if candidate_refused_before_staging(&prepared, &command) {
-                return Ok(unpublished(
-                    observed.exit_code,
-                    stdout,
-                    stderr,
-                    (observed.stdout_bytes, observed.stderr_bytes),
-                    envelope,
-                    "candidate refused before staging",
-                ));
-            }
-            if candidate_findings_prevent_publication(
-                &command.command_id,
-                context.gate_mode,
-                &envelope,
-            ) {
-                return Ok(unpublished(
-                    observed.exit_code,
-                    stdout,
-                    stderr,
-                    (observed.stdout_bytes, observed.stderr_bytes),
-                    envelope,
-                    "candidate findings prevented parent publication",
-                ));
-            }
-            let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
-            let run_id = self
-                .run_root
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| {
-                    WorkflowError::StateCorrupt(
-                        "fixed HostCommand run root has no UTF-8 run id".into(),
-                    )
-                })?
-                .to_string();
-            let shadow_root = self.context.project_root.clone();
-            let pin = super::workflow_task_set::acceptance_pin_path(
-                &context.project_root,
-                &context.task_root,
-            );
-            let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
-                // A sibling stopped by a pause reports "paused", not "cancelled".
-                crate::command::workflow_host_command_operational::require_run_owned_locked(
-                    locked,
-                    &run_id,
-                    expected_generation,
-                )?;
-                // The audit reads by path: refuse a tree swapped since creation.
-                staging.anchor.verify().map_err(|error| {
-                    WorkflowError::ArtifactInvalid(format!("host command staging refused: {error}"))
-                })?;
-                let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
-                    .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-                let receipt = publish_audited(audited, &destinations, &pin, &context.task_root)
-                    .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-                if let Some(envelope) = destinations.get(ENVELOPE_FILE) {
-                    owner_only(envelope)?;
-                }
-                // Parent-only recording follows every publication refusal.
-                // Never fatal here. The publication is already committed to the
-                // live tree; failing the call now would lose the receipt the script
-                // needs while leaving the commit in place - the partial state this
-                // whole path exists to prevent.
-                if let Err(error) = crate::command::workflow_gate::append_published_shadow_records(
-                    &shadow_root,
-                    &call_id,
-                    &command.command_id,
-                    &envelope.policy_findings,
-                    "staged",
-                ) {
-                    tracing::warn!(%error, "recording published gate findings failed");
-                }
-                let (subjects, postcondition) =
-                    evaluate_postcondition(&context, &command.command_id)?;
-                Ok((receipt, subjects, postcondition))
-            })?;
-            // Through the anchor, after the lock: a failure is recorded.
-            finish::remove_published(&staging, &receipt, &pause, &secrets);
-            let (stdout, stdout_bytes) =
-                append_host_note(stdout, &stamped_fields, observed.stdout_bytes);
-            Ok(HostCommandResult {
-                exit_code: observed.exit_code,
-                stdout,
-                stderr,
-                stdout_bytes,
-                stderr_bytes: observed.stderr_bytes,
-                timed_out: false,
-                interrupted: false,
-                stdout_truncated: truncated.0,
-                stderr_truncated: truncated.1,
-                gate_envelope: Some(envelope),
-                publication_receipt: Some(receipt),
-                subjects,
-                postcondition: Some(postcondition),
-            })
-        }
-        .await;
-        #[cfg(test)]
-        if let Some(hook) = AFTER_CALL.take() {
-            hook(&staging.root);
-        }
-        let sealed = cleanup.finish();
-        finish::settle_cleanup(result, sealed, &staging.root, &pause, &secrets)
-            .map_err(|error| secrets.error(error))
+        self.execute_inner(request, expected_generation, None, false)
+            .await
     }
 }
-
 #[path = "workflow_host_command_exec_identity.rs"]
 pub(crate) mod identity;
+#[path = "workflow_host_command_exec_inner.rs"]
+mod inner;

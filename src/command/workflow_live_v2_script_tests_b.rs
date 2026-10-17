@@ -174,6 +174,7 @@ pub(super) fn test_spec() -> WorkflowSpec {
 
 pub(super) fn test_runtime(spec: &WorkflowSpec) -> WorkflowV2ScriptRuntime {
     WorkflowV2ScriptRuntime {
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         target_repository_root: spec.target_repository_root.clone(),
         generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
     }

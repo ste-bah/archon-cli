@@ -159,7 +159,11 @@ async fn a_command_with_no_verdict_at_either_tree_blocks() {
         .unwrap();
     let store = WorkflowV2ResultStore::new(dir.path().join("run/v2"));
     bind_run(&store, &base);
-    let universe = universe(&[LIB, "npm run check"]);
+    // `npm` can resolve to a real npm.cmd on Windows, where its package
+    // lookup fails with runner-specific output instead of exercising the
+    // intended unnamed, non-cargo command. `false` is a POSIX shell builtin
+    // with the same stable failure at both trees on every supported host.
+    let universe = universe(&[LIB, "false"]);
     let verdict = regression_verdict(&RegressionGate {
         store: &store,
         dispatch: &cargo,
@@ -182,14 +186,14 @@ async fn a_command_with_no_verdict_at_either_tree_blocks() {
         verdict
             .notes
             .iter()
-            .any(|n| n.starts_with("NOT JUDGEABLE") && n.contains("npm run check")),
+            .any(|n| n.starts_with("NOT JUDGEABLE") && n.contains("false")),
         "{verdict:#?}"
     );
     assert!(
         !verdict
             .notes
             .iter()
-            .any(|n| n.starts_with("PRE-EXISTING") && n.contains("npm run check")),
+            .any(|n| n.starts_with("PRE-EXISTING") && n.contains("false")),
         "{verdict:#?}"
     );
     assert!(

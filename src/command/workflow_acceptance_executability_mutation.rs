@@ -1,40 +1,23 @@
-//! The generic input mutation (A4): proving a check that passes on the
-//! pre-implementation tree can still fail.
-//!
-//! A check can pass before any implementation for two reasons: it proves
-//! nothing (it passes whatever the tree holds), or its criterion already
-//! holds on that tree. Re-authoring cannot help the second, and a freeze
-//! must not loop on it. So such a check is run once more, on the same tree,
-//! with the DATA it names moved aside: every token of its executed text (and
-//! a floor's `artifact_path`) that is a relative path, without `..`, that
-//! exists under the check's working directory -- except what makes the
-//! check run at all: a command word, the script an interpreter runs (`sh
-//! x.sh`, `python3 x.py`), a directory it changes into (`cd`, `-C`), a
-//! build manifest (`Cargo.toml`, `package.json`, `--manifest-path`, ...),
-//! and any directory holding one of those. Moving those would make the
-//! check fail without saying anything about its criterion.
-//!
-//! The mutation is a shell prologue and epilogue around the check's own
-//! text, which runs in a subshell so its own `trap`/`exit` cannot skip the
-//! restore. The prologue first sweeps what an earlier killed run left, then
-//! moves each input aside unless a component of its path is a symlink
-//! (following one could move a live file); the epilogue restores them in
-//! REVERSE order (a nested input comes back before its parent) and only
-//! then reports, on stdout, that everything was restored. Every marker
-//! carries a per-run nonce, so a check cannot forge one. It is only ever
-//! run in a hermetic copy, one per mutated check; the prologue refuses, with
-//! a guard marker, to move anything when its working directory is inside a
-//! live root.
+//! Generic input mutation (A4): prove that a check passing on the
+//! pre-implementation tree can fail. Move aside text-derived data paths,
+//! excluding command mechanics, manifests, generated outputs and paths
+//! outside the copied check tree (except discovered siblings). Run the check
+//! in a subshell, then restore moved paths in reverse order even when its
+//! `trap` or `exit` runs. Nonce markers prevent forged results. Each
+//! mutation uses a hermetic copy; a live-root guard prevents moving live data.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::{
-    AcceptanceCheck, AcceptanceContract, AcceptanceCriterion,
+    AcceptanceCheck, AcceptanceContract, AcceptanceCriterion, TrustedCwd,
 };
 
 use super::executed_text;
+
+#[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
+mod wrapper_script;
 
 /// The exit status of a run stopped at the live-root guard.
 pub(super) const GUARD_STATUS: i32 = 97;
@@ -128,6 +111,16 @@ fn lex(text: &str) -> (Vec<Vec<String>>, Vec<String>) {
                         pending_tags.push(tag);
                     }
                     break;
+                }
+                None if matches!(c, '>' | '<') => {
+                    finish(&mut word, &mut commands);
+                    let operator = if chars.get(i + 1) == Some(&c) {
+                        i += 1;
+                        format!("{c}{c}")
+                    } else {
+                        c.to_string()
+                    };
+                    commands.last_mut().expect("one command").push(operator);
                 }
                 None if c.is_whitespace() => finish(&mut word, &mut commands),
                 None if matches!(c, ';' | '&' | '|' | '(' | ')' | '{' | '}' | '`') => {
@@ -223,7 +216,6 @@ fn normalize(token: &str) -> &str {
     token.trim_start_matches("./").trim_end_matches('/')
 }
 
-/// The relative path tokens of `text`.
 fn path_tokens(text: &str) -> Vec<String> {
     let allowed =
         |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-' | '+' | '@');
@@ -234,20 +226,60 @@ fn path_tokens(text: &str) -> Vec<String> {
                 && !token.starts_with('-')
                 && !token.starts_with('/')
                 && token.len() <= 4096
-                && Path::new(token).components().all(|part| {
-                    matches!(part, std::path::Component::Normal(name) if name != ".git" && name != "target")
-                })
+                && Path::new(token)
+                    .components()
+                    .enumerate()
+                    .all(|(index, part)| match part {
+                        std::path::Component::Normal(name) => name != ".git" && name != "target",
+                        std::path::Component::ParentDir => index == 0,
+                        _ => false,
+                    })
         })
         .map(str::to_string)
         .collect()
 }
 
 /// Candidate data paths `entry` names, relative to its working directory.
-pub(super) fn named_inputs(entry: &AcceptanceCriterion) -> Vec<String> {
+pub(super) fn named_inputs(
+    entry: &AcceptanceCriterion,
+    project: &Path,
+    repository: &Path,
+) -> Vec<String> {
     let text = executed_text(entry).map_or_else(String::new, |(_, text)| text.to_string());
     let (commands, bodies) = lex(&text);
+    let cwd = match &entry.check {
+        AcceptanceCheck::Command {
+            cwd: TrustedCwd::RepoRoot,
+            ..
+        } => repository,
+        _ => project,
+    };
+    let siblings = archon_workflow::acceptance_sibling_paths::discover(cwd, &[text.clone()]);
+    let message_words: BTreeSet<String> = commands
+        .iter()
+        .filter_map(|words| {
+            let program = words
+                .first()
+                .and_then(|word| Path::new(word).file_name())?
+                .to_string_lossy();
+            matches!(program.as_ref(), "echo" | "printf" | "fail" | "die")
+                .then(|| words.iter().skip(1).cloned().collect::<Vec<_>>())
+        })
+        .flatten()
+        .collect();
+    let written_words: BTreeSet<String> = commands
+        .iter()
+        .flat_map(|words| {
+            words
+                .windows(2)
+                .filter(|pair| matches!(pair[0].as_str(), ">" | ">>"))
+                .map(|pair| pair[1].clone())
+        })
+        .collect();
     let excluded: Vec<String> = (operational_words(&commands).iter())
         .flat_map(|word| path_tokens(word))
+        .chain(message_words.iter().flat_map(|word| path_tokens(word)))
+        .chain(written_words.iter().flat_map(|word| path_tokens(word)))
         .collect();
     let mut words: Vec<String> = commands.into_iter().flatten().chain(bodies).collect();
     if let AcceptanceCheck::Floor { contract } = &entry.check {
@@ -256,20 +288,36 @@ pub(super) fn named_inputs(entry: &AcceptanceCriterion) -> Vec<String> {
     let mut seen = BTreeSet::new();
     (words.iter())
         .flat_map(|word| path_tokens(word))
-        .filter(|token| {
-            let path = Path::new(token);
+        .filter_map(|token| {
+            let path = Path::new(&token);
+            let shaped = token.contains('/') || path.extension().is_some();
+            let exists = cwd.join(path).is_file() || cwd.join(path).is_dir();
+            let sibling = cwd.join(path).canonicalize().ok().is_some_and(|resolved| {
+                siblings
+                    .iter()
+                    .any(|sibling| resolved.starts_with(&sibling.source))
+            });
+            let manifest_sibling =
+                super::hermetic::siblings::manifest_relative_input(&token, &text, cwd);
             let manifest = path
                 .file_name()
                 .is_some_and(|name| MANIFESTS.contains(&name.to_string_lossy().as_ref()));
             // Neither what runs the check nor a directory that holds it.
             let runs = (excluded.iter()).any(|word| Path::new(word).starts_with(path));
-            !manifest && !runs
+            if manifest
+                || runs
+                || !(shaped || exists || manifest_sibling.is_some())
+                || (token.starts_with("../") && !sibling && manifest_sibling.is_none())
+            {
+                None
+            } else {
+                Some(manifest_sibling.unwrap_or_else(|| token.clone()))
+            }
         })
         .filter(|token| seen.insert(token.clone()))
         .collect()
 }
 
-/// The markers of one mutated run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Markers {
     nonce: String,
@@ -302,6 +350,14 @@ impl Markers {
         format!("archon-mutation-moved-{}: ", self.nonce)
     }
 
+    fn generated_prefix(&self) -> String {
+        format!("archon-mutation-generated-{}: ", self.nonce)
+    }
+
+    fn recreated_prefix(&self) -> String {
+        format!("archon-mutation-recreated-{}: ", self.nonce)
+    }
+
     fn restored(&self) -> String {
         format!("archon-mutation-restored-{}", self.nonce)
     }
@@ -313,7 +369,6 @@ impl Markers {
         )
     }
 
-    /// The inputs a run moved aside, as its prologue reported them.
     pub(super) fn moved(&self, result: &CheckResult) -> Vec<String> {
         let prefix = self.moved_prefix();
         String::from_utf8_lossy(&result.stderr)
@@ -323,7 +378,24 @@ impl Markers {
             .collect()
     }
 
-    /// Whether the run restored every input and left nothing behind.
+    pub(super) fn generated(&self, result: &CheckResult) -> BTreeSet<String> {
+        let prefix = self.generated_prefix();
+        String::from_utf8_lossy(&result.stderr)
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix.as_str()))
+            .map(str::to_string)
+            .collect()
+    }
+
+    pub(super) fn recreated(&self, result: &CheckResult) -> BTreeSet<String> {
+        let prefix = self.recreated_prefix();
+        String::from_utf8_lossy(&result.stderr)
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix.as_str()))
+            .map(str::to_string)
+            .collect()
+    }
+
     pub(super) fn restored_all(&self, result: &CheckResult) -> bool {
         let restored = self.restored();
         String::from_utf8_lossy(&result.stdout)
@@ -331,15 +403,12 @@ impl Markers {
             .any(|line| line == restored)
     }
 
-    /// Whether the run stopped at the live-root guard.
     pub(super) fn guarded(&self, result: &CheckResult) -> bool {
         result.exit_code == Some(GUARD_STATUS)
             && String::from_utf8_lossy(&result.stderr).contains(&self.guard())
     }
 }
 
-/// The check text wrapped so `inputs` are moved aside, the check runs, and
-/// they are restored; its exit status is the check's.
 pub(super) fn wrap(
     original: &str,
     inputs: &[String],
@@ -349,6 +418,7 @@ pub(super) fn wrap(
     let quote = |text: &str| format!("'{}'", text.replace('\'', r"'\''"));
     let tag = markers.tag();
     let mut script = String::new();
+    script.push_str(wrapper_script::watch_prologue());
     for root in live_roots {
         let root = quote(&root.to_string_lossy());
         script.push_str(&format!(
@@ -361,25 +431,25 @@ pub(super) fn wrap(
     script.push_str(&format!(
         "{sweep} | while IFS= read -r __archon_left; do __archon_base=\"${{__archon_left%.archon-mutated-*}}\"; if [ -e \"$__archon_base\" ] || [ -L \"$__archon_base\" ]; then rm -rf -- \"$__archon_left\"; else mv -- \"$__archon_left\" \"$__archon_base\"; fi; done\n"
     ));
+    script.push_str(&wrapper_script::move_inputs(
+        inputs,
+        &tag,
+        &markers.moved_prefix(),
+    ));
+    script.push_str(&wrapper_script::snapshot_parents(inputs, &tag));
+    script.push_str(&wrapper_script::wait_for_timestamp_tick(inputs));
+    script.push_str(&format!("(\n{original}\n)\n__archon_status=$?\n"));
+    script.push_str(&wrapper_script::report_recreated(
+        inputs,
+        &markers.recreated_prefix(),
+    ));
     for input in inputs {
-        let mut prefix = String::new();
-        let mut plain = Vec::new();
-        for part in input.split('/') {
-            prefix = if prefix.is_empty() {
-                part.to_string()
-            } else {
-                format!("{prefix}/{part}")
-            };
-            plain.push(format!("[ ! -L {} ]", quote(&prefix)));
-        }
         let path = quote(input);
         script.push_str(&format!(
-            "if {} && [ -e {path} ]; then mv -- {path} {path}.{tag} 2>/dev/null && printf '%s%s\\n' {} {path} >&2; fi\n",
-            plain.join(" && "),
-            quote(&markers.moved_prefix()),
+            "if [ -e {path} ] || [ -L {path} ]; then printf '%s%s\\n' {} {path} >&2; fi\n",
+            quote(&markers.generated_prefix()),
         ));
     }
-    script.push_str(&format!("(\n{original}\n)\n__archon_status=$?\n"));
     for input in inputs.iter().rev() {
         let path = quote(input);
         script.push_str(&format!(

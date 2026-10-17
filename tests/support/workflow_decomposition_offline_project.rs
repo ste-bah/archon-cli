@@ -16,12 +16,13 @@ const FIXTURE: &str = concat!(
 
 pub struct TestProject {
     temp: Option<tempfile::TempDir>,
+    root: PathBuf,
     pub provider: server::FakeProvider,
 }
 
 impl TestProject {
     pub fn path(&self) -> &Path {
-        self.temp.as_ref().unwrap().path()
+        &self.root
     }
 }
 
@@ -64,7 +65,12 @@ pub fn project_with(plan: server::Plan) -> TestProject {
 /// it before the repository's fixture commit.
 pub fn project_with_files(plan: server::Plan, files: &[(&str, String)]) -> TestProject {
     let temp = tempfile::tempdir().unwrap();
-    let root = temp.path();
+    let root = if plan.variant == server::Variant::SiblingCheck {
+        temp.path().join("project")
+    } else {
+        temp.path().to_path_buf()
+    };
+    fs::create_dir_all(&root).unwrap();
     fs::create_dir_all(root.join("repository")).unwrap();
     fs::create_dir_all(root.join("tasks")).unwrap();
     copy_tree(
@@ -76,13 +82,32 @@ pub fn project_with_files(plan: server::Plan, files: &[(&str, String)]) -> TestP
         &root.join(".archon"),
     );
     fs::copy(PathBuf::from(FIXTURE).join("prd.md"), root.join("prd.md")).unwrap();
+    if plan.variant == server::Variant::SiblingCheck {
+        let sibling = root.parent().unwrap().join("shared-check");
+        fs::create_dir_all(&sibling).unwrap();
+        fs::write(sibling.join("marker.txt"), "fixture marker\n").unwrap();
+        git_in_directory(&sibling, &["init", "-q"]);
+        git_in_directory(&sibling, &["add", "."]);
+        git_in_directory(
+            &sibling,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "sibling fixture",
+            ],
+        );
+    }
     for (path, contents) in files {
         fs::write(root.join(path), contents).unwrap();
     }
-    git(root, &["init", "-q"]);
-    git(root, &["add", "."]);
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "."]);
     git(
-        root,
+        &root,
         &[
             "-c",
             "user.name=Fixture",
@@ -122,15 +147,20 @@ max_concurrent = 1
     fs::write(root.join(".archon/config.toml"), &config).unwrap();
     TestProject {
         temp: Some(temp),
+        root,
         provider,
     }
 }
 
 fn git(root: &Path, args: &[&str]) {
+    git_in_directory(&root.join("repository"), args);
+}
+
+fn git_in_directory(directory: &Path, args: &[&str]) {
     // The fixture commit must not depend on the runner's git settings: a
     // Windows runner's core.autocrlf would otherwise rewrite line ends.
     let status = Command::new("git")
-        .current_dir(root.join("repository"))
+        .current_dir(directory)
         .args(["-c", "core.autocrlf=false"])
         .args(args)
         .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")

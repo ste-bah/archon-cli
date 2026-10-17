@@ -15,6 +15,19 @@ fn run_layout() -> (tempfile::TempDir, PathBuf, PathBuf) {
 }
 
 #[test]
+fn staged_task_file_lint_reads_candidate_through_the_spill_view() {
+    let source = include_str!("workflow_staged_cli.rs");
+    assert!(
+        source.contains("workflow_host_command_stdin_spill::read_candidate("),
+        "staged task-file lint must resolve host-created stdin spill views"
+    );
+    assert!(
+        source.contains("archon_workflow::HostCommandRequest::MAX_STDIN_BYTES"),
+        "staged task-file lint must use the host command stdin bound"
+    );
+}
+
+#[test]
 fn only_stdin_past_the_limit_or_with_the_reserved_prefix_spills() {
     let limit = 8;
     assert!(!needs_spill(b"", limit), "empty stdin stays inline");

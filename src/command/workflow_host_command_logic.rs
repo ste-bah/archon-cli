@@ -27,10 +27,22 @@
 //!   Any binary change re-runs them, whatever the version and the pinned
 //!   digest say, and a record without a build stamp never replays one. This
 //!   is the backstop for a logic change the version guard missed, and for a
+//!   build that shipped a stale pin. #387 item 5 (2026-10-14) keeps the #361
+//!   rule: task-set-lint and landings reuse by logic version only. The source
+//!   digest guard requires a reviewed bump or re-pin on every source change.
+//!   Rejected option 2: compare the recorded `logicDigest` with this build's
+//!   `sources_digest` on replay, so any source change re-runs every saved verdict
+//!   for that capability without human judgement. Not now: nearly every deploy
+//!   would re-judge body landings and set gates with critic calls. Unchanged text
+//!   could flip on another call (#434), causing re-authors and loops; freeze and
+//!   verify already bind to the build. Revisit if a wrong re-pin lets a stale
+//!   verdict through, or critic verdicts become stable across re-judgement. The
+//!   replay change point is `recorded_logic_holds` in
+//!   `workflow_host_command_exec_identity.rs`.
+//!
 //!   build that shipped a stale pin. task-set-lint (its critic run is
 //!   costly) and the landings keep version-only reuse; whether they also
 //!   bind to the build is Steven's decision.
-//!
 //! A developer cannot change a capability's logic and forget the version:
 //! `sources_digest` pins every source file its verdict is built from (the
 //! dependency closure of its roots, `workflow_host_command_logic_closure`,
@@ -152,277 +164,9 @@ const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
 
 /// Every capability of the fixed catalog, and nothing else
 /// (`logic_361_every_catalog_capability_has_a_logic_version`).
-pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
-    CapabilityLogic {
-        id: "freeze-acceptance",
-        // 2: #366 live-root rule (sibling paths pass; a bad repository lock
-        // is an error) changes acceptance freeze verdicts.
-        // 3: #288 acceptance checks rerun only when their input closure
-        // changed; a reused check verdict binds normalized literal paths,
-        // their filesystem state, the shell, environment and this logic.
-        // 4: #380 complete wrapped obligation text changes freeze verdicts.
-        // #385's re-ask improves recovery from an unusable provider reply;
-        // it does not change the verdict for a usable reply. #392 changes
-        // which authored reply shapes can supply an acceptance entry.
-        // #392 accepts a sole unnamed check block when command_block is omitted.
-        // #399 fixes resume seed reconstruction; identical gate input keeps its verdict.
-        // 9: #400 validates incremental subsets independently, allowing supplementary-only updates to pass.
-        // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // 10: #374 resolves existing aliases by identity; unresolved paths on the live volume fail closed.
-        // 11: #417 #418 #419 freeze-owned outputs leave check inputs; passability and judge verdicts reuse by scoped input keys.
-        // #421 changes when a recorded freeze is reused (a later publication extends its pin), not how it is judged.
-        // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
-        // #434 re-pin only: the fidelity critic's store and reply schema are in this closure; freeze never asks the critic.
-        // 14: #417 task-root exclusions and copies use the same project-relative input set as its digest.
-        // #417 re-pin only: direct copy calls now normalize roots like the production caller.
-        // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
-        // #439 re-pin only: resume phase selection shares this closure; freeze verdicts are unchanged.
-        // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
-        // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims.
-        // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
-        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
-        // 16: #440 the scratch copy skips a repository nested inside a project input, as the probe digest does, so a check can no longer read that live tree and its verdict can change.
-        // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
-        // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
-        // 18: #446 direct-site baseline runs use their hermetic copy's layout when applying that rule.
-        // 19: #402 missing provider stop reasons cannot complete acceptance authoring; #419 pinned restoration requires identical check and covers fields after a fresh refusal.
-        // 20: #374 reconstructs unresolved paths from the longest existing
-        // ancestor before comparing with the live root; only an unresolvable
-        // same-volume path fails closed. Sibling paths can now pass.
-        // 21: #366 joins shell-word paths and carries shell assignments into
-        // later commands when detecting live-root acceptance checks.
-        // #366 Windows fix: POSIX path comparison stays case-sensitive on Windows.
-        // #446 review 2, same unreleased version 18
-        version: 21,
-        sources: &[GATE, CONTRACT, FREEZE],
-        // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
-        // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
-        // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
-        // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
-        // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        // #446 follow-up re-pin only (version 18 at the time): cache compatibility now keeps old evidence;
-        // Scratch schema-3 verdicts stay reusable, while Hermetic layoutless
-        // evidence reruns under the version-18 acceptance pin. Version 19 records #402/#419 changes.
-        // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
-        // re-pin only: verdicts are unchanged.
-        sources_digest: "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-        build_bound: false,
-    },
-    CapabilityLogic {
-        id: "freeze-skeleton",
-        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
-        // #439 re-pin only, as freeze-acceptance.
-        // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims.
-        // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
-        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
-        version: 3,
-        sources: &[GATE, CONTRACT, FREEZE],
-        // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
-        // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
-        // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
-        // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
-        // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        // #440 re-pin only: the skeleton freeze runs no check and copies no input.
-        // #420 re-pin only: the skeleton freeze judges no check run, so the new no-verdict rule never applies.
-        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        // #446 re-pin only: the skeleton freeze judges no baseline run.
-        // #446 follow-up re-pin only: the shared probe cache source changed;
-        // freeze-skeleton judges no check runs.
-        // #446 follow-up: archive collisions keep both prior byte sets.
-        // #374 re-pin only: skeleton freeze performs no check path classification.
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // #366 re-pin only: skeleton freeze performs no check path classification.
-        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not skeleton verdicts.
-        // re-pin only: verdicts are unchanged.
-        sources_digest: "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-        build_bound: false,
-    },
-    CapabilityLogic {
-        id: "land-task-body",
-        // 3: R8 body packaging strips chat around the one frozen subject's task
-        // file and binds by its task_id; the fidelity critic re-asks on an
-        // unparseable answer while it makes progress.
-        // 4: #380's obligation model changes the frozen contract verdict.
-        // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // 6: #425 repository claims recognize leading negation and explicit directory scopes.
-        // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
-        // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
-        // 9: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
-        // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
-        // 10: #443 a path in the asserted clause of a test the body specifies ("assert: (a) `x` exists; (b) …")
-        // is a runtime expectation, not a repository claim; a word before the path still claims.
-        // 11: #443 review: the asserted clause ends at its first path's predicate; a marker continues only an
-        // enumeration its lead opened; numbered items and indented openers carry only their own list; a
-        // preposition before the path, repository wording ("(N lines)", "base commit") or a planned change claims.
-        // 12: #443 re-review: a blank line before an assertion list's first item keeps the list; a path an output
-        // noun locates ("the report at `x`") stays exempt; a prefixed lead ("re-verify that") is a lead.
-        // 13: #443 re-review 3: a relative clause right after the path ("`x`, which already exists") claims.
-        // No version bump: refused candidates now stay unpublished in observe mode; only those refused candidates are affected, recorded results remain valid, and the lineage guard makes a future bump safe.
-        version: 13,
-        sources: &[GATE, CONTRACT, LINT],
-        // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
-        // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
-        // #387 re-pin only: launch routing of refused frozen checks; lint verdicts are unchanged.
-        // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
-        // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
-        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
-        // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
-        // #443: the version bumps above; asserted runtime paths are no longer repository claims.
-        // Re-pin only: observe-mode refused bodies now stay unpublished; refused candidates never publish, existing results remain valid, and lineage protects any future version bump.
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
-        sources_digest: "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-        build_bound: false,
-    },
-    CapabilityLogic {
-        id: "task-set-lint",
-        // 3: the fidelity critic re-asks on an unparseable answer while it
-        // makes progress (R8).
-        // 4: #380's obligation model changes the frozen contract verdict.
-        // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // 6: #425 repository claims recognize leading negation and explicit directory scopes.
-        // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
-        // 8: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
-        // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
-        // 9: #443 a path in the asserted clause of a test the body specifies is a runtime expectation, not a
-        // repository claim; same rule as land-task-body 10.
-        // 10: #443 review, same rule as land-task-body 11.
-        // 11: #443 re-review, same rule as land-task-body 12.
-        // 12: #443 re-review 3, same rule as land-task-body 13.
-        version: 12,
-        sources: &[GATE, CONTRACT, LINT],
-        // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
-        // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
-        // #387 re-pin only: launch routing of refused frozen checks; lint verdicts are unchanged.
-        // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
-        // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
-        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
-        // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
-        // #443: the version bumps above; asserted runtime paths are no longer repository claims.
-        // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
-        // reconciliation; no gate calls the new entry, so every verdict is unchanged.
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
-        sources_digest: "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-        build_bound: false,
-    },
-    CapabilityLogic {
-        id: "requirements-trace",
-        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // 4: #442 a `path::symbol` or `path:line` span is a path plus an anchor judged in that file; a
-        // package-relative path is read against every base path it is a suffix of (the claiming task's
-        // own packages first) and refuted only when every reading refutes; a placeholder cargo target
-        // is no observable; a bare name that is a Cargo target exists (or is derived when declared).
-        version: 4,
-        sources: &[GATE, CONTRACT, TRACE],
-        // #434 and #417 re-pin only: trace never reads the newly excluded run state.
-        // #434d re-pin only: trace never asks the fidelity critic or reads its store.
-        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
-        // #440 re-pin only: trace calls none of the scratch copy, audit or probe digest walkers that changed.
-        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
-        build_bound: true,
-    },
-    CapabilityLogic {
-        id: "verify-frozen-acceptance",
-        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
-        // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
-        // 6: #417 copied task-root inputs now match the digest exclusions, which can change a check verdict.
-        // #417 re-pin only: the direct copy API now shares the production caller's root normalization.
-        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
-        // 8: #366 rechecks frozen acceptance paths using shell assignment scope when locating live roots (POSIX spelling case-sensitive on Windows too).
-        version: 8,
-        sources: &[GATE, CONTRACT, VERIFY],
-        // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
-        // #439 re-pin only: resume phase selection does not change verification verdicts.
-        // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
-        // #434d re-pin only: verification never asks the fidelity critic or reads its store.
-        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
-        // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
-        // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
-        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
-        // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
-        // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
-        // Re-pin only: the executor names whether a capability publishes, and moved its digest
-        // lookup; the reuse rules a verification verdict is checked under are unchanged.
-        // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
-        // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
-        // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
-        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        // #446 follow-up re-pin only: verification shares cache source files
-        // but reads no probe result layout or evidence.
-        // #374 re-pin only: frozen-chain verification does not classify check paths.
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: file split, no logic change
-        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
-        // re-pin only: verdicts are unchanged.
-        sources_digest: "d4b326e487dd61c36b66722411055c238e9f872eff0be0810974ef952cbc02b5",
-        build_bound: true,
-    },
-    CapabilityLogic {
-        id: "verify-frozen-skeleton",
-        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 3,
-        sources: &[GATE, CONTRACT, VERIFY],
-        // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
-        // #439 re-pin only: resume phase selection does not change verification verdicts.
-        // #425 re-pin only: the repository claim parser changed; skeleton verification verdicts do not read claims.
-        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
-        // #434d re-pin only: verification never asks the fidelity critic or reads its store.
-        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
-        // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
-        // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
-        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
-        // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
-        // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
-        // Re-pin only: the executor names whether a capability publishes, and moved its digest
-        // lookup; the reuse rules a verification verdict is checked under are unchanged.
-        // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
-        // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
-        // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
-        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        // #446 follow-up re-pin only: verification shares cache source files
-        // but reads no probe result layout or evidence.
-        // #374 re-pin only: frozen-chain verification does not classify check paths.
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: file split, no logic change
-        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
-        // #366 re-pin only: frozen skeleton verification does not classify check paths.
-        // re-pin only: verdicts are unchanged.
-        sources_digest: "d4b326e487dd61c36b66722411055c238e9f872eff0be0810974ef952cbc02b5",
-        build_bound: true,
-    },
-];
+#[path = "workflow_host_command_logic_catalog.rs"]
+mod catalog;
+pub(crate) use catalog::CAPABILITY_LOGIC;
 
 /// Every capability's logic version, by id.
 pub(crate) fn versions() -> std::collections::BTreeMap<String, u32> {

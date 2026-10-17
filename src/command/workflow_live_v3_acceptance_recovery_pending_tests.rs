@@ -75,6 +75,7 @@ fn pending_evidence(damage: Damage) {
         &run.run_id,
         run.runtime.target_repository_root.as_deref(),
         Some(&run.universe),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .unwrap();
     let result = super::super::super::author::publish_fresh(

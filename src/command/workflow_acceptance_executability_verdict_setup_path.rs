@@ -54,8 +54,8 @@ pub(crate) struct SiteTree {
 }
 
 impl SiteTree {
-    pub(crate) fn new(depth: usize, roots: &[&str]) -> Self {
-        let roots = roots.iter().map(|root| (*root).to_string()).collect();
+    pub(crate) fn new<S: AsRef<str>>(depth: usize, roots: &[S]) -> Self {
+        let roots = roots.iter().map(|root| root.as_ref().to_string()).collect();
         Self { depth, roots }
     }
 }

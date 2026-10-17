@@ -149,6 +149,7 @@ async fn a_repair_whose_republish_meets_a_journal_another_writer_left_pauses_the
         &run.run_id,
         run.runtime.target_repository_root.as_deref(),
         Some(&run.universe),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .unwrap();
     let (contract, _, _) = super::super::exec::load_contract(&context).unwrap();

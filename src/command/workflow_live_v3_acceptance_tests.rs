@@ -209,6 +209,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: Some(repo.path().display().to_string()),
         generated_config: Default::default(),
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     };
     Fixture {
         run_id: run.id,
@@ -439,6 +440,7 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
         pin_path: pin_path.clone(),
         expected_pin_digest: content_digest(&std::fs::read(&pin_path).unwrap()),
         evidence: scratch.path().join("evidence"),
+        resource_limits: Some(Default::default()),
     };
     let ids = |refs: &[archon_workflow::acceptance_world::FrozenCommandRef]| {
         refs.iter()
@@ -467,17 +469,28 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
     let (parsed, carried) = parse_request_line(std::str::from_utf8(&plain).unwrap()).unwrap();
     assert_eq!(carried, None);
     assert_eq!(parsed.pin_path, request.pin_path);
+    let mut old_request: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+    old_request
+        .as_object_mut()
+        .unwrap()
+        .remove("resource_limits");
+    let error = parse_request_line(&old_request.to_string())
+        .err()
+        .expect("an old request without resource limits was accepted");
+    assert!(
+        error
+            .to_string()
+            .contains(&request.pin_path.display().to_string())
+    );
+    assert!(error.to_string().contains("missing resource_limits"));
 }
 
-// Contract coverage of every round; split out to hold the 500-line ceiling.
 #[path = "workflow_live_v3_acceptance_tests_b.rs"]
 mod contract_coverage;
 
-// Batch G: environment failures never reach the tasks.
 #[path = "workflow_live_v3_acceptance_tests_g.rs"]
 mod environment;
 
-// Batch O: nothing passes without a contract, and zero-work passes fail.
 #[path = "workflow_live_v3_acceptance_tests_o.rs"]
 mod batch_o;
 

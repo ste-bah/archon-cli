@@ -102,6 +102,7 @@ pub(crate) fn unpublished(
             satisfied: false,
             summary: summary.to_string(),
         }),
+        observed_only: false,
     }
 }
 

@@ -87,10 +87,11 @@ pub(super) async fn republish(
             context.project.join(path)
         }
     };
-    let probe = HostProbe::at(
+    let probe = HostProbe::at_with_limits(
         context.project.clone(),
         context.repository.clone(),
         context.binding.clone(),
+        context.cargo_limits.clone(),
     );
     let probe = match base {
         Some(commit) => probe.with_baseline(Baseline {
@@ -304,10 +305,11 @@ pub(super) async fn repair_ran(
     );
     // The round's own site is the tree these checks just ran on, and they
     // are judged there, never on the host.
-    let site = HostProbe::at(
+    let site = HostProbe::at_with_limits(
         round.context.project.clone(),
         round.context.repository.clone(),
         round.context.binding.clone(),
+        round.context.cargo_limits.clone(),
     )
     .check_site(contract);
     let failed = FailedTree {

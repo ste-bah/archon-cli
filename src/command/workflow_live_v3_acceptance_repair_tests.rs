@@ -65,6 +65,7 @@ pub(super) fn run_fixture_with(checks: &[(&str, &str, bool)]) -> Run {
         runtime: WorkflowV2ScriptRuntime {
             target_repository_root: Some(root),
             generated_config: Default::default(),
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         },
         set,
         store,
@@ -240,6 +241,7 @@ async fn after_an_in_round_repair_the_scratch_guardian_verifies_the_republished_
         &run.run_id,
         run.runtime.target_repository_root.as_deref(),
         Some(&run.universe),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .unwrap();
     let scratch = tempfile::tempdir().unwrap();

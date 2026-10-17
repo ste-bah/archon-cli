@@ -37,6 +37,11 @@ fn fixture(
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "test@example.invalid"]);
     git(&repo, &["config", "user.name", "test"]);
+    std::fs::write(
+        repo.join("Cargo.toml"),
+        "[package]\nname='fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
     std::fs::write(repo.join("input"), "source").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-qm", "fixture"]);
@@ -67,6 +72,66 @@ fn fixture(
         command_digest: content_digest(command.as_bytes()),
     }];
     (t, p, commit, c, refs)
+}
+
+#[tokio::test]
+async fn scratch_check_receives_archon_resource_defaults() {
+    let (t, p, commit, c, refs) =
+        fixture("test \"$CARGO_BUILD_JOBS\" = 3 && test \"$CARGO_INCREMENTAL\" = 1");
+    let hooks = archon_workflow::acceptance_scratch::ObserveHooks::default().with_resource_limits(
+        archon_tools::workflow_resource_env::CargoResourceLimits {
+            build_jobs: 3,
+            incremental: true,
+            resource_class: "balanced".into(),
+        },
+    );
+    let out = archon_workflow::acceptance_scratch::observe_commands_hooked(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        &hooks,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.checks[0].exit_code, Some(0), "{:?}", out.checks[0]);
+}
+
+#[tokio::test]
+async fn public_observer_applies_cargo_resource_defaults() {
+    let (t, p, commit, c, refs) = fixture("test -n \"$CARGO_BUILD_JOBS\"");
+    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+        .await
+        .unwrap();
+    assert_eq!(out.checks[0].exit_code, Some(0), "{:?}", out.checks[0]);
+}
+
+#[tokio::test]
+async fn a_check_command_can_override_the_archon_cargo_default() {
+    let (t, p, commit, c, refs) = fixture("CARGO_BUILD_JOBS=7; test \"$CARGO_BUILD_JOBS\" = 7");
+    let hooks = archon_workflow::acceptance_scratch::ObserveHooks::default().with_resource_limits(
+        archon_tools::workflow_resource_env::CargoResourceLimits {
+            build_jobs: 3,
+            incremental: false,
+            resource_class: "balanced".into(),
+        },
+    );
+    let out = archon_workflow::acceptance_scratch::observe_commands_hooked(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        &hooks,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.checks[0].exit_code, Some(0), "{:?}", out.checks[0]);
 }
 #[tokio::test]
 async fn native_command_mutates_only_scratch_and_records_verified_cleanup() {

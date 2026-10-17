@@ -135,6 +135,7 @@ async fn try_finalize_with(
         observer,
         Some((&fixture.runtime, None, Some(&fixture.universe))),
         None,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
 }

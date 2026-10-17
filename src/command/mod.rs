@@ -336,10 +336,13 @@ pub(crate) mod workflow_decompose_events;
 pub(crate) mod workflow_decompose_frozen_chain;
 pub(crate) mod workflow_decompose_identity;
 pub(crate) mod workflow_decompose_landing_reconcile;
+#[path = "workflow_decompose_latest_report.rs"]
+mod workflow_decompose_latest_report;
 pub(crate) mod workflow_decompose_launch_repair;
 pub(crate) mod workflow_decompose_log;
 pub(crate) mod workflow_decompose_owner;
 pub(crate) mod workflow_decompose_progress;
+mod workflow_decompose_remediation;
 pub(crate) mod workflow_decompose_repository;
 pub(crate) mod workflow_decompose_requirement_inventory;
 pub(crate) mod workflow_decompose_seed;
@@ -393,6 +396,7 @@ mod workflow_host_command_logic_walk_tests;
 pub(crate) mod workflow_host_command_manifest;
 pub(crate) mod workflow_host_command_occurrence;
 pub(crate) mod workflow_host_command_operational;
+pub(crate) mod workflow_host_command_outcome_stamp;
 pub(crate) mod workflow_host_command_paths;
 pub(crate) mod workflow_host_command_postcondition;
 #[cfg(test)]

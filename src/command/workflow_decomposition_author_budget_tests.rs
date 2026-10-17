@@ -118,6 +118,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
                 satisfied: true,
                 summary: "fixture postcondition".into(),
             }),
+            observed_only: false,
         })
     }
 }

@@ -226,7 +226,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
         (seed, case)
     };
     // The same seed and floors the live resume hands the script.
-    let (script_arguments, script_seed) =
+    let (mut script_arguments, script_seed) =
         crate::command::workflow_decompose_seed::resume_script_arguments(
             &store,
             run_id,
@@ -237,6 +237,15 @@ pub(crate) async fn dry_run_fixed_decomposition(
             (&expected_arguments, prd_text),
             true,
         )?;
+    let ledger = crate::command::workflow_decompose_remediation::prepare(
+        &store,
+        run_id,
+        &run_dir,
+        &mut script_arguments,
+        &current_identity,
+        &criteria,
+        &requirement_texts,
+    )?;
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
         Some(&script_arguments),
@@ -356,6 +365,28 @@ pub(crate) async fn dry_run_fixed_decomposition(
     for line in reconciled.iter().chain(&lineage) {
         output.push_str(line);
         output.push('\n');
+    }
+    if let Some(report) =
+        crate::command::workflow_decompose_latest_report::latest_report(&store, run_id)?
+        && report.outcome == "needs_remediation"
+    {
+        output.push_str(&format!(
+            "reverify_latest_report: id={} outcome={} superseded_id={}\n",
+            report.id,
+            report.outcome,
+            report.superseded_id.as_deref().unwrap_or("none")
+        ));
+        let subjects = ledger
+            .as_ref()
+            .ok_or_else(|| {
+                anyhow!(
+                    "latest remediation report {} has no remediation ledger",
+                    report.id
+                )
+            })?
+            .subjects
+            .join(",");
+        output.push_str(&format!("reverify_remediation_plan: reauthor_subjects={} rerun_set_gates=task-set-lint,requirements-trace\n", subjects));
     }
     Ok(output)
 }

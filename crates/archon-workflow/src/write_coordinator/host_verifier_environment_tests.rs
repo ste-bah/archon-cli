@@ -70,8 +70,11 @@ fn focused_baseline_withholds_secrets_and_preserves_host_overlay() {
         "focused_baseline_withholds_secrets_and_preserves_host_overlay",
         true,
         |root| {
-            let dispatch =
-                crate::v2::write::test_baseline_run_base::tests::FakeCargo { bin: root.into() };
+            let dispatch = crate::v2::write::test_baseline_run_base::tests::FakeCargo {
+                bin: root.into(),
+                resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(
+                ),
+            };
             let runtime = tokio::runtime::Runtime::new().unwrap();
             let result = runtime.block_on(crate::v2::write::test_baseline_run::run_in_worktree(
             &dispatch, root,
@@ -91,6 +94,35 @@ fn focused_baseline_withholds_secrets_and_preserves_host_overlay() {
     );
 }
 
+#[test]
+fn focused_baseline_receives_configured_cargo_resource_defaults() {
+    operator(
+        "focused_baseline_receives_configured_cargo_resource_defaults",
+        true,
+        |root| {
+            std::fs::write(root.join("Cargo.toml"), "").unwrap();
+            let dispatch = crate::v2::write::test_baseline_run_base::tests::FakeCargo {
+                bin: root.into(),
+                resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits {
+                    build_jobs: 3,
+                    incremental: false,
+                    resource_class: "balanced".into(),
+                },
+            };
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let result = runtime.block_on(crate::v2::write::test_baseline_run::run_in_worktree(
+                &dispatch,
+                root,
+                "printenv CARGO_BUILD_JOBS # cargo",
+                None,
+            ));
+            assert!(result.error.is_none(), "{:?}", result.error);
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output.trim(), "3");
+        },
+    );
+}
+
 struct CacheDispatch {
     vars: Vec<(String, String)>,
 }
@@ -102,6 +134,7 @@ impl crate::agent_dispatch_port::WorkflowAgentDispatch for CacheDispatch {
     async fn host_command_env(&self, _: &Path) -> crate::agent_dispatch_port::HostCommandEnv {
         crate::agent_dispatch_port::HostCommandEnv {
             vars: self.vars.clone(),
+            resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             hold: None,
         }
     }

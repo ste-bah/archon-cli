@@ -39,6 +39,7 @@ pub(super) struct StageContext {
     pub(super) task_root: PathBuf,
     pub(super) repository: PathBuf,
     pub(super) binding: Option<NativeBinding>,
+    pub(super) cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     /// The pin identity the run recorded at launch, which every round's
     /// current pin must be proven reached from, and the run it belongs to.
     pub(super) launch: Option<archon_workflow::PortableAcceptanceIdentityV1>,
@@ -122,6 +123,7 @@ pub(super) fn resolve_context(
     run_id: &str,
     target_repository_root: Option<&str>,
     universe: Option<&WorkflowV2TaskUniverse>,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<StageContext, Unresolved> {
     let project = super::super::workflow_run_end_snapshot::project_root(store)
         .ok_or_else(|| {
@@ -202,6 +204,7 @@ pub(super) fn resolve_context(
         task_root,
         repository,
         binding,
+        cargo_limits,
         launch_lineage: archon_workflow::task_set_lineage::LaunchLineage::from_marker(
             snapshot
                 .as_ref()
@@ -437,6 +440,7 @@ pub(super) fn scratch_request(
         pin_path,
         expected_pin_digest: content_digest(&pin_bytes),
         evidence,
+        resource_limits: Some(context.cargo_limits.clone()),
     })
 }
 

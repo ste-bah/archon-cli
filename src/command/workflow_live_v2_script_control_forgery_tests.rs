@@ -93,6 +93,7 @@ async fn run_probe(
     let runner = WorkflowV2ScriptRunner::new(
         "forged control probe".to_string(),
         WorkflowV2ScriptRuntime {
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             target_repository_root: None,
             generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
         },

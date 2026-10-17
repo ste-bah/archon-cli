@@ -172,13 +172,17 @@ pub(crate) fn hashed_text(text: &str) -> String {
 }
 
 /// The digest of the capability registry includes its executable logic and
-/// metadata, except for the pin values that are outputs of that digest.
+/// metadata, except for pin values in the logic and catalog files.
 pub(crate) fn hashed_text_for_file(name: &str, text: &str) -> String {
-    if name != "src/command/workflow_host_command_logic.rs" {
+    if !matches!(
+        name,
+        "src/command/workflow_host_command_logic.rs"
+            | "src/command/workflow_host_command_logic_catalog.rs"
+    ) {
         return hashed_text(text);
     }
-    // This matches only whole `sources_digest: "<64 hex>",` lines in this
-    // file; a multiline string containing such a line would be normalized too.
+    // This matches only whole `sources_digest: "<64 hex>",` lines in these
+    // files; a multiline string containing such a line would be normalized too.
     let normalized = text
         .lines()
         .map(|line| -> String {

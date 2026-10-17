@@ -252,6 +252,7 @@ pub(super) fn boundary_driver(
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,
         WorkflowV2ScriptRuntime {
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             target_repository_root: None,
             generated_config: generated_config.clone(),
         },

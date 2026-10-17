@@ -161,6 +161,89 @@ fn hooked_records_reach_the_learning_store() {
     );
 }
 
+#[test]
+fn authored_reasoning_bank_hook_obeys_project_toggle() {
+    let _guard = super::store_lock();
+    for (enabled, expected_rows) in [(false, 0), (true, 1)] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".archon")).unwrap();
+        std::fs::write(
+            root.join(".archon/config.toml"),
+            format!("[learning.reasoning_bank]\nenabled = {enabled}\n"),
+        )
+        .unwrap();
+        let store = WorkflowStore::new(root.join("workflows"));
+        let path = archon_workflow::learning_records_path(&store, "authored-run");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::to_string(&record(
+                    "authored-stage",
+                    Verification::Accepted,
+                    &["reasoning_bank"],
+                ))
+                .unwrap()
+            ),
+        )
+        .unwrap();
+
+        let outcome = fold_workflow_learning(&root, &store, "authored-run");
+        assert_eq!(outcome.dispatched, 1);
+
+        let db = super::open_db(&root.join(".archon/learning-state.db"));
+        let rows = db
+            .run_script(
+                "?[pattern_id, pattern_type] := *patterns{pattern_id, pattern_type}",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        let workflow_rows = rows
+            .rows
+            .iter()
+            .filter(|row| row[1].get_str() == Some("workflow_lesson"))
+            .count();
+        assert_eq!(workflow_rows, expected_rows, "enabled={enabled}");
+    }
+}
+
+#[test]
+fn reasoning_bank_write_failure_does_not_suppress_desc_delivery() {
+    let _guard = super::store_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().to_path_buf();
+    std::fs::create_dir_all(root.join(".archon")).unwrap();
+    let (mut learning, db) = super::super::workflow_learning::build_fold_learning(&root).unwrap();
+    let plan = plan_dispatch(&[record(
+        "sink-failure",
+        Verification::Accepted,
+        &["reasoning_bank", "desc"],
+    )]);
+    let mut delivered = 0;
+
+    let count = super::super::workflow_learning::apply_dispatch_each(
+        &plan,
+        &mut learning,
+        &db,
+        |_, _| Err(anyhow::anyhow!("injected ReasoningBank write failure")),
+        &mut |_| delivered += 1,
+    );
+
+    assert_eq!(count, 1);
+    assert_eq!(delivered, 1);
+    let episodes = db
+        .run_script(
+            "?[episode_id] := *desc_episodes{episode_id}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .unwrap();
+    assert_eq!(episodes.rows.len(), 1);
+}
+
 /// The generated-plan derivation and this router must agree on the vocabulary.
 ///
 /// `WorkflowScriptPlan::generated` used to hardcode an empty hook list, so every

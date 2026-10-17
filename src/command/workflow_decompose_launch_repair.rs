@@ -254,6 +254,7 @@ pub(crate) async fn after_claim(
         &archon_workflow::SharedWorkflowUiSink,
     ),
     (project_root, prd_path, task_root, repository_root): (&Path, &Path, &Path, &Path),
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<()> {
     let log =
         |line: &str| crate::command::workflow_decompose_log::append_nofollow_line(log_path, line);
@@ -291,9 +292,10 @@ pub(crate) async fn after_claim(
                 })
                 .await
                 .context("building the client that re-authors refused frozen checks")?;
-            let probe = crate::command::workflow_task_set::executability::HostProbe::for_task_set(
+            let probe = crate::command::workflow_task_set::executability::HostProbe::for_task_set_with_limits(
                 project_root,
                 task_root,
+                cargo_limits.clone(),
             );
             reauthor_refused(
                 client.as_ref(),

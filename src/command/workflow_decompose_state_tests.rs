@@ -69,6 +69,7 @@ pub(super) fn host_record(run_id: &str) -> WorkflowV2CallRecord {
             satisfied: true,
             summary: "accepted".into(),
         }),
+        observed_only: false,
     };
     let mut result = WorkflowV2Result::accepted("accepted");
     result.data = serde_json::to_value(outcome).unwrap();

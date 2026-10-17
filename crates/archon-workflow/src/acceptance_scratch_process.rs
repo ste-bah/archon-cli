@@ -163,6 +163,8 @@ pub struct CommandSite<'a> {
     pub project: &'a Path,
     pub repository: &'a Path,
     pub environment: BTreeMap<String, String>,
+    /// Resolved operator configuration, applied as archon-owned defaults.
+    pub resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     /// Audited against `scratch_bytes` while a command runs; `None` for a
     /// site in live roots, whose size is not the command's to bound.
     pub audit_root: Option<&'a Path>,
@@ -205,8 +207,17 @@ pub async fn run_at(
         crate::task_set_contract::TrustedCwd::ProjectRoot => site.project,
         crate::task_set_contract::TrustedCwd::RepoRoot => site.repository,
     };
+    let mut environment = site.environment.clone();
+    let mut values: Vec<_> = environment.into_iter().collect();
+    archon_tools::workflow_resource_env::apply_workflow_resource_defaults(
+        &mut values,
+        &String::from_utf8_lossy(command.bytes()),
+        site.repository,
+        &site.resource_limits,
+    );
+    environment = values.into_iter().collect();
     let mut process = archon_shell::spawn::tokio_command(archon_shell::resolve_posix_shell());
-    archon_shell::spawn::replace_environment(process.as_std_mut(), site.environment.clone());
+    archon_shell::spawn::replace_environment(process.as_std_mut(), environment);
     process
         .arg("-s")
         .current_dir(cwd)

@@ -89,7 +89,10 @@ async fn run_unwatched(
         match crate::acceptance_check_environment::CommandEnvironment::capture_with_dispatch(
             policy, &env.vars,
         ) {
-            Ok(environment) => environment.with_remedy(remedy),
+            Ok(environment) => {
+                let environment = environment.with_remedy(remedy);
+                environment.with_workflow_resource_limits(&env.resource_limits, command, worktree)
+            }
             Err(error) => {
                 return CommandRun {
                     error: Some(error),

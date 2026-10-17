@@ -5,32 +5,31 @@ use archon_core::config::LearningConfig;
 use archon_workflow::{StageStatus, Verification, WorkflowLearningRecord, WorkflowStore};
 use serde_json::Value;
 
+#[path = "workflow_decompose_learning_classifier.rs"]
+mod classifier;
+use classifier::is_acceptance_evaluation_call;
+
 #[path = "workflow_decompose_learning_findings.rs"]
 mod findings;
 pub(crate) use findings::gate_finding_records;
 #[path = "workflow_decompose_learning_delivery.rs"]
 mod delivery;
 pub(super) use delivery::with_fold_lock;
+#[path = "workflow_decompose_learning_journal.rs"]
+pub(super) mod journal;
+#[cfg(test)]
+pub(super) use journal::finish_journal_dispatch;
+pub(super) use journal::{journal_paths, stage_journal, write_journal};
 
+#[cfg(test)]
 pub(crate) fn hooks(content: &str, config: &LearningConfig) -> Vec<String> {
-    // This fold has a DESC episode-store sink, but no ReasoningBank write
-    // sink. Do not select a hook whose lessons would be silently discarded.
     crate::command::learning_workflow_hooks::derive_learning_hooks(content, None, config)
-        .into_iter()
-        .filter(|hook| hook == "desc")
-        .collect()
 }
 
 pub(crate) fn unavailable_hook_warning(
-    configured: &[String],
+    _configured: &[String],
     selected: &[String],
 ) -> Option<(String, String)> {
-    if configured.iter().any(|hook| hook == "reasoning_bank") {
-        return Some((
-            "reasoning_bank".into(),
-            "this fold has no write sink".into(),
-        ));
-    }
     if selected.is_empty() {
         return Some((
             "none".into(),
@@ -285,11 +284,22 @@ fn fold_locked(
 ) -> anyhow::Result<()> {
     let run = store.load_state(run_id)?;
     let v2 = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
-    let calls = v2.load_call_records()?;
+    let mut calls = v2.load_call_records()?;
+    // Judge-only reverify observations describe existing bytes; they are not
+    // author attempts and must not produce author-attempt lessons.
+    calls.retain(|call| includes_learning_observation(&call.call.id));
     let safe_task = safe_fold_context(&run.spec.task);
     let classifier_content = calls.iter().fold(safe_task.clone(), |mut content, call| {
         content.push(' ');
         content.push_str(&call.call.id);
+        if let Some(role) = call.call.options.role.as_deref() {
+            content.push(' ');
+            content.push_str(role);
+        }
+        if let Some(command) = call.call.options.host_command.as_ref() {
+            content.push(' ');
+            content.push_str(&command.command_id);
+        }
         content.push(' ');
         content.push_str(&call.result.data.to_string());
         content
@@ -299,7 +309,17 @@ fn fold_locked(
         None,
         config,
     );
-    let hooks = hooks(&classifier_content, config);
+    let mut hooks = configured_hooks.clone();
+    if config.reasoning_bank.enabled
+        && calls.iter().any(is_acceptance_evaluation_call)
+        && !hooks.iter().any(|hook| hook == "reasoning_bank")
+    {
+        let position = hooks
+            .iter()
+            .position(|hook| hook == "desc")
+            .unwrap_or(hooks.len());
+        hooks.insert(position, "reasoning_bank".into());
+    }
     if let Some((hook, reason)) = unavailable_hook_warning(&configured_hooks, &hooks) {
         tracing::warn!(%run_id, hook = %hook, reason = %reason, "learning hook unavailable");
     }
@@ -354,109 +374,22 @@ fn fold_locked(
     delivery::deliver_pending(cwd, store, run_id, &pending_journal, &records)
 }
 
-pub(super) fn read_journal(path: &Path) -> anyhow::Result<Vec<WorkflowLearningRecord>> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.into()),
-    };
-    text.lines()
-        .map(serde_json::from_str)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(Into::into)
-}
-
-/// History is one 16-character key per distinct lesson, scoped to one run.
-pub(super) fn journal_paths(run_dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
-    let learning = run_dir.join("learning");
-    (
-        learning.join("decomposition-records.jsonl"),
-        learning.join("decomposition-pending.jsonl"),
-    )
-}
-
-fn read_seen_keys(path: &Path) -> anyhow::Result<std::collections::BTreeSet<String>> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(std::collections::BTreeSet::new());
-        }
-        Err(error) => return Err(error.into()),
-    };
-    text.lines()
-        .map(|line| {
-            if line.len() == 16 && line.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Ok(line.to_string());
-            }
-            let record: WorkflowLearningRecord = serde_json::from_str(line).map_err(|error| {
-                anyhow::anyhow!("invalid decomposition lesson history: {error}")
-            })?;
-            // Upgrade the previous record-bearing journal in place on the next write.
-            Ok(digest(&record.stage_id))
-        })
-        .collect()
-}
-
-fn write_seen_keys(path: &Path, keys: &std::collections::BTreeSet<String>) -> anyhow::Result<()> {
-    use std::io::Write;
-    let temporary = path.with_extension("jsonl.tmp");
-    let mut file = std::fs::File::create(&temporary)?;
-    for key in keys {
-        writeln!(file, "{key}")?;
-    }
-    file.sync_all()?;
-    std::fs::rename(temporary, path)?;
-    Ok(())
-}
-
-pub(super) fn stage_journal(
-    history_path: &Path,
-    pending_path: &Path,
-    candidates: Vec<WorkflowLearningRecord>,
-) -> anyhow::Result<Vec<WorkflowLearningRecord>> {
-    let mut known = read_seen_keys(history_path)?;
-    let new_records: Vec<_> = candidates
-        .into_iter()
-        .filter(|record| known.insert(digest(&record.stage_id)))
-        .collect();
-    let pending = merge_records(read_journal(pending_path)?, new_records.clone());
-    // The retry source is durable before the seen journal advances. A crash
-    // between the writes can therefore replay a pending record, never lose it.
-    write_journal(pending_path, &pending)?;
-    write_seen_keys(history_path, &known)?;
-    Ok(pending)
-}
-
-fn merge_records(
-    mut records: Vec<WorkflowLearningRecord>,
-    candidates: Vec<WorkflowLearningRecord>,
-) -> Vec<WorkflowLearningRecord> {
-    let mut known = records
-        .iter()
-        .map(|record| record.stage_id.clone())
-        .collect();
-    records.extend(filter_new_records(candidates, &mut known));
-    records
-}
-
-pub(super) fn write_journal(path: &Path, records: &[WorkflowLearningRecord]) -> anyhow::Result<()> {
-    use std::io::Write;
-    let temporary = path.with_extension("jsonl.tmp");
-    let mut file = std::fs::File::create(&temporary)?;
-    for record in records {
-        writeln!(file, "{}", serde_json::to_string(record)?)?;
-    }
-    file.sync_all()?;
-    std::fs::rename(temporary, path)?;
-    Ok(())
+fn includes_learning_observation(call_id: &str) -> bool {
+    !call_id.starts_with("reverify-")
 }
 
 #[cfg(test)]
-pub(super) fn finish_journal_dispatch(path: &Path, dispatched: bool) -> anyhow::Result<()> {
-    if dispatched {
-        write_journal(path, &[])?;
+mod reverify_observation_tests {
+    use super::includes_learning_observation;
+
+    #[test]
+    fn judge_only_reverify_calls_are_not_learning_attempts() {
+        assert!(!includes_learning_observation("reverify-4-body-0"));
+        assert!(!includes_learning_observation(
+            "reverify-4-gate-0-task-set-lint"
+        ));
+        assert!(includes_learning_observation("body-TASK-X-010-author-2"));
     }
-    Ok(())
 }
 
 pub(crate) fn best_effort_fold<T>(

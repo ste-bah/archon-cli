@@ -15,6 +15,8 @@ pub struct BuildIdentity {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CheckEvidence {
     pub acceptance_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sibling_revisions: Vec<crate::acceptance_sibling_paths::SiblingRevision>,
     pub before_identity: BuildIdentity,
     pub after_identity: Option<BuildIdentity>,
     pub changed_project_paths: Vec<String>,
@@ -22,6 +24,40 @@ pub struct CheckEvidence {
     pub cargo_cache_after: Option<String>,
     pub input_reset: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_sibling_record_serializes_like_the_main_identity_shape() {
+        // EXPECTED before implementation: empty sibling evidence is omitted,
+        // preserving the original record's serialized shape.
+        let identity = BuildIdentity {
+            source: BTreeMap::new(),
+            target: "target".into(),
+            cwd_targets: Vec::new(),
+            environment: BTreeMap::new(),
+            tools: BTreeMap::new(),
+            cargo_configuration: BTreeMap::new(),
+        };
+        let record = CheckEvidence {
+            acceptance_id: "AC-1".into(),
+            sibling_revisions: Vec::new(),
+            before_identity: identity,
+            after_identity: None,
+            changed_project_paths: Vec::new(),
+            cargo_cache_before: "cache".into(),
+            cargo_cache_after: None,
+            input_reset: false,
+        };
+        let encoded = serde_json::to_string(&record).unwrap();
+        assert!(!encoded.contains("sibling_revisions"), "{encoded}");
+        let main_shape = r#"{"acceptance_id":"AC-1","before_identity":{"source":{},"target":"target","cwd_targets":[],"environment":{},"tools":{},"cargo_configuration":{}},"after_identity":null,"changed_project_paths":[],"cargo_cache_before":"cache","cargo_cache_after":null,"input_reset":false}"#;
+        assert_eq!(encoded, main_shape);
+    }
+}
+
 fn object(path: &Path) -> WorkflowResult<String> {
     let m = std::fs::symlink_metadata(path).map_err(|e| WorkflowError::io(path, e))?;
     #[cfg(unix)]
