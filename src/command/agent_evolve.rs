@@ -1,5 +1,3 @@
-//! `archon agent evolve` CLI surfaces.
-
 use anyhow::Result;
 use cozo::DbInstance;
 
@@ -16,6 +14,10 @@ pub(crate) async fn handle_agent_command(
     action: &AgentAction,
     config: &archon_core::config::ArchonConfig,
 ) -> Result<()> {
+    if let AgentAction::Sync { update } = action {
+        let cwd = std::env::current_dir()?;
+        return crate::command::pipeline_agents::sync(&cwd, *update).map(|_| ());
+    }
     let db_path = learning_db_path()?;
     let db = open_learning_db(&db_path)?;
     archon_learning::schema::ensure_learning_schema(&db)?;
@@ -32,6 +34,7 @@ pub(crate) async fn handle_agent_command(
     );
 
     match action {
+        AgentAction::Sync { .. } => unreachable!("sync returned before opening learning DB"),
         AgentAction::Evolve { action } => handle_evolve_action(&db, action).await,
     }
 }

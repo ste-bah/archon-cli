@@ -177,6 +177,10 @@ async fn handle_run(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
+    crate::command::pipeline_agents::preflight(
+        &std::env::current_dir()?,
+        archon_pipeline::runner::PipelineType::GameTheory,
+    )?;
     let db = open_db()?;
     if classify_only {
         run_classify_only(&db, situation, config, env_vars).await
@@ -513,6 +517,10 @@ async fn handle_resume(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
+    crate::command::pipeline_agents::preflight(
+        &std::env::current_dir()?,
+        archon_pipeline::runner::PipelineType::GameTheory,
+    )?;
     let db = open_db()?;
     let llm = build_llm_client(config, env_vars).await;
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);

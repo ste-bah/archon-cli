@@ -70,6 +70,20 @@ fn handle_tui_resume(
     session_id: &str,
     force_quality_gate: bool,
 ) -> Result<()> {
+    handle_tui_resume_with_user_home(
+        ctx,
+        session_id,
+        force_quality_gate,
+        dirs::home_dir().as_deref(),
+    )
+}
+
+fn handle_tui_resume_with_user_home(
+    ctx: &mut CommandContext,
+    session_id: &str,
+    force_quality_gate: bool,
+    user_home: Option<&Path>,
+) -> Result<()> {
     let cwd = ctx
         .working_dir
         .clone()
@@ -85,6 +99,11 @@ fn handle_tui_resume(
             return crate::command::cli_mirror::spawn_cli_mirror(ctx, "pipeline", &mirror_args);
         }
     };
+    crate::command::pipeline_agents::preflight_with_user_home(
+        &cwd,
+        state.pipeline_type.clone(),
+        user_home,
+    )?;
 
     match state.status {
         BundleStatus::Running => {
@@ -318,6 +337,7 @@ mod tests {
     #[tokio::test]
     async fn running_resume_attaches_without_appending_run_resumed() {
         let temp = tempfile::tempdir().unwrap();
+        crate::command::pipeline_agents::sync(temp.path(), false).unwrap();
         let store = PipelineBundleStore::new(temp.path());
         let state = store
             .create(
@@ -360,8 +380,49 @@ mod tests {
     }
 
     #[test]
+    fn slash_resume_preflights_and_reports_every_missing_agent_key() {
+        use archon_core::agents::AgentRegistry;
+
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        let temp_home = tempfile::tempdir().unwrap();
+        let registry = AgentRegistry::load_with_user_home(cwd, Some(temp_home.path()));
+        let missing: Vec<_> = archon_pipeline::required_builtin_agent_keys(PipelineType::Coding)
+            .into_iter()
+            .filter(|key| registry.resolve(key).is_none())
+            .collect();
+        assert!(
+            !missing.is_empty(),
+            "test project must be missing bundled profiles"
+        );
+        PipelineBundleStore::new(cwd)
+            .create("missing-agent-resume", PipelineType::Coding, "coding task")
+            .unwrap();
+
+        let (mut ctx, _rx) = CtxBuilder::new()
+            .with_working_dir(cwd.to_path_buf())
+            .build();
+        let error = handle_tui_resume_with_user_home(
+            &mut ctx,
+            "missing-agent-resume",
+            false,
+            Some(temp_home.path()),
+        )
+        .unwrap_err()
+        .to_string();
+        for key in missing {
+            assert!(
+                error.contains(&key),
+                "missing key {key} must be reported: {error}"
+            );
+        }
+        assert!(error.contains("archon agents sync"));
+    }
+
+    #[test]
     fn completed_resume_reports_artifacts_without_spawning_cli() {
         let temp = tempfile::tempdir().unwrap();
+        crate::command::pipeline_agents::sync(temp.path(), false).unwrap();
         let store = PipelineBundleStore::new(temp.path());
         let mut state = store
             .create("session-2", PipelineType::Coding, "coding task")

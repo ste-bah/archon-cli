@@ -70,6 +70,12 @@ async fn run() -> Result<()> {
     }
     let cli = Cli::parse();
     let bootstrap = main_bootstrap::bootstrap(&cli)?;
+    if cli.init || cli.init_only {
+        crate::command::pipeline_agents::sync(&bootstrap.working_dir_for_config, false)?;
+    }
+    if cli.init_only {
+        return Ok(());
+    }
     let config = &bootstrap.config;
     let env_vars = &bootstrap.env_vars;
     let resolved_flags = &bootstrap.resolved_flags;
