@@ -4,6 +4,7 @@ pub mod agents;
 pub mod artifacts;
 pub mod chapters;
 pub mod citation_gate;
+pub mod draft_artifact;
 pub mod facade;
 pub mod final_appendix;
 pub mod final_artifact;

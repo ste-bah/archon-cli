@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use super::next_agent::{SkipGuard, StepProgress};
 use super::*;
 
@@ -227,6 +229,32 @@ async fn run_pipeline_inner(
     }
     if let Some(audit) = audit.as_mut() {
         audit.complete(&result.final_output)?;
+    }
+    if let Some(audit_run) = audit.as_ref() {
+        let bundle_dir = audit_run.store().bundle_dir(&result.session_id);
+        let events = facade
+            .after_run_completed(&bundle_dir)
+            .await
+            .context("run completed, but post-completion artifact handling failed")?;
+        for (artifact_type, path, content_hash) in events {
+            if let Err(error) = audit_run.store().append_event(
+                &result.session_id,
+                PipelineEvent::ArtifactWritten {
+                    artifact_type,
+                    path: relative_to_bundle(&bundle_dir, &path),
+                    content_hash,
+                },
+            ) {
+                tracing::error!(
+                    session_id = %result.session_id,
+                    error = %error,
+                    "run completed and artifacts were updated, but recording post-completion artifact event failed"
+                );
+                return Err(error).context(
+                    "run completed and artifacts were updated, but recording post-completion artifact event failed",
+                );
+            }
+        }
     }
     Ok(result)
 }

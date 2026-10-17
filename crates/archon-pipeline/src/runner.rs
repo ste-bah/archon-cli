@@ -19,6 +19,7 @@ use crate::learning::integration::LearningIntegration;
 use crate::learning::reflexion::ReflexionInjector;
 use crate::research::final_artifact::write_final_research_artifacts;
 
+mod critical_repair;
 mod next_agent;
 mod quality_gate;
 mod single_agent;
@@ -400,6 +401,50 @@ pub trait PipelineFacade: Send + Sync {
         result: &AgentResult,
     ) -> Result<QualityScore>;
 
+    /// Session artifact key judged by this critical validator, if it supports
+    /// repair between failed validation attempts.
+    fn critical_validator_artifact(&self, _agent: &AgentInfo) -> Option<String> {
+        None
+    }
+
+    /// Text judged for the critical validator's artifact in this session.
+    /// Facades whose judged text is assembled from several stored outputs can
+    /// override this; the default uses the validator's stored artifact output.
+    fn critical_validator_artifact_text(
+        &self,
+        session: &PipelineSession,
+        validator: &AgentInfo,
+    ) -> Option<String> {
+        let artifact_key = self.critical_validator_artifact(validator)?;
+        session
+            .agent_results
+            .iter()
+            .find(|(agent, _)| agent.key == artifact_key)
+            .map(|(_, result)| result.output.clone())
+    }
+
+    /// Build a targeted repair prompt for the artifact judged by a validator.
+    fn build_critical_repair_prompt(
+        &self,
+        _session: &PipelineSession,
+        _validator: &AgentInfo,
+        _artifact: &str,
+        _findings: &str,
+    ) -> Result<String> {
+        anyhow::bail!("critical validator repair is not supported")
+    }
+
+    /// Persist a failed critical artifact as a draft, with the latest findings.
+    fn write_failed_critical_draft(
+        &self,
+        _session: &PipelineSession,
+        _artifact: &str,
+        _findings: &str,
+        _bundle_dir: &Path,
+    ) -> Result<Option<Vec<(String, PathBuf, String)>>> {
+        Ok(None)
+    }
+
     /// Post-processing hook called after each agent completes (e.g. persist
     /// artifacts, update session metadata).
     ///
@@ -415,6 +460,16 @@ pub trait PipelineFacade: Send + Sync {
 
     /// Produce the final [`PipelineResult`] once all agents have finished.
     async fn finalize(&self, session: PipelineSession) -> Result<PipelineResult>;
+
+    /// Return artifact events to record after the final export and audit
+    /// completion have succeeded. This runs after the run is complete, so an
+    /// error here is reported to the caller as a post-completion error.
+    async fn after_run_completed(
+        &self,
+        _bundle_dir: &Path,
+    ) -> Result<Vec<(String, PathBuf, String)>> {
+        Ok(Vec::new())
+    }
 }
 
 mod execution;

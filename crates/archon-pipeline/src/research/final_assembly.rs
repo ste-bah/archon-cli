@@ -114,7 +114,14 @@ pub fn score_final_assembly_output(
 }
 
 pub fn assemble_result(session: PipelineSession) -> Result<PipelineResult> {
-    let final_output = assemble_final_paper(&session)
+    let repaired_paper = session
+        .agent_results
+        .iter()
+        .find(|(agent, _)| agent.key == COMBINER_KEY)
+        .filter(|(_, result)| super::draft_artifact::was_repaired(result.quality.as_ref()))
+        .map(|(_, result)| result.output.clone());
+    let final_output = repaired_paper
+        .or_else(|| assemble_final_paper(&session))
         .or_else(|| {
             session
                 .agent_results
@@ -267,15 +274,13 @@ fn combiner_prompt(
 }
 
 fn validator_prompt(session: &PipelineSession) -> Result<String> {
+    let paper = super::draft_artifact::paper_to_validate(session)
+        .unwrap_or_else(|| "Final combiner output unavailable.".to_string());
     Ok(format!(
         "# Final Paper Validator\n\n\
          Validate the final combined paper below. Return PASS only if it has a title, Abstract, \
          ordered chapters, one References section, appendix material, coherent citations, and \
-         no pipeline/status garbage. If there is a blocking issue, return FAIL with exact fixes.\n\n{}",
-        assemble_final_paper(session)
-            .as_deref()
-            .or_else(|| result_text(session, COMBINER_KEY))
-            .unwrap_or("Final combiner output unavailable."),
+         no pipeline/status garbage. If there is a blocking issue, return FAIL with exact fixes.\n\n{paper}"
     ))
 }
 

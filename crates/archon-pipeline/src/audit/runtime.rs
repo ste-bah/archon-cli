@@ -14,8 +14,8 @@ use crate::audit::verify::verify_bundle;
 use crate::runner::{AgentInfo, AgentResult, PipelineType};
 
 pub struct PipelineAuditRun {
-    store: PipelineBundleStore,
-    state: BundleState,
+    pub(super) store: PipelineBundleStore,
+    pub(super) state: BundleState,
 }
 
 impl PipelineAuditRun {
@@ -93,6 +93,29 @@ impl PipelineAuditRun {
                 quality: record.quality,
             };
             results.push((agent, result));
+        }
+        // Repair outputs are immutable, versioned files referenced by audit events.
+        // Apply the latest committed version over the original combiner record.
+        for event in self.read_events()? {
+            if let PipelineEvent::ArtifactRepairCommitted {
+                agent_key,
+                output_path,
+                ..
+            } = event
+                && let Some((_, result)) =
+                    results.iter_mut().find(|(agent, _)| agent.key == agent_key)
+            {
+                result.output = fs::read_to_string(
+                    self.store
+                        .bundle_dir(&self.state.session_id)
+                        .join(output_path),
+                )?;
+                if let Some(quality) = result.quality.as_mut() {
+                    quality
+                        .dimensions
+                        .insert("artifact_repaired".to_string(), 1.0);
+                }
+            }
         }
         Ok(results)
     }
@@ -260,6 +283,24 @@ impl PipelineAuditRun {
                 agent_key: agent.key.clone(),
                 attempt,
                 reason: reason.to_string(),
+            },
+        )
+    }
+
+    pub fn record_artifact_repaired(
+        &self,
+        agent_key: &str,
+        attempt: usize,
+        input_hash: String,
+        output_hash: String,
+    ) -> Result<()> {
+        self.store.append_event(
+            &self.state.session_id,
+            PipelineEvent::ArtifactRepaired {
+                agent_key: agent_key.to_string(),
+                attempt,
+                input_hash,
+                output_hash,
             },
         )
     }

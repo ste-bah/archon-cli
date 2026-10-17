@@ -82,7 +82,7 @@ pub(super) async fn run_single_agent(
 async fn run_agent_attempts(
     facade: &dyn PipelineFacade,
     llm: &dyn LlmClient,
-    session: &PipelineSession,
+    session: &mut PipelineSession,
     agent: &AgentInfo,
     ordinal: usize,
     learning_ctx: &LearningContext,
@@ -90,9 +90,71 @@ async fn run_agent_attempts(
     audit: &mut Option<PipelineAuditRun>,
     options: PipelineRunOptions,
 ) -> Result<AgentExecutionOutcome> {
-    let mut attempt = 0usize;
+    let repair_artifact = agent
+        .critical
+        .then(|| facade.critical_validator_artifact(agent))
+        .flatten();
+    let pending_repair = if let (Some(artifact_key), Some(audit_run)) =
+        (repair_artifact.as_deref(), audit.as_ref())
+    {
+        audit_run.pending_artifact_repair(artifact_key, &agent.key)?
+    } else {
+        None
+    };
+    if let (Some(artifact_key), Some((pending_attempt, findings))) =
+        (repair_artifact.as_deref(), pending_repair)
+    {
+        if let Err(error) = critical_repair::repair_judged_artifact(
+            facade,
+            llm,
+            session,
+            agent,
+            artifact_key,
+            pending_attempt,
+            &findings,
+            ordinal,
+            audit,
+        )
+        .await
+        {
+            if let Some(audit_run) = audit.as_ref() {
+                audit_run.store().append_event(
+                    &session.id,
+                    crate::audit::types::PipelineEvent::ArtifactRepairRejected {
+                        agent_key: artifact_key.to_string(),
+                        attempt: pending_attempt,
+                        reason: format!("repair abandoned on resume; kept previous paper: {error}"),
+                    },
+                )?;
+            }
+        }
+    }
+    let mut attempt = if repair_artifact.is_some() {
+        audit
+            .as_ref()
+            .map(|run| run.last_validator_attempt(&agent.key))
+            .transpose()?
+            .unwrap_or(0)
+    } else {
+        0
+    };
     let mut attempts = Vec::new();
     loop {
+        if agent.critical && attempt >= PIPELINE_MAX_ATTEMPTS {
+            let reason = format!(
+                "critical validator {} exhausted its {} attempt budget before resume",
+                agent.key, PIPELINE_MAX_ATTEMPTS
+            );
+            critical_repair::write_exhausted_validator_draft(
+                facade,
+                session,
+                agent,
+                &format!("validator did not return findings; {reason}"),
+                audit,
+            )?;
+            fail_audit(audit, &reason)?;
+            return Err(anyhow::anyhow!(reason));
+        }
         attempt += 1;
         let (messages, mut system, tools) = match facade
             .build_prompt_for_attempt(session, agent, attempt as u8)
@@ -100,6 +162,15 @@ async fn run_agent_attempts(
         {
             Ok(prompt) => prompt,
             Err(error) => {
+                if agent.critical && attempt >= PIPELINE_MAX_ATTEMPTS {
+                    critical_repair::write_exhausted_validator_draft(
+                        facade,
+                        session,
+                        agent,
+                        &format!("validator did not return findings; prompt build failed: {error}"),
+                        audit,
+                    )?;
+                }
                 fail_audit(audit, &error.to_string())?;
                 return Err(error);
             }
@@ -142,6 +213,15 @@ async fn run_agent_attempts(
         {
             Ok(response) => response,
             Err(error) => {
+                if agent.critical && attempt >= PIPELINE_MAX_ATTEMPTS {
+                    critical_repair::write_exhausted_validator_draft(
+                        facade,
+                        session,
+                        agent,
+                        &format!("validator did not return findings; provider failed: {error}"),
+                        audit,
+                    )?;
+                }
                 if should_retry_single_agent_transport(audit, agent, ordinal, attempt, &error)
                     .await?
                 {
@@ -167,12 +247,22 @@ async fn run_agent_attempts(
         let quality = match facade.score_quality(session, agent, &result).await {
             Ok(quality) => quality,
             Err(error) => {
+                if agent.critical && attempt >= PIPELINE_MAX_ATTEMPTS {
+                    critical_repair::write_exhausted_validator_draft(
+                        facade,
+                        session,
+                        agent,
+                        &format!(
+                            "validator did not return findings; quality scoring failed: {error}"
+                        ),
+                        audit,
+                    )?;
+                }
                 fail_audit(audit, &error.to_string())?;
                 return Err(error);
             }
         };
         result.quality = Some(quality.clone());
-
         let meets_threshold = quality.overall >= agent.quality_threshold;
         let effective_options = if has_non_bypassable_quality_failure(&quality) {
             PipelineRunOptions::default()
@@ -187,6 +277,21 @@ async fn run_agent_attempts(
         } else {
             failure_reason
         };
+        if let Some(audit) = audit.as_ref() {
+            if let Some(artifact_key) = repair_artifact.as_ref()
+                && !gate.accepted
+                && attempt < PIPELINE_MAX_ATTEMPTS
+            {
+                audit.record_validator_repair_pending(
+                    &agent.key,
+                    artifact_key,
+                    attempt,
+                    &result.output,
+                )?;
+            } else if repair_artifact.is_some() {
+                audit.record_validator_progress(&agent.key, attempt)?;
+            }
+        }
         if let Some(audit) = audit.as_ref() {
             attempts.push(audit.record_attempt_completed(
                 ordinal,
@@ -218,6 +323,17 @@ async fn run_agent_attempts(
         }
         if attempt >= PIPELINE_MAX_ATTEMPTS && agent.critical {
             let reason = quality_gate_failure(agent, quality.overall, attempt);
+            critical_repair::write_exhausted_validator_draft(
+                facade,
+                session,
+                agent,
+                &format!(
+                    "{}\n\nLast validator findings:\n{}",
+                    quality_gate_failure(agent, quality.overall, attempt),
+                    result.output
+                ),
+                audit,
+            )?;
             fail_audit(audit, &reason)?;
             return Err(anyhow::anyhow!(reason));
         }
@@ -239,6 +355,32 @@ async fn run_agent_attempts(
                     .as_deref()
                     .unwrap_or("quality threshold not met"),
             )?;
+        }
+        if let Some(artifact_key) = repair_artifact.as_ref() {
+            if let Err(error) = critical_repair::repair_judged_artifact(
+                facade,
+                llm,
+                session,
+                agent,
+                &artifact_key,
+                attempt,
+                &result.output,
+                ordinal,
+                audit,
+            )
+            .await
+            {
+                if let Some(audit) = audit.as_ref() {
+                    audit.store().append_event(
+                        &session.id,
+                        crate::audit::types::PipelineEvent::ArtifactRepairRejected {
+                            agent_key: artifact_key.clone(),
+                            attempt,
+                            reason: format!("repair failed; kept previous paper: {error}"),
+                        },
+                    )?;
+                }
+            }
         }
     }
 }

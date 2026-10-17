@@ -5,6 +5,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::audit::store::{PipelineBundleStore, sha256_hex};
+use crate::audit::types::PipelineEvent;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VerificationFinding {
@@ -51,8 +52,29 @@ pub fn verify_bundle(
                     continue;
                 }
                 audit_events += 1;
-                if serde_json::from_str::<serde_json::Value>(line).is_err() {
-                    findings.push(error(format!("audit.log line {} is invalid JSON", idx + 1)));
+                match serde_json::from_str::<crate::audit::types::PipelineEventLine>(line) {
+                    Ok(event_line) => {
+                        if let PipelineEvent::ArtifactRepairCommitted {
+                            agent_key,
+                            output_path,
+                            output_hash,
+                            ..
+                        } = event_line.event
+                        {
+                            match fs::read(dir.join(&output_path)) {
+                                Ok(bytes) if sha256_hex(&bytes) == output_hash => {}
+                                Ok(_) => findings.push(error(format!(
+                                    "artifact repair output hash mismatch for {agent_key}"
+                                ))),
+                                Err(_) => findings.push(error(format!(
+                                    "artifact repair output missing for {agent_key}"
+                                ))),
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        findings.push(error(format!("audit.log line {} is invalid JSON", idx + 1)))
+                    }
                 }
             }
         }

@@ -78,6 +78,8 @@ pub struct SubagentRunner {
 pub struct SubagentCompletion {
     pub content: String,
     pub stop_reason: Option<String>,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
 }
 
 /// A single pending tool call collected from the stream.

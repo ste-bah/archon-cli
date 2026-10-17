@@ -251,8 +251,8 @@ impl AgentSubagentExecutor {
                     |completion| archon_tools::subagent_executor::SubagentCompletion {
                         content: completion.content,
                         stop_reason: completion.stop_reason,
-                        tokens_in: None,
-                        tokens_out: None,
+                        tokens_in: completion.tokens_in,
+                        tokens_out: completion.tokens_out,
                     },
                 )
                 .map_err(|e| format!("Subagent failed: {e}")),

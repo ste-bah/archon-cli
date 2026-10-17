@@ -59,6 +59,19 @@ async fn init_session_creates_coding_session() {
 }
 
 #[tokio::test]
+async fn coding_facade_completion_hook_is_a_noop() {
+    let facade = make_facade();
+    let temp = tempfile::tempdir().unwrap();
+    assert!(
+        facade
+            .after_run_completed(temp.path())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn next_agent_returns_first_agent() {
     let facade = make_facade();
     let session = facade.init_session("some task").await.unwrap();
