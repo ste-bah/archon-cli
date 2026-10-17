@@ -186,6 +186,8 @@ pub(crate) struct HostProbe {
     /// The same resolved configuration the Bash tool carries for this run.
     resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     diagnostics: Mutex<Vec<String>>,
+    /// Stored judge verdicts that supplied the regression-guard basis.
+    regression_guards: Mutex<BTreeMap<String, String>>,
     /// What the host could not run, after its environment repairs.
     unproven: Mutex<BTreeMap<String, String>>,
     /// The pre-implementation tree every probed check must fail on.

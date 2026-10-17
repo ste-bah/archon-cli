@@ -7,17 +7,21 @@
 //! mutation uses a hermetic copy; a live-root guard prevents moving live data.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::{
     AcceptanceCheck, AcceptanceContract, AcceptanceCriterion, TrustedCwd,
 };
+use paths::path_tokens;
 
 use super::executed_text;
 
 #[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
 mod wrapper_script;
+
+#[path = "workflow_acceptance_executability_mutation_paths.rs"]
+mod paths;
 
 /// The exit status of a run stopped at the live-root guard.
 pub(super) const GUARD_STATUS: i32 = 97;
@@ -75,97 +79,22 @@ const MANIFESTS: [&str; 26] = [
     "Package.swift",
 ];
 
-/// The shell words of `text`, one list per simple command, and the bodies of
-/// its here-documents (data, never commands). Quote-aware; a best effort
-/// that errs towards excluding more.
-fn lex(text: &str) -> (Vec<Vec<String>>, Vec<String>) {
-    let (mut commands, mut bodies) = (vec![Vec::new()], Vec::new());
-    let (mut word, mut quote, mut pending_tags): (String, Option<char>, Vec<String>) =
-        (String::new(), None, Vec::new());
-    let mut lines = text.lines();
-    let finish = |word: &mut String, commands: &mut Vec<Vec<String>>| {
-        if !word.is_empty() {
-            commands
-                .last_mut()
-                .expect("one command")
-                .push(std::mem::take(word));
-        }
-    };
-    while let Some(line) = lines.next() {
-        let chars: Vec<char> = line.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            let c = chars[i];
-            match quote {
-                Some(q) if c == q => quote = None,
-                Some(_) => word.push(c),
-                None if c == '\'' || c == '"' => quote = Some(c),
-                None if c == '<' && chars.get(i + 1) == Some(&'<') => {
-                    finish(&mut word, &mut commands);
-                    let rest: String = chars[i + 2..].iter().collect();
-                    let tag: String = (rest.trim_start_matches(['-', ' ']).chars())
-                        .filter(|c| !matches!(c, '\'' | '"'))
-                        .take_while(|c| c.is_alphanumeric() || *c == '_')
-                        .collect();
-                    if !tag.is_empty() {
-                        pending_tags.push(tag);
-                    }
-                    break;
-                }
-                None if matches!(c, '>' | '<') => {
-                    finish(&mut word, &mut commands);
-                    let operator = if chars.get(i + 1) == Some(&c) {
-                        i += 1;
-                        format!("{c}{c}")
-                    } else {
-                        c.to_string()
-                    };
-                    commands.last_mut().expect("one command").push(operator);
-                }
-                None if c.is_whitespace() => finish(&mut word, &mut commands),
-                None if matches!(c, ';' | '&' | '|' | '(' | ')' | '{' | '}' | '`') => {
-                    finish(&mut word, &mut commands);
-                    commands.push(Vec::new());
-                }
-                None if c == '$' && chars.get(i + 1) == Some(&'(') => {
-                    finish(&mut word, &mut commands);
-                    commands.push(Vec::new());
-                    i += 1;
-                }
-                None => word.push(c),
-            }
-            i += 1;
-        }
-        if quote.is_some() {
-            word.push('\n');
-            continue;
-        }
-        finish(&mut word, &mut commands);
-        commands.push(Vec::new());
-        for tag in std::mem::take(&mut pending_tags) {
-            let mut body = String::new();
-            for line in lines.by_ref() {
-                if line.trim() == tag {
-                    break;
-                }
-                body.push_str(line);
-                body.push('\n');
-            }
-            bodies.push(body);
-        }
-    }
-    finish(&mut word, &mut commands);
-    (commands, bodies)
-}
-
 /// The words of `text` that make the check run (see the module docs).
 fn operational_words(commands: &[Vec<String>]) -> BTreeSet<String> {
     let mut excluded = BTreeSet::new();
     for words in commands {
+        if words
+            .iter()
+            .any(|word| matches!(word.as_str(), paths::SUBSHELL_OPEN | paths::SUBSHELL_CLOSE))
+        {
+            continue;
+        }
         let mut rest = words
             .iter()
             .skip_while(|word| {
                 PREFIXES.contains(&word.as_str())
+                    || matches!(word.as_str(), "\0and" | "\0or")
+                    || word.starts_with('\0')
                     || word.starts_with('-')
                     || (word.contains('=') && !word.starts_with('='))
             })
@@ -212,33 +141,6 @@ fn operational_words(commands: &[Vec<String>]) -> BTreeSet<String> {
     excluded
 }
 
-fn normalize(token: &str) -> &str {
-    token.trim_start_matches("./").trim_end_matches('/')
-}
-
-fn path_tokens(text: &str) -> Vec<String> {
-    let allowed =
-        |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-' | '+' | '@');
-    text.split(|c: char| !allowed(c))
-        .map(normalize)
-        .filter(|token| {
-            !token.is_empty()
-                && !token.starts_with('-')
-                && !token.starts_with('/')
-                && token.len() <= 4096
-                && Path::new(token)
-                    .components()
-                    .enumerate()
-                    .all(|(index, part)| match part {
-                        std::path::Component::Normal(name) => name != ".git" && name != "target",
-                        std::path::Component::ParentDir => index == 0,
-                        _ => false,
-                    })
-        })
-        .map(str::to_string)
-        .collect()
-}
-
 /// Candidate data paths `entry` names, relative to its working directory.
 pub(super) fn named_inputs(
     entry: &AcceptanceCriterion,
@@ -246,7 +148,7 @@ pub(super) fn named_inputs(
     repository: &Path,
 ) -> Vec<String> {
     let text = executed_text(entry).map_or_else(String::new, |(_, text)| text.to_string());
-    let (commands, bodies) = lex(&text);
+    let (raw_commands, bodies) = paths::lex(&text);
     let cwd = match &entry.check {
         AcceptanceCheck::Command {
             cwd: TrustedCwd::RepoRoot,
@@ -254,7 +156,15 @@ pub(super) fn named_inputs(
         } => repository,
         _ => project,
     };
-    let siblings = archon_workflow::acceptance_sibling_paths::discover(cwd, &[text.clone()]);
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let (commands, bases, _) = paths::effective_directories(&raw_commands, &cwd);
+    let expanded_text = commands
+        .iter()
+        .map(|words| words.join(" "))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let siblings =
+        archon_workflow::acceptance_sibling_paths::discover(&cwd, &[text.clone(), expanded_text]);
     let message_words: BTreeSet<String> = commands
         .iter()
         .filter_map(|words| {
@@ -281,41 +191,112 @@ pub(super) fn named_inputs(
         .chain(message_words.iter().flat_map(|word| path_tokens(word)))
         .chain(written_words.iter().flat_map(|word| path_tokens(word)))
         .collect();
-    let mut words: Vec<String> = commands.into_iter().flatten().chain(bodies).collect();
+    let bases = paths::command_directories(&commands, bases);
+    let mut words: Vec<(String, Option<PathBuf>)> = commands
+        .iter()
+        .enumerate()
+        .flat_map(|(index, words)| {
+            let base = bases.get(index).cloned().flatten();
+            words
+                .iter()
+                .filter(|word| {
+                    !matches!(
+                        word.as_str(),
+                        paths::SUBSHELL_OPEN | paths::SUBSHELL_CLOSE | "export"
+                    ) && !word.starts_with('\0')
+                        && !word.starts_with('$')
+                        && !word.contains(['$', '`'])
+                        && !word.split_once('=').is_some_and(|(name, _)| {
+                            !name.is_empty()
+                                && name
+                                    .bytes()
+                                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                        })
+                })
+                .cloned()
+                .map(move |word| (word, base.clone()))
+        })
+        .collect();
+    for (index, body) in bodies {
+        words.push((body, bases.get(index).cloned().flatten()));
+    }
     if let AcceptanceCheck::Floor { contract } = &entry.check {
-        words.push(contract.artifact_path.clone());
+        words.push((contract.artifact_path.clone(), Some(cwd.clone())));
     }
     let mut seen = BTreeSet::new();
-    (words.iter())
-        .flat_map(|word| path_tokens(word))
-        .filter_map(|token| {
+    let found: Vec<String> = (words.iter())
+        .flat_map(|(word, base)| {
+            path_tokens(word)
+                .into_iter()
+                .map(move |token| (token, base.clone()))
+        })
+        .filter_map(|(token, base)| {
             let path = Path::new(&token);
+            let Some(base) = base else {
+                return None;
+            };
             let shaped = token.contains('/') || path.extension().is_some();
-            let exists = cwd.join(path).is_file() || cwd.join(path).is_dir();
-            let sibling = cwd.join(path).canonicalize().ok().is_some_and(|resolved| {
+            let resolved_path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                base.join(path)
+            };
+            let exists = super::hermetic::siblings::exact_path_exists(&resolved_path);
+            let resolved = resolved_path.canonicalize().ok();
+            let sibling_root = resolved.as_ref().and_then(|resolved| {
                 siblings
                     .iter()
-                    .any(|sibling| resolved.starts_with(&sibling.source))
+                    .find(|sibling| resolved.starts_with(&sibling.source))
             });
-            let manifest_sibling =
-                super::hermetic::siblings::manifest_relative_input(&token, &text, cwd);
+            let sibling = exists && sibling_root.is_some();
+            let mapped_sibling = sibling_root.and_then(|sibling| {
+                let resolved = resolved.as_ref()?;
+                let within = resolved.strip_prefix(&sibling.source).ok()?;
+                Some(
+                    paths::relative_path(&cwd, &sibling.source.join(within))
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            });
+            let manifest_sibling = commands
+                .iter()
+                .filter(|words| {
+                    words
+                        .iter()
+                        .flat_map(|word| path_tokens(word))
+                        .any(|candidate| candidate == token)
+                })
+                .find_map(|words| {
+                    super::hermetic::siblings::manifest_relative_input(
+                        &token,
+                        &words.join(" "),
+                        &base,
+                    )
+                });
             let manifest = path
                 .file_name()
                 .is_some_and(|name| MANIFESTS.contains(&name.to_string_lossy().as_ref()));
             // Neither what runs the check nor a directory that holds it.
             let runs = (excluded.iter()).any(|word| Path::new(word).starts_with(path));
+            let has_manifest_sibling = manifest_sibling.is_some();
+            let mapped = mapped_sibling.or(manifest_sibling).unwrap_or_else(|| {
+                paths::relative_path(&cwd, &resolved_path)
+                    .to_string_lossy()
+                    .into_owned()
+            });
             if manifest
                 || runs
-                || !(shaped || exists || manifest_sibling.is_some())
-                || (token.starts_with("../") && !sibling && manifest_sibling.is_none())
+                || !(shaped || exists || has_manifest_sibling)
+                || (mapped.starts_with("../") && !sibling && !has_manifest_sibling)
             {
                 None
             } else {
-                Some(manifest_sibling.unwrap_or_else(|| token.clone()))
+                Some(mapped)
             }
         })
         .filter(|token| seen.insert(token.clone()))
-        .collect()
+        .collect();
+    found
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -495,3 +476,7 @@ pub(super) fn mutated(
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_mutation_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_mutation_variable_tests.rs"]
+mod variable_tests;

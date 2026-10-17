@@ -5,6 +5,15 @@ use super::*;
 use crate::command::workflow_task_set::live_root;
 
 impl HostProbe {
+    pub(crate) fn take_regression_guards(&self) -> BTreeMap<String, String> {
+        std::mem::take(
+            &mut *self
+                .regression_guards
+                .lock()
+                .expect("regression guards lock"),
+        )
+    }
+
     /// Run frozen accepted checks against the probe's current hermetic site.
     /// Reverification deliberately does not reuse the pre-implementation run:
     /// it needs the finished tree and the copy layout that actually ran it.

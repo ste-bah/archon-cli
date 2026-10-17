@@ -13,6 +13,18 @@ use super::Unrun;
 const SKIP: &[&str] = &[".git", "target", "node_modules"];
 
 pub(crate) fn manifest_relative_input(token: &str, command: &str, cwd: &Path) -> Option<String> {
+    let relative = Path::new(token);
+    // A path that exists from the check's actual working directory belongs
+    // there, even when the command also names a sibling manifest.
+    if exact_path_exists(&cwd.join(relative)) {
+        return None;
+    }
+    // A sibling manifest must not turn identifiers and prose words into
+    // paths. The caller applies the ordinary candidate filters before using
+    // this mapping; retain the path-shape requirement here as well.
+    if !token.contains('/') && relative.extension().is_none() {
+        return None;
+    }
     archon_workflow::acceptance_sibling_paths::scan(command)
         .into_iter()
         .filter(|named| {
@@ -24,7 +36,7 @@ pub(crate) fn manifest_relative_input(token: &str, command: &str, cwd: &Path) ->
         })
         .find_map(|named| {
             let root = cwd.join(&named.path).parent()?.canonicalize().ok()?;
-            root.join(token).exists().then(|| {
+            exact_path_exists(&root.join(relative)).then(|| {
                 format!(
                     "{}/{}",
                     named.path.parent().expect("manifest parent").display(),
@@ -32,6 +44,34 @@ pub(crate) fn manifest_relative_input(token: &str, command: &str, cwd: &Path) ->
                 )
             })
         })
+}
+
+/// `Path::exists` follows the host volume's case rules. Input discovery must
+/// require every path component to match the spelling in the check text.
+pub(crate) fn exact_path_exists(path: &Path) -> bool {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => current.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => current.push(".."),
+            Component::Normal(name) => {
+                let Ok(entries) = std::fs::read_dir(if current.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    &current
+                }) else {
+                    return false;
+                };
+                if !entries.flatten().any(|entry| entry.file_name() == name) {
+                    return false;
+                }
+                current.push(name);
+            }
+        }
+    }
+    current.exists()
 }
 
 pub(super) fn copy_for_checks(

@@ -63,7 +63,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 28: baseline-passing checks use a stored semantic judgment only
         // when its frozen contract and exact command digests still match;
         // otherwise the input-mutation proof and findings still apply.
-        version: 28,
+        // 29: sibling mutation inputs must be named in the check's actual
+        // relative context, changing can-fail proof verdicts.
+        version: 29,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -86,8 +88,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
         // #457: baseline-passing checks may use a bound accepted judge verdict; the can-fail proof remains required.
-        // #457 follow-up re-pin only: transient recreation of moved check inputs invalidates a stored verdict; freeze-acceptance remains version 28 (unreleased).
-        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+        // #457 follow-up re-pin only: directory and variable flow jointly refine input discovery; freeze-acceptance remains version 29.
+        sources_digest: "1f46507c4e3f7b1056d60caa81d5fc3c3c2fc445470116086024c1b176f4a7cb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -131,7 +133,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
         // #457 re-pin only: acceptance probe changes do not affect skeleton freeze verdicts.
         // #457 follow-up re-pin only: this closure is shared; the skeleton verdict is unchanged.
-        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+        // #457 sibling-input classification changes can-fail proof outcomes only, not skeleton freeze verdicts.
+        // #457 re-pin only: directory and variable flow are shared; the skeleton verdict is unchanged.
+        sources_digest: "1f46507c4e3f7b1056d60caa81d5fc3c3c2fc445470116086024c1b176f4a7cb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -308,7 +312,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
         // #457 re-pin only: frozen-chain verification does not run the can-fail probe or read named inputs.
-        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
+        // #457 reverify report evidence and can-fail proof logic do not affect frozen-chain verification.
+        sources_digest: "8797b06cd4423d942eb4b1da802f288ff1ebbf17eabf1ae7876c81eee6449be6",
         build_bound: true,
     },
     CapabilityLogic {
@@ -350,7 +355,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
         // #457 re-pin only: frozen verification runs no check and judges no probe result.
-        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
+        // #457 reverify report evidence and can-fail proof logic do not affect frozen-chain verification.
+        sources_digest: "8797b06cd4423d942eb4b1da802f288ff1ebbf17eabf1ae7876c81eee6449be6",
         build_bound: true,
     },
 ];

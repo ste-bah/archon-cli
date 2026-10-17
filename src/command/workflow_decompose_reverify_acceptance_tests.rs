@@ -88,6 +88,7 @@ fn only_checks_needing_remediation_produce_task_subjects() {
         sibling_paths: Vec::new(),
         findings: Vec::new(),
         not_run_reason: None,
+        regression_guard: None,
     };
     let not_run = not_run_checks(&frozen_check_plan(&contract));
     assert!(
@@ -108,6 +109,7 @@ fn only_checks_needing_remediation_produce_task_subjects() {
         sibling_paths: Vec::new(),
         findings: vec!["invalid setup".into()],
         not_run_reason: None,
+        regression_guard: None,
     };
     assert_eq!(
         remediation_task_subjects(&[setup_failure], &contract, &skeleton),
@@ -173,6 +175,51 @@ fn reverify_progress_reports_each_check_in_a_two_check_plan() {
 }
 
 #[test]
+fn regression_guard_basis_is_reported_and_optional_for_older_entries() {
+    let check = CheckResult {
+        check_id: "AC-X-001".into(),
+        verdict: "accepted".into(),
+        really_ran: true,
+        setup_failure: false,
+        real_failure: false,
+        sibling_paths: Vec::new(),
+        findings: Vec::new(),
+        not_run_reason: None,
+        regression_guard: Some(
+            "accepted on the stored judge verdict because it passed on the baseline".into(),
+        ),
+    };
+    let report_entry = serde_json::to_value(&check).unwrap();
+    assert!(
+        report_entry["regression_guard"]
+            .as_str()
+            .unwrap()
+            .contains("stored judge verdict")
+    );
+    assert_eq!(
+        serde_json::from_value::<CheckResult>(serde_json::json!({
+            "check_id": "AC-X-002",
+            "verdict": "accepted",
+            "really_ran": true,
+            "setup_failure": false,
+            "real_failure": false,
+            "sibling_paths": [],
+            "findings": []
+        }))
+        .unwrap()
+        .regression_guard,
+        None
+    );
+    let line = CheckProgress::new(1).finish_line(
+        1,
+        "AC-X-001",
+        "passed; regression guard: stored judge verdict",
+        0.0,
+    );
+    assert!(line.contains("regression guard: stored judge verdict"));
+}
+
+#[test]
 fn missing_implementation_failure_is_accepted_without_a_passability_finding() {
     // EXPECTED BEFORE RUN: the check ran and failed on the pre-implementation
     // tree; when the freeze judge attributes that failure to missing
@@ -187,6 +234,7 @@ fn missing_implementation_failure_is_accepted_without_a_passability_finding() {
         sibling_paths: Vec::new(),
         findings: Vec::new(),
         not_run_reason: None,
+        regression_guard: None,
     };
 
     apply_passability_result(&mut check, true, None, None);
@@ -211,6 +259,7 @@ fn setup_failure_from_freeze_judge_remains_a_finding() {
         sibling_paths: Vec::new(),
         findings: Vec::new(),
         not_run_reason: None,
+        regression_guard: None,
     };
 
     apply_passability_result(
@@ -243,6 +292,7 @@ fn check_that_passes_on_baseline_has_no_failed_check_finding() {
         sibling_paths: Vec::new(),
         findings: Vec::new(),
         not_run_reason: None,
+        regression_guard: None,
     };
 
     apply_passability_result(&mut check, false, None, None);
@@ -267,6 +317,7 @@ fn baseline_pass_that_cannot_fail_keeps_the_freeze_probe_finding() {
         sibling_paths: Vec::new(),
         findings: Vec::new(),
         not_run_reason: None,
+        regression_guard: None,
     };
 
     apply_passability_result(

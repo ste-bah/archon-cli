@@ -34,7 +34,7 @@ pub(super) async fn prove(
             mutation::CANNOT_FAIL
         )
     };
-    let already = "if the criterion already holds on that tree, the check must still be able to fail: the host runs it again with every data file it names (by a path relative to its working directory) moved aside -- never its own script, a program it runs, a directory it changes into or a build manifest -- so read the files that decide the criterion by those paths";
+    let already = "if the criterion already holds on that tree, the check must still be able to fail: name the input files explicitly with paths relative to the check's working directory, so the host can move them aside and verify that the check fails";
     let mut findings = BTreeMap::new();
     let live = [
         baseline
@@ -64,9 +64,14 @@ pub(super) async fn prove(
             .map(|entry| named_inputs(entry, &probe.project, &baseline.repository))
             .unwrap_or_default();
         if names.is_empty() {
+            // Unresolvable inputs never count as moved; a check with no
+            // resolvable input routes here so its author can make paths explicit.
             findings.insert(
                 id.clone(),
-                format!("{}; {already}; it names none", passed_there(id)),
+                format!(
+                    "{}; {already}; it names none (no resolvable input)",
+                    passed_there(id)
+                ),
             );
             continue;
         }
@@ -157,6 +162,10 @@ pub(super) async fn prove(
             );
         } else if super::baseline::passed(result) {
             if bound_accepted && recreated.is_empty() && !crashed {
+                let basis = format!(
+                    "accepted on the stored judge verdict because the check passed on the pre-implementation tree at {short} and the moved text-derived paths did not make it fail"
+                );
+                probe.note_regression_guard(id, basis.clone());
                 probe.note(format!(
                     "check '{id}': passed on the pre-implementation tree at {short}; accepted as a regression guard on its stored accepted judge verdict, bound to the current contract and check digests (the moved text-derived paths did not make it fail)"
                 ));

@@ -21,6 +21,8 @@ pub(super) struct CheckResult {
     pub(super) findings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) not_run_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) regression_guard: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -114,6 +116,7 @@ fn not_run_checks(plan: &[(String, bool, Option<String>)]) -> Vec<CheckResult> {
             sibling_paths: Vec::new(),
             findings: Vec::new(),
             not_run_reason: reason.clone(),
+            regression_guard: None,
         })
         .collect()
 }
@@ -253,6 +256,7 @@ pub(super) async fn reverify_checks(
             .await
             .map_err(|error| anyhow!("could not prepare frozen acceptance checks: {error}"))?
     };
+    let regression_guards = probe.take_regression_guards();
     let mut by_id = evidence
         .into_iter()
         .map(|item| (item.acceptance_id.clone(), item))
@@ -288,6 +292,7 @@ pub(super) async fn reverify_checks(
                         .unwrap_or_else(|| "the check-copy probe returned no result".into()),
                 ],
                 not_run_reason: None,
+                regression_guard: None,
             });
             progress.finish(
                 *check_indexes.get(id.as_str()).unwrap_or(&0),
@@ -335,17 +340,20 @@ pub(super) async fn reverify_checks(
             sibling_paths: siblings,
             findings: Vec::new(),
             not_run_reason: None,
+            regression_guard: regression_guards.get(id).cloned(),
         });
-        let outcome = if probe.reused_check(id) {
-            "reused from cache"
+        let outcome = if let Some(basis) = regression_guards.get(id) {
+            format!("passed; regression guard: {basis}")
+        } else if probe.reused_check(id) {
+            "reused from cache".to_string()
         } else if !really_ran {
-            "setup failure"
+            "setup failure".to_string()
         } else if failed {
-            "failed"
+            "failed".to_string()
         } else {
-            "passed"
+            "passed".to_string()
         };
-        progress.finish(*check_indexes.get(id.as_str()).unwrap_or(&0), id, outcome);
+        progress.finish(*check_indexes.get(id.as_str()).unwrap_or(&0), id, &outcome);
     }
 
     let mut setup_findings = BTreeMap::new();

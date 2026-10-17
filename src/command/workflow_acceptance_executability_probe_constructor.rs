@@ -18,6 +18,7 @@ impl HostProbe {
             host: archon_workflow::acceptance_check_environment::host_environment(),
             resource_limits,
             diagnostics: Mutex::new(Vec::new()),
+            regression_guards: Mutex::new(BTreeMap::new()),
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
             baseline_failures: Mutex::new(BTreeMap::new()),
@@ -150,6 +151,13 @@ impl HostProbe {
             .lock()
             .expect("diagnostics lock")
             .push(text);
+    }
+
+    pub(super) fn note_regression_guard(&self, id: &str, basis: String) {
+        self.regression_guards
+            .lock()
+            .expect("regression guards lock")
+            .insert(id.to_string(), basis);
     }
 
     /// Record that the host could not prove `id`.
