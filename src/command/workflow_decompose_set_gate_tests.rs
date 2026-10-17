@@ -20,6 +20,8 @@ fn driver(args_json: &str, lint_rounds: &str, tail: &str) -> String {
         r##"{FIXED_SCRIPT_SOURCE}
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
+// Explicit Node fixture binding; host redaction parity is covered in QuickJS.
+globalThis.__archonRedactPublicText = text => String(text);
 // Issue 288: the host's author-context binding, its files kept nowhere.
 const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0, 2166136261).toString(16).padStart(8, "0").repeat(8);
 globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({{ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) }});

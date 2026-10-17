@@ -49,6 +49,11 @@ pub mod tokens;
 pub mod tokens_codex;
 pub(crate) mod transport_evidence;
 mod transport_evidence_redaction;
+
+/// Redact credential content from a transport evidence sample.
+pub fn redact_transport_evidence(text: &str) -> String {
+    transport_evidence_redaction::scrub(text, &[], false, false)
+}
 pub mod transport_idle;
 pub mod types;
 pub mod usage;

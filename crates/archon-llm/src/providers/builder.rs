@@ -102,6 +102,7 @@ pub fn build_llm_provider_with_policy(
         }
     };
 
+    archon_observability::secret_values::register_values([api_key.expose()]);
     let inner: Arc<dyn LlmProvider> = match descriptor.compat_kind {
         CompatKind::OpenAiCompat => Arc::new(OpenAiCompatProvider::new(descriptor, http, api_key)),
         CompatKind::Native => dispatch_native(cfg, descriptor, http, api_key)?,

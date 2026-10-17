@@ -14,13 +14,17 @@ const SECRET_NAME_PARTS: &[&str] = &[
     "PASS",
     "AUTH",
     "CREDENTIAL",
-    "PRIVATE",
 ];
 
-/// Shared credential-name rule for configured environments and headers.
+/// Shared credential-name rule for headers and URL query parameters.
 pub fn is_credential_name(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     SECRET_NAME_PARTS.iter().any(|part| name.contains(part))
+}
+
+/// Register provider credentials loaded from configuration for all sinks.
+pub fn register_values<'a>(values: impl IntoIterator<Item = &'a str>) {
+    SecretValues::for_evidence(values).register();
 }
 
 /// Literal secrets and their escaped representations, independent of log regexes.
@@ -41,8 +45,7 @@ impl SecretValues {
         secrets
     }
 
-    /// Every nonempty configured value for persisted evidence, including short
-    /// credentials. Unlike tracing, this boundary cannot discard known values.
+    /// Retain every nonempty configured value for persisted evidence, including short credentials.
     pub fn for_evidence<'a>(values: impl IntoIterator<Item = &'a str>) -> Self {
         let mut secrets = Self::default();
         for value in values.into_iter().filter(|value| !value.is_empty()) {
@@ -167,7 +170,7 @@ impl SecretValues {
         self.0.dedup();
     }
 
-    /// Replace only configured literal values, preserving diagnostic words.
+    /// Replace every configured literal value, including short values and substrings.
     pub fn text(&self, text: &str) -> String {
         self.0.iter().fold(text.to_string(), |text, value| {
             text.replace(value.as_str(), REDACTED_VALUE)
@@ -199,6 +202,7 @@ impl SecretValues {
         registry.normalize();
     }
 }
+
 static REGISTERED: Lazy<RwLock<SecretValues>> = Lazy::new(|| RwLock::new(SecretValues::default()));
 
 pub(crate) fn redact_registered(text: &str) -> String {

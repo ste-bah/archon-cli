@@ -95,7 +95,7 @@ function unwrapEntry(parsed, id) {
 }
 
 function malformedAcceptanceFailure(id, reason, malformedClass) {
-  const finding = {text:`candidate artifact was refused: acceptance entry ${id}: ${reason}`, subject:id};
+  const finding = {text:redactSecretShapedText(`candidate artifact was refused: acceptance entry ${id}: ${String(reason)}`), subject:id};
   return {failure:{status:"failed",malformed:true,malformedClass,entryId:id,findings:[finding],summary:finding.text}};
 }
 
@@ -125,83 +125,53 @@ function stopReasonClass(reason) {
   return known.has(reason) ? `stop-${reason.replace(/_/g, "-")}` : "stop-other";
 }
 
-// Issue 383: the host's public-copy redaction (sanitize_value in
-// crates/archon-workflow/src/events.rs), word for word, held equal by
-// workflow_decompose_redaction_tests.rs. A word is a run between Unicode
-// whitespace (Rust's char::is_whitespace); a secret-shaped word, or the word
-// after a `Bearer` word, becomes REDACTION_MARKER.
-const REDACTION_MARKER = "<redacted>";
-const RUST_WHITESPACE = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
-
-function asciiLower(text) {
-  return text.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-
-function utf8Length(text) {
-  let bytes = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0);
-    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-  }
-  return bytes;
-}
-
-function looksSecretLike(word) {
-  const trimmed = word.replace(/^["'`,;)(\[\]]+|["'`,;)(\[\]]+$/g, "");
-  const lower = asciiLower(trimmed);
-  return ["authorization:", "api_key=", "apikey=", "token=", "access_token=",
-    "refresh_token=", "password=", "secret=", "sk-ant-"].some((prefix) => lower.startsWith(prefix))
-    || (lower.startsWith("sk-") && utf8Length(trimmed) >= 20);
-}
-
-function isBearerWord(word) {
-  return asciiLower(word.replace(/^["'`]+|["'`]+$/g, "")) === "bearer";
-}
-
-// The words of `text` with their offsets and whether each is redacted.
-function redactionWords(text) {
-  const words = [];
-  let start = null;
-  let afterBearer = false;
-  const close = (end) => {
-    if (start === null) return;
-    const word = text.slice(start, end);
-    words.push({start, end, redacted: afterBearer || looksSecretLike(word)});
-    afterBearer = isBearerWord(word);
-    start = null;
-  };
-  for (let index = 0; index < text.length;) {
-    const ch = String.fromCodePoint(text.codePointAt(index));
-    if (RUST_WHITESPACE.test(ch)) close(index);
-    else if (start === null) start = index;
-    index += ch.length;
-  }
-  close(text.length);
-  return words;
-}
-
 function redactSecretShapedText(text) {
-  let out = "";
-  let at = 0;
-  for (const word of redactionWords(text)) {
-    out += text.slice(at, word.start) + (word.redacted ? REDACTION_MARKER : text.slice(word.start, word.end));
-    at = word.end;
+  if (typeof __archonRedactPublicText !== "function") {
+    throw new Error("host public-text redactor binding __archonRedactPublicText is required");
   }
-  return out + text.slice(at);
+  return __archonRedactPublicText(String(text));
+}
+
+function redactFinding(finding) {
+  if (typeof finding === "string") return redactSecretShapedText(finding);
+  if (!finding || typeof finding !== "object") return finding;
+  return typeof finding.text === "string"
+    ? {...finding, text:redactSecretShapedText(finding.text)}
+    : finding;
+}
+
+function redactFailure(failure) {
+  if (!failure || typeof failure !== "object") return failure;
+  if (Array.isArray(failure.findings)) failure.findings = failure.findings.map(redactFinding);
+  if (typeof failure.summary === "string") failure.summary = redactSecretShapedText(failure.summary);
+  return failure;
 }
 
 // `source[start, end)` with every secret-shaped word of the WHOLE source
 // replaced by the marker, so a word the window cuts is still found whole.
 function redactedWindow(source, start, end) {
-  let out = "";
-  let at = start;
-  for (const word of redactionWords(source)) {
-    if (word.end <= start || word.start >= end) continue;
-    if (!word.redacted) continue;
-    out += source.slice(at, Math.max(at, word.start)) + REDACTION_MARKER;
-    at = Math.min(end, word.end);
+  // Redact the complete source so a credential crossing either edge cannot
+  // evade the shared rule. Expand the excerpt to whole Unicode-whitespace
+  // delimited words before mapping offsets through the shortened prefix.
+  // These are Rust char::is_whitespace boundaries (not JavaScript \s).
+  const whitespace = (code) => code === 0x09 || code === 0x0a || code === 0x0b
+    || code === 0x0c || code === 0x0d || code === 0x20 || code === 0x85
+    || code === 0xa0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200a)
+    || code === 0x2028 || code === 0x2029 || code === 0x202f
+    || code === 0x205f || code === 0x3000;
+  if (start > 0 && !whitespace(source.codePointAt(start - 1))
+      && redactSecretShapedText(source.slice(0, start)).endsWith("<redacted>")) {
+    while (start > 0 && !whitespace(source.codePointAt(start - 1))) start--;
   }
-  return out + source.slice(at, end);
+  if (end < source.length && !whitespace(source.codePointAt(end))
+      && redactSecretShapedText(source.slice(0, end)).endsWith("<redacted>")) {
+    while (end < source.length && !whitespace(source.codePointAt(end))) {
+      end += source.codePointAt(end) > 0xffff ? 2 : 1;
+    }
+  }
+  const redactPrefix = (offset) => redactSecretShapedText(source.slice(0, offset)).length;
+  const out = redactSecretShapedText(source);
+  return out.slice(redactPrefix(start), redactPrefix(end));
 }
 
 // Keep malformed-reply refusals useful to the author without echoing the
@@ -302,7 +272,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order)}\n${acceptanceReplyFormat()}`;
   } catch (error) {
     if (!error || error.authorContext !== true) throw error;
-    return {failure:{status:"failed",summary:`acceptance entry ${id}: ${error.message}`}};
+    return {failure:redactFailure({status:"failed",summary:`acceptance entry ${id}: ${error.message}`})};
   }
   task = await requireDispatchable(w, `acceptance-prompt-${id}`, task);
   state.roundCalls += 1;
@@ -311,7 +281,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   });
   if (result.status !== "failed") state.roundAnswered += 1;
   if (result.dry_run === true) return {entry:setHostOwnedFields({id}, criteria)};
-  if (result.status === "failed") return {failure:result};
+  if (result.status === "failed") return {failure:redactFailure(result)};
   if (result.stopReason !== "end_turn") {
     if (result.stopReason === "max_tokens") {
       return malformedAcceptanceFailure(id,
@@ -356,7 +326,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
         // invalid_json refusal. A missing binding or a validator fault must
         // propagate, never accept. Each text names the entry by its id. The
         // live roots let it refuse a check naming one, as freeze does (366).
-        const defects = JSON.parse(__archonValidateAcceptanceEntry(id, serialized, liveRootsText()));
+        const defects = JSON.parse(__archonValidateAcceptanceEntry(id, serialized, liveRootsText())).map(redactFinding);
         if (defects.length === 0) return {entry};
         return {failure:{status:"failed",malformed:true,findings:defects,entryId:id,
           summary:defects.map(defect => defect.text).join("; ")}};
@@ -470,7 +440,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   if (!first) throw new Error(`acceptance entry ${pending[stop]} was never authored`);
   // The failures and the indices never started are retried.
   state.retryIds = new Set(pending.filter((_, index) => !succeeded(settled[index])));
-  if (refusals.length === 0) return first.value.failure;
+  if (refusals.length === 0) return redactFailure(first.value.failure);
   const findings = refusals.flatMap(refusal => refusal.findings);
   return {status:"failed", malformed:true, refusals, findings, summary:findings.map(progressText).join("; ")};
 }

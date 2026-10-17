@@ -37,6 +37,33 @@ fn round2_registry_can_be_scoped_without_cross_test_pollution() {
 }
 
 #[test]
+fn evidence_secret_values_include_every_nonempty_value() {
+    let secrets = SecretValues::for_evidence(["x", "true", "false", "0", "1", "abc123"]);
+    assert!(secrets.iter().any(|value| value == "abc123"));
+    for value in ["x", "true", "false", "0", "1", "abc"] {
+        let held = SecretValues::for_evidence([value]);
+        assert!(held.iter().any(|secret| secret == value));
+        assert_eq!(held.text(&format!("held={value}")), "held=[REDACTED]");
+    }
+    assert_eq!(secrets.text("held=abc123"), "held=[REDACTED]");
+}
+
+#[test]
+fn registered_short_provider_credential_redacts_text_and_evidence() {
+    let _registry = scoped_registry_for_tests();
+    // Same registration path used when the provider builder resolves an API key.
+    super::register_values(["abc12"]);
+    assert_eq!(
+        redact_registered("provider failed: xabc12y"),
+        "provider failed: x[REDACTED]y"
+    );
+    assert_eq!(
+        super::super::shared_redactor::redact_text("transport payload xabc12y", "[REDACTED]"),
+        "transport payload x[REDACTED]y"
+    );
+}
+
+#[test]
 fn python_ascii_json_secret_spellings_are_redacted() {
     for (secret, escaped) in [
         ("credential-é-canary", r"credential-\u00e9-canary"),

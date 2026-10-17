@@ -1,6 +1,6 @@
 // Parse refusals give the acceptance author a bounded repair clue and remain
 // stable progress keys when the same malformed reply is repeated.
-const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
+const { withAuthorContext, redactPublicTextFixture } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -18,6 +18,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   ctx.__archonValidateAcceptanceEntry = () => '[]';
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
+  ctx.__archonRedactPublicText = redactPublicTextFixture;
   ctx.requireDispatchable = async (_w, _label, task) => task;
   ctx.catalogueText = () => '';
   ctx.priorText = () => '';
@@ -255,13 +256,6 @@ async function refusal(reply, stopReason = 'end_turn') {
   // A word that only looks like the rule's prefixes stays.
   const plain = parseFn('A', 'tokens=5 sk-short secret', at('', 3));
   assert.match(plain, /excerpt: "tokens=5 sk-short secret"/);
-  // The script's rule is the host's word for word (held equal by
-  // workflow_decompose_redaction_tests.rs over a shared corpus).
-  const words = ctxForBlocks().redactSecretShapedText;
-  assert.equal(words('Authorization: Bearer abc def'), '<redacted> Bearer <redacted> def');
-  assert.equal(words('(sk-ant-x) "password=p" api_key=1,'), '<redacted> <redacted> <redacted>');
-  assert.equal(words('sk-0123456789abcdef sk-0123456789abcdefg'), 'sk-0123456789abcdef <redacted>');
-  assert.equal(words('sk-ééééééééé'), '<redacted>', 'the length rule counts UTF-8 bytes, as Rust does');
   console.log('PASS acceptance parse refusal');
 })().catch(error => { console.error(`FAIL acceptance parse refusal: ${error.stack}`); process.exitCode = 1; });
 
@@ -269,5 +263,6 @@ function ctxForBlocks() {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(source, ctx);
+  ctx.__archonRedactPublicText = redactPublicTextFixture;
   return ctx;
 }
