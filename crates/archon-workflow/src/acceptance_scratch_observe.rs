@@ -46,6 +46,7 @@ pub async fn observe_commands(
     chain_digest: &str,
     refs: &[FrozenCommandRef],
     evidence: &Path,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> WorkflowResult<ObservationResult> {
     observe_commands_cancellable(
         policy,
@@ -54,6 +55,7 @@ pub async fn observe_commands(
         chain_digest,
         refs,
         evidence,
+        resource_limits,
         Arc::new(AtomicBool::new(false)),
     )
     .await
@@ -65,9 +67,10 @@ pub async fn observe_commands_cancellable(
     chain_digest: &str,
     refs: &[FrozenCommandRef],
     evidence: &Path,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<ObservationResult> {
-    let hooks = ObserveHooks::default();
+    let hooks = ObserveHooks::for_resource_limits(resource_limits);
     observe_commands_hooked(
         policy,
         commit,

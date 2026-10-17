@@ -177,6 +177,7 @@ async fn rounds(
             sink,
             Vec::new(),
             executor.clone(),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         )
         .await;
         let status = store.load_state(run_id).unwrap().status;

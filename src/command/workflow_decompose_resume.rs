@@ -485,6 +485,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         ui_sink,
         agent_names,
         executor,
+        config.tools.cargo.to_limits(),
     )
     .await?;
     crate::command::workflow_decompose_remediation::finish_resume_for_store(

@@ -55,8 +55,8 @@ pub(super) async fn run_read_only_v2_fanout(
     // no target repository keeps the implementation-wave stamp.
     let mut judged_commit = None;
     if let Some(root) = runtime.target_repository_root.as_deref() {
-        let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-            .with_generated_config(&runtime.generated_config);
+        let dispatch =
+            super::live_agent_dispatch::LiveAgentDispatch::for_runtime(client.clone(), runtime);
         judged_commit = archon_workflow::v2::verification::establish_verification_baseline(
             &archon_workflow::v2::verification::VerificationBaselineContext {
                 store: v2_store,
@@ -388,8 +388,8 @@ pub(super) async fn run_read_only_v2_fanout(
     // recorded as a host gap the second residual pass routes into work.
     let excused = match runtime.target_repository_root.as_deref() {
         Some(root) => {
-            let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-                .with_generated_config(&runtime.generated_config);
+            let dispatch =
+                super::live_agent_dispatch::LiveAgentDispatch::for_runtime(client.clone(), runtime);
             let context = archon_workflow::v2::verification::RunBaseRedContext {
                 store: v2_store,
                 dispatch: &dispatch,

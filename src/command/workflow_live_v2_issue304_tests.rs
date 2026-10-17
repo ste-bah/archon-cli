@@ -19,6 +19,7 @@ async fn replay(script: &str) {
         ui.clone(),
         Vec::new(),
         Arc::new(NoHostCommands),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
     .unwrap();
@@ -44,6 +45,7 @@ async fn replay(script: &str) {
         ui,
         Vec::new(),
         Arc::new(NoHostCommands),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
     .unwrap();
@@ -191,6 +193,7 @@ async fn inflight(action: LifecycleAction, expected: RunStatus) {
         ui,
         Vec::new(),
         executor,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
     .unwrap();

@@ -106,6 +106,7 @@ async fn execute(fx: &Fixture, run: WorkflowRun, sink: SharedWorkflowUiSink) -> 
         sink,
         Vec::new(),
         Arc::new(NoHostCommands),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
 }

@@ -47,9 +47,19 @@ pub(super) struct LiveAgentDispatch {
 }
 
 impl LiveAgentDispatch {
-    pub(super) fn new(client: LiveV2AgentClient) -> Self {
+    pub(super) fn for_runtime(
+        client: LiveV2AgentClient,
+        runtime: &super::WorkflowV2ScriptRuntime,
+    ) -> Self {
+        Self::new(client, runtime.cargo_limits.clone())
+            .with_generated_config(&runtime.generated_config)
+    }
+
+    pub(super) fn new(
+        client: LiveV2AgentClient,
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    ) -> Self {
         let defaults = archon_core::config::GeneratedWorkflowConfig::default();
-        let cargo_limits = client.cargo_limits().cloned().unwrap_or_default();
         Self {
             client,
             submit_grace_calls: defaults.submit_grace_calls,

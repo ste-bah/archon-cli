@@ -25,8 +25,8 @@ pub(super) async fn prepare(
     {
         return Ok(());
     }
-    let dispatch = super::super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-        .with_generated_config(&runtime.generated_config);
+    let dispatch =
+        super::super::live_agent_dispatch::LiveAgentDispatch::for_runtime(client.clone(), runtime);
     archon_workflow::v2::verification::regression_slot::prepare_slot(
         v2_store,
         &dispatch,

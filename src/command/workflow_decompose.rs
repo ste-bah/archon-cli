@@ -402,6 +402,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             ui_sink,
             agent_names,
             executor,
+            config.tools.cargo.to_limits(),
         )
         .await
     }

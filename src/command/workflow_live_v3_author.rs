@@ -284,9 +284,10 @@ impl WorkflowV2ScriptRunner {
         // the host stopped is held by that stop.
         let regression = match (returned, self.runtime.target_repository_root.as_deref()) {
             (true, Some(root)) => {
-                let dispatch =
-                    super::super::live_agent_dispatch::LiveAgentDispatch::new(self.client.clone())
-                        .with_generated_config(&self.runtime.generated_config);
+                let dispatch = super::super::live_agent_dispatch::LiveAgentDispatch::for_runtime(
+                    self.client.clone(),
+                    &self.runtime,
+                );
                 archon_workflow::v2::verification::regression_gate::regression_verdict(
                     &archon_workflow::v2::verification::regression_gate::RegressionGate {
                         store: &self.v2_store,

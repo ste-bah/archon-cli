@@ -70,6 +70,7 @@ async fn supervisor_cancellation_reaps_work_before_root_cleanup() {
         "chain",
         &refs,
         &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         cancel,
     )
     .await

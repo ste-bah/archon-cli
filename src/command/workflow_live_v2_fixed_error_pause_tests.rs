@@ -69,6 +69,7 @@ async fn fixed_pause(source: &str, expected: &str) {
         sink,
         Vec::new(),
         Arc::new(UnusedHost),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await;
     assert_eq!(
@@ -219,6 +220,7 @@ async fn fixed_boundary_pause_replays_recorded_refusal_on_resume() {
                 fault,
                 refusals: refusals.clone(),
             }),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         )
         .await;
         if fault {
@@ -337,6 +339,7 @@ async fn a_host_fault_crash_resume_dispatches_the_faulted_call_again() {
             Arc::new(FaultOnce {
                 calls: calls.clone(),
             }),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         )
         .await;
         let status = store.load_state(&run.id).unwrap().status;

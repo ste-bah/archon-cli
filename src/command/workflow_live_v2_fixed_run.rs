@@ -16,6 +16,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     host_command_executor: Arc<
         dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
     >,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<String> {
     const LABEL: &str = "Fixed decomposition";
     let v2_store = match persist_fixed_start(store, &mut run) {
@@ -32,7 +33,6 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     let store = &owner_store;
     let execution_generation = run.generation;
     let pause_executor = host_command_executor.clone();
-    let cargo_limits = archon_tools::workflow_resource_env::CargoResourceLimits::default();
     let runner = fixed_runner(
         &run,
         &plan,
@@ -244,19 +244,14 @@ pub(super) fn fixed_runner(
     // acceptance contract from a 36KB PRD is legitimately longer work than an
     // ordinary host call. Issue 288: the value is a no-progress window that
     // novel author activity renews, never a total limit on the session.
-    let client = LiveV2AgentClient::new(
+    let client = fixed_decomposition_client(
         llm,
         ui_sink,
         agent_names,
         run.id.clone(),
-        None,
-        Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
-    )
-    .with_fixed_raw_tool_policy(vec![
-        "Read".to_string(),
-        "Grep".to_string(),
-        "Glob".to_string(),
-    ]);
+        u64::from(runtime.generated_config.host_call_timeout_secs),
+        runtime.cargo_limits.clone(),
+    );
     WorkflowV2ScriptRunner::new(
         run.spec.task.clone(),
         runtime,
@@ -271,6 +266,26 @@ pub(super) fn fixed_runner(
     )
     .with_host_command_executor(host_command_executor)
     .with_raw_outcomes(true)
+}
+
+pub(super) fn fixed_decomposition_client(
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
+    agent_names: Vec<String>,
+    run_id: String,
+    host_call_timeout_secs: u64,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+) -> LiveV2AgentClient {
+    LiveV2AgentClient::new(
+        llm,
+        ui_sink,
+        agent_names,
+        run_id,
+        None,
+        Some(host_call_timeout_secs),
+    )
+    .with_cargo_limits(cargo_limits)
+    .with_fixed_raw_tool_policy(vec!["Read".into(), "Grep".into(), "Glob".into()])
 }
 
 /// Marks the run running and binds this executor's session to the

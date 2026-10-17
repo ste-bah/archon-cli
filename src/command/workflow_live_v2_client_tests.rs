@@ -1,7 +1,6 @@
 use super::*;
 use archon_workflow::{WorkflowAgentOutcome, WorkflowV2HostCall, WorkflowV2HostMethod};
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::{path::PathBuf, sync::Mutex};
 
 #[path = "workflow_live_v2_client_audit_boundary_tests.rs"]
 mod audit_boundary;
@@ -56,6 +55,9 @@ impl WorkflowLlmClient for RecordingClient {
         })
     }
 }
+
+#[path = "workflow_live_v2_client_cargo_limits_tests.rs"]
+mod cargo_limits_tests;
 
 pub(super) fn request(
     method: WorkflowV2HostMethod,
