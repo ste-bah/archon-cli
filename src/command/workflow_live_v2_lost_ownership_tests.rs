@@ -66,14 +66,20 @@ async fn fixed_runner_script_tool_call_uses_its_resolved_config() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _cargo_jobs = CargoBuildJobsGuard::clear();
-    async fn run_bash_with_fixed_config(write_layer: bool) -> String {
+    let default_build_jobs = archon_core::config::ArchonConfig::default()
+        .tools
+        .cargo
+        .to_limits()
+        .build_jobs;
+    let project_build_jobs = default_build_jobs + 1;
+    async fn run_bash_with_fixed_config(write_layer: bool, project_build_jobs: u32) -> String {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join("Cargo.toml"), "[package]\n").unwrap();
         if write_layer {
             std::fs::create_dir_all(temp.path().join(".archon")).unwrap();
             std::fs::write(
                 temp.path().join(".archon/config.toml"),
-                "[tools.cargo]\nbuild_jobs = 2\n",
+                format!("[tools.cargo]\nbuild_jobs = {project_build_jobs}\n"),
             )
             .unwrap();
         }
@@ -132,15 +138,15 @@ async fn fixed_runner_script_tool_call_uses_its_resolved_config() {
         response["content"].as_str().unwrap().to_string()
     }
 
-    let default_result = run_bash_with_fixed_config(false).await;
+    let default_result = run_bash_with_fixed_config(false, project_build_jobs).await;
     assert!(
-        default_result != "2",
+        default_result != project_build_jobs.to_string(),
         "ArchonConfig::default() must not produce the project-layer value: {default_result}"
     );
-    let layered_result = run_bash_with_fixed_config(true).await;
+    let layered_result = run_bash_with_fixed_config(true, project_build_jobs).await;
     assert!(
-        layered_result == "2",
-        "fixed runner must propagate project-layer CARGO_BUILD_JOBS=2: {layered_result}"
+        layered_result == project_build_jobs.to_string(),
+        "fixed runner must propagate project-layer CARGO_BUILD_JOBS={project_build_jobs}: {layered_result}"
     );
 }
 

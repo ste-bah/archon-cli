@@ -131,11 +131,17 @@ async fn script_bash_uses_project_layer_cargo_limits() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _cargo_jobs = CargoJobsEnvGuard::clear();
+    let project_build_jobs = archon_core::config::ArchonConfig::default()
+        .tools
+        .cargo
+        .to_limits()
+        .build_jobs
+        + 1;
     let project = tempfile::tempdir().expect("project");
     std::fs::create_dir_all(project.path().join(".archon")).unwrap();
     std::fs::write(
         project.path().join(".archon/config.toml"),
-        "[tools.cargo]\nbuild_jobs = 2\nincremental = true\nresource_class = 'balanced'\n[[permissions.always_allow]]\ntool = 'Bash'\npattern = '*'\n",
+        format!("[tools.cargo]\nbuild_jobs = {project_build_jobs}\nincremental = true\nresource_class = 'balanced'\n[[permissions.always_allow]]\ntool = 'Bash'\npattern = '*'\n"),
     )
     .unwrap();
     let config =
@@ -161,7 +167,11 @@ async fn script_bash_uses_project_layer_cargo_limits() {
     .expect("the command is answered");
     let response: serde_json::Value = serde_json::from_str(&json).expect("json");
     assert_eq!(response["is_error"], serde_json::json!(false), "{response}");
-    assert_eq!(response["content"], "2", "{response}");
+    assert_eq!(
+        response["content"],
+        project_build_jobs.to_string(),
+        "{response}"
+    );
 }
 
 /// A name nothing serves has to say so, not return an empty success that a

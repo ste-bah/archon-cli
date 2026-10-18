@@ -5,18 +5,24 @@ use super::*;
 async fn project_cargo_limits_reach_fixed_client_and_live_dispatch_command() {
     use archon_workflow::agent_dispatch_port::WorkflowAgentDispatch;
 
+    let project_build_jobs = archon_core::config::ArchonConfig::default()
+        .tools
+        .cargo
+        .to_limits()
+        .build_jobs
+        + 1;
     let project = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project.path().join(".archon")).unwrap();
     std::fs::write(
         project.path().join(".archon/config.toml"),
-        "[tools.cargo]\nbuild_jobs = 2\nincremental = true\nresource_class = 'balanced'\n",
+        format!("[tools.cargo]\nbuild_jobs = {project_build_jobs}\nincremental = true\nresource_class = 'balanced'\n"),
     )
     .unwrap();
     std::fs::write(project.path().join("Cargo.toml"), "[package]\n").unwrap();
     let config =
         archon_core::config_layers::load_layered_config(None, project.path(), None, None).unwrap();
     let limits = config.tools.cargo.to_limits();
-    assert_eq!(limits.build_jobs, 2);
+    assert_eq!(limits.build_jobs, project_build_jobs);
     assert!(limits.incremental);
     assert_eq!(limits.resource_class, "balanced");
 
@@ -49,7 +55,10 @@ async fn project_cargo_limits_reach_fixed_client_and_live_dispatch_command() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(String::from_utf8(output.stdout).unwrap(), "2 1 balanced");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("{project_build_jobs} 1 balanced")
+    );
 
     let observer_root = tempfile::tempdir().unwrap();
     let repository = observer_root.path().join("repo");
@@ -59,7 +68,7 @@ async fn project_cargo_limits_reach_fixed_client_and_live_dispatch_command() {
     std::fs::create_dir_all(observer_project.join(".archon")).unwrap();
     std::fs::write(
         observer_project.join(".archon/config.toml"),
-        "[tools.cargo]\nbuild_jobs = 2\nincremental = true\nresource_class = 'balanced'\n",
+        format!("[tools.cargo]\nbuild_jobs = {project_build_jobs}\nincremental = true\nresource_class = 'balanced'\n"),
     )
     .unwrap();
     let observer_config =
@@ -87,7 +96,9 @@ async fn project_cargo_limits_reach_fixed_client_and_live_dispatch_command() {
     git(&["add", "."]);
     git(&["commit", "-qm", "fixture"]);
     let commit = git(&["rev-parse", "HEAD"]);
-    let command = "test \"$CARGO_BUILD_JOBS\" = 2 && test \"$CARGO_INCREMENTAL\" = 1 && test \"$ARCHON_WORKFLOW_RESOURCE_CLASS\" = balanced";
+    let command = format!(
+        "test \"$CARGO_BUILD_JOBS\" = {project_build_jobs} && test \"$CARGO_INCREMENTAL\" = 1 && test \"$ARCHON_WORKFLOW_RESOURCE_CLASS\" = balanced"
+    );
     let contract: archon_workflow::task_set_contract::AcceptanceContract =
         serde_json::from_value(serde_json::json!({
             "schema_version": 1,
