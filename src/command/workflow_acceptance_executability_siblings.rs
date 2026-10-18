@@ -74,6 +74,7 @@ pub(crate) fn exact_path_exists(path: &Path) -> bool {
     current.exists()
 }
 
+#[cfg(test)]
 pub(super) fn copy_for_checks(
     copied_project: &Path,
     live_project: &Path,
@@ -81,11 +82,35 @@ pub(super) fn copy_for_checks(
     live_repository: &Path,
     contract: &AcceptanceContract,
 ) -> Result<Vec<super::SiblingRevision>, Unrun> {
+    copy_for_checks_with_check_map(
+        copied_project,
+        live_project,
+        copied_repository,
+        live_repository,
+        contract,
+    )
+    .map(|(siblings, _)| siblings)
+}
+
+pub(super) fn copy_for_checks_with_check_map(
+    copied_project: &Path,
+    live_project: &Path,
+    copied_repository: &Path,
+    live_repository: &Path,
+    contract: &AcceptanceContract,
+) -> Result<
+    (
+        Vec<super::SiblingRevision>,
+        std::collections::BTreeMap<String, Vec<super::SiblingRevision>>,
+    ),
+    Unrun,
+> {
     let project = archon_shell::paths::canonicalize(live_project)
         .map_err(|error| Unrun(format!("{}: {error}", live_project.display())))?;
     let repository = archon_shell::paths::canonicalize(live_repository)
         .map_err(|error| Unrun(format!("{}: {error}", live_repository.display())))?;
     let mut paths = Vec::new();
+    let mut paths_by_check = std::collections::BTreeMap::<String, Vec<PathBuf>>::new();
     for entry in contract.acceptance.iter().chain(&contract.supplementary) {
         if let AcceptanceCheck::Command { command, cwd } = &entry.check {
             let (live_root, copied_root) = match cwd {
@@ -103,42 +128,82 @@ pub(super) fn copy_for_checks(
                 let relative = relative_path(live_root, &sibling.alias).ok_or_else(|| {
                     Unrun("could not resolve sibling path from check root".into())
                 })?;
+                paths_by_check
+                    .entry(entry.id.clone())
+                    .or_default()
+                    .push(sibling.source.clone());
                 paths.push((copied_root.join(&relative), relative, sibling.source));
             }
         }
     }
     paths.sort();
     paths.dedup_by(|a, b| a.0 == b.0);
-    let mut evidence = Vec::new();
+    let mut evidence = std::collections::BTreeMap::new();
     for (destination, relative, source) in paths {
-        if destination.exists() {
-            continue;
-        }
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| Unrun(format!("{}: {error}", parent.display())))?;
-        }
-        let commit = if git_repository(&source) {
-            Some(clone_head(&source, &destination)?)
-        } else {
-            if source.is_file() {
-                if let Some(parent) = destination.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|error| Unrun(format!("{}: {error}", parent.display())))?;
-                }
-                std::fs::copy(&source, &destination)
-                    .map_err(|error| Unrun(format!("{}: {error}", destination.display())))?;
-            } else {
-                copy_directory(&source, &source, &destination)?;
-            }
+        let commit = if destination.exists() {
             None
+        } else {
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| Unrun(format!("{}: {error}", parent.display())))?;
+            }
+            if git_repository(&source) {
+                Some(clone_head(&source, &destination)?)
+            } else {
+                if source.is_file() {
+                    if let Some(parent) = destination.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|error| Unrun(format!("{}: {error}", parent.display())))?;
+                    }
+                    std::fs::copy(&source, &destination)
+                        .map_err(|error| Unrun(format!("{}: {error}", destination.display())))?;
+                } else {
+                    copy_directory(&source, &source, &destination)?;
+                }
+                None
+            }
         };
-        evidence.push(super::SiblingRevision {
-            path: relative,
-            commit,
-        });
+        evidence
+            .entry(source.clone())
+            .or_insert_with(|| super::SiblingRevision {
+                path: relative,
+                commit,
+            });
     }
-    Ok(evidence)
+    let revisions = evidence;
+    let per_check = paths_by_check
+        .into_iter()
+        .map(|(id, paths)| {
+            let siblings = paths
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .filter_map(|source| revisions.get(&source).cloned())
+                .collect();
+            (id, siblings)
+        })
+        .collect();
+    Ok((revisions.into_values().collect(), per_check))
+}
+
+pub(super) fn install_copy_layout(
+    layout: &mut super::CopyLayout,
+    copied_project: &Path,
+    live_project: &Path,
+    copied_repository: &Path,
+    live_repository: &Path,
+    contract: &AcceptanceContract,
+) -> Result<(), Unrun> {
+    let (siblings, check_siblings) = copy_for_checks_with_check_map(
+        copied_project,
+        live_project,
+        copied_repository,
+        live_repository,
+        contract,
+    )?;
+    layout.siblings = siblings;
+    layout.check_siblings = check_siblings;
+    Ok(())
 }
 
 fn relative_path(from: &Path, to: &Path) -> Option<PathBuf> {

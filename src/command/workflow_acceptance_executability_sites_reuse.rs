@@ -50,10 +50,100 @@ pub(super) fn memo_key(
     let entry = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .find(|entry| entry.id == id)?;
-    if let Some(key) = bounded_memo_key(probe, tree, data, entry) {
-        return Some(key);
+    let key = bounded_memo_key(probe, tree, data, entry)
+        .or_else(|| full_closure_memo_key(probe, tree, data, entry))?;
+    let siblings = sibling_input_state(probe, tree, entry)?;
+    Some(content_digest(
+        serde_json::json!([key, siblings]).to_string().as_bytes(),
+    ))
+}
+
+/// Sibling files sit outside the project data closure. Bind their copied
+/// revision to the verdict key so a retry reuses the same snapshot, while a
+/// changed sibling gets a fresh observation.
+fn sibling_input_state(
+    probe: &HostProbe,
+    tree: &Baseline,
+    entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
+) -> Option<Vec<(PathBuf, String)>> {
+    let AcceptanceCheck::Command { command, cwd } = &entry.check else {
+        return Some(Vec::new());
+    };
+    let root = match (&probe.site, cwd) {
+        (Site::Scratch(binding), archon_workflow::task_set_contract::TrustedCwd::ProjectRoot) => {
+            binding.policy.project.as_path()
+        }
+        (Site::Scratch(binding), archon_workflow::task_set_contract::TrustedCwd::RepoRoot) => {
+            binding.policy.repository.as_path()
+        }
+        (_, archon_workflow::task_set_contract::TrustedCwd::ProjectRoot) => probe.project.as_path(),
+        (_, archon_workflow::task_set_contract::TrustedCwd::RepoRoot) => tree.repository.as_path(),
+    };
+    archon_workflow::acceptance_sibling_paths::discover(root, std::slice::from_ref(command))
+        .into_iter()
+        .map(|sibling| {
+            let revision = if sibling.source.join(".git").exists() {
+                let output = archon_shell::spawn::command("git")
+                    .arg("-C")
+                    .arg(&sibling.source)
+                    .args(["rev-parse", "HEAD"])
+                    .output()
+                    .ok()?;
+                output
+                    .status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())?
+            } else {
+                sibling_content_digest(&sibling.source)?
+            };
+            Some((sibling.alias, revision))
+        })
+        .collect()
+}
+
+fn sibling_content_digest(root: &Path) -> Option<String> {
+    fn visit(root: &Path, path: &Path, bytes: &mut Vec<u8>) -> Option<()> {
+        let mut entries = std::fs::read_dir(path)
+            .ok()?
+            .map(|entry| entry.ok())
+            .collect::<Option<Vec<_>>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let name = entry.file_name();
+            if [".git", "target", "node_modules"]
+                .iter()
+                .any(|excluded| name == *excluded)
+            {
+                continue;
+            }
+            let child = entry.path();
+            let metadata = std::fs::symlink_metadata(&child).ok()?;
+            bytes.extend_from_slice(child.strip_prefix(root).ok()?.to_string_lossy().as_bytes());
+            bytes.push(0);
+            if metadata.is_dir() {
+                bytes.push(b'd');
+                visit(root, &child, bytes)?;
+            } else if metadata.is_file() {
+                bytes.push(b'f');
+                bytes.extend_from_slice(&std::fs::read(&child).ok()?);
+                bytes.push(0);
+            } else if metadata.file_type().is_symlink() {
+                bytes.push(b'l');
+                bytes.extend_from_slice(
+                    std::fs::read_link(&child)
+                        .ok()?
+                        .to_string_lossy()
+                        .as_bytes(),
+                );
+                bytes.push(0);
+            }
+        }
+        Some(())
     }
-    full_closure_memo_key(probe, tree, data, entry)
+
+    let mut bytes = Vec::new();
+    visit(root, root, &mut bytes)?;
+    Some(content_digest(&bytes))
 }
 
 /// Checks with a literal repository path can reuse across commits when that

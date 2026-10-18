@@ -31,10 +31,7 @@ pub(crate) use layout::{
     CheckEvidence, CopyLayout, CopyRun, SiblingRevision, deferred, warm_target,
 };
 
-/// The largest project copy a probe makes without a scratch policy naming
-/// what the checks read.
 pub(super) const PROJECT_COPY_BYTES: u64 = 16 << 30;
-/// Copies a probe leaves are swept once they are this old.
 const STALE_COPY_SECS: u64 = 24 * 60 * 60;
 const COPY_PREFIX: &str = "archon-probe-";
 /// The warm build directories, one per repository, under the copy parent.
@@ -73,6 +70,7 @@ impl HermeticCopy {
             repository: self.repository.clone(),
             project: self.project.clone(),
             siblings: Vec::new(),
+            check_siblings: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -424,7 +422,8 @@ pub(super) async fn run_in_copy(
     .await
     .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
     let mut layout = copy.layout();
-    layout.siblings = siblings::copy_for_checks(
+    siblings::install_copy_layout(
+        &mut layout,
         &copy.project,
         &probe.project,
         &copy.repository,

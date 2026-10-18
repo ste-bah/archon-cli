@@ -1,22 +1,8 @@
-//! A freeze probe that spans attempts (Issue 255).
-//!
-//! A freeze's probe used to keep its verdicts in process memory only, so a
-//! freeze the host killed at its wall clock lost every check it had run.
-//! Here a freeze probe given a staged [`FreezeResume`]:
-//!
-//! - stages each verdict to disk the moment its check finishes, under the
-//!   probe's existing memo key (the site's policy, the tree, the project
-//!   data's state, the check's id and exact content: `sites::memo_key`), so
-//!   a changed check, commit or data set never meets an old verdict; a
-//!   verdict is committed only after final observation validation;
-//! - bounds each check by its site's own no-progress window, watching its
-//!   output and process-tree activity; there is no total budget or share;
-//! - keeps the nonce of each input mutation it draws, so a retry builds the
-//!   same mutated check and meets its saved verdict too.
-//!
-//! Only verdicts are saved, never an operational result: a check that
-//! timed out or could not run -- or failed for its host, gave no verdict
-//! (Issue 328: `verdict::may_be_host_failure`) -- is run again by the next attempt.
+//! Persist freeze verdicts between attempts (Issue 255), keyed by the complete
+//! site, tree, project data, and check identity. Save each result as it finishes,
+//! promote only after observation validation, and rerun operational failures.
+//! The staged resume state also retains mutation nonces and bounds each check by
+//! its site's no-progress window.
 
 use std::path::PathBuf;
 
@@ -141,9 +127,17 @@ impl ResultStore {
         let path = path.with_extension("provisional");
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
         let provisional = path.with_extension("provisional");
+        let same_result = std::fs::read(&provisional)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|previous| {
+                previous["key"] == key
+                    && serde_json::to_value(&saved.result)
+                        .is_ok_and(|result| previous["result"] == result)
+            });
         let written = std::fs::create_dir_all(&self.dir).is_ok()
             && serde_json::to_vec(&saved).is_ok_and(|bytes| write_owner_only(&staging, &bytes))
-            && self.preserve_replaced(&provisional)
+            && (same_result || self.preserve_replaced(&provisional))
             && std::fs::rename(&staging, &provisional).is_ok();
         if !written {
             let _ = std::fs::remove_file(&staging);

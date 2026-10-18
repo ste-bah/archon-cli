@@ -11,6 +11,10 @@ pub struct CopyLayout {
     pub project: PathBuf,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub siblings: Vec<SiblingRevision>,
+    /// Sibling setup named by each check. The top-level list is the shared
+    /// materialized layout; reports use this per-check view.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub check_siblings: std::collections::BTreeMap<String, Vec<SiblingRevision>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

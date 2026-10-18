@@ -218,6 +218,29 @@ fn git_dash_c_names_a_setup_path_and_tar_dash_c_does_not() {
 
 #[cfg(unix)]
 #[test]
+fn a_mutated_check_failing_only_on_an_absent_sibling_has_no_verdict() {
+    let (_parent, tree) = tree();
+    let original = "cd ../archon-420-absent-root && test -f fixture.txt";
+    use crate::command::workflow_task_set::executability::mutation::{Markers, wrap};
+
+    let markers = Markers::new();
+    let wrapped = wrap(original, &["missing-input".into()], &[], &markers);
+    let result = real(&wrapped, &tree);
+    assert_ne!(result.exit_code, Some(0));
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(output.contains("archon-420-absent-root"), "{output}");
+    assert!(
+        no_verdict(&wrapped, &result, &host()).is_some(),
+        "the mutation's site setup failure must not prove the check can fail: {output}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_missing_path_inside_a_copied_sibling_is_a_behavioural_result() {
     let (_parent, cwd) = tree();
     let command =

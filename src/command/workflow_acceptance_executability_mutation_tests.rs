@@ -41,20 +41,20 @@ fn generated_or_overwritten_paths_are_not_mutation_inputs() {
 }
 
 #[test]
-fn discovered_sibling_paths_remain_relative_to_the_sibling_tree() {
+fn discovered_sibling_paths_are_not_mutation_candidates() {
     let parent = tempfile::tempdir().unwrap();
     let project = parent.path().join("project");
     let sibling = parent.path().join("sibling");
     std::fs::create_dir_all(&project).unwrap();
     std::fs::create_dir_all(&sibling).unwrap();
     std::fs::write(sibling.join("fixture.txt"), "ready\n").unwrap();
-    assert_eq!(
+    assert!(
         named_inputs(
             &entry("grep -q ready ../sibling/fixture.txt"),
             &project,
             &project
-        ),
-        ["../sibling/fixture.txt"]
+        )
+        .is_empty()
     );
 }
 
@@ -71,13 +71,13 @@ fn manifest_relative_paths_are_resolved_inside_the_sibling_root() {
         "#[test] fn fixture() {}\n",
     )
     .unwrap();
-    assert_eq!(
+    assert!(
         named_inputs(
             &entry("cargo test --manifest-path ../sibling/Cargo.toml --test tests/fixture.rs"),
             &project,
             &project
-        ),
-        ["../sibling/tests/fixture.rs"]
+        )
+        .is_empty()
     );
 }
 
@@ -182,15 +182,15 @@ fn later_commands_resolve_paths_from_the_effective_sibling_directory() {
     std::fs::create_dir_all(sibling.join("crates/x/tests")).unwrap();
     std::fs::write(sibling.join("Cargo.toml"), "[workspace]\n").unwrap();
     std::fs::write(sibling.join("crates/x/tests/y.rs"), "#[test] fn y() {}\n").unwrap();
-    assert_eq!(
+    assert!(
         named_inputs(
             &entry(
                 "cd ../archon-cli && cargo test --manifest-path Cargo.toml && python3 -c 'open(\"crates/x/tests/y.rs\")'"
             ),
             &project,
             &project,
-        ),
-        ["../archon-cli/crates/x/tests/y.rs"]
+        )
+        .is_empty()
     );
 }
 
@@ -390,10 +390,7 @@ fn env_and_git_directory_options_scope_candidate_resolution() {
         "env -C ../sibling grep x fixtures/data.txt",
         "git -C ../sibling grep x fixtures/data.txt",
     ] {
-        assert_eq!(
-            named_inputs(&entry(command), &project, &project),
-            ["../sibling/fixtures/data.txt"]
-        );
+        assert!(named_inputs(&entry(command), &project, &project).is_empty());
     }
 }
 
@@ -406,13 +403,13 @@ fn literal_path_variables_are_substituted_but_unknown_variables_stay_unresolved(
     std::fs::create_dir_all(sibling.join("fixtures")).unwrap();
     std::fs::write(sibling.join("Cargo.toml"), "[package]\nname='sibling'\n").unwrap();
     std::fs::write(sibling.join("fixtures/data.txt"), "x\n").unwrap();
-    assert_eq!(
+    assert!(
         named_inputs(
             &entry("ROOT=../sibling; grep x \"$ROOT/fixtures/data.txt\""),
             &project,
             &project
-        ),
-        ["../sibling/fixtures/data.txt"]
+        )
+        .is_empty()
     );
     std::fs::create_dir_all(project.join("UNKNOWN/fixtures")).unwrap();
     std::fs::write(project.join("UNKNOWN/fixtures/data.txt"), "x\n").unwrap();
@@ -435,15 +432,9 @@ fn interpreter_strings_and_heredocs_use_the_directory_after_cd() {
     std::fs::create_dir_all(sibling.join("fixtures")).unwrap();
     std::fs::write(sibling.join("fixtures/data.json"), "{}\n").unwrap();
     let python = entry("cd ../sibling && python3 -c 'open(\"fixtures/data.json\")'");
-    assert_eq!(
-        named_inputs(&python, &project, &project),
-        ["../sibling/fixtures/data.json"]
-    );
+    assert!(named_inputs(&python, &project, &project).is_empty());
     let heredoc = entry("cd ../sibling && python3 - <<'PY'\nopen('fixtures/data.json')\nPY\n");
-    assert_eq!(
-        named_inputs(&heredoc, &project, &project),
-        ["../sibling/fixtures/data.json"]
-    );
+    assert!(named_inputs(&heredoc, &project, &project).is_empty());
 }
 
 #[test]

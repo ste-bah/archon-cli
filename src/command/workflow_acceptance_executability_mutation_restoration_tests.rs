@@ -202,6 +202,83 @@ fn the_mutation_moves_named_inputs_aside_and_restores_them_whatever_the_check_tr
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_mutation_wrapper_keeps_sibling_inputs_visible_and_readable() {
+    let parent = tempfile::tempdir().unwrap();
+    let project = parent.path().join("project");
+    let sibling = parent.path().join("sibling");
+    std::fs::create_dir_all(project.join("data")).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    std::fs::write(project.join("data/input.txt"), "input").unwrap();
+    std::fs::write(sibling.join("fixture.txt"), "ready\n").unwrap();
+    let original = "grep -q ready ../sibling/fixture.txt";
+    assert_eq!(sh(&project, original).exit_code, Some(0));
+
+    let markers = Markers::new();
+    let wrapped = wrap(original, &["data/input.txt".into()], &[], &markers);
+    let found = archon_workflow::acceptance_sibling_paths::discover(&project, &[wrapped.clone()]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].source, sibling.canonicalize().unwrap());
+    let result = sh(&project, &wrapped);
+    assert_eq!(
+        result.exit_code,
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(markers.restored_all(&result));
+}
+
+#[cfg(unix)]
+#[test]
+fn sibling_only_input_is_never_moved_during_the_can_fail_run() {
+    let parent = tempfile::tempdir().unwrap();
+    let project = parent.path().join("project");
+    let sibling = parent.path().join("sibling");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    let fixture = sibling.join("fixture.txt");
+    std::fs::write(&fixture, "ready\n").unwrap();
+    std::fs::write(sibling.join("fixture.txt.archon-mutated-old"), "old\n").unwrap();
+    let before = std::fs::read_dir(&sibling)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name(), std::fs::read(entry.path()).unwrap())
+        })
+        .collect::<BTreeMap<_, _>>();
+    let original = "grep -q ready ../sibling/fixture.txt";
+    assert!(named_inputs(&criterion("AC-M-001", original, true), &project, &project).is_empty());
+
+    let markers = Markers::new();
+    let wrapped = wrap(original, &[], &[], &markers);
+    let discovered =
+        archon_workflow::acceptance_sibling_paths::discover(&project, &[wrapped.clone()]);
+    assert_eq!(
+        discovered.len(),
+        1,
+        "wrapper keeps sibling discovery visible"
+    );
+    let can_fail = sh(&project, &wrapped);
+    assert_eq!(
+        can_fail.exit_code,
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&can_fail.stderr)
+    );
+    assert!(markers.moved(&can_fail).is_empty());
+    let after = std::fs::read_dir(&sibling)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name(), std::fs::read(entry.path()).unwrap())
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(after, before, "the sibling copy stays byte-identical");
+    assert_eq!(std::fs::read_to_string(fixture).unwrap(), "ready\n");
+}
+
 #[test]
 fn a_recreated_input_read_and_deleted_by_the_check_is_marked_recreated() {
     let dir = tempfile::tempdir().unwrap();

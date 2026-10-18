@@ -31,6 +31,10 @@ fn run(dir: &Path, script: &str) -> i32 {
     child.wait().unwrap().code().unwrap()
 }
 
+fn interpreter_on_path(dir: &Path, interpreter: &str) -> bool {
+    run(dir, &format!("command -v {interpreter} >/dev/null 2>&1")) == 0
+}
+
 #[test]
 fn inline_python_literal_read_survives_unrelated_shell_metacharacters_and_fails_when_moved() {
     let project = tempfile::tempdir().unwrap();
@@ -104,6 +108,10 @@ fn zsh_inline_program_finds_the_literal_check_input_and_fails_when_moved() {
     let command = "zsh -c 'grep -q ready fixtures/input.txt && echo \"$HOME\"'";
     let names = named_inputs(&entry(command), project.path(), project.path());
     assert_eq!(names, ["fixtures/input.txt"]);
+    if !interpreter_on_path(project.path(), "zsh") {
+        eprintln!("skipping execution: zsh not on PATH");
+        return;
+    }
     assert_eq!(run(project.path(), command), 0);
     assert_ne!(
         run(project.path(), &wrap(command, &names, &[], &Markers::new())),
@@ -119,6 +127,10 @@ fn dash_inline_program_finds_the_literal_check_input_and_fails_when_moved() {
     let command = "dash -c 'grep -q ready fixtures/input.txt && echo \"$HOME\"'";
     let names = named_inputs(&entry(command), project.path(), project.path());
     assert_eq!(names, ["fixtures/input.txt"]);
+    if !interpreter_on_path(project.path(), "dash") {
+        eprintln!("skipping execution: dash not on PATH");
+        return;
+    }
     assert_eq!(run(project.path(), command), 0);
     assert_ne!(
         run(project.path(), &wrap(command, &names, &[], &Markers::new())),
@@ -134,6 +146,10 @@ fn perl_multiple_inline_programs_find_a_literal_read_with_shell_metacharacters()
     let command = "perl -e '1;' -e 'open(my $f, \"<\", \"fixtures/input.txt\") or die; print while <$f>; print \"$ENV{HOME}\"'";
     let names = named_inputs(&entry(command), project.path(), project.path());
     assert_eq!(names, ["fixtures/input.txt"]);
+    if !interpreter_on_path(project.path(), "perl") {
+        eprintln!("skipping execution: perl not on PATH");
+        return;
+    }
     assert_eq!(run(project.path(), command), 0);
     assert_ne!(
         run(project.path(), &wrap(command, &names, &[], &Markers::new())),

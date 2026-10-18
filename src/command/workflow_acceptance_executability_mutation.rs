@@ -1,7 +1,7 @@
 //! Generic input mutation (A4): prove that a check passing on the
 //! pre-implementation tree can fail. Move aside text-derived data paths,
-//! excluding command mechanics, manifests, generated outputs and paths
-//! outside the copied check tree (except discovered siblings). Run the check
+//! excluding command mechanics, manifests, generated outputs, siblings and
+//! paths outside the copied check tree. Run the check
 //! in a subshell, then restore moved paths in reverse order even when its
 //! `trap` or `exit` runs. Nonce markers prevent forged results. Each
 //! mutation uses a hermetic copy; a live-root guard prevents moving live data.
@@ -19,6 +19,7 @@ use super::executed_text;
 
 #[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
 mod wrapper_script;
+pub(super) use wrapper_script::wrap;
 
 #[path = "workflow_acceptance_executability_mutation_inline.rs"]
 mod inline;
@@ -284,6 +285,7 @@ pub(super) fn named_inputs(
                         &base,
                     )
                 });
+            let sibling = sibling || manifest_sibling.is_some();
             let manifest = path
                 .file_name()
                 .is_some_and(|name| MANIFESTS.contains(&name.to_string_lossy().as_ref()));
@@ -297,6 +299,9 @@ pub(super) fn named_inputs(
             });
             if manifest
                 || runs
+                // Sibling trees are copied setup. They remain discoverable
+                // by the wrapper, but must never be moved during proof.
+                || sibling
                 || !(shaped || exists || has_manifest_sibling)
                 || (mapped.starts_with("../") && !sibling && !has_manifest_sibling)
             {
@@ -399,61 +404,6 @@ impl Markers {
         result.exit_code == Some(GUARD_STATUS)
             && String::from_utf8_lossy(&result.stderr).contains(&self.guard())
     }
-}
-
-pub(super) fn wrap(
-    original: &str,
-    inputs: &[String],
-    live_roots: &[&Path],
-    markers: &Markers,
-) -> String {
-    let quote = |text: &str| format!("'{}'", text.replace('\'', r"'\''"));
-    let tag = markers.tag();
-    let mut script = String::new();
-    script.push_str(wrapper_script::watch_prologue());
-    for root in live_roots {
-        let root = quote(&root.to_string_lossy());
-        script.push_str(&format!(
-            "case \"$(pwd -P)/\" in {root}/*) printf '%s\\n' {} >&2; exit {GUARD_STATUS};; esac\n",
-            quote(&markers.guard())
-        ));
-    }
-    let sweep =
-        "find . \\( -name .git -o -name target \\) -prune -o -name '*.archon-mutated-*' -print";
-    script.push_str(&format!(
-        "{sweep} | while IFS= read -r __archon_left; do __archon_base=\"${{__archon_left%.archon-mutated-*}}\"; if [ -e \"$__archon_base\" ] || [ -L \"$__archon_base\" ]; then rm -rf -- \"$__archon_left\"; else mv -- \"$__archon_left\" \"$__archon_base\"; fi; done\n"
-    ));
-    script.push_str(&wrapper_script::move_inputs(
-        inputs,
-        &tag,
-        &markers.moved_prefix(),
-    ));
-    script.push_str(&wrapper_script::snapshot_parents(inputs, &tag));
-    script.push_str(&wrapper_script::wait_for_timestamp_tick(inputs));
-    script.push_str(&format!("(\n{original}\n)\n__archon_status=$?\n"));
-    script.push_str(&wrapper_script::report_recreated(
-        inputs,
-        &markers.recreated_prefix(),
-    ));
-    for input in inputs {
-        let path = quote(input);
-        script.push_str(&format!(
-            "if [ -e {path} ] || [ -L {path} ]; then printf '%s%s\\n' {} {path} >&2; fi\n",
-            quote(&markers.generated_prefix()),
-        ));
-    }
-    for input in inputs.iter().rev() {
-        let path = quote(input);
-        script.push_str(&format!(
-            "if [ -e {path}.{tag} ] || [ -L {path}.{tag} ]; then rm -rf -- {path}; mv -- {path}.{tag} {path}; fi\n"
-        ));
-    }
-    script.push_str(&format!(
-        "if [ -z \"$({sweep} | grep -F -- {} | head -n 1)\" ]; then printf '%s\\n' {}; fi\nexit $__archon_status\n",
-        quote(&tag),
-        quote(&markers.restored()),
-    ));
-    script
 }
 
 /// `contract` with each of `inputs`' entries' executed text wrapped by

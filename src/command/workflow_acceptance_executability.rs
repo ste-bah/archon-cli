@@ -371,7 +371,7 @@ fn contract_digest(contract: &AcceptanceContract) -> Result<String, String> {
 mod baseline_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_probe_tests.rs"]
-mod probe_tests;
+pub(crate) mod probe_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_probe_tests_b.rs"]
 mod probe_tests_b;

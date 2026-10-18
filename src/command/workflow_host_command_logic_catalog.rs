@@ -70,7 +70,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // are included in mutation inputs, changing can-fail proof verdicts.
         // 32: every program following a recognized inline-program flag is
         // scanned, changing can-fail proof verdicts for repeated flags.
-        version: 32,
+        // 33: mutation wrappers preserve named sibling setup paths, so their
+        // copy layout matches baseline and absent-sibling failures give no verdict.
+        version: 35,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -99,7 +101,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; acceptance-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into check execution; these limits affect execution environment and parallelism, not verdict rules.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "4f64013f7ea4c5650a08ad50009a9562334f19958da9b9ea61210db970ba4b3b",
+        // 34: #420 keeps same-spelled siblings from different roots distinct,
+        // so a false Scratch revision conflict no longer voids a check.
+        // 35: sibling revisions are part of verdict reuse identity; changed
+        // sibling inputs cannot reuse an earlier check result.
+        sources_digest: "52139b6aa9b16a9ccbdaee70b6fb1bb839d4b648ddddad8807101f3bea7b4627",
         build_bound: false,
     },
     CapabilityLogic {
@@ -151,7 +157,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; skeleton-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into scratch checks; skeleton freeze runs no checks, so its verdict is unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "4f64013f7ea4c5650a08ad50009a9562334f19958da9b9ea61210db970ba4b3b",
+        // #420 re-pin only: sibling input handling is outside the frozen skeleton verdict.
+        // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
+        sources_digest: "52139b6aa9b16a9ccbdaee70b6fb1bb839d4b648ddddad8807101f3bea7b4627",
         build_bound: false,
     },
     CapabilityLogic {
@@ -346,7 +354,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into frozen check execution; limits change execution environment and parallelism, not verification verdict rules.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
         // #457 re-pin only: freeze-acceptance logic version 32 changes the can-fail proof, not frozen-chain verification.
-        sources_digest: "3f01ebf5654cdabc0638627ef13b56c5ddb61ab48b4117b60fb418caaaa6a98a",
+        // #420 re-pin only: per-check sibling report evidence does not change frozen acceptance verdicts.
+        // #420 re-pin only: frozen acceptance checks run under the build-bound verifier.
+        sources_digest: "89f208d3e0251ca8f99bd82cf28be93e97685a203cd5f93f8268aeea62843473",
         build_bound: true,
     },
     CapabilityLogic {
@@ -396,7 +406,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into shared observation code; skeleton verification runs no checks, so its verdict is unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
         // #457 re-pin only: freeze-acceptance logic version 32 does not affect frozen skeleton verification.
-        sources_digest: "3f01ebf5654cdabc0638627ef13b56c5ddb61ab48b4117b60fb418caaaa6a98a",
+        // #420 re-pin only: sibling report evidence is outside frozen skeleton verification.
+        // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
+        sources_digest: "89f208d3e0251ca8f99bd82cf28be93e97685a203cd5f93f8268aeea62843473",
         build_bound: true,
     },
 ];

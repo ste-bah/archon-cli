@@ -31,6 +31,34 @@ pub(super) struct SiblingResult {
     pub(super) commit: Option<String>,
 }
 
+fn sibling_results(
+    siblings: impl IntoIterator<Item = (String, Option<String>)>,
+) -> Vec<SiblingResult> {
+    siblings
+        .into_iter()
+        .map(|(path, commit)| SiblingResult { path, commit })
+        .collect()
+}
+
+pub(crate) fn reported_siblings(
+    id: &str,
+    item: &crate::command::workflow_task_set::executability::CheckEvidence,
+) -> Vec<SiblingResult> {
+    sibling_results(item.copy_layout.iter().flat_map(|layout| {
+        layout
+            .check_siblings
+            .get(id)
+            .into_iter()
+            .flatten()
+            .map(|sibling| {
+                (
+                    sibling.path.to_string_lossy().replace('\\', "/"),
+                    sibling.commit.clone(),
+                )
+            })
+    }))
+}
+
 pub(super) struct ReverifyChecks {
     pub(super) checks: Vec<CheckResult>,
     pub(super) task_subjects: Vec<String>,
@@ -306,20 +334,7 @@ pub(super) async fn reverify_checks(
             .as_ref()
             .is_some_and(|classification| !classification.passed);
         let really_ran = item.operational_error.is_none() && classification.is_some();
-        let siblings = item
-            .copy_layout
-            .as_ref()
-            .map(|layout| {
-                layout
-                    .siblings
-                    .iter()
-                    .map(|sibling| SiblingResult {
-                        path: sibling.path.to_string_lossy().replace('\\', "/"),
-                        commit: sibling.commit.clone(),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let siblings = reported_siblings(id, &item);
         if !really_ran {
             operational_failure = true;
         }

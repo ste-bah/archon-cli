@@ -35,7 +35,7 @@ const EVIDENCE_BYTES: usize = 800;
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
     let at = Context::new(super::sites::listing_environment(probe), contract);
-    match scratch_copy_tree(probe, contract) {
+    match scratch_copy_tree(probe, contract, None) {
         Some((depth, roots)) => at.within(depth, &roots),
         None => at,
     }
@@ -51,7 +51,7 @@ pub(super) fn baseline_context(
     let at = Context::new(super::sites::listing_environment(probe), contract);
     let tree = match probe.site {
         Site::Direct | Site::Hermetic => layout.and_then(|layout| layout.site_tree()),
-        Site::Scratch(_) => scratch_copy_tree(probe, contract),
+        Site::Scratch(_) => scratch_copy_tree(probe, contract, layout),
         Site::Unavailable(_) => None,
     };
     match tree {
@@ -70,6 +70,7 @@ pub(super) fn baseline_context(
 fn scratch_copy_tree(
     probe: &HostProbe,
     contract: &AcceptanceContract,
+    layout: Option<&super::hermetic::CopyLayout>,
 ) -> Option<(usize, Vec<String>)> {
     const SCRATCH: &[&str] = &[
         "repo",
@@ -83,10 +84,31 @@ fn scratch_copy_tree(
     match probe.site {
         Site::Scratch(_) => {
             let mut roots: Vec<String> = SCRATCH.iter().map(|root| (*root).to_string()).collect();
-            roots.extend(hermetic::siblings::copied_root_names(
-                &probe.project,
-                &probe.repository,
-                contract,
+            roots.extend(layout.map_or_else(
+                || {
+                    hermetic::siblings::copied_root_names(
+                        &probe.project,
+                        &probe.repository,
+                        contract,
+                    )
+                },
+                |layout| {
+                    layout
+                        .siblings
+                        .iter()
+                        .filter_map(|sibling| {
+                            sibling
+                                .path
+                                .components()
+                                .find_map(|component| match component {
+                                    std::path::Component::Normal(name) => {
+                                        Some(name.to_string_lossy().into_owned())
+                                    }
+                                    _ => None,
+                                })
+                        })
+                        .collect()
+                },
             ));
             Some((1, roots))
         }

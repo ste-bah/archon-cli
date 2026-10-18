@@ -469,3 +469,6 @@ fn relative_and_symlinked_task_roots_exclude_the_same_contract() {
 
 #[path = "workflow_acceptance_executability_sibling_tests.rs"]
 mod sibling_tests;
+
+#[path = "workflow_acceptance_executability_sibling_identity_tests.rs"]
+mod sibling_identity_tests;

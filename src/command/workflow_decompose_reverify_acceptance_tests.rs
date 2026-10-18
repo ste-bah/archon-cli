@@ -41,6 +41,77 @@ fn contract() -> AcceptanceContract {
     }
 }
 
+#[tokio::test]
+async fn reverify_report_sibling_paths_come_from_each_real_probe_check() {
+    use crate::command::workflow_task_set::executability::probe_tests::trees;
+    use archon_workflow::task_set_contract::TrustedCwd;
+
+    let trees = trees(&[
+        (
+            "AC-X-001",
+            "grep -q ready ../sibling-a/fixture.txt",
+            TrustedCwd::RepoRoot,
+        ),
+        (
+            "AC-X-002",
+            "grep -q ready ../sibling-b/fixture.txt",
+            TrustedCwd::RepoRoot,
+        ),
+        (
+            "AC-X-003",
+            "grep -q ready src/state.txt",
+            TrustedCwd::RepoRoot,
+        ),
+    ]);
+    for name in ["sibling-a", "sibling-b"] {
+        let root = trees.outside.path().join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("fixture.txt"), "ready\n").unwrap();
+    }
+    let copies = tempfile::tempdir().unwrap();
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let probe =
+        crate::command::workflow_task_set::executability::HostProbe::for_reverify_with_limits(
+            trees.set.project.path(),
+            &trees.set.tasks,
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+            &resume,
+        )
+        .with_host_environment(crate::test_environment::probe_host())
+        .with_copy_parent(copies.path().to_path_buf())
+        .without_process_memo();
+    let (evidence, _, _, _) = probe
+        .run_reverify_copy(&trees.contract(), &trees.ids())
+        .await
+        .expect("real two-root reverify probe");
+
+    let reported = |id: &str| {
+        let item = evidence
+            .iter()
+            .find(|item| item.acceptance_id == id)
+            .unwrap();
+        CheckResult {
+            check_id: id.into(),
+            verdict: "accepted".into(),
+            really_ran: true,
+            setup_failure: false,
+            real_failure: false,
+            sibling_paths: super::reported_siblings(id, item),
+            findings: Vec::new(),
+            not_run_reason: None,
+            regression_guard: None,
+        }
+    };
+    let check_a = reported("AC-X-001");
+    let check_b = reported("AC-X-002");
+    let check_c = reported("AC-X-003");
+    assert_eq!(check_a.sibling_paths.len(), 1);
+    assert_eq!(check_a.sibling_paths[0].path, "../sibling-a");
+    assert_eq!(check_b.sibling_paths.len(), 1);
+    assert_eq!(check_b.sibling_paths[0].path, "../sibling-b");
+    assert!(check_c.sibling_paths.is_empty());
+}
+
 #[test]
 fn a_failed_check_without_an_implementing_task_keeps_the_check_as_subject() {
     // EXPECTED BEFORE RUN: no task implements this check id or covered

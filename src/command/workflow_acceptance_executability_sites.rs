@@ -9,6 +9,14 @@ use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_
 use super::hermetic::{CheckEvidence, CopyLayout, Unrun, data_digest, data_digest_scoped};
 use super::*;
 
+#[path = "workflow_acceptance_executability_sites_observe.rs"]
+mod observe_scratch;
+use observe_scratch::observe;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_sites_scratch_tests.rs"]
+mod scratch_tests;
+
 /// A freeze probe's site and the repository it proves checks against: the
 /// hermetic scratch site when a policy is configured (warm from a
 /// per-repository cache), else the probe's own copy. A configured policy
@@ -243,6 +251,13 @@ pub(super) async fn run_at(
         if cold {
             binding.policy.build_cache = None;
         }
+        let layout = CopyLayout {
+            root: binding.policy.scratch_parent.clone(),
+            repository: binding.policy.repository.clone(),
+            project: binding.policy.project.clone(),
+            siblings: Vec::new(),
+            check_siblings: BTreeMap::new(),
+        };
         let cancel = CancelOnDrop(Arc::new(AtomicBool::new(false)));
         tokio::spawn(observe(
             binding,
@@ -256,8 +271,13 @@ pub(super) async fn run_at(
         .await
         .map_err(|error| Unrun(format!("scratch probe task failed: {error}")))
         .and_then(|observed| observed.map_err(|error| Unrun(format!("{error:#}"))))
-        .map(|results| SiteRun {
-            results: CheckEvidence::from_results(results, None),
+        .map(|(results, sibling_revisions, check_siblings)| {
+            let mut layout = layout;
+            layout.siblings = sibling_revisions;
+            layout.check_siblings = check_siblings;
+            SiteRun {
+                results: CheckEvidence::from_results(results, Some(layout)),
+            }
         })
     } else {
         hermetic::run_in_copy(
@@ -277,6 +297,13 @@ pub(super) async fn run_at(
     };
     // A voided run's verdicts were told early, but are no evidence.
     let ran = ran.inspect_err(|_| probe.unsave(store.as_ref(), &written))?;
+    if let Some(store) = store.as_ref() {
+        for evidence in &ran.results {
+            if let Some(key) = pending_keys.get(&evidence.acceptance_id) {
+                store.save_evidence(key, &evidence.result, evidence.copy_layout.clone());
+            }
+        }
+    }
     probe.promote(store.as_ref(), &written);
     probe.defer(
         (ran.results.iter())
@@ -320,59 +347,6 @@ pub(super) fn resolves(repository: &Path, commit: &str) -> bool {
             .args(["cat-file", "-e", &format!("{commit}^{{commit}}")])
             .output()
             .is_ok_and(|output| output.status.success())
-}
-
-/// The scratch observation the acceptance stage's guardian performs, run
-/// in-process over the unpublished candidate contract, at the target
-/// repository's HEAD, under the same repository lease. Its own task, so a
-/// synchronous copy phase never blocks the caller's run-control race; its
-/// evidence is removed afterwards (a crash reaches the author as a finding).
-pub(super) async fn observe(
-    binding: NativeBinding,
-    commit: Option<String>,
-    contract: AcceptanceContract,
-    digest: String,
-    refs: Vec<FrozenCommandRef>,
-    cancel: Arc<AtomicBool>,
-    hooks: ObserveHooks,
-) -> anyhow::Result<Vec<CheckResult>> {
-    let identity = archon_shell::paths::canonicalize(&binding.policy.repository)?;
-    let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
-        &std::env::temp_dir().join("archon-native-observer-locks"),
-        &identity.to_string_lossy(),
-    )?;
-    let head = match commit {
-        Some(commit) => commit,
-        None => git_head(&binding.policy.repository)
-            .ok_or_else(|| anyhow::anyhow!("cannot read the repository HEAD"))?,
-    };
-    let evidence = binding
-        .policy
-        .scratch_parent
-        .join(format!("acceptance-probe-{}", uuid::Uuid::new_v4()));
-    let observed = observe_commands_hooked(
-        &binding.policy,
-        &head,
-        &contract,
-        &digest,
-        &refs,
-        &evidence,
-        cancel,
-        &hooks,
-    )
-    .await;
-    let _ = std::fs::remove_dir_all(&evidence);
-    let observed = observed?;
-    if !observed.operational_errors.is_empty()
-        || !observed.teardown_verified
-        || !observed.live_roots_unchanged
-    {
-        anyhow::bail!(
-            "scratch observation void: {}",
-            observed.operational_errors.join("; ")
-        );
-    }
-    Ok(observed.checks)
 }
 
 pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {

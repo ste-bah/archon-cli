@@ -337,7 +337,11 @@ fn a_copy_error_drops_the_entire_temporary_parent() {
         &contract,
     )
     .unwrap_err();
-    assert!(error.0.contains("git rev-parse HEAD"));
+    assert!(
+        error.0.contains("git rev-parse HEAD") || error.0.contains("git clone"),
+        "{}",
+        error.0
+    );
     drop(copy);
     println!(
         "EVIDENCE #420 cleanup-on-error BEFORE: temporary parent exists; AFTER: removed after sibling copy error"
@@ -435,6 +439,7 @@ fn empty_sibling_layout_serializes_like_the_original_layout_shape() {
         repository: PathBuf::from("copy/repository"),
         project: PathBuf::from("copy/project"),
         siblings: Vec::new(),
+        check_siblings: std::collections::BTreeMap::new(),
     };
     let encoded = serde_json::to_string(&layout).unwrap();
     assert_eq!(
