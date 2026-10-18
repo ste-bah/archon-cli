@@ -1,6 +1,55 @@
 //! Refusal and publication edge cases for reverify.
 use super::workflow_decompose_reverify_tests::{archon_binary, fixture, invoke_reverify};
 use archon_workflow::RunStatus;
+use std::path::Path;
+
+pub(super) fn assert_binary_identity(binary: &Path) {
+    let output = std::process::Command::new(binary)
+        .arg("--build-fingerprint")
+        .output()
+        .unwrap_or_else(|error| panic!("could not inspect archon build identity at {}: {error}; run `cargo build --bin archon`", binary.display()));
+    assert!(
+        output.status.success(),
+        "could not inspect archon build identity at {}; run `cargo build --bin archon`",
+        binary.display()
+    );
+    let actual = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    assert_build_identity(env!("ARCHON_BUILD_FINGERPRINT"), &actual);
+}
+
+fn assert_build_identity(expected: &str, actual: &str) {
+    assert_eq!(
+        actual, expected,
+        "archon executable has a different build identity; run `cargo build --bin archon`"
+    );
+}
+
+#[test]
+fn archon_binary_rejects_a_different_build_identity() {
+    let result = std::panic::catch_unwind(|| assert_build_identity("current-build", "old-build"));
+    assert!(result.is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn archon_binary_check_rejects_a_mismatched_executable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let script = temp.path().join("wrong-archon");
+    std::fs::write(&script, "#!/bin/sh\nprintf 'different-fingerprint\\n'\n").unwrap();
+    let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&script, permissions).unwrap();
+
+    let result = std::panic::catch_unwind(|| assert_binary_identity(&script));
+    assert!(result.is_err(), "mismatched executable should be rejected");
+}
+
+#[test]
+fn current_archon_binary_passes_the_identity_check() {
+    assert_binary_identity(&archon_binary());
+}
 
 #[tokio::test]
 async fn refusals_for_wrong_kind_or_incomplete_run_do_not_write_results() {

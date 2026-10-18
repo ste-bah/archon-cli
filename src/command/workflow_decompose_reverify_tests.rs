@@ -274,9 +274,10 @@ pub(super) fn archon_binary() -> std::path::PathBuf {
         });
     assert!(
         binary.is_file(),
-        "built archon executable missing: {}",
+        "built archon executable missing: {}; run `cargo build --bin archon`",
         binary.display()
     );
+    super::workflow_decompose_reverify_edge_tests::assert_binary_identity(&binary);
     binary
 }
 

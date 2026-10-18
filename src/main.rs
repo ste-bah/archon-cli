@@ -38,6 +38,11 @@ use clap::Parser;
 use cli_args::Cli;
 
 fn main() -> Result<()> {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if is_build_fingerprint_request(&args) {
+        println!("{}", env!("ARCHON_BUILD_FINGERPRINT"));
+        return Ok(());
+    }
     // SAFETY: no runtime or application threads exist yet. A limit that
     // cannot be lowered is reported once logging runs; it never stops startup.
     #[cfg(unix)]
@@ -48,6 +53,27 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?
         .block_on(main_outcome())
+}
+
+fn is_build_fingerprint_request(args: &[std::ffi::OsString]) -> bool {
+    args.len() == 1 && args[0] == "--build-fingerprint"
+}
+
+#[cfg(test)]
+mod build_fingerprint_argument_tests {
+    use super::is_build_fingerprint_request;
+    use std::ffi::OsString;
+
+    #[test]
+    fn fingerprint_shortcut_requires_the_only_argument() {
+        assert!(is_build_fingerprint_request(&[OsString::from(
+            "--build-fingerprint"
+        )]));
+        assert!(!is_build_fingerprint_request(&[
+            OsString::from("--build-fingerprint"),
+            OsString::from("--init"),
+        ]));
+    }
 }
 
 async fn main_outcome() -> Result<()> {
