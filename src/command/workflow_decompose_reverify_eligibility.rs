@@ -12,7 +12,7 @@ pub(crate) fn set_before_recovery_lock_hook(hook: impl FnOnce() + 'static) {
     BEFORE_RECOVERY_LOCK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
 }
 
-pub(super) fn check_run_status(
+pub(crate) fn check_run_status(
     store: &WorkflowStore,
     run_dir: &Path,
     run_id: &str,
@@ -159,13 +159,7 @@ pub(crate) fn paused_reverify_is_unconsumed(
                 ledger.display()
             ));
         }
-        let consumed = run_dir.join("decomposition/reverify/consumed.jsonl");
-        if consumed.exists()
-            && std::fs::read_to_string(&consumed)?
-                .lines()
-                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-                .any(|row| row["report_id"].as_str() == Some(latest.id.as_str()))
-        {
+        if crate::command::workflow_decompose_remediation::is_consumed(run_dir, &latest.id)? {
             return Err(anyhow!(
                 "reverify report {} remediation ledger is already consumed",
                 latest.id

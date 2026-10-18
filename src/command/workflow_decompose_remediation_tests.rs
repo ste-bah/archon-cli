@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "workflow_decompose_remediation_read_tests.rs"]
+mod read_tests;
+
 #[tokio::test]
 async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_finding_seed() {
     let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
@@ -200,64 +203,6 @@ fn force_subjects_only_overrides_the_ledger_subjects_and_consumption_is_append_o
 }
 
 #[test]
-fn read_selects_only_the_ledger_named_by_the_latest_report() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().join("decomposition/reverify");
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(
-        root.join("remediation-reverify-old-report.json"),
-        serde_json::json!({
-            "schema_version": 1, "report_id": "reverify-old-report", "subjects": ["TASK-OLD"]
-        })
-        .to_string(),
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("remediation-reverify-new-report.json"),
-        serde_json::json!({
-            "schema_version": 1, "report_id": "reverify-new-report", "subjects": ["TASK-NEW"]
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let ledger = read(temp.path(), "reverify-new-report").unwrap().unwrap();
-    assert_eq!(ledger.report_id, "reverify-new-report");
-    assert_eq!(ledger.subjects, vec!["TASK-NEW"]);
-}
-
-#[test]
-fn read_deduplicates_subjects_without_changing_first_seen_order() {
-    let temp = tempfile::tempdir().unwrap();
-    let run_dir = temp.path();
-    let directory = run_dir.join("decomposition/reverify");
-    std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(
-        directory.join("remediation-report.json"),
-        serde_json::json!({
-            "schema_version": 1,
-            "report_id": "report",
-            "subjects": ["TASK-X-010", "TASK-X-020", "TASK-X-010", "TASK-X-010"]
-        })
-        .to_string(),
-    )
-    .unwrap();
-
-    let ledger = read(run_dir, "report").unwrap().unwrap();
-
-    assert_eq!(ledger.subjects, vec!["TASK-X-010", "TASK-X-020"]);
-}
-
-#[test]
-fn generated_ledger_subjects_keep_first_seen_order() {
-    let subjects = deduplicate_subjects(
-        ["TASK-X-010", "TASK-X-020", "TASK-X-010", "TASK-X-010"]
-            .into_iter()
-            .map(str::to_owned),
-    );
-    assert_eq!(subjects, vec!["TASK-X-010", "TASK-X-020"]);
-}
-
-#[test]
 fn paused_finding_report_prepares_resume_seed_from_the_persisted_ledger() {
     // EXPECTED BEFORE RUN: a paused run with a persisted needs_remediation
     // report and ledger prepares a phase seed and tolerates a torn event tail.
@@ -373,6 +318,13 @@ fn paused_finding_report_prepares_resume_seed_from_the_persisted_ledger() {
         .to_string(),
     )
     .unwrap();
+    std::fs::write(
+        tasks
+            .path()
+            .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        r#"{"schema_version":1,"prd":{"path":"PRD.md","digest":"digest"},"gap_policy":{"permitted_acceptance_ids":[],"forbidden_phrases":[],"required_fields":[]},"acceptance":[],"supplementary":[]}"#,
+    )
+    .unwrap();
     let runtime = archon_workflow::FixedRunIdentityV1 {
         template_version: "fixed-decomposition-v1".into(),
         starting_binary_revision: "revision".into(),
@@ -406,6 +358,64 @@ fn paused_finding_report_prepares_resume_seed_from_the_persisted_ledger() {
         serde_json::json!(["TASK-A-001"])
     );
     assert!(arguments["phaseSeed"].is_object());
+
+    std::fs::write(
+        store
+            .run_dir(&run.id)
+            .join("decomposition/reverify/remediation-reverify-report.json"),
+        serde_json::json!({"report_id":"reverify-report", "subjects":["UNKNOWN-X"]}).to_string(),
+    )
+    .unwrap();
+    let mut consumed_arguments = serde_json::json!({
+        "phaseSeed": null,
+        "forceBodySubjects": ["stale"],
+        "frozenChain": {"acceptance":false,"skeleton":false,"bodies":[]}
+    });
+    let error = prepare(
+        &store,
+        &run.id,
+        &store.run_dir(&run.id),
+        &mut consumed_arguments,
+        &runtime,
+        &criteria,
+        &requirement_texts,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("UNKNOWN-X"), "{error}");
+    assert!(
+        error.contains("remediation-reverify-report.json"),
+        "{error}"
+    );
+
+    let ledger = Ledger {
+        report_id: "reverify-report".into(),
+        subjects: vec!["UNKNOWN-X".into()],
+    };
+    append_consumed(store.run_dir(&run.id).as_path(), &ledger).unwrap();
+    assert!(
+        prepare(
+            &store,
+            &run.id,
+            &store.run_dir(&run.id),
+            &mut consumed_arguments,
+            &runtime,
+            &criteria,
+            &requirement_texts,
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert_eq!(
+        consumed_arguments["forceBodySubjects"],
+        serde_json::json!([])
+    );
+    assert!(consumed_arguments["phaseSeed"].is_null());
+
+    let mut resumed = store.load_state(&run.id).unwrap();
+    resumed.status = archon_workflow::RunStatus::Completed;
+    store.save_state(&resumed).unwrap();
+    assert_eq!(resumed.status, archon_workflow::RunStatus::Completed);
 }
 
 #[test]

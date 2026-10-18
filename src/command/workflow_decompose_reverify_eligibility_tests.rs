@@ -3,6 +3,9 @@ use super::*;
 #[path = "workflow_decompose_reverify_abandoned_tests.rs"]
 mod abandoned_tests;
 
+#[path = "workflow_decompose_reverify_eligibility_consumed_tests.rs"]
+mod consumed_tests;
+
 #[test]
 fn reverify_error_for_running_run_names_status_and_next_action() {
     let fixture = fixture();
