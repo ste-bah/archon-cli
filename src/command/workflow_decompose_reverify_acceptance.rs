@@ -23,6 +23,15 @@ pub(super) struct CheckResult {
     pub(super) not_run_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) regression_guard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) remediation_route: Option<RemediationRoute>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RemediationRoute {
+    Check,
+    Task,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -145,6 +154,7 @@ fn not_run_checks(plan: &[(String, bool, Option<String>)]) -> Vec<CheckResult> {
             findings: Vec::new(),
             not_run_reason: reason.clone(),
             regression_guard: None,
+            remediation_route: None,
         })
         .collect()
 }
@@ -159,11 +169,14 @@ fn apply_passability_result(
         check.setup_failure = true;
         check.verdict = "needs_remediation".into();
         check.findings.push(finding);
+        check.remediation_route = Some(RemediationRoute::Check);
     } else if failed {
         check.real_failure = true;
+        check.remediation_route = Some(RemediationRoute::Task);
     } else if let Some(finding) = baseline_finding {
         check.verdict = "needs_remediation".into();
         check.findings.push(finding);
+        check.remediation_route = Some(RemediationRoute::Check);
     }
 }
 
@@ -189,7 +202,7 @@ fn check_subjects(
     subjects
 }
 
-fn remediation_task_subjects(
+fn remediation_subjects(
     checks: &[CheckResult],
     contract: &AcceptanceContract,
     skeleton: &archon_workflow::task_skeleton::TaskSkeleton,
@@ -205,7 +218,17 @@ fn remediation_task_subjects(
             .chain(&contract.supplementary)
             .find(|entry| entry.id == check.check_id)
         {
-            subjects.extend(check_subjects(entry, skeleton));
+            let route = check.remediation_route.unwrap_or_else(|| {
+                if check.setup_failure || (!check.real_failure && !check.findings.is_empty()) {
+                    RemediationRoute::Check
+                } else {
+                    RemediationRoute::Task
+                }
+            });
+            match route {
+                RemediationRoute::Check => subjects.push(check.check_id.clone()),
+                RemediationRoute::Task => subjects.extend(check_subjects(entry, skeleton)),
+            }
         }
     }
     subjects
@@ -321,6 +344,7 @@ pub(super) async fn reverify_checks(
                 ],
                 not_run_reason: None,
                 regression_guard: None,
+                remediation_route: None,
             });
             progress.finish(
                 *check_indexes.get(id.as_str()).unwrap_or(&0),
@@ -356,6 +380,7 @@ pub(super) async fn reverify_checks(
             findings: Vec::new(),
             not_run_reason: None,
             regression_guard: regression_guards.get(id).cloned(),
+            remediation_route: None,
         });
         let outcome = if let Some(basis) = regression_guards.get(id) {
             format!("passed; regression guard: {basis}")
@@ -426,7 +451,7 @@ pub(super) async fn reverify_checks(
             baseline_findings.remove(&check.check_id),
         );
     }
-    let mut task_subjects = remediation_task_subjects(&results, &contract, &skeleton);
+    let mut task_subjects = remediation_subjects(&results, &contract, &skeleton);
     task_subjects.sort();
     task_subjects.dedup();
     let accepted = !operational_failure && results.iter().all(|check| check.verdict == "accepted");

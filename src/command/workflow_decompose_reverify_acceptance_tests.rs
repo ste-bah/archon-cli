@@ -4,6 +4,9 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::{FrozenTask, TaskSkeleton};
 
+#[path = "workflow_decompose_reverify_routing_tests.rs"]
+mod remediation_routing;
+
 fn entry(id: &str, covers: &[&str], verdict: JudgeDecision) -> AcceptanceCriterion {
     AcceptanceCriterion {
         id: id.into(),
@@ -41,10 +44,11 @@ fn contract() -> AcceptanceContract {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn reverify_report_sibling_paths_come_from_each_real_probe_check() {
+    #[cfg(unix)]
     use crate::command::workflow_task_set::executability::probe_tests::trees;
-    use archon_workflow::task_set_contract::TrustedCwd;
 
     let trees = trees(&[
         (
@@ -100,6 +104,7 @@ async fn reverify_report_sibling_paths_come_from_each_real_probe_check() {
             findings: Vec::new(),
             not_run_reason: None,
             regression_guard: None,
+            remediation_route: None,
         }
     };
     let check_a = reported("AC-X-001");
@@ -136,7 +141,7 @@ fn a_failed_check_without_an_implementing_task_keeps_the_check_as_subject() {
 fn only_checks_needing_remediation_produce_task_subjects() {
     // EXPECTED BEFORE RUN: an accepted check with a real failure and a
     // not_run check produce no remediation subjects; a setup failure that is
-    // needs_remediation produces its owning task.
+    // needs_remediation produces a check subject for check setup defects.
     let skeleton = TaskSkeleton {
         schema_version: 1,
         acceptance_digest: "digest".into(),
@@ -160,10 +165,11 @@ fn only_checks_needing_remediation_produce_task_subjects() {
         findings: Vec::new(),
         not_run_reason: None,
         regression_guard: None,
+        remediation_route: None,
     };
     let not_run = not_run_checks(&frozen_check_plan(&contract));
     assert!(
-        remediation_task_subjects(
+        remediation_subjects(
             &[accepted_failure, not_run[0].clone()],
             &contract,
             &skeleton
@@ -181,10 +187,11 @@ fn only_checks_needing_remediation_produce_task_subjects() {
         findings: vec!["invalid setup".into()],
         not_run_reason: None,
         regression_guard: None,
+        remediation_route: None,
     };
     assert_eq!(
-        remediation_task_subjects(&[setup_failure], &contract, &skeleton),
-        ["TASK-X-010"]
+        remediation_subjects(&[setup_failure], &contract, &skeleton),
+        ["AC-X-001"]
     );
 }
 
@@ -259,6 +266,7 @@ fn regression_guard_basis_is_reported_and_optional_for_older_entries() {
         regression_guard: Some(
             "accepted on the stored judge verdict because it passed on the baseline".into(),
         ),
+        remediation_route: None,
     };
     let report_entry = serde_json::to_value(&check).unwrap();
     assert!(
@@ -279,6 +287,20 @@ fn regression_guard_basis_is_reported_and_optional_for_older_entries() {
         }))
         .unwrap()
         .regression_guard,
+        None
+    );
+    assert_eq!(
+        serde_json::from_value::<CheckResult>(serde_json::json!({
+            "check_id": "AC-X-003",
+            "verdict": "needs_remediation",
+            "really_ran": true,
+            "setup_failure": false,
+            "real_failure": false,
+            "sibling_paths": [],
+            "findings": ["baseline pass was vacuous"]
+        }))
+        .unwrap()
+        .remediation_route,
         None
     );
     let line = CheckProgress::new(1).finish_line(
@@ -306,6 +328,7 @@ fn missing_implementation_failure_is_accepted_without_a_passability_finding() {
         findings: Vec::new(),
         not_run_reason: None,
         regression_guard: None,
+        remediation_route: None,
     };
 
     apply_passability_result(&mut check, true, None, None);
@@ -331,6 +354,7 @@ fn setup_failure_from_freeze_judge_remains_a_finding() {
         findings: Vec::new(),
         not_run_reason: None,
         regression_guard: None,
+        remediation_route: None,
     };
 
     apply_passability_result(
@@ -364,6 +388,7 @@ fn check_that_passes_on_baseline_has_no_failed_check_finding() {
         findings: Vec::new(),
         not_run_reason: None,
         regression_guard: None,
+        remediation_route: None,
     };
 
     apply_passability_result(&mut check, false, None, None);
@@ -389,6 +414,7 @@ fn baseline_pass_that_cannot_fail_keeps_the_freeze_probe_finding() {
         findings: Vec::new(),
         not_run_reason: None,
         regression_guard: None,
+        remediation_route: None,
     };
 
     apply_passability_result(
@@ -405,6 +431,7 @@ fn baseline_pass_that_cannot_fail_keeps_the_freeze_probe_finding() {
         check.findings,
         ["check cannot fail on the pre-implementation tree"]
     );
+    assert_eq!(check.remediation_route, Some(RemediationRoute::Check));
 }
 
 #[test]

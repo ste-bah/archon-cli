@@ -13,7 +13,7 @@ use super::*;
 mod observe_scratch;
 use observe_scratch::observe;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_sites_scratch_tests.rs"]
 mod scratch_tests;
 

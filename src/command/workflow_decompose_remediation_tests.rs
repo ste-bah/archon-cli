@@ -1,5 +1,59 @@
 use super::*;
 
+#[tokio::test]
+async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_finding_seed() {
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
+        "AC-F-001",
+        "jq -e '.a == true' out.json",
+        true,
+    )]);
+    let run_dir = tempfile::tempdir().unwrap();
+    let report_dir = run_dir.path().join("decomposition/reverify/reports");
+    std::fs::create_dir_all(&report_dir).unwrap();
+    let finding = "passed on base but the can-fail proof has no named input";
+    std::fs::write(
+        report_dir.join("report-check-defect.json"),
+        serde_json::json!({
+            "checks": [{"check_id":"AC-F-001", "findings":[finding]}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let ledger = Ledger {
+        report_id: "report-check-defect".into(),
+        subjects: vec!["AC-F-001".into()],
+    };
+    let client = crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
+        |entry, _| {
+            crate::command::workflow_task_set::reauthor::test_client::command_entry(
+                entry,
+                "jq -e '.a == true and .b == 1' out.json",
+            )
+        },
+        |_, _| true,
+    );
+
+    reauthor_check_subjects_on_resume(
+        (set.project.path(), &set.prd, &set.tasks, run_dir.path()),
+        Some(&ledger),
+        &client,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(client.authored(), 1);
+    assert!(
+        client
+            .judged_ids
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|id| id == "AC-F-001")
+    );
+    assert!(client.prompts.lock().unwrap()[0].contains(finding));
+}
+
 #[test]
 fn completed_run_with_ledger_builds_seed_and_other_cases_do_not() {
     let temp = tempfile::tempdir().unwrap();
@@ -118,9 +172,13 @@ fn force_subjects_only_overrides_the_ledger_subjects_and_consumption_is_append_o
     let mut arguments = serde_json::json!({"forceBodySubjects": ["old"]});
     let ledger = Ledger {
         report_id: "reverify-4-report".into(),
-        subjects: vec!["TASK-A-001".into()],
+        subjects: vec!["AC-A-001".into(), "TASK-A-001".into()],
     };
-    force_subjects(&mut arguments, Some(&ledger));
+    force_subjects(
+        &mut arguments,
+        Some(&ledger),
+        &std::collections::BTreeSet::from(["TASK-A-001".into()]),
+    );
     assert_eq!(
         arguments["forceBodySubjects"],
         serde_json::json!(["TASK-A-001"])
@@ -135,7 +193,10 @@ fn force_subjects_only_overrides_the_ledger_subjects_and_consumption_is_append_o
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0]["report_id"], "reverify-4-report");
-    assert_eq!(records[0]["subjects"], serde_json::json!(["TASK-A-001"]));
+    assert_eq!(
+        records[0]["subjects"],
+        serde_json::json!(["AC-A-001", "TASK-A-001"])
+    );
 }
 
 #[test]
@@ -292,6 +353,26 @@ fn paused_finding_report_prepares_resume_seed_from_the_persisted_ledger() {
         .unwrap()
         .write_all(b"{\"seq\":")
         .unwrap();
+    let tasks = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tasks
+            .path()
+            .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
+        serde_json::json!({
+            "schema_version": 1,
+            "acceptance_digest": "digest",
+            "tasks": [{
+                "task_id": "TASK-A-001",
+                "file_name": "TASK-A-001.md",
+                "depends_on": [],
+                "blocks": [],
+                "implements": [],
+                "deliverable_contracts": []
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
     let runtime = archon_workflow::FixedRunIdentityV1 {
         template_version: "fixed-decomposition-v1".into(),
         starting_binary_revision: "revision".into(),
@@ -299,7 +380,7 @@ fn paused_finding_report_prepares_resume_seed_from_the_persisted_ledger() {
         catalog_digest: "catalog".into(),
         project_root_identity: "/project".into(),
         prd_identity: "/project/PRD.md".into(),
-        task_root_identity: "/project/tasks".into(),
+        task_root_identity: tasks.path().to_string_lossy().into_owned(),
     };
     let criteria = std::collections::BTreeMap::new();
     let requirement_texts = std::collections::BTreeMap::new();

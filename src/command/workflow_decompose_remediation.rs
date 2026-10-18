@@ -34,13 +34,22 @@ pub(crate) fn read(run_dir: &Path, report_id: &str) -> Result<Option<Ledger>> {
     Ok(Some(ledger))
 }
 
-pub(crate) fn force_subjects(arguments: &mut serde_json::Value, ledger: Option<&Ledger>) {
+pub(crate) fn force_subjects(
+    arguments: &mut serde_json::Value,
+    ledger: Option<&Ledger>,
+    task_ids: &std::collections::BTreeSet<String>,
+) {
     if let Some(ledger) = ledger {
-        arguments["forceBodySubjects"] = serde_json::json!(ledger.subjects);
+        let tasks = ledger
+            .subjects
+            .iter()
+            .filter(|subject| task_ids.contains(*subject))
+            .collect::<Vec<_>>();
+        arguments["forceBodySubjects"] = serde_json::json!(tasks);
     }
 }
 
-pub(crate) async fn reauthor_unowned_checks_on_resume(
+pub(crate) async fn reauthor_check_subjects_on_resume(
     (project_root, prd_path, task_root, run_dir): (&Path, &Path, &Path, &Path),
     ledger: Option<&Ledger>,
     client: &dyn archon_workflow::WorkflowLlmClient,
@@ -53,9 +62,6 @@ pub(crate) async fn reauthor_unowned_checks_on_resume(
         serde_json::from_slice(&std::fs::read(
             task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
         )?)?;
-    let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(
-        &std::fs::read(task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE))?,
-    )?;
     let ids = ledger
         .subjects
         .iter()
@@ -64,16 +70,7 @@ pub(crate) async fn reauthor_unowned_checks_on_resume(
                 .acceptance
                 .iter()
                 .chain(&contract.supplementary)
-                .find(|entry| &entry.id == *subject)
-                .is_some_and(|entry| {
-                    !skeleton.tasks.iter().any(|task| {
-                        entry
-                            .covers
-                            .iter()
-                            .chain(std::iter::once(&entry.id))
-                            .any(|obligation| task.implements.contains(obligation))
-                    })
-                })
+                .any(|entry| &entry.id == *subject)
         })
         .cloned()
         .collect::<std::collections::BTreeSet<_>>();
@@ -123,7 +120,7 @@ pub(crate) async fn reauthor_unowned_checks_on_resume(
                 probe: &probe,
                 seeds: &seeds,
             },
-            trigger: "workflow resume: reverify routed a failed check with no implementing task",
+            trigger: "workflow resume: reverify routed a check defect to its frozen check entry",
         },
         &scope,
     )
@@ -144,7 +141,7 @@ pub(crate) async fn prepare_resume_checks(
         target_root,
         run_dir,
     )?;
-    reauthor_unowned_checks_on_resume(
+    reauthor_check_subjects_on_resume(
         (project_root, prd_path, task_root, run_dir),
         ledger,
         client,
@@ -213,8 +210,18 @@ pub(crate) fn prepare(
             latest.id
         ));
     }
-    force_subjects(arguments, ledger.as_ref());
     if let Some(ledger) = ledger.as_ref() {
+        let skeleton: archon_workflow::task_skeleton::TaskSkeleton =
+            serde_json::from_slice(&std::fs::read(
+                Path::new(&runtime.task_root_identity)
+                    .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
+            )?)?;
+        let task_ids = skeleton
+            .tasks
+            .iter()
+            .map(|task| task.task_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        force_subjects(arguments, Some(ledger), &task_ids);
         let missing_phase_seed = arguments
             .get("phaseSeed")
             .is_none_or(serde_json::Value::is_null);
@@ -239,6 +246,8 @@ pub(crate) fn prepare(
             arguments["frozenChain"] = frozen_chain;
         }
         advance_forced_author_ordinals(run_dir, arguments, ledger)?;
+    } else {
+        force_subjects(arguments, None, &Default::default());
     }
     Ok(ledger)
 }

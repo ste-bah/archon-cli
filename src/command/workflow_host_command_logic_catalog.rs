@@ -105,7 +105,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // so a false Scratch revision conflict no longer voids a check.
         // 35: sibling revisions are part of verdict reuse identity; changed
         // sibling inputs cannot reuse an earlier check result.
-        sources_digest: "52139b6aa9b16a9ccbdaee70b6fb1bb839d4b648ddddad8807101f3bea7b4627",
+        // #219 re-pin only: reverify remediation routes check defects to frozen check entries; freeze verdicts are unchanged.
+        sources_digest: "b84628417e48b40c5153a5058b856dd16a968317af1a52a02971cdd2db374d3a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -159,7 +160,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
         // #420 re-pin only: sibling input handling is outside the frozen skeleton verdict.
         // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
-        sources_digest: "52139b6aa9b16a9ccbdaee70b6fb1bb839d4b648ddddad8807101f3bea7b4627",
+        // #219 re-pin only: reverify remediation routing does not change frozen skeleton verification verdicts.
+        sources_digest: "b84628417e48b40c5153a5058b856dd16a968317af1a52a02971cdd2db374d3a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -356,7 +358,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #457 re-pin only: freeze-acceptance logic version 32 changes the can-fail proof, not frozen-chain verification.
         // #420 re-pin only: per-check sibling report evidence does not change frozen acceptance verdicts.
         // #420 re-pin only: frozen acceptance checks run under the build-bound verifier.
-        sources_digest: "89f208d3e0251ca8f99bd82cf28be93e97685a203cd5f93f8268aeea62843473",
+        // #219 re-pin only: report remediation routing does not alter frozen acceptance verification verdicts.
+        sources_digest: "e7b5402957805ed8e2c455c43214c666cf98b70af04cd106d3eb7b11db66cf1f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -408,7 +411,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #457 re-pin only: freeze-acceptance logic version 32 does not affect frozen skeleton verification.
         // #420 re-pin only: sibling report evidence is outside frozen skeleton verification.
         // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
-        sources_digest: "89f208d3e0251ca8f99bd82cf28be93e97685a203cd5f93f8268aeea62843473",
+        // #219 re-pin only: report remediation routing does not alter frozen skeleton verification verdicts.
+        sources_digest: "e7b5402957805ed8e2c455c43214c666cf98b70af04cd106d3eb7b11db66cf1f",
         build_bound: true,
     },
 ];
