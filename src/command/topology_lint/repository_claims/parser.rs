@@ -1,6 +1,10 @@
 //! Claim extraction for repository path assertions.
 
 use super::{Claim, PathClaim};
+mod predicate;
+mod reporting;
+use predicate::claim_before;
+use reporting::reported_claim_clause;
 
 const ABSENT_AFTER: &[&str] = &[
     "does not exist yet",
@@ -71,37 +75,6 @@ const FILLER: &[&str] = &[
     "–",
     ",",
 ];
-/// Verbs directly before the path that assert it is present (the body will
-/// change a file it has), and phrases that assert it is absent (a new file).
-const EXISTS_BEFORE: &[&str] = &[
-    "modify",
-    "modifies",
-    "modifying",
-    "extend",
-    "extends",
-    "extending",
-    "edit",
-    "edits",
-    "editing",
-    "update",
-    "updates",
-    "updating",
-    "existing file",
-    "existing module",
-    "existing",
-];
-const ABSENT_BEFORE: &[&str] = &[
-    "new file",
-    "new module",
-    "new crate",
-    "new directory",
-    "create new",
-    "creates new",
-    "add new",
-    "adds new",
-    "a new file",
-    "a new module",
-];
 /// What may follow a phrase for it to be the whole predicate.
 const TERMINATORS: &[&str] = &[
     "",
@@ -140,10 +113,7 @@ pub(crate) fn extract_claims(text: &str) -> Vec<PathClaim> {
 }
 
 fn claims_in_sentence(sentence: &str, carried: bool) -> Vec<PathClaim> {
-    if let Some(claims) = leading_absence_claims(sentence) {
-        return claims;
-    }
-    let mut claims = Vec::new();
+    let (mut claims, leading_paths) = leading_absence_claims(sentence).unwrap_or_default();
     let mut rest = sentence;
     while let Some(open) = rest.find('`') {
         let after_open = &rest[open + 1..];
@@ -153,12 +123,14 @@ fn claims_in_sentence(sentence: &str, carried: bool) -> Vec<PathClaim> {
         let token = &after_open[..close];
         let before = &rest[..open];
         let after = &after_open[close + 1..];
-        if !is_incomplete_path_fragment(before, after)
+        let at = sentence.len() - rest.len() + open;
+        if !leading_paths.contains(&at)
+            && !is_incomplete_path_fragment(before, after)
+            && !reported_claim_clause(&sentence[..at])
             && let Some(path) = repository_or_scoped_token(token, after)
         {
             // The predicate after the path may be what a test asserts; a
             // word before it is the body's own statement.
-            let at = sentence.len() - rest.len() + open;
             let claim = claim_after(after)
                 .or_else(|| explicit_scope(after).map(|(_, claim)| claim))
                 .filter(|_| !super::assertion::exempt(sentence, carried, at, after))
@@ -179,25 +151,47 @@ fn claims_in_sentence(sentence: &str, carried: bool) -> Vec<PathClaim> {
     claims
 }
 
-/// A sentence-leading `No` or `Neither` negates each path in its coordinated
-/// list. The list is accepted only when its final path has an existence
-/// predicate, so incomplete or ambiguous prose remains unclaimed. A bare file
-/// name is a claim only under the explicit scope that follows the predicate:
+/// Sentence-leading negation applies to a short subject noun phrase and each
+/// path in its coordinated list. Ambiguous prose remains unclaimed. A bare
+/// file name is a claim only under an explicit scope:
 /// "No `Cargo.toml` is present in the new crate" names no repository path.
-fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
+fn leading_absence_claims(sentence: &str) -> Option<(Vec<PathClaim>, Vec<usize>)> {
     let trimmed = sentence.trim_start();
     let lowered = trimmed.to_ascii_lowercase();
     let (lead, conjunction) = if lowered.starts_with("neither ") {
         ("neither ", " nor ")
+    } else if lowered.starts_with("none of ") {
+        ("none of ", " or ")
+    } else if lowered.starts_with("there is no ") {
+        ("there is no ", " or ")
     } else if lowered.starts_with("no ") {
         ("no ", " or ")
     } else {
         return None;
     };
-    let mut rest = &trimmed[lead.len()..];
+    let after_lead = &trimmed[lead.len()..];
+    let Some(path_offset) = after_lead.find('`') else {
+        return None;
+    };
+    let subject = after_lead[..path_offset].trim();
+    // Clause punctuation ends the scope of the sentence-leading negator.
+    // The path after it belongs to the normal per-path reader.
+    if subject.contains([';', ',']) {
+        return None;
+    }
+    // `none of the files` has the same noun phrase as `No files`; the
+    // article is part of that negation form rather than a subject modifier.
+    let subject = subject
+        .strip_prefix("the ")
+        .filter(|_| lead == "none of ")
+        .unwrap_or(subject);
+    let ambiguous_subject = !subject.is_empty() && !is_unambiguous_absence_subject(subject);
+    let mut rest = &after_lead[path_offset..];
     let mut paths = Vec::new();
+    let mut offsets = Vec::new();
     loop {
         rest = rest.trim_start();
+        let offset = sentence.len() - rest.len();
         let token = rest.strip_prefix('`')?;
         let close = token.find('`')?;
         let path = match repository_relative_token(&token[..close]) {
@@ -205,6 +199,7 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
             None => (bare_repository_file_token(&token[..close])?, true),
         };
         paths.push(path);
+        offsets.push(offset);
         rest = &token[close + 1..];
         let lowered_rest = rest.to_ascii_lowercase();
         if lowered_rest.starts_with(conjunction) {
@@ -212,8 +207,11 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
             continue;
         }
         if matches!(claim_after(rest), Some(Claim::Exists)) {
+            if ambiguous_subject {
+                return Some((Vec::new(), offsets));
+            }
             let scope = explicit_scope(rest).map(|(scope, _)| scope);
-            return Some(
+            return Some((
                 paths
                     .into_iter()
                     .filter(|(_, bare)| !bare || scope.is_some())
@@ -225,9 +223,57 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
                         sentence: sentence.trim().to_string(),
                     })
                     .collect(),
-            );
+                offsets,
+            ));
         }
         return None;
+    }
+}
+
+/// Whether the complete negated subject has a path noun as its head, with
+/// only the supported modifiers and directly attached path qualifier.
+fn is_unambiguous_absence_subject(subject: &str) -> bool {
+    let words = subject.to_ascii_lowercase();
+    let words = words.split_whitespace().collect::<Vec<_>>();
+    let words = if words
+        .first()
+        .is_some_and(|word| matches!(*word, "such" | "other" | "separate" | "additional"))
+    {
+        &words[1..]
+    } else {
+        &words[..]
+    };
+
+    let Some(noun) = words.first() else {
+        return false;
+    };
+    if !matches!(
+        *noun,
+        "path"
+            | "paths"
+            | "file"
+            | "files"
+            | "module"
+            | "modules"
+            | "directory"
+            | "directories"
+            | "dir"
+            | "dirs"
+            | "crate"
+            | "crates"
+            | "entry"
+            | "entries"
+            | "artifact"
+            | "artifacts"
+    ) {
+        return false;
+    }
+
+    match &words[1..] {
+        [] => true,
+        ["named"] | ["called"] | ["like"] | ["at"] => true,
+        ["of", "the", "form"] => true,
+        _ => false,
     }
 }
 
@@ -288,6 +334,7 @@ fn repository_directory_token(token: &str) -> Option<String> {
     if token.is_empty()
         || token.chars().any(char::is_whitespace)
         || token.contains("::")
+        || token.contains(['(', ')'])
         || token.starts_with('/')
         || token.starts_with('~')
         || token.contains("://")
@@ -325,6 +372,7 @@ fn bare_repository_file_token(token: &str) -> Option<String> {
     let (stem, extension) = file.rsplit_once('.')?;
     (!file.contains('/')
         && !file.chars().any(char::is_whitespace)
+        && !file.contains(['(', ')'])
         && !stem.is_empty()
         && !extension.is_empty()
         && extension.len() <= 8
@@ -358,6 +406,7 @@ pub(crate) fn repository_relative_token(token: &str) -> Option<String> {
         || token.chars().any(char::is_whitespace)
         || !token.contains('/')
         || token.starts_with('~')
+        || token.contains(['(', ')'])
         || token.contains("://")
         || token.contains(['*', '{', '}', '$', '<', '>', '|', '=', '"', '\''])
         || token.contains("...")
@@ -433,49 +482,4 @@ fn terminates(tail: &str, terminator: &str) -> bool {
     };
     let word = terminator.chars().last().is_some_and(char::is_alphanumeric);
     !word || rest.chars().next().is_none_or(|c| !c.is_alphanumeric())
-}
-
-fn claim_before(before: &str) -> Option<Claim> {
-    let lowered = before.trim_end().to_ascii_lowercase();
-    let mut rest = lowered.as_str();
-    for _ in 0..3 {
-        for (phrases, claim) in [
-            (ABSENT_BEFORE, Claim::Absent),
-            (EXISTS_BEFORE, Claim::Exists),
-        ] {
-            for phrase in phrases {
-                if let Some(head) = rest.strip_suffix(phrase)
-                    && head.chars().last().is_none_or(|c| !c.is_alphanumeric())
-                {
-                    return Some(claim);
-                }
-            }
-        }
-        // A filler word is stripped only as a whole word: "schema" must not
-        // lose its "a" and become something else.
-        let trimmed = [
-            "the",
-            "file",
-            "module",
-            "directory",
-            "crate",
-            "a",
-            "an",
-            ":",
-            "-",
-            "—",
-        ]
-        .iter()
-        .find_map(|filler| {
-            let head = rest.strip_suffix(filler)?;
-            let whole = !filler.chars().last().is_some_and(char::is_alphanumeric)
-                || head.chars().last().is_none_or(|c| !c.is_alphanumeric());
-            whole.then(|| head.trim_end())
-        });
-        match trimmed {
-            Some(head) if head.len() < rest.len() => rest = head,
-            _ => return None,
-        }
-    }
-    None
 }

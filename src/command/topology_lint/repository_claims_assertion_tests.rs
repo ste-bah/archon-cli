@@ -207,5 +207,151 @@ fn claimed_paths(text: &str) -> Vec<String> {
     claims(text).into_iter().map(|(path, _)| path).collect()
 }
 
+#[test]
+fn issue461_reported_and_call_syntax_paths_are_not_repository_claims() {
+    for text in [
+        "The claim that `src/ghost.rs` exists is rewritten to what is observed.",
+        "The statement that `src/ghost.rs` exists was repeated.",
+        "The assumption that `src/ghost.rs` exists is unsupported.",
+        "The assertion that `src/ghost.rs` exists was reported.",
+        "The reviewer says that `src/ghost.rs` exists.",
+        "The reviewer said that `src/ghost.rs` exists.",
+        "The reviewer states that `src/ghost.rs` exists.",
+        "The reviewer stated that `src/ghost.rs` exists.",
+        "The reviewer asserts that `src/ghost.rs` exists.",
+        "The reviewer claims that `src/ghost.rs` exists.",
+        "The reviewer assumes that `src/ghost.rs` exists.",
+        "The claim that `src/ghost.rs` and `src/other-ghost.rs` exist was reported.",
+        "The body says `src/ghost.rs` exists.",
+        "`ahdm_strategy_root()/strategy-spec.json` exists.",
+    ] {
+        assert!(claims(text).is_empty(), "{text:?}: {:?}", claims(text));
+    }
+}
+
+#[test]
+fn issue461_ambiguous_negation_and_report_leads_are_scoped_to_their_lists() {
+    let (_temp, project, _tasks, tree) = grounded();
+    for text in [
+        "No changes are needed here; `src/ghost.rs` exists.",
+        "There is no migration, and `src/ghost.rs` exists.",
+    ] {
+        let found = findings_against(&tree, &project, "TASK-X-461", text);
+        assert_eq!(found.len(), 1, "{text:?}: {found:?}");
+        assert!(found[0].contains("`src/ghost.rs` exists"), "{found:?}");
+    }
+
+    let reported_list = "The reviewer claims that `src/ghost.rs` and `src/ghost2.rs` exist.";
+    assert!(
+        claims(reported_list).is_empty(),
+        "{:?}",
+        claims(reported_list)
+    );
+
+    let unreported_list = "This task claims AC-1; `src/ghost.rs` and `src/ghost2.rs` exist.";
+    assert_eq!(
+        claims(unreported_list),
+        vec![("src/ghost2.rs".to_string(), Claim::Exists)]
+    );
+
+    let essays = "The essays say `src/ghost.rs` exists.";
+    assert_eq!(
+        claims(essays),
+        vec![("src/ghost.rs".to_string(), Claim::Exists)]
+    );
+}
+
+#[test]
+fn issue461_repository_claim_changes_never_widen_coordinated_paths() {
+    // The extraction change must be a subset of the base claims for existing
+    // repository assertions; only an unambiguous negated subject adds Absent.
+    let cases = [
+        (
+            "`src/a.rs` and `src/b.rs` exist.",
+            vec![("src/b.rs".to_string(), Claim::Exists)],
+        ),
+        (
+            "Either `src/a.rs` or `src/b.rs` exists.",
+            vec![("src/b.rs".to_string(), Claim::Exists)],
+        ),
+        (
+            "The reviewer claims that `src/a.rs`, `src/b.rs`, and `src/c.rs` exist.",
+            vec![],
+        ),
+        (
+            "No path of the form `src/a.rs` exists.",
+            vec![("src/a.rs".to_string(), Claim::Absent)],
+        ),
+        (
+            "No changes are needed here; `src/b.rs` exists.",
+            vec![("src/b.rs".to_string(), Claim::Exists)],
+        ),
+    ];
+
+    for (sentence, expected) in cases {
+        assert_eq!(claims(sentence), expected, "{sentence:?}");
+    }
+}
+
+#[test]
+fn issue461_negated_noun_phrases_are_absence_claims_and_siblings_still_check() {
+    for text in [
+        "No path of the form `src/ghost.rs` exists.",
+        "No such file `src/ghost.rs` exists.",
+        "No file named `src/ghost.rs` exists.",
+        "No other module `src/ghost.rs` exists.",
+        "There is no file `src/ghost.rs` present.",
+        "None of the files `src/ghost.rs` exist.",
+    ] {
+        assert_eq!(
+            claims(text),
+            vec![("src/ghost.rs".to_string(), Claim::Absent)],
+            "{text:?}"
+        );
+    }
+
+    for text in [
+        "No evidence about the planned file `src/ghost.rs` exists.",
+        "No test that reads the file `src/ghost.rs` exists.",
+        "No existing file `src/ghost.rs` exists.",
+    ] {
+        assert!(claims(text).is_empty(), "{text:?}");
+    }
+
+    let (_temp, project, _tasks, tree) = grounded();
+    let text = "No file named `src/existing.rs` exists. `src/ghost.rs` exists.";
+    let found = findings_against(&tree, &project, "TASK-X-461", text);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found[0].contains("`src/existing.rs` does not exist"),
+        "{found:?}"
+    );
+    assert!(found[1].contains("`src/ghost.rs` exists"), "{found:?}");
+}
+
+#[test]
+fn issue461_live_rewrites_and_ambiguous_negations_make_no_false_finding() {
+    let (_temp, project, _tasks, tree) = grounded();
+    for text in [
+        "No path of the form `ahdm_strategy_root()/strategy-spec.json` exists under the repository root;",
+        "BLOCKING repository claims: the body says `ahdm_strategy_root()/strategy-spec.json` exists (...) but it is absent from repository ...",
+        "(b) The claim that `ahdm_strategy_root()/strategy-spec.json` exists at base commit is rewritten to what is observed: ...",
+        "No convincing evidence `src/ghost.rs` exists.",
+    ] {
+        assert!(
+            findings_against(&tree, &project, "TASK-X-461", text).is_empty(),
+            "{text:?}"
+        );
+    }
+    // Existing true repository claims remain eligible beside the negated sentence.
+    let mixed = "No path of the form `src/ghost.rs` exists. `src/other-ghost.rs` exists.";
+    let found = findings_against(&tree, &project, "TASK-X-461", mixed);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("`src/other-ghost.rs` exists"),
+        "{found:?}"
+    );
+}
+
 #[path = "repository_claims_review_tests.rs"]
 mod review_tests;

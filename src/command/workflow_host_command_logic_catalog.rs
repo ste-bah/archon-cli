@@ -106,7 +106,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 35: sibling revisions are part of verdict reuse identity; changed
         // sibling inputs cannot reuse an earlier check result.
         // #219 re-pin only: reverify remediation routes check defects to frozen check entries; freeze verdicts are unchanged.
-        sources_digest: "b84628417e48b40c5153a5058b856dd16a968317af1a52a02971cdd2db374d3a",
+        // Re-pin only: the parser change does not alter freeze verdicts.
+        sources_digest: "cb1f5f6fa54ead8df91b7fabb40798f1ffcbcf6ec38c4e19e270276dbecb1fbb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -161,7 +162,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: sibling input handling is outside the frozen skeleton verdict.
         // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
         // #219 re-pin only: reverify remediation routing does not change frozen skeleton verification verdicts.
-        sources_digest: "b84628417e48b40c5153a5058b856dd16a968317af1a52a02971cdd2db374d3a",
+        // Re-pin only: the parser change does not alter freeze verdicts.
+        sources_digest: "cb1f5f6fa54ead8df91b7fabb40798f1ffcbcf6ec38c4e19e270276dbecb1fbb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -192,7 +194,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 18: malformed task-body parse failures are now classified as body findings, changing landing verdicts.
         // 19: landing repair uses the store's platform-aware directory flush, so recovered bodies can be judged on Windows.
         // 20: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
-        version: 20,
+        // 21: reported claims are excluded and short negated path subjects are read as absence claims.
+        version: 21,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -223,7 +226,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; body-landing verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; staged body lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "d630d78adb8a3cdc40d9a10e252135afa99ee9b46471a934a56863762fd52719",
+        sources_digest: "d052b7539d6c98b81d15ad52afb1474800b6a3c3580542c4a004f8663e386de7",
         build_bound: false,
     },
     CapabilityLogic {
@@ -245,7 +248,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441: the set gate checks exactly the focused test commands the runtime records.
         // 15: malformed task-body parse failures are now body findings, changing task-set lint verdicts.
         // 16: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
-        version: 16,
+        // 17: reported claims are excluded and short negated path subjects are read as absence claims.
+        version: 17,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -277,7 +281,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; lint verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "d630d78adb8a3cdc40d9a10e252135afa99ee9b46471a934a56863762fd52719",
+        sources_digest: "d052b7539d6c98b81d15ad52afb1474800b6a3c3580542c4a004f8663e386de7",
         build_bound: false,
     },
     CapabilityLogic {
@@ -359,7 +363,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: per-check sibling report evidence does not change frozen acceptance verdicts.
         // #420 re-pin only: frozen acceptance checks run under the build-bound verifier.
         // #219 re-pin only: report remediation routing does not alter frozen acceptance verification verdicts.
-        sources_digest: "e7b5402957805ed8e2c455c43214c666cf98b70af04cd106d3eb7b11db66cf1f",
+        // Re-pin only: the parser change does not alter verification verdicts.
+        sources_digest: "e374ec73892723cd13598a18f867bf06c025c499d43541ac8e21de756b22f1d9",
         build_bound: true,
     },
     CapabilityLogic {
@@ -412,7 +417,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: sibling report evidence is outside frozen skeleton verification.
         // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
         // #219 re-pin only: report remediation routing does not alter frozen skeleton verification verdicts.
-        sources_digest: "e7b5402957805ed8e2c455c43214c666cf98b70af04cd106d3eb7b11db66cf1f",
+        // Re-pin only: the parser change does not alter verification verdicts.
+        sources_digest: "e374ec73892723cd13598a18f867bf06c025c499d43541ac8e21de756b22f1d9",
         build_bound: true,
     },
 ];
