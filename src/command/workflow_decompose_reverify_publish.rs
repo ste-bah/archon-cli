@@ -16,6 +16,9 @@ pub(super) fn operational_failure_cause(
     if !operational_failure {
         return None;
     }
+    if let Some(cause) = &report.operational_failure_cause {
+        return Some(cause.clone());
+    }
     let causes = report
         .subjects
         .iter()
@@ -36,6 +39,164 @@ pub(super) fn operational_failure_cause(
             .cloned()
             .unwrap_or_else(|| "gate gave no verdict".to_string()),
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_operational_failure(
+    store: &WorkflowStore,
+    run_id: &str,
+    run_dir: &Path,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
+    generation: u64,
+    status: &RunStatus,
+    v2: &WorkflowV2ResultStore,
+    prior_id: &str,
+    prior_digest: &str,
+    invocation_id: &str,
+    error: &anyhow::Error,
+) -> anyhow::Error {
+    let cause = archon_observability::redaction::redact_text(&error.to_string());
+    match publish_operational_failure(
+        store,
+        run_id,
+        run_dir,
+        lease,
+        generation,
+        status,
+        v2,
+        prior_id,
+        prior_digest,
+        invocation_id,
+        error,
+    ) {
+        Ok(recorded_error) => recorded_error,
+        Err(publication_error) => {
+            let publication_error =
+                archon_observability::redaction::redact_text(&publication_error.to_string());
+            anyhow::anyhow!(
+                "reverify operational failure: {cause}; failure record was not written: {publication_error}"
+            )
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_operational_failure(
+    store: &WorkflowStore,
+    run_id: &str,
+    run_dir: &Path,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
+    generation: u64,
+    status: &RunStatus,
+    v2: &WorkflowV2ResultStore,
+    prior_id: &str,
+    prior_digest: &str,
+    invocation_id: &str,
+    error: &anyhow::Error,
+) -> Result<anyhow::Error> {
+    let cause = archon_observability::redaction::redact_text(&error.to_string());
+    let report_event_seq = store.next_event_seq(run_id)?;
+    let report_id = format!("{invocation_id}-report");
+    let mut call_record_ids_at_report = v2
+        .load_call_records()?
+        .into_iter()
+        .map(|record| record.call.id)
+        .collect::<Vec<_>>();
+    call_record_ids_at_report.push(report_id.clone());
+    call_record_ids_at_report.sort();
+    let report = super::ReverifyReport {
+        schema_version: 1,
+        id: report_id.clone(),
+        supersedes_id: prior_id.to_string(),
+        supersedes_digest: prior_digest.to_string(),
+        outcome: "operational_failure".into(),
+        report_event_seq,
+        call_record_ids_at_report,
+        calls: Vec::new(),
+        subjects: Vec::new(),
+        set_gates: Vec::new(),
+        frozen_gates: Vec::new(),
+        checks: Vec::new(),
+        operational_failure_cause: Some(cause.clone()),
+    };
+    let report_bytes = serde_json::to_vec_pretty(&report)?;
+    let report_digest = archon_workflow::task_set_contract::content_digest(&report_bytes);
+    let record = WorkflowV2CallRecord::new(
+        run_id,
+        archon_workflow::WorkflowV2HostCall {
+            id: report_id.clone(),
+            method: archon_workflow::WorkflowV2HostMethod::FinalReport,
+            write_mode: None,
+            options: archon_workflow::WorkflowV2HostOptions::default(),
+        },
+        1,
+        report_digest.clone(),
+        archon_workflow::WorkflowV2Result {
+            status: archon_workflow::WorkflowV2Status::NeedsReview,
+            summary: "reverify outcome: operational_failure".into(),
+            data: serde_json::to_value(&report)?,
+            ..archon_workflow::WorkflowV2Result::default()
+        },
+        Vec::new(),
+    );
+    let report_event = serde_json::json!({
+        "report_id": report_id,
+        "invocation_id": invocation_id,
+        "report_digest": report_digest,
+        "supersedes_id": prior_id,
+        "outcome": "operational_failure",
+        "operational_failure_cause": cause
+    });
+    final_report(
+        store,
+        run_id,
+        run_dir,
+        lease,
+        generation,
+        status,
+        v2,
+        &format!("decomposition/reverify/reports/{report_id}.json"),
+        &report_bytes,
+        &record,
+        report_event_seq,
+        report_event,
+        None,
+        None,
+    )?;
+    let cause = reverify_retry_guidance(&cause, run_id);
+    Ok(anyhow::anyhow!(
+        "reverify recorded operational_failure: {cause}"
+    ))
+}
+
+fn reverify_retry_guidance(cause: &str, run_id: &str) -> String {
+    let command = format!("archon workflow reverify {run_id}");
+    let cause = cause.replace("archon workflow reverify <run>", &command);
+    if cause.contains(&command) {
+        cause
+    } else {
+        format!("{cause}; run `{command}` again")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn retry_guidance_uses_the_run_id_and_does_not_duplicate_existing_advice() {
+        let run_id = "run-452";
+        let advised = super::reverify_retry_guidance(
+            "provider failed; run `archon workflow reverify <run>` again",
+            run_id,
+        );
+        let command = format!("archon workflow reverify {run_id}");
+        assert!(advised.contains(&command), "{advised}");
+        assert_eq!(advised.matches(&command).count(), 1, "{advised}");
+        assert!(!advised.contains("Retry the freeze"), "{advised}");
+        let missing = super::reverify_retry_guidance("provider failed", run_id);
+        assert!(missing.contains(&command), "{missing}");
+        assert_eq!(missing.matches(&command).count(), 1, "{missing}");
+        assert!(!missing.contains("Retry the freeze"), "{missing}");
+    }
 }
 
 #[cfg(test)]

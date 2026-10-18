@@ -1,5 +1,8 @@
 use super::acceptance;
 
+pub(super) const STATE_PATH: &str = "decomposition/state.json";
+pub(super) const REPORT_PATH: &str = "decomposition/reverify/reports";
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct ReverifyReport {
     pub(super) schema_version: u32,
@@ -16,6 +19,8 @@ pub(super) struct ReverifyReport {
     pub(super) set_gates: Vec<GateResult>,
     pub(super) frozen_gates: Vec<GateResult>,
     pub(super) checks: Vec<acceptance::CheckResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) operational_failure_cause: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
