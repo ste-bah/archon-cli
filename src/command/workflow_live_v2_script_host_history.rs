@@ -99,21 +99,15 @@ impl WorkflowScriptHost {
         }))
     }
 
-    /// A landing request a record already answered, under whatever key, is
-    /// history unless it is the request of its subject's current body
-    /// (`archon_workflow::v2::script::landing_lineage`): its recorded answer
-    /// is replayed and nothing is executed or published. After a logic bump
-    /// every landing arrives under a new id, and running a superseded round
-    /// again published an old candidate over the newer body the later
-    /// rounds accepted. A record this session wrote or replayed is not
-    /// history for it. Deliberately, neither the record's logic version, its
-    /// limits nor a phase seed bars the replay: each would send the call to
-    /// live execution, which is exactly how an old candidate was published
-    /// over a newer body.
+    /// A landing request already answered is history, except an unpublished
+    /// refusal judged by older logic or the request of its subject's current
+    /// body (`archon_workflow::v2::script::landing_lineage`). A refusal is
+    /// rejudged only if no later round was accepted or published.
     pub(super) async fn replay_historic_landing(
         &self,
-        execution: &WorkflowV2CallExecution,
+        execution: &mut WorkflowV2CallExecution,
         generation: Option<u64>,
+        force_fresh_execution: &mut bool,
     ) -> archon_workflow::WorkflowResult<Option<String>> {
         use archon_workflow::v2::script::landing_lineage::{
             LandingLineage, call_occurrence, subject_of,
@@ -135,14 +129,79 @@ impl WorkflowScriptHost {
         let records = self.runner.v2_store.load_call_records()?;
         let lineage = LandingLineage::of(&records, &request.command_id, subject);
         let store = &self.runner.v2_store;
-        let Some(record) =
-            lineage.superseded_answer(request, call_occurrence(&execution.call), |record| {
-                store.in_session(&record.call.id)
+        let occurrence = call_occurrence(&execution.call);
+        let matched_answer = lineage.superseded_answer(request, occurrence, |record| {
+            store.in_session(&record.call.id)
+        });
+        let used_missing_stdin_fallback = matched_answer.is_none();
+        let record = matched_answer.or_else(|| {
+            lineage.answers().iter().copied().find(|record| {
+                !lineage.is_rerun(record)
+                    && call_occurrence(&record.call) == occurrence
+                    && record
+                        .call
+                        .options
+                        .host_command
+                        .as_ref()
+                        .is_some_and(|recorded| {
+                            recorded.stdin.is_none()
+                                && recorded.command_id == request.command_id
+                                && recorded.target == request.target
+                        })
             })
-        else {
+        });
+        let Some(record) = record else {
             return Ok(None);
         };
-        let record = record.clone();
+        let later_accepted_or_published = lineage
+            .answers()
+            .iter()
+            .position(|answer| answer.call.id == record.call.id)
+            .is_some_and(|index| {
+                lineage.answers()[index + 1..].iter().any(|later| {
+                    matches!(
+                        later.status,
+                        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+                    ) || later.result.data["publicationReceipt"].is_object()
+                })
+            });
+        if used_missing_stdin_fallback
+            && !(archon_workflow::v2::script::landing_lineage::landing_refused(&record)
+                && record.result.data["publicationReceipt"].is_null()
+                && !later_accepted_or_published
+                && !executor.outcome_logic_holds(&record)?)
+        {
+            return Ok(None);
+        }
+        if archon_workflow::v2::script::landing_lineage::landing_refused(&record) {
+            let outcome: archon_workflow::HostCommandResult =
+                serde_json::from_value(record.result.data.clone())?;
+            if outcome.publication_receipt.is_none() && !later_accepted_or_published {
+                let recorded_request =
+                    record.call.options.host_command.clone().ok_or_else(|| {
+                        WorkflowError::StateCorrupt(
+                            "superseded landing refusal has no recorded host command request"
+                                .into(),
+                        )
+                    })?;
+                if !executor.outcome_logic_holds(&record)? {
+                    if recorded_request.stdin.is_none() {
+                        return Err(WorkflowError::StateCorrupt(format!(
+                            "superseded landing refusal {} has no recorded candidate bytes",
+                            record.call.id
+                        )));
+                    }
+                    execution.call.options.host_command = Some(recorded_request);
+                    *force_fresh_execution = true;
+                    tracing::info!(
+                        call_id = %execution.call.id,
+                        recorded_call_id = %record.call.id,
+                        "superseded refusal is being judged again under current host command logic"
+                    );
+                    return Ok(None);
+                }
+            }
+        }
         if matches!(
             record.status,
             WorkflowV2Status::Accepted | WorkflowV2Status::Noop

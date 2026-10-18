@@ -3,6 +3,8 @@
 //! the current body's request is judged again. Before, every landing the
 //! script asked again ran under its new key and published its old
 //! candidate over the body the later rounds had accepted.
+//! An unpublished refusal with changed logic is reconsidered only if no later
+//! landing in that subject's lineage was accepted or published.
 use std::sync::{
     Mutex,
     atomic::{AtomicBool, Ordering},
@@ -19,6 +21,7 @@ struct LandingHost {
     executed: Mutex<Vec<String>>,
     receipt_matches: AtomicBool,
     rejudge_findings: AtomicBool,
+    accept_refused: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -115,17 +118,18 @@ impl WorkflowHostCommandExecutor for LandingHost {
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         let stdin = request.stdin.clone().unwrap_or_default();
         self.executed.lock().unwrap().push(stdin.clone());
-        let findings = if stdin.starts_with("refused") {
-            vec![archon_workflow::GatePolicyFinding {
-                deterministic_defect: None,
-                text: format!("gap in {stdin}"),
-                subject: "TASK-X-001".into(),
-                source_path: None,
-                remediation_scope: archon_workflow::RemediationScope::Body,
-            }]
-        } else {
-            Vec::new()
-        };
+        let findings =
+            if stdin.starts_with("refused") && !self.accept_refused.load(Ordering::SeqCst) {
+                vec![archon_workflow::GatePolicyFinding {
+                    deterministic_defect: None,
+                    text: format!("gap in {stdin}"),
+                    subject: "TASK-X-001".into(),
+                    source_path: None,
+                    remediation_scope: archon_workflow::RemediationScope::Body,
+                }]
+            } else {
+                Vec::new()
+            };
         Ok(archon_workflow::HostCommandResult {
             exit_code: Some(0),
             stdout: String::new(),
@@ -401,6 +405,7 @@ impl Run {
             executed: Mutex::new(Vec::new()),
             receipt_matches: AtomicBool::new(true),
             rejudge_findings: AtomicBool::new(false),
+            accept_refused: AtomicBool::new(false),
         })
     }
 
@@ -467,3 +472,6 @@ impl Run {
 
 #[path = "workflow_live_v2_upgrade_landing_real_tests.rs"]
 mod real_host_tests;
+
+#[path = "workflow_live_v2_upgrade_landing_refusal_tests.rs"]
+mod refusal_tests;

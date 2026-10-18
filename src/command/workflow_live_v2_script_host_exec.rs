@@ -124,29 +124,35 @@ impl WorkflowScriptHost {
         // round describes a tree that may no longer exist, so it is never
         // replayed, by any reuse path. Re-running costs one round of checks.
         let reusable_kind = !archon_workflow::v2::script::is_acceptance_stage_call(&execution.call);
+        let mut force_fresh_execution = false;
         // Superseded landing rounds first, then pause coverage (Issue 261).
         if reusable_kind
             && let Some(view) = self
-                .replay_historic_landing(&execution, execution_generation)
+                .replay_historic_landing(
+                    &mut execution,
+                    execution_generation,
+                    &mut force_fresh_execution,
+                )
                 .await?
         {
             return Ok(view);
         }
-        if reusable_kind
+        let reuse_enabled = reusable_kind && !force_fresh_execution;
+        if reuse_enabled
             && let Some(view) = self
                 .replay_covered_attempt(&execution, &input_hash, execution_generation)
                 .await?
         {
             return Ok(view);
         }
-        if reusable_kind
+        if reuse_enabled
             && let Some(view) = self
                 .replay_superseded_history(&execution, &input_hash, execution_generation)
                 .await?
         {
             return Ok(view);
         }
-        if reusable_kind
+        if reuse_enabled
             && let Some(candidate) = self
                 .runner
                 .v2_store
@@ -236,7 +242,7 @@ impl WorkflowScriptHost {
         // completed set, reuse that task's accepted record of the same kind
         // (implement vs verify) regardless of the ordinal — this is what makes
         // `restart`/continue actually skip 010–079 instead of re-validating.
-        if reusable_kind
+        if reuse_enabled
             && let Some(record) = self.reusable_completed_task_record(&execution)?
             && self.refresh_audit_for_cache(&record).await?
         {
@@ -246,7 +252,7 @@ impl WorkflowScriptHost {
         // Review remediation under a shifted ordinal, or a round a later round
         // superseded: replayed by content (`remediation_replay`). A write is
         // refused by the audit gate here and reused per branch instead.
-        if reusable_kind
+        if reuse_enabled
             && let Some(record) = self.remediation_replay(&execution)?
             && self.refresh_audit_for_cache(&record).await?
         {
