@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn forwarded_short_credentials_reach_both_host_result_streams() {
-    for secret in ["p4ss", "x", "é"] {
+    for secret in ["p4ss", "abc123", "aébc"] {
         let ran = run_secret(Child::JsonOutput, secret).await;
         let result = ran.result.unwrap();
         assert_eq!(result.stdout, "\"[REDACTED]\"", "{secret}");

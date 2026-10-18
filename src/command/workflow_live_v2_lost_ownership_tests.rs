@@ -207,6 +207,7 @@ async fn a_fixed_launch_after_a_newer_executor_took_over_changes_nothing() {
         ui,
         Vec::new(),
         Arc::new(NoHostCommands),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
     .expect("a replaced launch ends without an error");
@@ -246,6 +247,7 @@ async fn a_fixed_executor_replaced_mid_run_reports_lost_ownership_not_a_cancel()
         ui,
         Vec::new(),
         Arc::new(NoHostCommands),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
     .unwrap();

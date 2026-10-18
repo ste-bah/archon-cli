@@ -58,6 +58,8 @@ fn acceptance_entries_are_separate_calls_and_truncation_retries_only_one() {
         r#"
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => '[]';
+// Explicit Node fixture binding; host redaction parity is covered in QuickJS.
+globalThis.__archonRedactPublicText = text => String(text).replace(/held-[^\s]+/g, '[REDACTED]');
 // Issue 288: the host's author-context binding, its files kept nowhere.
 const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0, 2166136261).toString(16).padStart(8, "0").repeat(8);
 globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) });

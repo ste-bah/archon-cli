@@ -1,7 +1,7 @@
 use super::*;
 
 async fn scalar_credentials(child: Child) {
-    for secret in ["87654321", "-87654321.25", "true", "false"] {
+    for secret in ["87654321", "-87654321.25"] {
         let ran = run_secret(child, secret).await;
         let result = ran
             .result

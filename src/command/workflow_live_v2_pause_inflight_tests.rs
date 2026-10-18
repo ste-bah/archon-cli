@@ -158,6 +158,7 @@ async fn pause_with_calls_in_flight(
             ui,
             Vec::new(),
             executor,
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         ),
     )
     .await

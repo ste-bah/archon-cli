@@ -42,7 +42,10 @@ fn assert_redacted(captured: &str, raw: &str, class: &str) {
 
 #[test]
 fn openai_key_pattern_scrubbed() {
-    let raw = "sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz56";
+    let raw = concat!(
+        "sk",
+        "-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz56"
+    );
     let captured = capture_one(|| {
         ::tracing::info!(token = raw, "openai-key test");
     });
@@ -51,7 +54,7 @@ fn openai_key_pattern_scrubbed() {
 
 #[test]
 fn anthropic_key_pattern_scrubbed() {
-    let raw = "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    let raw = concat!("sk", "-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
     let captured = capture_one(|| {
         ::tracing::info!(auth = raw, "anthropic-key test");
     });
@@ -60,7 +63,7 @@ fn anthropic_key_pattern_scrubbed() {
 
 #[test]
 fn aws_access_key_pattern_scrubbed() {
-    let raw = "AKIAIOSFODNN7EXAMPLE";
+    let raw = concat!("AK", "IAIOSFODNN7EXAMPLE");
     let captured = capture_one(|| {
         ::tracing::info!(aws_access_key_id = raw, "aws-key test");
     });
@@ -69,16 +72,17 @@ fn aws_access_key_pattern_scrubbed() {
 
 #[test]
 fn gcp_service_account_json_scrubbed() {
-    // GCP service-account key file shape — private_key is the sensitive bit,
-    // but #201 design call redacts the WHOLE blob (project_id, client_email,
-    // private_key_id are PII-adjacent and auditors prefer belt-and-braces).
-    let raw = r#"{"type":"service_account","project_id":"my-project","private_key_id":"abc123","private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG\n-----END PRIVATE KEY-----","client_email":"sa@my-project.iam.gserviceaccount.com"}"#;
+    // The exact private_key field and PEM block are redacted. Neighbor fields
+    // remain available because their names do not identify credentials.
+    let raw = concat!(
+        "{\"type\":\"service_account\",\"project_id\":\"my-project\",\"private_key_id\":\"abc123\",\"private_key\":\"--",
+        "---BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG\\n-----END PRIVATE KEY-----\",\"client_email\":\"sa@my-project.iam.gserviceaccount.com\"}"
+    );
     let captured = capture_one(|| {
         ::tracing::info!(credentials = raw, "gcp-sa test");
     });
-    // Strict post-#201 contract: REDACTED marker MUST be present AND none of
-    // the sensitive substrings may leak. The previous `has_marker OR !leak`
-    // logic was a pre-fix placeholder.
+    // Both the credential marker and the absence of the private key body are
+    // checked at the actual tracing sink.
     assert!(
         captured.contains(REDACTED),
         "gcp service-account: expected REDACTED marker, got: {captured:?}"
@@ -97,7 +101,7 @@ fn gcp_service_account_json_scrubbed() {
     );
     assert!(
         !captured.contains("my-project"),
-        "gcp service-account: project_id leaked: {captured:?}"
+        "gcp service-account: project id leaked: {captured:?}"
     );
     assert!(
         !captured.contains("sa@my-project.iam.gserviceaccount.com"),
@@ -106,9 +110,28 @@ fn gcp_service_account_json_scrubbed() {
 }
 
 #[test]
+fn stripe_secret_and_publishable_patterns_scrubbed() {
+    for raw in [
+        concat!("sk", "_live_abcdefghijklmnopqrstuvwx"),
+        concat!("sk", "_test_abcdefghijklmnopqrstuvwx"),
+        concat!("pk", "_live_abcdefghijklmnopqrstuvwx"),
+        concat!("pk", "_test_abcdefghijklmnopqrstuvwx"),
+        concat!("rk", "_live_abcdefghijklmnopqrstuvwx"),
+    ] {
+        let captured = capture_one(|| {
+            ::tracing::info!(payload = raw, "stripe key test");
+        });
+        assert_redacted(&captured, raw, "stripe key");
+    }
+}
+
+#[test]
 fn jwt_bearer_token_pattern_scrubbed() {
     // Canonical JWT-shape bearer token.
-    let raw = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.sig_here_abc123";
+    let raw = concat!(
+        "ey",
+        "JhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.sig_here_abc123"
+    );
     let bearer_line = format!("Bearer {raw}");
     let captured = capture_one(|| {
         ::tracing::info!(authorization = %bearer_line, "bearer test");

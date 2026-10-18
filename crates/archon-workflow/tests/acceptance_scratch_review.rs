@@ -45,9 +45,17 @@ async fn audit_ignores_untracked_build_and_concurrent_workflow_output() {
         *command = cmd.clone();
     }
     refs[0].command_digest = content_digest(cmd.as_bytes());
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         out.passed(),
         "unrelated outputs invalidated input audit: {:?}",
@@ -69,9 +77,17 @@ async fn later_check_cannot_use_earlier_input_mutations() {
         &mut refs,
         "grep -q changed data/value && test -f data/new",
     );
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(out.checks[0].exit_code, Some(0));
     assert_ne!(
         out.checks[1].exit_code,
@@ -85,9 +101,17 @@ async fn later_check_cannot_use_earlier_input_mutations() {
 async fn quota_walks_are_coarse_while_cancellation_stays_responsive() {
     let (t, mut p, commit, c, refs) = fixture("sleep 3; test -f data/value");
     p.timeout_secs = 10;
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(out.passed());
     let value = serde_json::to_value(&out.checks[0]).unwrap();
     let count = value["quota_walk_count"]
@@ -103,9 +127,17 @@ async fn quota_walks_are_coarse_while_cancellation_stays_responsive() {
 async fn nested_data_configuration_is_not_a_host_secret() {
     let (t, p, commit, c, refs) = fixture("grep -q dataset data/config.json");
     std::fs::write(p.project.join("data/config.json"), "{\"dataset\":true}").unwrap();
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(out.passed(), "{:?}", out.operational_errors);
 }
 
@@ -114,9 +146,17 @@ async fn ordinary_timeout_does_not_skip_independent_later_check() {
     let (t, mut p, commit, mut c, mut refs) = fixture("sleep 30; test -f input");
     p.timeout_secs = 1;
     second(&mut c, &mut refs, "grep -q before data/value");
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(out.checks[0].operational_error.is_some());
     assert_eq!(
         out.checks[1].exit_code,
@@ -130,9 +170,17 @@ async fn operator_exclusions_apply_to_copy_and_audit() {
     let (t, mut p, commit, c, refs) = fixture("test -f data/value && test ! -e data/private");
     p.project_input_excludes = vec!["data/private".into()];
     std::fs::write(p.project.join("data/private"), "operator-excluded").unwrap();
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(out.passed());
     assert!(!out.before[&p.project.display().to_string()].contains_key("data/private"));
 }

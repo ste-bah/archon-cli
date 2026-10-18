@@ -27,9 +27,17 @@ async fn environment_child() {
     raw["environment_allowlist"] = serde_json::json!(["FIXTURE_ALLOWED_TOKEN"]);
     let policy: ScratchPolicy = serde_json::from_value(raw).expect("allowlist must be supported");
     let evidence = t.path().join("evidence");
-    let out = observe_commands(&policy, &commit, &c, "chain", &refs, &evidence)
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &policy,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &evidence,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(out.passed(), "{:?}", out.operational_errors);
     let encoded = serde_json::to_string(&out).unwrap();
     assert!(!encoded.contains("secret-acceptance-canary-98e3"));
@@ -133,9 +141,17 @@ async fn redaction_child() {
         let (t, mut p, commit, c, refs) = support::fixture(command);
         p.environment_allowlist = vec!["FIXTURE_ALLOWED_TOKEN".into()];
         p.output_bytes = limit;
-        let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-            .await
-            .unwrap();
+        let out = observe_commands(
+            &p,
+            &commit,
+            &c,
+            "chain",
+            &refs,
+            &t.path().join("evidence"),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(out.checks[0].stdout, stdout.as_bytes());
         assert_eq!(out.checks[0].stderr, stderr.as_bytes());
         assert_eq!(out.checks[0].operational_error.is_some(), overflow);
@@ -162,9 +178,17 @@ fn missing_allowlisted_value_is_an_operational_check_error() {
 async fn missing_environment_child() {
     let (t, mut p, commit, c, refs) = support::fixture("test -f input && printf should-not-run");
     p.environment_allowlist = vec!["ARCHON_274_DELIBERATELY_ABSENT_TOKEN".into()];
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     let check = &out.checks[0];
     let error = check
         .operational_error

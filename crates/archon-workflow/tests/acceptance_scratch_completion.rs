@@ -50,9 +50,17 @@ async fn advanced_floor_runs_shared_verifier_before_exact_nested_command() {
         )
         .unwrap();
         refs[0].kind = AcceptanceCommandKind::NestedVerifier;
-        let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-            .await
-            .unwrap();
+        let out = observe_commands(
+            &p,
+            &commit,
+            &c,
+            "chain",
+            &refs,
+            &t.path().join("evidence"),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        )
+        .await
+        .unwrap();
         assert!(out.checks[0].operational_error.is_none(), "{out:?}");
         assert_eq!(out.passed(), valid, "{out:?}");
         assert_eq!(
@@ -72,9 +80,17 @@ async fn replaced_target_link_voids_result_before_reuse() {
     let mut next = refs[0].clone();
     next.acceptance_id = "AC-X-002".into();
     refs.push(next);
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(!out.passed(), "target substitution was accepted");
     assert!(
         out.checks[0]
@@ -91,7 +107,16 @@ async fn setup_failure_preserves_operational_record_and_live_audit() {
     let (t, mut p, commit, c, refs) = fixture("test -f input");
     p.project_inputs.push("missing".into());
     let evidence = t.path().join("evidence");
-    let _ = observe_commands(&p, &commit, &c, "chain", &refs, &evidence).await;
+    let _ = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &evidence,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await;
     let raw =
         std::fs::read(evidence.join("observation.json")).expect("setup failure evidence missing");
     let record: serde_json::Value = serde_json::from_slice(&raw).unwrap();
@@ -111,7 +136,16 @@ async fn after_audit_failure_preserves_nonpassing_record() {
     }
     refs[0].command_digest = archon_workflow::task_set_contract::content_digest(cmd.as_bytes());
     let evidence = t.path().join("evidence");
-    let _ = observe_commands(&p, &commit, &c, "chain", &refs, &evidence).await;
+    let _ = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &evidence,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await;
     let record: serde_json::Value = serde_json::from_slice(
         &std::fs::read(evidence.join("observation.json")).expect("audit failure evidence missing"),
     )
@@ -123,9 +157,17 @@ async fn after_audit_failure_preserves_nonpassing_record() {
 #[tokio::test]
 async fn each_check_records_cache_identity_and_project_mutations() {
     let (t, p, commit, c, refs) = fixture("test -f data/value && printf changed > data/value");
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     let record = serde_json::to_value(out).unwrap();
     assert!(record["check_evidence"][0]["before_identity"].is_object());
     assert!(
@@ -147,6 +189,7 @@ async fn cancelled_observation_does_not_create_a_worktree() {
         "chain",
         &refs,
         &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         Arc::new(AtomicBool::new(true)),
     )
     .await
@@ -179,9 +222,17 @@ async fn hanging_checkout_is_bounded_and_records_cleanup() {
     git(&["config", "filter.stall.smudge", "sleep 30; cat"]);
     p.timeout_secs = 1;
     let start = std::time::Instant::now();
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         start.elapsed() < std::time::Duration::from_secs(8),
         "checkout exceeded observation setup bound"
@@ -201,9 +252,17 @@ async fn hanging_checkout_is_bounded_and_records_cleanup() {
 async fn cache_configuration_change_cannot_feed_a_later_check() {
     let cmd = "test -f input && printf '[build]\nrustflags=[\"--cfg=changed\"]\n' > \"$CARGO_HOME/config.toml\"";
     let (t, p, commit, c, refs) = fixture(cmd);
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(!out.passed());
     assert!(
         out.checks[0]
@@ -218,9 +277,17 @@ async fn cache_configuration_change_cannot_feed_a_later_check() {
 async fn cleanup_registration_damage_cannot_report_verified_teardown() {
     let cmd = "test -f input && rm ../repo/.git && test -f input";
     let (t, p, commit, c, refs) = fixture(cmd);
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         !out.teardown_verified,
         "lost worktree registration was silently accepted"
@@ -232,9 +299,17 @@ async fn cleanup_registration_damage_cannot_report_verified_teardown() {
 async fn new_source_build_configuration_invalidates_cache_identity() {
     let cmd = "test -f input && mkdir .cargo && printf '[build]\nrustflags=[\"--cfg=changed\"]\n' > .cargo/config.toml";
     let (t, p, commit, c, refs) = fixture(cmd);
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         !out.passed(),
         "new source build configuration bypassed identity validation"

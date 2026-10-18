@@ -190,19 +190,19 @@ const SCRIPT: &str = r#"async function workflow(w) {
 async fn logic_361_a_logic_change_reruns_only_its_capability() {
     let run = Run::new();
     assert_eq!(run.run(Arc::new(run.launched()), SCRIPT).await, (4, 0));
-    assert_eq!(run.stamps("freeze-skeleton"), vec![Some(3)]);
-    let stricter = run.upgraded(&[("freeze-skeleton", 4)]);
+    assert_eq!(run.stamps("freeze-skeleton"), vec![Some(4)]);
+    let stricter = run.upgraded(&[("freeze-skeleton", 5)]);
     assert_eq!(run.run(stricter.clone(), SCRIPT).await, (1, 3));
     assert_eq!(stricter.calls.load(Ordering::SeqCst), 1);
     // The new verdict is keyed and stamped by the new logic, and holds.
-    assert!(run.stamps("freeze-skeleton").contains(&Some(4)));
+    assert!(run.stamps("freeze-skeleton").contains(&Some(5)));
     assert_eq!(
-        run.run(run.upgraded(&[("freeze-skeleton", 4)]), SCRIPT)
+        run.run(run.upgraded(&[("freeze-skeleton", 5)]), SCRIPT)
             .await,
         (0, 4)
     );
     // A stricter set lint re-runs the lint alone.
-    let lint = run.upgraded(&[("freeze-skeleton", 4), ("task-set-lint", 5)]);
+    let lint = run.upgraded(&[("freeze-skeleton", 5), ("task-set-lint", 5)]);
     assert_eq!(run.run(lint.clone(), SCRIPT).await, (1, 3));
     assert!(run.stamps("task-set-lint").contains(&Some(5)));
 }

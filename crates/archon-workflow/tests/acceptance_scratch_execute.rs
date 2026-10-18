@@ -9,6 +9,24 @@ use archon_workflow::acceptance_scratch::{ScratchPolicy, observe_commands};
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{AcceptanceContract, content_digest};
 use std::{collections::BTreeMap, path::Path, process::Command};
+async fn observe(
+    policy: &ScratchPolicy,
+    commit: &str,
+    contract: &AcceptanceContract,
+    refs: &[FrozenCommandRef],
+    evidence: &Path,
+) -> archon_workflow::WorkflowResult<archon_workflow::acceptance_scratch::ObservationResult> {
+    observe_commands(
+        policy,
+        commit,
+        contract,
+        "chain",
+        refs,
+        evidence,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+}
 fn git(root: &Path, args: &[&str]) -> String {
     let o = Command::new("git")
         .arg("-C")
@@ -78,7 +96,7 @@ fn fixture(
 async fn scratch_check_receives_archon_resource_defaults() {
     let (t, p, commit, c, refs) =
         fixture("test \"$CARGO_BUILD_JOBS\" = 3 && test \"$CARGO_INCREMENTAL\" = 1");
-    let hooks = archon_workflow::acceptance_scratch::ObserveHooks::default().with_resource_limits(
+    let hooks = archon_workflow::acceptance_scratch::ObserveHooks::for_resource_limits(
         archon_tools::workflow_resource_env::CargoResourceLimits {
             build_jobs: 3,
             incremental: true,
@@ -102,17 +120,32 @@ async fn scratch_check_receives_archon_resource_defaults() {
 
 #[tokio::test]
 async fn public_observer_applies_cargo_resource_defaults() {
-    let (t, p, commit, c, refs) = fixture("test -n \"$CARGO_BUILD_JOBS\"");
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
-        .await
-        .unwrap();
+    let (t, p, commit, c, refs) = fixture(
+        "test \"$CARGO_BUILD_JOBS\" = 2 && test \"$CARGO_INCREMENTAL\" = 0 && test \"$ARCHON_WORKFLOW_RESOURCE_CLASS\" = constrained",
+    );
+    let limits = archon_tools::workflow_resource_env::CargoResourceLimits {
+        build_jobs: 2,
+        incremental: false,
+        resource_class: "constrained".into(),
+    };
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        limits,
+    )
+    .await
+    .unwrap();
     assert_eq!(out.checks[0].exit_code, Some(0), "{:?}", out.checks[0]);
 }
 
 #[tokio::test]
 async fn a_check_command_can_override_the_archon_cargo_default() {
     let (t, p, commit, c, refs) = fixture("CARGO_BUILD_JOBS=7; test \"$CARGO_BUILD_JOBS\" = 7");
-    let hooks = archon_workflow::acceptance_scratch::ObserveHooks::default().with_resource_limits(
+    let hooks = archon_workflow::acceptance_scratch::ObserveHooks::for_resource_limits(
         archon_tools::workflow_resource_env::CargoResourceLimits {
             build_jobs: 3,
             incremental: false,
@@ -138,7 +171,7 @@ async fn native_command_mutates_only_scratch_and_records_verified_cleanup() {
     let (t, p, commit, c, r) = fixture(
         "test -f data/value && printf after > data/value; test \"$(cat data/value)\" = after",
     );
-    let out = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+    let out = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(out.passed());
@@ -163,7 +196,7 @@ async fn direct_live_write_voids_even_a_zero_exit() {
         *command = cmd.clone();
     }
     r[0].command_digest = content_digest(cmd.as_bytes());
-    let out = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+    let out = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(!out.passed());
@@ -174,7 +207,7 @@ async fn timeout_and_output_flood_are_operational_and_cleaned() {
     for cmd in ["sleep 30; test -f input", "while :; do printf flood; done"] {
         let (t, mut p, commit, c, r) = fixture(cmd);
         p.timeout_secs = 1;
-        let out = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+        let out = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
             .await
             .unwrap();
         assert!(!out.passed());
@@ -188,7 +221,7 @@ async fn authorization_failure_creates_no_scratch_and_runs_nothing() {
         fixture("test -f data/value && printf after > data/value; test -f input");
     r[0].command_digest = "wrong".into();
     let evidence = t.path().join("evidence");
-    let result = observe_commands(&p, &commit, &c, "chain", &r, &evidence)
+    let result = observe(&p, &commit, &c, &r, &evidence)
         .await
         .expect("authorization failure must still publish per-check evidence");
     assert!(!result.passed());
@@ -255,7 +288,7 @@ async fn real_native_build_relative_binary_and_warm_target_work() {
     let mut second = refs[0].clone();
     second.acceptance_id = "AC-X-002".into();
     refs.push(second);
-    let result = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+    let result = observe(&p, &commit, &c, &refs, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(result.passed(), "{result:?}");
@@ -269,7 +302,7 @@ async fn ambient_credentials_and_shell_startup_are_not_inherited() {
     let cmd = "test -z \"${NATIVE_SECRET_CANARY:-}\" && test -z \"${BASH_ENV:-}\" && test \"$HOME\" != / && test -d \"$CARGO_HOME\"";
     let (t, p, commit, c, r) = fixture(cmd);
     // Use the test executable as a subprocess for environment isolation.
-    let out = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+    let out = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(out.passed(), "{out:?}");
@@ -307,7 +340,7 @@ async fn native_check_reaches_an_owned_loopback_service() {
     });
     let cmd = format!("curl --fail --silent --max-time 3 http://127.0.0.1:{port}/ | grep -q ready");
     let (t, p, commit, c, r) = fixture(&cmd);
-    let result = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+    let result = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(result.passed(), "{result:?}");
@@ -317,7 +350,7 @@ async fn native_check_reaches_an_owned_loopback_service() {
 #[tokio::test]
 async fn normal_nonzero_is_not_an_operational_failure() {
     let (t, p, commit, c, r) = fixture("test -f absent");
-    let result = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+    let result = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(!result.passed());
@@ -331,7 +364,7 @@ async fn short_command_cannot_escape_scratch_size_check_by_exiting() {
     let (t, mut p, commit, c, r) =
         fixture("test -f input && dd if=/dev/zero of=large bs=1048576 count=2 2>/dev/null");
     p.scratch_bytes = 1024 * 1024;
-    let result = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+    let result = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(!result.passed());
@@ -357,7 +390,7 @@ async fn changed_scratch_source_cannot_feed_a_later_check() {
         chain_digest: "chain".into(),
         command_digest: content_digest(b"grep -q modified input"),
     });
-    let result = observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
+    let result = observe(&p, &commit, &c, &r, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(
@@ -386,9 +419,7 @@ async fn changed_scratch_source_cannot_feed_a_later_check() {
 async fn evidence_binds_commands_policy_and_copied_inputs() {
     let (t, p, commit, c, refs) = fixture("test -f data/value");
     let evidence = t.path().join("evidence");
-    observe_commands(&p, &commit, &c, "chain", &refs, &evidence)
-        .await
-        .unwrap();
+    observe(&p, &commit, &c, &refs, &evidence).await.unwrap();
     let record: serde_json::Value =
         serde_json::from_slice(&std::fs::read(evidence.join("observation.json")).unwrap()).unwrap();
     assert_eq!(
@@ -424,7 +455,7 @@ async fn separate_view_uses_each_declared_cwd_without_live_inputs() {
     reference.acceptance_id = "AC-X-002".into();
     reference.command_digest = content_digest(repo_command.as_bytes());
     refs.push(reference);
-    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+    let out = observe(&p, &commit, &c, &refs, &t.path().join("evidence"))
         .await
         .unwrap();
     assert!(out.passed(), "{out:?}");

@@ -43,8 +43,7 @@ pub(super) async fn run(
         runtime.target_repository_root.as_deref(),
         resolved,
         adapter,
-        &super::super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-            .with_generated_config(&runtime.generated_config),
+        &super::super::live_agent_dispatch::LiveAgentDispatch::for_runtime(client.clone(), runtime),
         v2,
         store,
         run_id,

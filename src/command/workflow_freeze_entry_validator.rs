@@ -151,6 +151,12 @@ fn live_roots(text: &str) -> Result<Vec<PathBuf>, String> {
 /// not one JSON value); every defect of the model's reply is a refusal.
 pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs::Result<()> {
     ctx.globals().set(
+        "__archonRedactPublicText",
+        rquickjs::function::Func::from(|text: String| -> String {
+            archon_observability::shared_redactor::redact_text(&text, "<redacted>")
+        }),
+    )?;
+    ctx.globals().set(
         "__archonValidateAcceptanceEntry",
         rquickjs::function::Func::from(
             |id: String,

@@ -18,6 +18,10 @@ use std::{
     fs::{File, OpenOptions, TryLockError},
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 pub(crate) const LEASE: &str = "decomposition/executor.lock";
@@ -62,10 +66,12 @@ pub(crate) struct ExecutionLease {
     file: File,
     holder: LeaseHolder,
     previous_executor: Option<LeaseHolder>,
+    held: Arc<AtomicBool>,
 }
 
 impl Drop for ExecutionLease {
     fn drop(&mut self) {
+        self.held.store(false, Ordering::Release);
         release_lock(&self.file);
     }
 }
@@ -85,6 +91,25 @@ pub(crate) fn release_lock(file: &File) {
 }
 
 impl ExecutionLease {
+    pub(crate) fn holder(&self) -> &LeaseHolder {
+        &self.holder
+    }
+
+    /// A shared token for in-process authorization that becomes false before
+    /// this guard releases its kernel lock.
+    pub(crate) fn held_token(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.held)
+    }
+
+    /// Checks ownership through the guard that acquired the lock. Reopening
+    /// and relocking the file is not portable: Windows may report a conflict
+    /// for a second handle in the same process.
+    pub(crate) fn is_held_by(&self, pid: u32, acquired_at: &str) -> bool {
+        self.held.load(Ordering::Acquire)
+            && self.holder.pid == pid
+            && self.holder.acquired_at == acquired_at
+    }
+
     /// The last process that executed the run before this lease was taken.
     /// `None` for a new run, or for a lock file that an older build left
     /// empty.
@@ -144,6 +169,7 @@ pub(crate) fn acquire(run_dir: &Path, id: &str) -> Result<ExecutionLease> {
             acquired_at: chrono::Utc::now().to_rfc3339(),
         },
         previous_executor,
+        held: Arc::new(AtomicBool::new(true)),
     };
     lease.write(&LeaseRecord {
         schema_version: 1,
@@ -182,3 +208,17 @@ fn live_owner_message(id: &str, path: &Path) -> String {
 #[cfg(test)]
 #[path = "workflow_executor_lease_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[test]
+fn held_lease_identity_uses_the_guard_and_clears_on_drop() {
+    let temp = tempfile::tempdir().unwrap();
+    let lease = acquire(temp.path(), "wf-held-token").unwrap();
+    let holder = lease.holder().clone();
+    assert!(lease.is_held_by(holder.pid, &holder.acquired_at));
+    assert!(!lease.is_held_by(holder.pid.wrapping_add(1), &holder.acquired_at));
+
+    let token = lease.held_token();
+    drop(lease);
+    assert!(!token.load(std::sync::atomic::Ordering::Acquire));
+}

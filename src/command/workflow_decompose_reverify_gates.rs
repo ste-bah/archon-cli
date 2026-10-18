@@ -1,6 +1,8 @@
 //! Runs and records the fixed read-only gates used during reverify.
 use anyhow::Result;
-use archon_workflow::{HostCommandRequest, HostCommandResult, WorkflowV2ResultStore};
+use archon_workflow::{
+    HostCommandRequest, HostCommandResult, RunStatus, WorkflowStore, WorkflowV2ResultStore,
+};
 
 use super::workflow_decompose_reverify::{GateResult, persist_call};
 use crate::command::workflow_host_command_exec::{
@@ -9,9 +11,13 @@ use crate::command::workflow_host_command_exec::{
 
 pub(super) async fn execute_gate(
     executor: &FixedHostCommandExecutor,
+    store: &WorkflowStore,
     v2: &WorkflowV2ResultStore,
     run_id: &str,
+    run_dir: &std::path::Path,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
     generation: u64,
+    status: &RunStatus,
     seq: u64,
     index: usize,
     command_id: &str,
@@ -47,7 +53,8 @@ pub(super) async fn execute_gate(
     let logic_digest = executor.logic_digest(&request)?;
     let build = executor.logic_build(&request)?;
     persist_call(
-        executor, v2, run_id, &call_id, request, &result, b"", depends_on,
+        executor, store, v2, run_id, run_dir, lease, generation, status, &call_id, request,
+        &result, b"", depends_on,
     )?;
     let subjects = result
         .gate_envelope

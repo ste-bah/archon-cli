@@ -66,6 +66,7 @@ async fn round8_fixed_started_delivery_failure_is_closed_before_sibling_terminal
             sink.clone(),
             Vec::new(),
             Arc::new(NoHostCommands),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         ),
     )
     .await
@@ -140,6 +141,7 @@ async fn round8_fixed_unmarked_script_errors_leave_durable_paused_status() {
             ui,
             Vec::new(),
             Arc::new(NoHostCommands),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         )
         .await
         .unwrap();

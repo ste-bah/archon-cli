@@ -219,7 +219,12 @@ impl OperationalReport<'_> {
 
 #[path = "workflow_host_command_run_owned.rs"]
 mod run_owned;
-pub(crate) use run_owned::{require_run_owned, require_run_owned_locked, supervisor_signal};
+pub(crate) use run_owned::{
+    PausedRunAuthorization, require_run_owned_authorized, require_run_owned_locked_authorized,
+    supervisor_signal_authorized,
+};
+#[cfg(test)]
+pub(crate) use run_owned::{require_run_owned, require_run_owned_locked};
 
 /// Records that the last attempt of `report` ended operationally and the call
 /// runs again. Evidence only: a failure to record never stops the retry.

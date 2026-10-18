@@ -246,6 +246,8 @@ async fn the_body_author_loop_gets_the_refusal_as_its_next_attempts_finding() {
     let driver = format!(
         r##"{script}
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
+// Explicit Node fixture binding; host redaction parity is covered in QuickJS.
+globalThis.__archonRedactPublicText = text => String(text);
 const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0, 2166136261).toString(16).padStart(8, "0").repeat(8);
 globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({{ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) }});
 globalThis.args = {{ projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "/p/tasks", gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "c" }} }};

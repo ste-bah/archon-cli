@@ -15,10 +15,24 @@ function authorContext(files = new Map()) {
   return binding;
 }
 
+// Explicit Node-only stand-in for the native redactor binding. This small
+// fixture covers the shapes exercised by these harnesses; Rust/QuickJS tests
+// compare the product script against the complete host redactor corpus.
+function redactPublicTextFixture(value) {
+  return String(value)
+    .replace(/(?<![\p{L}\p{N}_])authorization:[^\s]*/giu, '<redacted>')
+    .replace(/(?<![\p{L}\p{N}_])sk-ant-[A-Za-z0-9_-]{20,}/giu, '<redacted>')
+    .replace(/(?<![\p{L}\p{N}_])sk-[A-Za-z0-9_-]{17,}/giu, '<redacted>')
+    .replace(/["']?(?:x-api-key|api-key|api[_-]?key|apikey|token|secret|password)\s*[:=]\s*[^\s,;}"']+/giu, '<redacted>')
+    .replace(/(?<![\p{L}\p{N}_])(bearer\s+)\S+/giu, '$1<redacted>')
+    .replace(/((?:x-api-key|api-key)\s+)[^\s]+/giu, '$1<redacted>');
+}
+
 // `context` with the binding installed, unless the test installed its own.
 function withAuthorContext(context) {
   if (!Object.prototype.hasOwnProperty.call(context, '__archonAuthorContext')) context.__archonAuthorContext = authorContext();
+  if (!Object.prototype.hasOwnProperty.call(context, '__archonRedactPublicText')) context.__archonRedactPublicText = redactPublicTextFixture;
   return context;
 }
 
-module.exports = { authorContext, withAuthorContext };
+module.exports = { authorContext, withAuthorContext, redactPublicTextFixture };

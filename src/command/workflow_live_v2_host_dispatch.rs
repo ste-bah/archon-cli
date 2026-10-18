@@ -125,8 +125,8 @@ pub(super) async fn execute_v2_live_call(
             // shared with read-only fan-out and resolves stored source
             // expressions, which is host policy about where items come from.
             let branches = fanout_items_for_call(&execution, v2_store)?;
-            let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-                .with_generated_config(&runtime.generated_config);
+            let dispatch =
+                super::live_agent_dispatch::LiveAgentDispatch::for_runtime(client.clone(), runtime);
             on_heap(|| {
                 run_write_capable_v2_fanout(
                     task,

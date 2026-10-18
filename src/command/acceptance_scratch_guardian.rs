@@ -163,7 +163,7 @@ async fn serve() -> WorkflowResult<()> {
             request.pin_path.display()
         ))
     })?;
-    let hooks = ObserveHooks::default().with_resource_limits(limits);
+    let hooks = ObserveHooks::for_resource_limits(limits);
     let result = observe_commands_hooked(
         &request.policy,
         &request.source_commit,

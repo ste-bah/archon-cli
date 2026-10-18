@@ -1,7 +1,11 @@
 //! End-to-end tests for the reverify command. Expected state is recorded
 //! before invoking the real entry point; assertions read its persisted output.
+#[path = "workflow_decompose_reverify_eligibility_tests.rs"]
+mod eligibility_tests;
 #[path = "workflow_decompose_reverify_fixture_repository.rs"]
 mod fixture_repository;
+#[path = "workflow_decompose_reverify_resume_recovery_tests.rs"]
+mod resume_recovery_tests;
 use super::*;
 use archon_workflow::{
     DecompositionPhase, FixedDecompositionStateV1, FixedRunIdentityV1, RunStatus, WorkflowRunKind,
@@ -484,6 +488,7 @@ async fn defective_body_is_a_finding_that_pauses_and_creates_a_ledger() {
     assert!(stdout.contains("needs_remediation"), "{stdout}");
     assert!(stdout.contains("Resume:"), "{stdout}");
     assert_eq!(std::fs::read(&fixture.bodies[0]).unwrap(), defective);
+    super::workflow_decompose_reverify_pause_tests::verify_second_reverify_gates(&binary, &fixture);
     println!(
         "EVIDENCE reverify defective_body AFTER: outcome={} verdict={} findings={} run=Paused ledger_present=true exit_zero=true resume_printed=true body_unchanged=true",
         report["outcome"],
