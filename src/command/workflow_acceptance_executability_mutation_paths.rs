@@ -26,6 +26,7 @@ pub(super) fn path_tokens(text: &str) -> Vec<String> {
     let allowed =
         |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-' | '+' | '@');
     text.split(|c: char| !allowed(c))
+        .filter(|token| !token.ends_with('/'))
         .map(normalize)
         .filter(|token| {
             !token.is_empty()

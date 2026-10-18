@@ -69,7 +69,7 @@ pub(super) async fn prove(
             findings.insert(
                 id.clone(),
                 format!(
-                    "{}; {already}; it names none (no resolvable input)",
+                    "{}; {already}; it names none that exists there (no resolvable input)",
                     passed_there(id)
                 ),
             );

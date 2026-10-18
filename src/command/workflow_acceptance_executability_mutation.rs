@@ -20,6 +20,9 @@ use super::executed_text;
 #[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
 mod wrapper_script;
 
+#[path = "workflow_acceptance_executability_mutation_inline.rs"]
+mod inline;
+
 #[path = "workflow_acceptance_executability_mutation_paths.rs"]
 mod paths;
 
@@ -192,18 +195,23 @@ pub(super) fn named_inputs(
         .chain(written_words.iter().flat_map(|word| path_tokens(word)))
         .collect();
     let bases = paths::command_directories(&commands, bases);
+    let inline_programs = inline::program_positions(&commands);
     let mut words: Vec<(String, Option<PathBuf>)> = commands
         .iter()
         .enumerate()
         .flat_map(|(index, words)| {
             let base = bases.get(index).cloned().flatten();
+            let inline_programs = &inline_programs;
             words
                 .iter()
-                .filter(|word| {
-                    !matches!(
-                        word.as_str(),
-                        paths::SUBSHELL_OPEN | paths::SUBSHELL_CLOSE | "export"
-                    ) && !word.starts_with('\0')
+                .enumerate()
+                .filter(move |(word_index, word)| {
+                    !inline_programs.contains(&(index, *word_index))
+                        && !matches!(
+                            word.as_str(),
+                            paths::SUBSHELL_OPEN | paths::SUBSHELL_CLOSE | "export"
+                        )
+                        && !word.starts_with('\0')
                         && !word.starts_with('$')
                         && !word.contains(['$', '`'])
                         && !word.split_once('=').is_some_and(|(name, _)| {
@@ -213,10 +221,13 @@ pub(super) fn named_inputs(
                                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
                         })
                 })
-                .cloned()
+                .map(|(_, word)| word.clone())
                 .map(move |word| (word, base.clone()))
         })
         .collect();
+    for (index, _, program) in inline::programs(&commands) {
+        words.push((program, bases.get(index).cloned().flatten()));
+    }
     for (index, body) in bodies {
         words.push((body, bases.get(index).cloned().flatten()));
     }
@@ -235,13 +246,13 @@ pub(super) fn named_inputs(
             let Some(base) = base else {
                 return None;
             };
-            let shaped = token.contains('/') || path.extension().is_some();
             let resolved_path = if path.is_absolute() {
                 path.to_path_buf()
             } else {
                 base.join(path)
             };
             let exists = super::hermetic::siblings::exact_path_exists(&resolved_path);
+            let shaped = token.contains('/') || exists;
             let resolved = resolved_path.canonicalize().ok();
             let sibling_root = resolved.as_ref().and_then(|resolved| {
                 siblings
@@ -480,3 +491,7 @@ mod tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_mutation_variable_tests.rs"]
 mod variable_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_mutation_inline_tests.rs"]
+mod inline_tests;

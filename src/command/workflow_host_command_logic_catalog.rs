@@ -66,7 +66,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 29: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 30: sibling mutation inputs must be named in the check's actual
         // relative context, changing can-fail proof verdicts.
-        version: 30,
+        // 31: literal file reads in recognized inline interpreter programs
+        // are included in mutation inputs, changing can-fail proof verdicts.
+        // 32: every program following a recognized inline-program flag is
+        // scanned, changing can-fail proof verdicts for repeated flags.
+        version: 32,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -95,7 +99,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; acceptance-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into check execution; these limits affect execution environment and parallelism, not verdict rules.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "0414c05ab179c6317ffce5651b08ceff9e889f5db03205a6b0b65537c6907c16",
+        sources_digest: "4f64013f7ea4c5650a08ad50009a9562334f19958da9b9ea61210db970ba4b3b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -142,11 +146,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #457 follow-up re-pin only: this closure is shared; the skeleton verdict is unchanged.
         // #457 sibling-input classification changes can-fail proof outcomes only, not skeleton freeze verdicts.
         // #457 re-pin only: directory and variable flow are shared; the skeleton verdict is unchanged.
+        // #457 re-pin only: inline acceptance input discovery does not change skeleton freeze verdicts.
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; skeleton-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into scratch checks; skeleton freeze runs no checks, so its verdict is unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "0414c05ab179c6317ffce5651b08ceff9e889f5db03205a6b0b65537c6907c16",
+        sources_digest: "4f64013f7ea4c5650a08ad50009a9562334f19958da9b9ea61210db970ba4b3b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -335,11 +340,13 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
         // #457 re-pin only: frozen-chain verification does not run the can-fail probe or read named inputs.
         // #457 reverify report evidence and can-fail proof logic do not affect frozen-chain verification.
+        // #457 re-pin only: inline acceptance input discovery does not affect frozen-chain verification.
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; frozen acceptance verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into frozen check execution; limits change execution environment and parallelism, not verification verdict rules.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "3969cdab47d92a494b250eda7516c2769dfb06a603ffad19acf2e247df4ef86f",
+        // #457 re-pin only: freeze-acceptance logic version 32 changes the can-fail proof, not frozen-chain verification.
+        sources_digest: "3f01ebf5654cdabc0638627ef13b56c5ddb61ab48b4117b60fb418caaaa6a98a",
         build_bound: true,
     },
     CapabilityLogic {
@@ -383,11 +390,13 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
         // #457 re-pin only: frozen verification runs no check and judges no probe result.
         // #457 reverify report evidence and can-fail proof logic do not affect frozen-chain verification.
+        // #457 re-pin only: inline acceptance input discovery does not affect frozen-chain verification.
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; frozen skeleton verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into shared observation code; skeleton verification runs no checks, so its verdict is unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "3969cdab47d92a494b250eda7516c2769dfb06a603ffad19acf2e247df4ef86f",
+        // #457 re-pin only: freeze-acceptance logic version 32 does not affect frozen skeleton verification.
+        sources_digest: "3f01ebf5654cdabc0638627ef13b56c5ddb61ab48b4117b60fb418caaaa6a98a",
         build_bound: true,
     },
 ];
