@@ -50,13 +50,13 @@ pub(super) fn copy_external(
         for sibling in crate::acceptance_sibling_paths::discover(root, std::slice::from_ref(check))
         {
             let path = relative(root, &sibling.alias);
-            siblings.push((copied_root.join(&path), path, sibling.source));
+            siblings.push((copied_root.join(&path), path, sibling.source, *cwd));
         }
     }
-    siblings.sort();
+    siblings.sort_by(|left, right| left.0.cmp(&right.0));
     siblings.dedup_by(|left, right| left.0 == right.0);
     let mut evidence = Vec::new();
-    for (destination, relative, source) in siblings {
+    for (destination, relative, source, cwd) in siblings {
         let existed = destination.exists();
         let commit = if source.join(".git").exists() {
             let head = git_head(&source)?;
@@ -132,6 +132,7 @@ pub(super) fn copy_external(
         evidence.push(crate::acceptance_sibling_paths::SiblingRevision {
             path: relative,
             commit,
+            cwd: Some(cwd),
         });
         if !existed && source.join(".git").exists() {
             *remaining = remaining

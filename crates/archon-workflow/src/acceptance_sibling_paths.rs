@@ -13,6 +13,8 @@ pub struct SiblingPath {
 pub struct SiblingRevision {
     pub path: PathBuf,
     pub commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<crate::task_set_contract::TrustedCwd>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
