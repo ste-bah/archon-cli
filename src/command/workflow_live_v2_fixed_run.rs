@@ -6,7 +6,34 @@ use super::*;
 pub(super) mod lost_ownership;
 use lost_ownership::{lost_ownership, lost_ownership_report};
 
+#[cfg(test)]
 pub(crate) async fn execute_fixed_decomposition_v2_run(
+    store: &WorkflowStore,
+    run: WorkflowRun,
+    plan: WorkflowScriptPlan,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
+    agent_names: Vec<String>,
+    host_command_executor: Arc<
+        dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
+    >,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+) -> Result<String> {
+    execute_fixed_decomposition_v2_run_with_config(
+        store,
+        run,
+        plan,
+        llm,
+        ui_sink,
+        agent_names,
+        host_command_executor,
+        cargo_limits,
+        Arc::new(archon_core::config::ArchonConfig::default()),
+    )
+    .await
+}
+
+pub(crate) async fn execute_fixed_decomposition_v2_run_with_config(
     store: &WorkflowStore,
     mut run: WorkflowRun,
     plan: WorkflowScriptPlan,
@@ -17,6 +44,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
     >,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    resolved_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<String> {
     const LABEL: &str = "Fixed decomposition";
     let v2_store = match persist_fixed_start(store, &mut run) {
@@ -43,6 +71,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         store,
         &v2_store,
         cargo_limits.clone(),
+        resolved_config,
     );
     let summary = match runner.run(&plan.harness_source).await {
         Ok(summary) => summary,
@@ -226,6 +255,7 @@ pub(super) fn fixed_runner(
     store: &WorkflowStore,
     v2_store: &WorkflowV2ResultStore,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    resolved_config: Arc<archon_core::config::ArchonConfig>,
 ) -> WorkflowV2ScriptRunner {
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: None,
@@ -266,6 +296,7 @@ pub(super) fn fixed_runner(
     )
     .with_host_command_executor(host_command_executor)
     .with_raw_outcomes(true)
+    .with_resolved_config(resolved_config)
 }
 
 pub(super) fn fixed_decomposition_client(

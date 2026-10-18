@@ -460,7 +460,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             )),
         };
     }
-    let result = super::super::workflow_live::execute_fixed_decomposition_v2_run(
+    let result = super::super::workflow_live::execute_fixed_decomposition_v2_run_with_config(
         &store,
         run,
         plan,
@@ -469,6 +469,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         agent_names,
         executor,
         config.tools.cargo.to_limits(),
+        Arc::new(config.clone()),
     )
     .await?;
     crate::command::workflow_decompose_remediation::finish_resume_for_store(

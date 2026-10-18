@@ -116,13 +116,20 @@ impl ScriptToolHost {
     pub(crate) fn require_audited_writes(&mut self) {
         self.audited_writes = true;
     }
-    /// Build from the loaded configuration, exactly as a session does.
-    pub(crate) fn new(working_dir: std::path::PathBuf, session_id: String) -> WorkflowResult<Self> {
-        let config = archon_core::config::load_config().map_err(|error| {
-            WorkflowError::SpecInvalid(format!(
-                "workflow tool calls need the archon config, which failed to load: {error}"
-            ))
-        })?;
+    /// Build from the run's startup-resolved configuration, exactly as a session does.
+    pub(crate) fn new(
+        working_dir: std::path::PathBuf,
+        session_id: String,
+        config: &archon_core::config::ArchonConfig,
+    ) -> WorkflowResult<Self> {
+        Self::with_config(working_dir, session_id, config)
+    }
+
+    fn with_config(
+        working_dir: std::path::PathBuf,
+        session_id: String,
+        config: &archon_core::config::ArchonConfig,
+    ) -> WorkflowResult<Self> {
         // Bound before the literal below moves it: the activity sink is
         // named by the same id the context carries, so the two cannot drift.
         let run_session_id = session_id.clone();
@@ -176,9 +183,17 @@ impl ScriptToolHost {
         // the gate present and inert, which is worse than absent because it
         // reads as closed.
         crate::command::world_model::configure_tool_run_context(&config, &mut context);
+        let mut registry = archon_core::dispatch::create_default_registry(working_dir, None);
+        // Script Bash keeps the historical default classifier so a configured
+        // safe-command exception cannot skip workflow tool-run admission.
+        // Cargo resource defaults still come from the run's resolved config.
+        registry.replace(Box::new(
+            archon_tools::bash::BashTool::default()
+                .with_cargo_limits(config.tools.cargo.to_limits()),
+        ));
         Ok(Self {
             audited_writes: false,
-            registry: archon_core::dispatch::create_default_registry(working_dir, None),
+            registry,
             checker: PermissionChecker::new(
                 // Same parse the session does, and the same fallback: an
                 // unrecognised mode string must not silently become the most

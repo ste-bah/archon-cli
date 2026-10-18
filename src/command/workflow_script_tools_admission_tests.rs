@@ -189,6 +189,62 @@ async fn a_sandbox_capability_denial_refuses_a_scripts_tool_call() {
     );
 }
 
+/// Configured safe-command exceptions must not change the script host's Bash
+/// classifier: an `rm` command still reaches the workflow admission callback.
+#[tokio::test]
+async fn safe_command_config_does_not_bypass_script_bash_admission() {
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.permissions.safe_commands = vec!["rm".to_string()];
+    let mut host = ScriptToolHost::new(
+        std::env::temp_dir(),
+        "script-bash-classification".to_string(),
+        &config,
+    )
+    .expect("the tool host builds");
+    host.checker = PermissionChecker::new(
+        archon_permissions::mode::PermissionMode::default(),
+        archon_permissions::rules::RuleSet {
+            always_allow: vec![archon_permissions::rules::ToolRule {
+                tool: "Bash".to_string(),
+                pattern: "*".to_string(),
+            }],
+            always_deny: Vec::new(),
+            always_ask: Vec::new(),
+        },
+    );
+    let admissions = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&admissions);
+    host.context.tool_run_admission = Some(Arc::new(move |request| {
+        observed.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(request.permission_level, PermissionLevel::Dangerous);
+        ToolRunAdmission::Blocked {
+            reason: "workflow admission checked dangerous Bash".to_string(),
+        }
+    }));
+    let bash = host.registry.lookup("Bash").expect("Bash is registered");
+    let input = serde_json::json!({"command": "rm -rf x"});
+    assert_eq!(bash.permission_level(&input), PermissionLevel::Dangerous);
+
+    let response = host
+        .run(
+            "script-bash-classification#1",
+            &RunToolRequest {
+                name: "Bash".to_string(),
+                input,
+            },
+        )
+        .await
+        .expect("the blocked call is a tool result");
+
+    assert!(response.is_error, "{response:?}");
+    assert!(
+        response
+            .content
+            .contains("workflow admission checked dangerous Bash")
+    );
+    assert_eq!(admissions.load(Ordering::SeqCst), 1);
+}
+
 /// A script is a loop with no model in it to get bored, so it is the caller
 /// most able to repeat itself — and until now the only one whose repetitions
 /// were invisible to the guard.
@@ -252,8 +308,12 @@ async fn differing_script_tool_calls_do_not_earn_a_reminder() {
 #[test]
 fn a_host_built_from_config_carries_the_admission_gate_and_the_repeat_policy() {
     let config = archon_core::config::load_config().expect("the archon config loads");
-    let host = ScriptToolHost::new(std::env::temp_dir(), "script-host-wiring".to_string())
-        .expect("the tool host builds from config");
+    let host = ScriptToolHost::new(
+        std::env::temp_dir(),
+        "script-host-wiring".to_string(),
+        &config,
+    )
+    .expect("the tool host builds from config");
 
     assert!(
         host.context.tool_run_admission.is_some(),

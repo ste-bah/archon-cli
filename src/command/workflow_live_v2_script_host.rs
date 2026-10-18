@@ -24,6 +24,42 @@ pub(super) struct WorkflowScriptHost {
 }
 
 impl WorkflowScriptHost {
+    fn build_tool_host(
+        runner: &WorkflowV2ScriptRunner,
+    ) -> archon_workflow::WorkflowResult<
+        crate::command::workflow_live::workflow_script_tools::ScriptToolHost,
+    > {
+        let mut built = crate::command::workflow_live::workflow_script_tools::ScriptToolHost::new(
+            runner
+                .runtime
+                .target_repository_root
+                .as_deref()
+                .map_or_else(
+                    || std::env::current_dir().unwrap_or_default(),
+                    std::path::PathBuf::from,
+                ),
+            runner.run_id.clone(),
+            runner.resolved_config.as_deref().ok_or_else(|| {
+                WorkflowError::SpecInvalid(
+                    "workflow script tool host needs the run's resolved config".to_string(),
+                )
+            })?,
+        )?;
+        if runner.client.audit.is_some() {
+            built.require_audited_writes();
+        }
+        Ok(built)
+    }
+
+    #[cfg(test)]
+    pub(super) fn tool_host_for_test(
+        runner: &WorkflowV2ScriptRunner,
+    ) -> archon_workflow::WorkflowResult<
+        crate::command::workflow_live::workflow_script_tools::ScriptToolHost,
+    > {
+        Self::build_tool_host(runner)
+    }
+
     /// The repository the run writes, for reading paths the way the task
     /// universe declares them.
     pub(super) fn repository_root(&self) -> Option<&std::path::Path> {
@@ -82,22 +118,7 @@ impl WorkflowScriptHost {
         let host = match self.tool_host.get() {
             Some(host) => Arc::clone(host),
             None => {
-                let mut built =
-                    crate::command::workflow_live::workflow_script_tools::ScriptToolHost::new(
-                        self.runner
-                            .runtime
-                            .target_repository_root
-                            .as_deref()
-                            .map_or_else(
-                                || std::env::current_dir().unwrap_or_default(),
-                                std::path::PathBuf::from,
-                            ),
-                        self.runner.run_id.clone(),
-                    )?;
-                if self.runner.client.audit.is_some() {
-                    built.require_audited_writes();
-                }
-                let built = Arc::new(built);
+                let built = Arc::new(Self::build_tool_host(&self.runner)?);
                 // A concurrent caller may have won; either instance is
                 // equivalent, so the loser's is simply dropped.
                 let _ = self.tool_host.set(Arc::clone(&built));

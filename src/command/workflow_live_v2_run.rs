@@ -58,6 +58,7 @@ pub(crate) async fn run_generated_v2_workflow_with_limits(
     script_lifecycle: bool,
     learning: &archon_core::config::LearningConfig,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    archon_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -73,6 +74,7 @@ pub(crate) async fn run_generated_v2_workflow_with_limits(
         script_lifecycle,
         learning,
         cargo_limits,
+        archon_config,
     )
     .await
 }
@@ -89,6 +91,7 @@ pub(crate) async fn run_saved_v2_workflow(
     workspace_boundary_supported: bool,
     learning: &archon_core::config::LearningConfig,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    archon_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -104,6 +107,7 @@ pub(crate) async fn run_saved_v2_workflow(
         script_lifecycle_from_env(),
         learning,
         cargo_limits,
+        archon_config,
     )
     .await
 }
@@ -123,6 +127,7 @@ async fn run_v2_workflow_with_origin(
     script_lifecycle: bool,
     learning: &archon_core::config::LearningConfig,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    archon_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<String> {
     let snapshot = super::workflow_run_end_snapshot::refuse_launch(store, &plan, script_lifecycle)?;
     let run = store.create_run(plan.approval_metadata_spec())?;
@@ -168,6 +173,7 @@ async fn run_v2_workflow_with_origin(
         false,
         Arc::clone(&lease),
         cargo_limits,
+        archon_config,
     )
     .await;
     fold_run_topology(cwd, store, &run_id, &task, learning).await;
@@ -185,6 +191,7 @@ pub(crate) async fn resume_generated_v2_workflow_with_limits(
     workspace_boundary_supported: bool,
     learning: &archon_core::config::LearningConfig,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    archon_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<Option<String>> {
     let run = store.load_state(run_id)?;
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
@@ -227,6 +234,7 @@ pub(crate) async fn resume_generated_v2_workflow_with_limits(
         true,
         Arc::clone(&lease),
         cargo_limits,
+        archon_config,
     )
     .await;
     fold_run_topology(cwd, store, &run_id, &task, learning).await;
@@ -246,6 +254,7 @@ async fn execute_generated_v2_run_with_limits(
     adopt_accepted_cache: bool,
     executor_lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    archon_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<String> {
     if let Err(WorkflowError::ControlCancelled(refused)) =
         archon_workflow::control_pause::require_executor(
@@ -328,6 +337,7 @@ async fn execute_generated_v2_run_with_limits(
         plan.task_universe.clone(),
         plan.script_args.clone(),
     )
+    .with_resolved_config(archon_config)
     .with_frontier_resume(adopt_accepted_cache)
     .with_resume_completed_ids(resume_completed_ids)
     .with_executor_lease(executor_lease, run.generation);

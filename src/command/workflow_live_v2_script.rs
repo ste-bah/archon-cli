@@ -22,6 +22,8 @@ use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Promise};
 use tokio::sync::Mutex;
 
 use super::WorkflowV2ScriptRuntime;
+#[path = "workflow_live_v2_script_config.rs"]
+mod config;
 use super::execute_v2_live_call;
 use super::workflow_live_v2_client::LiveV2AgentClient;
 use archon_workflow::poll_v2_run_control;
@@ -57,6 +59,7 @@ pub(super) struct WorkflowV2ScriptSummary {
 pub(super) struct WorkflowV2ScriptRunner {
     task: String,
     runtime: WorkflowV2ScriptRuntime,
+    pub(super) resolved_config: Option<Arc<archon_core::config::ArchonConfig>>,
     adapter: WorkflowV2AgentAdapter,
     client: LiveV2AgentClient,
     v2_store: WorkflowV2ResultStore,
@@ -116,6 +119,7 @@ impl WorkflowV2ScriptRunner {
         Self {
             task,
             runtime,
+            resolved_config: None,
             adapter,
             client,
             v2_store,
@@ -147,14 +151,6 @@ impl WorkflowV2ScriptRunner {
         completed_ids: std::collections::BTreeSet<String>,
     ) -> Self {
         self.resume_completed_ids = completed_ids;
-        self
-    }
-
-    pub(super) fn with_host_command_executor(
-        mut self,
-        executor: Arc<dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor>,
-    ) -> Self {
-        self.host_command_executor = Some(executor);
         self
     }
 

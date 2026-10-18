@@ -73,7 +73,8 @@ pub(super) fn runner(
         None,
         args,
     )
-    .with_raw_outcomes(true);
+    .with_raw_outcomes(true)
+    .with_resolved_config(Arc::new(archon_core::config::ArchonConfig::default()));
     let runner = match host {
         Some(host) => runner.with_host_command_executor(host),
         None => runner,

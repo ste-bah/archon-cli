@@ -9,14 +9,15 @@ use crate::tool::{
 };
 use crate::workflow_resource_env::CargoResourceLimits;
 
+#[path = "bash_containment.rs"]
+mod bash_containment;
 #[path = "bash_output.rs"]
 mod bash_output;
 
-#[path = "bash_containment.rs"]
-mod bash_containment;
-
 #[path = "bash_build_cache.rs"]
 mod bash_build_cache;
+#[path = "bash_cargo_limits.rs"]
+mod bash_cargo_limits;
 #[path = "bash_process.rs"]
 mod bash_process;
 #[path = "bash_write_sandbox.rs"]

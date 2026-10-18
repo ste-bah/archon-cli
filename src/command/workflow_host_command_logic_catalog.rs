@@ -94,7 +94,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; acceptance-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into check execution; these limits affect execution environment and parallelism, not verdict rules.
-        sources_digest: "a99473440af541a51469eb85bbb50a963b183d6e5c6289c54a7ac992eb191a87",
+        // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
+        sources_digest: "0414c05ab179c6317ffce5651b08ceff9e889f5db03205a6b0b65537c6907c16",
         build_bound: false,
     },
     CapabilityLogic {
@@ -144,7 +145,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; skeleton-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into scratch checks; skeleton freeze runs no checks, so its verdict is unchanged.
-        sources_digest: "a99473440af541a51469eb85bbb50a963b183d6e5c6289c54a7ac992eb191a87",
+        // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
+        sources_digest: "0414c05ab179c6317ffce5651b08ceff9e889f5db03205a6b0b65537c6907c16",
         build_bound: false,
     },
     CapabilityLogic {
@@ -205,7 +207,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; body-landing verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; staged body lint verdict rules are unchanged.
-        sources_digest: "72b91e6e9deecf2fd8cf5109a03a2b58e5fc469b162df709f60bd46196ed65b8",
+        // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
+        sources_digest: "d630d78adb8a3cdc40d9a10e252135afa99ee9b46471a934a56863762fd52719",
         build_bound: false,
     },
     CapabilityLogic {
@@ -258,7 +261,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; lint verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; lint verdict rules are unchanged.
-        sources_digest: "72b91e6e9deecf2fd8cf5109a03a2b58e5fc469b162df709f60bd46196ed65b8",
+        // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
+        sources_digest: "d630d78adb8a3cdc40d9a10e252135afa99ee9b46471a934a56863762fd52719",
         build_bound: false,
     },
     CapabilityLogic {
@@ -334,7 +338,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; frozen acceptance verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into frozen check execution; limits change execution environment and parallelism, not verification verdict rules.
-        sources_digest: "39d59efbeb596201d2b6c250cf578c709fb8419d2f2f61bdead5b8ed671137c7",
+        // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
+        sources_digest: "3969cdab47d92a494b250eda7516c2769dfb06a603ffad19acf2e247df4ef86f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -381,7 +386,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; frozen skeleton verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into shared observation code; skeleton verification runs no checks, so its verdict is unchanged.
-        sources_digest: "39d59efbeb596201d2b6c250cf578c709fb8419d2f2f61bdead5b8ed671137c7",
+        // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
+        sources_digest: "3969cdab47d92a494b250eda7516c2769dfb06a603ffad19acf2e247df4ef86f",
         build_bound: true,
     },
 ];

@@ -65,9 +65,11 @@ mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
 #[cfg(test)]
+pub(crate) use workflow_live_v2::execute_fixed_decomposition_v2_run;
+#[cfg(test)]
 pub(crate) use workflow_live_v2::workflow_run_end_snapshot::recover_bound_task_set;
 pub(crate) use workflow_live_v2::{
-    execute_fixed_decomposition_v2_run, reobserve, save_fixed_decomposition_metadata,
+    execute_fixed_decomposition_v2_run_with_config, reobserve, save_fixed_decomposition_metadata,
 };
 // #189 Phase 4: real tool calls from inside a workflow script.
 #[path = "workflow_script_tools.rs"]
@@ -103,6 +105,7 @@ pub(crate) fn spawn_live_workflow(
 ) -> Result<()> {
     let check_policy =
         crate::command::acceptance_check_policy::for_config_action(&action, &config)?;
+    let config = Arc::new(config);
     archon_observability::spawn_named("dynamic-workflow-run", async move {
         if let Err(error) = ui_sink
             .emit(WorkflowUiEvent::Text(live_start_message(&action)))
@@ -123,6 +126,7 @@ pub(crate) fn spawn_live_workflow(
             LiveApprovalMode::InteractiveSurface,
             check_policy,
             config.tools.cargo.to_limits(),
+            config.clone(),
         )
         .await;
         match result {
@@ -204,6 +208,7 @@ pub(crate) async fn run_live_cli_action(
         LiveApprovalMode::CliYes,
         check_policy,
         config.tools.cargo.to_limits(),
+        Arc::new(config.clone()),
     )
     .await;
     drain.abort();

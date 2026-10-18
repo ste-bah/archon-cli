@@ -394,7 +394,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             .collect();
         execution_lease.record_executor()?;
         work_started.store(true, std::sync::atomic::Ordering::SeqCst);
-        super::workflow_live::execute_fixed_decomposition_v2_run(
+        super::workflow_live::execute_fixed_decomposition_v2_run_with_config(
             &store,
             run,
             plan,
@@ -403,6 +403,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             agent_names,
             executor,
             config.tools.cargo.to_limits(),
+            Arc::new(config.clone()),
         )
         .await
     }

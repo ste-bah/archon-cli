@@ -2,6 +2,29 @@
 
 use super::*;
 
+struct CargoJobsEnvGuard(Option<String>);
+
+impl CargoJobsEnvGuard {
+    fn clear() -> Self {
+        let previous = std::env::var("CARGO_BUILD_JOBS").ok();
+        // SAFETY: the command test environment lock serializes process-env edits.
+        unsafe { std::env::remove_var("CARGO_BUILD_JOBS") };
+        Self(previous)
+    }
+}
+
+impl Drop for CargoJobsEnvGuard {
+    fn drop(&mut self) {
+        // SAFETY: the guard is held until this restoration completes.
+        unsafe {
+            match &self.0 {
+                Some(value) => std::env::set_var("CARGO_BUILD_JOBS", value),
+                None => std::env::remove_var("CARGO_BUILD_JOBS"),
+            }
+        }
+    }
+}
+
 /// A rule matching every use of one tool. `"*"` is the wildcard the rule
 /// matcher recognises; an empty pattern matches nothing.
 fn rule(tool: &str) -> archon_permissions::rules::ToolRule {
@@ -21,8 +44,12 @@ fn envelope(name: &str, input: serde_json::Value) -> String {
 
 fn host() -> Arc<ScriptToolHost> {
     Arc::new(
-        ScriptToolHost::new(std::env::temp_dir(), "script-tool-tests".to_string())
-            .expect("the tool host builds from config"),
+        ScriptToolHost::new(
+            std::env::temp_dir(),
+            "script-tool-tests".to_string(),
+            &archon_core::config::ArchonConfig::default(),
+        )
+        .expect("the tool host builds from config"),
     )
 }
 
@@ -95,6 +122,46 @@ async fn a_script_can_grep_files_directly() {
             .contains("a.txt"),
         "{response}"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn script_bash_uses_project_layer_cargo_limits() {
+    let _env_lock = crate::command::USER_DATA_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _cargo_jobs = CargoJobsEnvGuard::clear();
+    let project = tempfile::tempdir().expect("project");
+    std::fs::create_dir_all(project.path().join(".archon")).unwrap();
+    std::fs::write(
+        project.path().join(".archon/config.toml"),
+        "[tools.cargo]\nbuild_jobs = 2\nincremental = true\nresource_class = 'balanced'\n[[permissions.always_allow]]\ntool = 'Bash'\npattern = '*'\n",
+    )
+    .unwrap();
+    let config =
+        archon_core::config_layers::load_layered_config(None, project.path(), None, None).unwrap();
+    let host = Arc::new(
+        ScriptToolHost::new(
+            project.path().to_path_buf(),
+            "script-cargo-limits".into(),
+            &config,
+        )
+        .unwrap(),
+    );
+
+    let json = execute_run_tool(
+        &host,
+        &budget(),
+        &envelope(
+            "Bash",
+            serde_json::json!({"command": "printf %s \"$CARGO_BUILD_JOBS\" # cargo"}),
+        ),
+    )
+    .await
+    .expect("the command is answered");
+    let response: serde_json::Value = serde_json::from_str(&json).expect("json");
+    assert_eq!(response["is_error"], serde_json::json!(false), "{response}");
+    assert_eq!(response["content"], "2", "{response}");
 }
 
 /// A name nothing serves has to say so, not return an empty success that a

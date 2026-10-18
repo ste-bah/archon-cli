@@ -29,6 +29,7 @@ pub(super) async fn run_live_action(
         approval_mode,
         captured,
         archon_core::config::CargoResourceConfig::default().to_limits(),
+        Arc::new(archon_core::config::ArchonConfig::default()),
     )
     .await
 }
@@ -44,6 +45,7 @@ pub(super) async fn run_live_action_with_policy(
     approval_mode: LiveApprovalMode,
     captured_policy: Option<Option<archon_workflow::acceptance_check_environment::CheckPolicy>>,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    archon_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
     // Every new production launch supplies the startup-resolved binding.
@@ -154,6 +156,7 @@ pub(super) async fn run_live_action_with_policy(
                 },
                 &learning,
                 cargo_limits.clone(),
+                archon_config.clone(),
             )
             .await;
         }
@@ -188,6 +191,7 @@ pub(super) async fn run_live_action_with_policy(
                 workspace_boundary_supported,
                 &learning,
                 cargo_limits.clone(),
+                archon_config.clone(),
             )
             .await;
         }
@@ -203,6 +207,7 @@ pub(super) async fn run_live_action_with_policy(
                 workspace_boundary_supported,
                 &learning,
                 cargo_limits.clone(),
+                archon_config.clone(),
             )
             .await?
             {

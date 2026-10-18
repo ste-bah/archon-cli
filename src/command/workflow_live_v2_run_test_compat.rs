@@ -27,6 +27,7 @@ pub(crate) async fn run_generated_v2_workflow(
         script_lifecycle,
         learning,
         archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        Arc::new(archon_core::config::ArchonConfig::default()),
     )
     .await
 }
@@ -54,6 +55,7 @@ pub(crate) async fn resume_generated_v2_workflow(
         workspace_boundary_supported,
         learning,
         archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        Arc::new(archon_core::config::ArchonConfig::default()),
     )
     .await
 }
@@ -84,6 +86,7 @@ pub(crate) async fn execute_generated_v2_run(
         adopt_accepted_cache,
         executor_lease,
         archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        Arc::new(archon_core::config::ArchonConfig::default()),
     )
     .await
 }
