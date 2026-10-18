@@ -94,7 +94,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; acceptance-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into check execution; these limits affect execution environment and parallelism, not verdict rules.
-        sources_digest: "cb4278470231c33a4a53e7fc88311692da61585d3e5df3f00dd82f0e7d9a2a69",
+        sources_digest: "a99473440af541a51469eb85bbb50a963b183d6e5c6289c54a7ac992eb191a87",
         build_bound: false,
     },
     CapabilityLogic {
@@ -144,7 +144,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; skeleton-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into scratch checks; skeleton freeze runs no checks, so its verdict is unchanged.
-        sources_digest: "cb4278470231c33a4a53e7fc88311692da61585d3e5df3f00dd82f0e7d9a2a69",
+        sources_digest: "a99473440af541a51469eb85bbb50a963b183d6e5c6289c54a7ac992eb191a87",
         build_bound: false,
     },
     CapabilityLogic {
@@ -334,7 +334,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; frozen acceptance verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into frozen check execution; limits change execution environment and parallelism, not verification verdict rules.
-        sources_digest: "89ac3bad1686454430a1c1852d8b12dc67af0f838663d315a047cd56d61ba35a",
+        sources_digest: "39d59efbeb596201d2b6c250cf578c709fb8419d2f2f61bdead5b8ed671137c7",
         build_bound: true,
     },
     CapabilityLogic {
@@ -381,7 +381,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the held executor lease now authenticates paused-run
         // recovery; frozen skeleton verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into shared observation code; skeleton verification runs no checks, so its verdict is unchanged.
-        sources_digest: "89ac3bad1686454430a1c1852d8b12dc67af0f838663d315a047cd56d61ba35a",
+        sources_digest: "39d59efbeb596201d2b6c250cf578c709fb8419d2f2f61bdead5b8ed671137c7",
         build_bound: true,
     },
 ];
