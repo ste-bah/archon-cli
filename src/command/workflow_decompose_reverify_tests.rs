@@ -2,6 +2,8 @@
 //! before invoking the real entry point; assertions read its persisted output.
 #[path = "workflow_decompose_reverify_eligibility_tests.rs"]
 mod eligibility_tests;
+#[path = "workflow_decompose_reverify_failure_tests.rs"]
+mod failure_tests;
 #[path = "workflow_decompose_reverify_fixture_repository.rs"]
 mod fixture_repository;
 #[path = "workflow_decompose_reverify_resume_recovery_tests.rs"]

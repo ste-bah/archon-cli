@@ -17,9 +17,6 @@ use super::workflow_decompose_reverify_gates::execute_gate;
 use crate::command::workflow_host_command_catalog::HostCommandResolutionContext;
 use crate::command::workflow_host_command_exec::FixedHostCommandExecutor;
 
-const REPORT_PATH: &str = "decomposition/reverify/reports";
-const STATE_PATH: &str = "decomposition/state.json";
-
 #[path = "workflow_decompose_reverify_eligibility.rs"]
 pub(crate) mod eligibility;
 
@@ -53,7 +50,7 @@ pub(crate) async fn reverify(
     let run = store.load_state(run_id)?;
     let invocation_generation = run.generation;
     let invocation_status = run.status.clone();
-    let state_path = run_dir.join(STATE_PATH);
+    let state_path = run_dir.join(types::STATE_PATH);
     let state: FixedDecompositionStateV1 = serde_json::from_slice(
         &std::fs::read(&state_path).with_context(|| format!("reading {}", state_path.display()))?,
     )?;
@@ -181,14 +178,31 @@ pub(crate) async fn reverify(
     let mut failed_subjects = Vec::new();
     let mut all_accepted = true;
     let mut operational_failure = false;
-
     let acceptance =
-        acceptance::reverify_checks(&project_root, &prd_path, &task_root, config, env_vars).await?;
+        match acceptance::reverify_checks(&project_root, &prd_path, &task_root, config, env_vars)
+            .await
+        {
+            Ok(acceptance) => acceptance,
+            Err(error) => {
+                return Err(publish::record_operational_failure(
+                    &store,
+                    run_id,
+                    &run_dir,
+                    &_lease,
+                    invocation_generation,
+                    &invocation_status,
+                    &v2,
+                    &prior.call.id,
+                    &prior_digest,
+                    &invocation_id,
+                    &error,
+                ));
+            }
+        };
     let checks = acceptance.checks;
     operational_failure |= acceptance.operational_failure;
     failed_subjects.extend(acceptance.task_subjects);
     all_accepted &= acceptance.accepted;
-
     for (index, frozen) in skeleton.tasks.iter().enumerate() {
         let path = task_root.join(&frozen.file_name);
         let bytes = std::fs::read(&path)
@@ -384,11 +398,12 @@ pub(crate) async fn reverify(
         set_gates,
         frozen_gates,
         checks,
+        operational_failure_cause: None,
     };
     let report_bytes = serde_json::to_vec_pretty(&report)?;
     if v2.result_path(&report_id).exists()
         || run_dir
-            .join(format!("{REPORT_PATH}/{report_id}.json"))
+            .join(format!("{}/{report_id}.json", types::REPORT_PATH))
             .exists()
     {
         return Err(anyhow!("reverify report already exists: {report_id}"));
@@ -427,7 +442,7 @@ pub(crate) async fn reverify(
         None
     };
     let operational_cause = publish::operational_failure_cause(&report, operational_failure);
-    let report_path = format!("{REPORT_PATH}/{report_id}.json");
+    let report_path = format!("{}/{report_id}.json", types::REPORT_PATH);
     let ledger_path = format!("decomposition/reverify/remediation-{report_id}.json");
     let report_event = serde_json::json!({"report_id": report_id, "invocation_id": invocation_id,
         "report_digest": report_digest,
