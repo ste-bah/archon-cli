@@ -124,6 +124,20 @@ fn a_read_only_guard_refuses_the_same_write_and_an_empty_scope_refuses_nothing()
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn a_verbatim_write_path_is_matched_against_a_plain_forbidden_root() {
+    let guard = guard(ForbiddenPathScope::new(
+        &patterns(&["secret.txt"]),
+        &[r"C:\repo".to_string()],
+    ));
+    assert!(
+        guard
+            .before_tool("Write", &json!({"file_path": r"\\?\C:\repo\secret.txt"}))
+            .is_some()
+    );
+}
+
 /// The live path: the host scopes the list around the call, and the guard
 /// built inside the scope carries it.
 #[test]

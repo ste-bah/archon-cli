@@ -200,7 +200,9 @@ async fn bounded_glob_with_state_roots(
                 && state_roots
                     .iter()
                     .zip(&targeted_roots)
-                    .any(|(root, targeted)| !targeted && (path == *root || path.starts_with(root)))
+                    .any(|(root, targeted)| {
+                        !targeted && archon_shell::paths::path_starts_with(&path, root)
+                    })
                 && !ctx
                     .run_store
                     .as_ref()
@@ -217,7 +219,9 @@ async fn bounded_glob_with_state_roots(
                     .iter()
                     .zip(&targeted_roots)
                     .any(|(root, targeted)| {
-                        *targeted && (root.starts_with(&path) || path.starts_with(root))
+                        *targeted
+                            && (archon_shell::paths::path_starts_with(root, &path)
+                                || archon_shell::paths::path_starts_with(&path, root))
                     });
             if !leads_to_owned_tree
                 && !leads_to_targeted_root
@@ -276,10 +280,10 @@ async fn ancestor_ignores(
         ancestors.push(boundary);
         ancestors.reverse();
         ancestors
-    } else if base.starts_with(&ctx.working_dir) {
+    } else if archon_shell::paths::path_starts_with(base, &ctx.working_dir) {
         let mut ancestors = ancestors
             .into_iter()
-            .filter(|dir| dir.starts_with(&ctx.working_dir))
+            .filter(|dir| archon_shell::paths::path_starts_with(dir, &ctx.working_dir))
             .collect::<Vec<_>>();
         ancestors.reverse();
         ancestors
@@ -361,15 +365,15 @@ fn root_targeted_by_pattern(
 ) -> bool {
     use std::path::Component;
 
-    let root_components = match root.strip_prefix(base) {
-        Ok(relative) => relative
+    let root_components = match archon_shell::paths::path_strip_prefix(root, base) {
+        Some(relative) => relative
             .components()
             .filter_map(|component| match component {
                 Component::Normal(value) => Some(value.to_os_string()),
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        Err(_) => {
+        None => {
             if !pattern.is_absolute() {
                 return false;
             }
@@ -386,7 +390,7 @@ fn root_targeted_by_pattern(
                     _ => {}
                 }
             }
-            return literal_prefix.starts_with(root);
+            return archon_shell::paths::path_starts_with(&literal_prefix, root);
         }
     };
     if root_components.is_empty() {
@@ -410,6 +414,20 @@ fn root_targeted_by_pattern(
                 .zip(&root_components)
                 .all(|(pattern, root)| pattern.as_ref() == Some(root))
         })
+}
+
+#[cfg(all(test, windows))]
+mod path_prefix_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_pattern_targets_verbatim_root_from_plain_base() {
+        assert!(root_targeted_by_pattern(
+            std::path::Path::new(r"C:\repo"),
+            std::path::Path::new(".archon/workflows/**"),
+            std::path::Path::new(r"\\?\C:\repo\.archon\workflows")
+        ));
+    }
 }
 
 fn is_literal_component(component: &std::ffi::OsStr) -> bool {

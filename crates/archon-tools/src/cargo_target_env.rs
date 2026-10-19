@@ -260,7 +260,10 @@ fn is_word_char(ch: Option<char>) -> bool {
 }
 
 fn is_macos_external_volume(working_dir: &Path) -> bool {
-    cfg!(target_os = "macos") && canonical_working_dir(working_dir).starts_with("/Volumes/")
+    cfg!(target_os = "macos")
+        && canonical_working_dir(working_dir)
+            .to_string_lossy()
+            .starts_with("/Volumes/")
 }
 
 fn canonical_working_dir(working_dir: &Path) -> PathBuf {

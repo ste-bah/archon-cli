@@ -84,7 +84,9 @@ impl PlanScopeRoots {
                     .ok(),
             )
             .and_then(|(base, path)| {
-                let relative = path.strip_prefix(&base).ok()?.to_str()?.replace('\\', "/");
+                let relative = archon_shell::paths::path_strip_prefix(&path, &base)?
+                    .to_str()?
+                    .replace('\\', "/");
                 Some(relative)
             });
         self.covers(file) && resolved.is_some_and(|relative| self.covers(&relative))

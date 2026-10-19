@@ -126,7 +126,7 @@ impl GitPlacement {
             .workdir()
             .map(real)
             .ok_or_else(|| format!("{} is inside a bare repository", dir.display()))?;
-        if !dir.starts_with(&workdir) {
+        if !archon_shell::paths::path_starts_with(dir, &workdir) {
             return Err(format!(
                 "{} is not inside the working tree its repository registers ({})",
                 dir.display(),

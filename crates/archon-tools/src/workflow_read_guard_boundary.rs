@@ -137,7 +137,7 @@ impl BoundaryPaths {
                 && !self
                     .protected
                     .iter()
-                    .any(|root| root.starts_with(&spelling))
+                    .any(|root| archon_shell::paths::path_starts_with(root, &spelling))
             {
                 push_unique(&mut self.writable, spelling);
             }
@@ -149,8 +149,11 @@ impl BoundaryPaths {
         spellings(path).iter().any(|candidate| {
             self.protected
                 .iter()
-                .any(|root| candidate.starts_with(root))
-                && !self.writable.iter().any(|dir| candidate.starts_with(dir))
+                .any(|root| archon_shell::paths::path_starts_with(candidate, root))
+                && !self
+                    .writable
+                    .iter()
+                    .any(|dir| archon_shell::paths::path_starts_with(candidate, dir))
         })
     }
 }
@@ -181,7 +184,11 @@ impl WorkflowReadGuard {
             .filter_map(|root| linked_common_dir(root));
         for root in stamp.sealed.iter().cloned().chain(store).chain(shared_git) {
             for spelling in spellings(&root) {
-                if spelling.to_str().is_some() && !tree.iter().any(|t| spelling.starts_with(t)) {
+                if spelling.to_str().is_some()
+                    && !tree
+                        .iter()
+                        .any(|t| archon_shell::paths::path_starts_with(&spelling, t))
+                {
                     push_unique(&mut protected, spelling);
                 }
             }
@@ -218,9 +225,11 @@ impl WorkflowReadGuard {
             return false;
         };
         let declared: Vec<PathBuf> = stamp.writable.iter().flat_map(|d| spellings(d)).collect();
-        spellings(path)
-            .iter()
-            .any(|candidate| declared.iter().any(|dir| candidate.starts_with(dir)))
+        spellings(path).iter().any(|candidate| {
+            declared
+                .iter()
+                .any(|dir| archon_shell::paths::path_starts_with(candidate, dir))
+        })
     }
 
     /// A file-tool write outside the branch's boundary, refused before the
@@ -285,11 +294,17 @@ impl DeclaredTargetScope {
             .writable
             .iter()
             .flat_map(|dir| spellings(dir))
-            .filter(|dir| self.roots.iter().any(|root| dir.starts_with(root)))
+            .filter(|dir| {
+                self.roots
+                    .iter()
+                    .any(|root| archon_shell::paths::path_starts_with(dir, root))
+            })
             .collect();
         self.roots.iter().any(|root| {
             let path = root.join(relative);
-            inside.iter().any(|dir| path.starts_with(dir))
+            inside
+                .iter()
+                .any(|dir| archon_shell::paths::path_starts_with(&path, dir))
         })
     }
 

@@ -44,6 +44,12 @@ pub fn path_starts_with(path: &Path, root: &Path) -> bool {
     comparable_strip_prefix(path, root).is_some()
 }
 
+/// Strip `root` from `path` using the same host-aware spelling comparison as
+/// [`path_starts_with`].
+pub fn path_strip_prefix(path: &Path, root: &Path) -> Option<PathBuf> {
+    comparable_strip_prefix(path, root)
+}
+
 #[cfg(windows)]
 fn comparable_windows_spelling(path: &Path) -> Option<String> {
     let text = path.to_str()?;
@@ -55,7 +61,18 @@ fn comparable_windows_spelling(path: &Path) -> Option<String> {
     } else {
         slashed
     };
-    Some(plain.to_lowercase())
+    // Windows drive letters are case-insensitive, but filesystem components
+    // retain their on-disk case. Folding the whole spelling aliases distinct
+    // paths on case-sensitive Windows volumes.
+    let mut chars = plain.chars();
+    let Some(first) = chars.next() else {
+        return Some(plain);
+    };
+    if chars.next() == Some(':') && first.is_ascii_alphabetic() {
+        Some(format!("{}{}", first.to_ascii_lowercase(), &plain[1..]))
+    } else {
+        Some(plain)
+    }
 }
 
 /// Best-effort plain spelling; returns the original path when its verbatim
@@ -210,24 +227,39 @@ mod tests {
     fn comparable_prefix_is_component_aware() {
         assert!(path_starts_with(Path::new("/a/b/c.txt"), Path::new("/a/b")));
         assert!(!path_starts_with(Path::new("/a/bc/d"), Path::new("/a/b")));
+        assert!(
+            path_strip_prefix(Path::new("/a/b/c.txt"), Path::new("/a/b"))
+                .is_some_and(|suffix| suffix == Path::new("c.txt"))
+        );
+        assert!(!path_starts_with(
+            Path::new("/tmp-other/file"),
+            Path::new("/tmp")
+        ));
+        assert!(path_starts_with(Path::new("/tmp/file"), Path::new("/tmp")));
     }
 
     #[cfg(windows)]
     #[test]
     fn windows_verbatim_paths_match_plain_roots_without_losing_components() {
         let root = Path::new(r"C:\a\b");
-        for candidate in [r"\\?\C:\a\b\c.txt", r"\\?\c:\A\B\c.txt"] {
+        for candidate in [r"\\?\C:\a\b\c.txt", r"\\?\c:\a\b\c.txt"] {
             assert!(path_starts_with(Path::new(candidate), root), "{candidate}");
         }
-        for candidate in [r"\\?\C:\a\bc\d", r"\\?\D:\a\b\c"] {
+        for candidate in [r"\\?\C:\a\bc\d", r"\\?\D:\a\b\c", r"C:\a\B\c"] {
             assert!(!path_starts_with(Path::new(candidate), root), "{candidate}");
         }
 
+        assert!(!path_starts_with(
+            Path::new(r"C:\root\foo"),
+            Path::new(r"C:\root\Foo")
+        ));
+        assert!(path_starts_with(
+            Path::new(r"\\?\c:\root\Foo\x"),
+            Path::new(r"C:\root\Foo")
+        ));
+
         let unc_root = Path::new(r"\\server\share\a\b");
-        for candidate in [
-            r"\\?\UNC\server\share\a\b\c.txt",
-            r"\\?\UNC\SERVER\SHARE\A\B\c.txt",
-        ] {
+        for candidate in [r"\\?\UNC\server\share\a\b\c.txt"] {
             assert!(
                 path_starts_with(Path::new(candidate), unc_root),
                 "{candidate}"
@@ -237,6 +269,10 @@ mod tests {
             Path::new(r"\\?\UNC\server\share\a\bc\d"),
             unc_root
         ));
+        assert_eq!(
+            path_strip_prefix(Path::new(r"\\?\C:\a\b\c.txt"), root),
+            Some(PathBuf::from(r"c.txt"))
+        );
     }
 
     #[test]

@@ -64,7 +64,8 @@ impl WorkflowReadGuard {
                 .canonicalize()
                 .map(archon_shell::paths::plain)
                 .unwrap_or_else(|_| ctx.working_dir.clone());
-            let record = json!({"path": path.strip_prefix(&root).unwrap_or(path),
+            let relative = archon_shell::paths::path_strip_prefix(path, &root);
+            let record = json!({"path": relative.as_deref().unwrap_or(path),
                 "offset": offset, "limit": limit, "call": call, "hash": hash});
             append_record(sink, &record).map_err(|error| format!(
                 "Failed to retain workflow read-set at {}: {error}. Read content withheld rather than silently losing retry evidence.", sink.display()))?;

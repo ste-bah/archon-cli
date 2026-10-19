@@ -89,6 +89,18 @@ fn a_confined_agent_writes_its_own_workspace() {
     .expect("an existing file inside the workspace must be permitted");
 }
 
+#[cfg(windows)]
+#[test]
+fn a_verbatim_path_under_a_writable_root_passes_the_symlink_check() {
+    let trees = trees();
+    let root = &trees.workspace;
+    let requested = PathBuf::from(format!(r"\\?\{}", root.join("src/lib.rs").display()));
+    let resolved = root.join("src/lib.rs");
+
+    super::reject_symlinked_descent(root, &requested, &resolved)
+        .expect("a verbatim spelling of a writable path is still under its root");
+}
+
 /// Traversal, which the containment check alone already answers. Kept because
 /// the symlink work must not regress it.
 #[test]

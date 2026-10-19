@@ -422,7 +422,7 @@ fn is_rust_identifier(value: &str) -> bool {
 /// the path outgrew the OS limit. A path that climbs above the root is none.
 fn repo_relative(repository_root: &Path, path: &Path) -> Option<String> {
     use std::path::Component;
-    let relative = path.strip_prefix(repository_root).ok()?;
+    let relative = archon_shell::paths::path_strip_prefix(path, repository_root)?;
     let mut segments: Vec<String> = Vec::new();
     for component in relative.components() {
         match component {

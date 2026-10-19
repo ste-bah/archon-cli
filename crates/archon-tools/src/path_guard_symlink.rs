@@ -77,7 +77,7 @@ pub(crate) fn reject_symlinked_descent(
     //    is not redundant with the caller's containment check — that one ran
     //    against the same `resolved`, and this is what keeps the guarantee true
     //    for a future caller that reorders them.
-    if resolved != root && !resolved.starts_with(root) {
+    if !archon_shell::paths::path_starts_with(resolved, root) {
         return Err(crate::path_guard::guard_refusal(format!(
             "Path '{}' resolves to '{}', which is outside the writable directory '{}'. \
              Name the file directly rather than reaching it through a link.",
@@ -132,7 +132,10 @@ fn symlinked_component_below(root: &Path, requested: &Path) -> Option<std::path:
             // to judge. It becomes ours the moment the prefix names the root.
             inside_root = std::fs::canonicalize(&walked)
                 .map(archon_shell::paths::plain)
-                .is_ok_and(|actual| actual == root);
+                .is_ok_and(|actual| {
+                    archon_shell::paths::path_starts_with(&actual, root)
+                        && archon_shell::paths::path_starts_with(root, &actual)
+                });
             continue;
         }
 
