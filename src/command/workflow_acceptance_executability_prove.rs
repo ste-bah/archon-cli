@@ -113,7 +113,9 @@ pub(super) async fn prove(
             Some(result) if result.operational_error.is_none() && !markers.restored_all(result) => {
                 Some("the run did not restore every input it moved aside (it was killed, or an input was left behind), so its verdict proves nothing".to_string())
             }
-            _ if setup_failure.is_some() => setup_failure,
+            _ if setup_failure.is_some() => setup_failure.map(|reason| {
+                format!("the mutation run stopped at a setup failure: {reason}")
+            }),
             _ => run.unrun(id),
         };
         if let Some(reason) = host {

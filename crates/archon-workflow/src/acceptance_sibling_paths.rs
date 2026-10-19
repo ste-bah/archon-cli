@@ -23,6 +23,74 @@ pub struct SiblingSource {
     pub source: PathBuf,
 }
 
+/// Program text carried by interpreter flags or shell here-documents.
+/// Shared with acceptance input discovery so both scanners see the same code.
+pub fn program_texts(command: &str) -> Vec<String> {
+    let words = crate::check_source_resolve::words(command);
+    let commands: Vec<Vec<String>> = words
+        .split(|word| matches!(word.as_str(), ";" | "&&" | "||" | "|" | "&"))
+        .map(<[String]>::to_vec)
+        .collect();
+    let mut programs: Vec<String> = inline_programs(&commands)
+        .into_iter()
+        .map(|(_, _, program)| program)
+        .collect();
+    programs.extend(heredoc_bodies(command));
+    programs
+}
+
+/// The position and text of each program passed to a recognized inline flag.
+pub fn inline_programs(commands: &[Vec<String>]) -> Vec<(usize, usize, String)> {
+    const FLAGS: [&str; 5] = ["-c", "-e", "--eval", "--command", "--exec"];
+    let mut found = Vec::new();
+    for (command_index, command) in commands.iter().enumerate() {
+        let mut argument_index = 1;
+        while let Some(argument) = command.get(argument_index) {
+            if FLAGS.contains(&argument.as_str()) {
+                if let Some(program) = command.get(argument_index + 1) {
+                    found.push((command_index, argument_index + 1, program.clone()));
+                }
+                argument_index += 2;
+            } else {
+                argument_index += 1;
+            }
+        }
+    }
+    found
+}
+
+fn heredoc_bodies(command: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let lines: Vec<_> = command.lines().collect();
+    let mut line = 0;
+    while line < lines.len() {
+        let Some(at) = lines[line]
+            .find("<<")
+            .filter(|at| !lines[line][*at..].starts_with("<<<"))
+        else {
+            line += 1;
+            continue;
+        };
+        let rest = lines[line][at + 2..].trim_start_matches('-').trim_start();
+        let delimiter: String = rest
+            .trim_start_matches(['\'', '"'])
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        let body_start = line + 1;
+        let close = (!delimiter.is_empty())
+            .then(|| (body_start..lines.len()).find(|index| lines[*index].trim() == delimiter))
+            .flatten();
+        if let Some(close) = close {
+            found.push(lines[body_start..close].join("\n"));
+            line = close + 1;
+        } else {
+            line += 1;
+        }
+    }
+    found
+}
+
 /// Resolve existing sibling inputs named by shell checks. `alias` keeps the
 /// path spelling the check uses; `source` follows symlinks for materializing
 /// their content.
@@ -147,6 +215,13 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
         }
         command_start = end + 1;
     }
+    for program in program_texts(command) {
+        for word in crate::check_source_resolve::words(&program) {
+            if let Some(path) = sibling_word(&word) {
+                push(&mut found, path, true);
+            }
+        }
+    }
     found.sort_by(|a, b| a.path.cmp(&b.path).then(a.required.cmp(&b.required)));
     let mut merged: Vec<SiblingPath> = Vec::new();
     for item in found {
@@ -160,7 +235,8 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
 }
 
 fn sibling_word(word: &str) -> Option<PathBuf> {
-    word.starts_with("../").then(|| PathBuf::from(word))
+    let value = word.split_once('=').map_or(word, |(_, value)| value);
+    value.starts_with("../").then(|| PathBuf::from(value))
 }
 
 fn is_assignment(word: &str) -> bool {
@@ -221,5 +297,22 @@ mod tests {
             assert_eq!(paths.len(), 1, "{command}: {paths:?}");
             assert!(paths[0].required, "{command}: {paths:?}");
         }
+    }
+
+    #[test]
+    fn program_text_paths_are_scanned_but_project_paths_are_not_siblings() {
+        for command in [
+            "python3 <<'PY'\nMANIFEST='../sibling/Cargo.toml'\nPY",
+            "python3 -c 'MANIFEST=\"../sibling/Cargo.toml\"'",
+        ] {
+            let paths = scan(command);
+            assert_eq!(paths.len(), 1, "{command}: {paths:?}");
+            assert_eq!(paths[0].path, PathBuf::from("../sibling/Cargo.toml"));
+            assert!(paths[0].required, "{command}: {paths:?}");
+        }
+        assert_eq!(
+            scan("python3 -c 'MANIFEST=\"crates/inside/Cargo.toml\"'"),
+            []
+        );
     }
 }

@@ -232,6 +232,15 @@ pub(super) fn named_inputs(
     for (index, body) in bodies {
         words.push((body, bases.get(index).cloned().flatten()));
     }
+    // Keep sibling discovery and mutation input discovery on the same view of
+    // inline programs and here-doc bodies. The richer shell lexer above still
+    // supplies per-command working directories; this shared pass catches
+    // program text carried through syntax it cannot associate with a command.
+    words.extend(
+        archon_workflow::acceptance_sibling_paths::program_texts(&text)
+            .into_iter()
+            .map(|program| (program, Some(cwd.clone()))),
+    );
     if let AcceptanceCheck::Floor { contract } = &entry.check {
         words.push((contract.artifact_path.clone(), Some(cwd.clone())));
     }

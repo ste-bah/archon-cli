@@ -72,7 +72,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // scanned, changing can-fail proof verdicts for repeated flags.
         // 33: mutation wrappers preserve named sibling setup paths, so their
         // copy layout matches baseline and absent-sibling failures give no verdict.
-        version: 35,
+        version: 36,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -105,11 +105,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // so a false Scratch revision conflict no longer voids a check.
         // 35: sibling revisions are part of verdict reuse identity; changed
         // sibling inputs cannot reuse an earlier check result.
+        // 36: sibling paths in inline and here-doc programs are copied into
+        // each check site, and a failed mutation setup path stays explicitly
+        // unproven rather than disappearing from the check's report.
         // #219 re-pin only: reverify remediation routes check defects to frozen check entries; freeze verdicts are unchanged.
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "e895fb0b0183e3c583e5fe725035a5c47b67fd62f64aecc82c66f6d6b893230b",
+        sources_digest: "9c29b5280f1188d869d2beda172071ab06b2fb968ebe20ac67a215aa031681f1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -167,7 +170,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "e895fb0b0183e3c583e5fe725035a5c47b67fd62f64aecc82c66f6d6b893230b",
+        sources_digest: "9c29b5280f1188d869d2beda172071ab06b2fb968ebe20ac67a215aa031681f1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -378,7 +381,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "642d204512589251f39e6d351fdc07f6a590d8f370f18ceec79b58e44d3e32c3",
+        sources_digest: "ef1fbbe4ba0de9396a0e7d836fe1f492f439e53b643509bfe0610f8a8c8c06b1",
         build_bound: true,
     },
     CapabilityLogic {
@@ -434,7 +437,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "642d204512589251f39e6d351fdc07f6a590d8f370f18ceec79b58e44d3e32c3",
+        sources_digest: "ef1fbbe4ba0de9396a0e7d836fe1f492f439e53b643509bfe0610f8a8c8c06b1",
         build_bound: true,
     },
 ];
