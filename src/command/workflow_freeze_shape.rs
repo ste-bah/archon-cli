@@ -345,7 +345,11 @@ pub(crate) fn element_shape_defects(
     };
     let value = match parsed {
         Ok(value) => value,
-        Err(error) => return vec![invalid_json_defect(error.to_string())],
+        Err(error) => {
+            return vec![invalid_json_defect(
+                crate::command::workflow_json_parse_diagnostic::describe(&document, &error),
+            )];
+        }
     };
     // Assembly replaces the entire contract when entries is present, including
     // acceptance, PRD and gap policy, and stamps BOTH authored entry lists.

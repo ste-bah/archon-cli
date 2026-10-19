@@ -54,7 +54,9 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.equal(blockRefusal('{}'),
     'acceptance entry A check.command_block must be boolean true');
   assert.equal(blockRefusal('{}', {kind:'command', command_block:true}),
-    'acceptance entry A check.command_block is true but no check block is present');
+    "acceptance entry A check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: none");
+  assert.equal(blockRefusal('```check js\nrun\n```', {kind:'command', command_block:true}),
+    "acceptance entry A check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: 'check js'");
   assert.equal(blockRefusal('```check\na\n```\n```check\nb\n```', {kind:'command', command_block:true}),
     'acceptance reply contains more than one check block');
   assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'run'}}, '```check\nrun\n```'),
@@ -64,7 +66,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.deepEqual(JSON.parse(JSON.stringify(inferred.check)), {kind:'command', cwd:'project_root', command:'run'});
   assert.equal(blockRefusal('```check\n```', {kind:'command', command_block:true}), 'acceptance entry A check block is empty');
   assert.equal(blockRefusal('```check\nrun\n```', {kind:'command', command:'old', command_block:true}),
-    'acceptance entry A returned both check.command and check.command_block');
+    'acceptance entry A returned both check.command and check.command_block — remove check.command from the JSON when you use the check block');
   assert.equal(blockRefusal('```check X\nignored named fence\n```', {kind:'command', command:'run'}), null,
     'named fences are not check blocks');
   assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'echo "ok"'}}, ''), null,
@@ -101,6 +103,9 @@ async function refusal(reply, stopReason = 'end_turn') {
     if (fixture.id === 'live-prose-after-json-close' || fixture.id === 'live-close-and-open-same-line') {
       assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
     }
+    if (fixture.id === 'unicode-fence-label') {
+      assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
+    }
     if (fixture.id === 'corrected-fence-layout') assert.equal(outcome, 'accepted', fixture.id);
     if (fixture.id === 'single-check-block-implicit-command-block') assert.equal(outcome, 'accepted', fixture.id);
     if (fixture.id === 'false-command-block-with-check-fence' || fixture.id === 'command-and-command-block-with-check-fence' ||
@@ -126,7 +131,7 @@ async function refusal(reply, stopReason = 'end_turn') {
     assert.equal(result.malformedClass, 'missing-entry', reply);
   }
   await exact('{"id":"A","check":{"kind":"command","command_block":true}}',
-    'acceptance entry A check.command_block is true but no check block is present');
+    "acceptance entry A check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: none");
   await exact('```check\na\n```\n```check\nb\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
     'acceptance reply contains more than one check block');
   await exact('```check\nrun\n```\n{"id":"A","check":{"kind":"command","command":"run"}}',
@@ -146,8 +151,9 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(first.summary, /JSON parse error.*Invalid \\escape|JSON parse error.*escape/i);
   assert.match(first.summary, /(?:line\s+1\s+column\s+\d+|offset\s+\d+)/i);
   assert.match(first.summary, /excerpt:/);
-  assert.match(first.summary, /Use inline check\.command only for one short line without quotes or backslashes/);
-  assert.ok(first.summary.includes('put the whole script in one block that opens with a line that is exactly ```check (set check.command_block true, or omit it when the command check has no command field); never write a script inside a JSON string.'));
+  assert.match(first.summary, /; excerpt: ".*<HERE>/);
+  assert.ok(first.summary.includes('; a literal backslash inside a JSON string must be written as `\\\\`'), first.summary);
+  assert.ok(first.summary.includes("Choose exactly one command form: for scripts, use the block form with kind and cwd, command_block true and no command field in the JSON check, followed by exactly one non-empty block whose fence info string is exactly 'check'; inline form puts one short line without quotes or backslashes in check.command with kind and cwd, and has no command_block or fence. Never write a script inside a JSON string."));
   assert.equal(first.summary, repeated.summary, 'identical malformed replies have identical refusal text');
   assert.notEqual(first.malformedClass, changed.malformedClass, 'a changed parse position has a distinct diagnostic key');
   const excerpt = first.summary.match(/; excerpt: ("(?:\\.|[^"\\])*")/);
@@ -228,16 +234,38 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(secretRefusal.summary, /excerpt: ".*x-api-key <redacted> /);
   const parseFn = ctxForBlocks().acceptanceParseRefusal;
   const at = (source, offset) => ({message: `Unexpected token at position ${offset}`});
+  const unicodeWindowSource = 'é'.repeat(50) + String.raw`\q`;
+  const unicodeWindowRefusal = parseFn('A', unicodeWindowSource, at(unicodeWindowSource, 50));
+  const unicodeWindowExcerpt = JSON.parse(unicodeWindowRefusal.match(/; excerpt: ("(?:\\.|[^"\\])*")/)[1]);
+  assert.equal(unicodeWindowExcerpt, 'é'.repeat(40) + '<HERE>\\q');
+  const invalidEscape = String.raw`{"id":"A","check":{"kind":"command","command":"echo \q"}}`;
+  const invalidEscapeError = (() => { try { JSON.parse(invalidEscape); } catch (error) { return error; } })();
+  const invalidEscapeRefusal = parseFn('A', invalidEscape, invalidEscapeError);
+  assert.match(invalidEscapeRefusal, /; excerpt: ".*<HERE>/);
+  const invalidEscapeExcerpt = invalidEscapeRefusal.match(/; excerpt: ("(?:\\.|[^"\\])*")/);
+  assert.ok(invalidEscapeExcerpt);
+  assert.equal(JSON.parse(invalidEscapeExcerpt[1]), String.raw`eck":{"kind":"command","command":"echo \<HERE>q"}}`);
+  assert.ok(invalidEscapeRefusal.includes('; a literal backslash inside a JSON string must be written as `\\\\`'));
+  const splitSecret = String.raw`{"api-\qkey":"secret123"}`;
+  const splitSecretError = (() => { try { JSON.parse(splitSecret); } catch (error) { return error; } })();
+  const splitSecretRefusal = parseFn('A', splitSecret, splitSecretError);
+  assert.ok(!splitSecretRefusal.includes('secret123'), splitSecretRefusal);
+  assert.match(splitSecretRefusal, /at line 1 column \d+/);
+  const splitSecretExcerpt = splitSecretRefusal.match(/; excerpt: ("(?:\\.|[^"\\])*")/);
+  assert.ok(splitSecretExcerpt);
+  assert.equal(JSON.parse(splitSecretExcerpt[1]), '{"api-key":"<redacted>"}');
   // A key that starts before the window and ends inside it.
   const straddle = 'x'.repeat(10) + ' ' + secretKey + ' ' + 'y'.repeat(200);
   const straddleText = parseFn('A', straddle, at(straddle, 11 + secretKey.length + 79 - 5));
   assert.ok(!straddleText.includes('A'.repeat(5)), straddleText);
-  assert.match(straddleText, /excerpt: "…<redacted> y/);
+  const straddleExcerpt = JSON.parse(straddleText.match(/; excerpt: ("(?:\\.|[^"\\])*")/)[1]);
+  assert.match(straddleExcerpt, /^y{40}<HERE>y{40}$/);
   // `Bearer` before the window, its credential inside it.
   const bearer = 'z'.repeat(5) + ' Bearer ' + 'opaque-credential-value ' + 'w'.repeat(300);
   const bearerText = parseFn('A', bearer, at(bearer, 13 + 79 + 2));
   assert.ok(!bearerText.includes('opaque-credential'), bearerText);
-  assert.match(bearerText, /excerpt: "…<redacted> w/);
+  const bearerExcerpt = JSON.parse(bearerText.match(/; excerpt: ("(?:\\.|[^"\\])*")/)[1]);
+  assert.match(bearerExcerpt, /^w{40}<HERE>w{40}$/);
   // key=value forms and an engine message that quotes the reply.
   const assigned = parseFn('A', '{"a":"run token=abc123 \\q"}', {message: 'Bad escape near "token=abc123 \\q" at position 22'});
   assert.ok(!assigned.includes('abc123'), assigned);
@@ -246,8 +274,8 @@ async function refusal(reply, stopReason = 'end_turn') {
   const tail = 'p'.repeat(300) + ' {"x":';
   const tailText = parseFn('A', tail, at(tail, tail.length));
   const tailExcerpt = JSON.parse(tailText.match(/; excerpt: ("(?:\\.|[^"\\])*")/)[1]);
-  assert.ok(tailExcerpt.startsWith('…') && tailExcerpt.endsWith('{"x":'), tailExcerpt);
-  assert.equal(tailExcerpt.length, 159);
+  assert.ok(tailExcerpt.endsWith('{"x":<HERE>'), tailExcerpt);
+  assert.ok(Array.from(tailExcerpt).length <= 46, tailExcerpt);
   // A byte offset in a multi-byte reply is mapped to characters.
   const multi = 'é'.repeat(100) + ' MARK ' + 'é'.repeat(100);
   const multiText = parseFn('A', multi, {message: 'invalid at byte offset 201'});
@@ -255,7 +283,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(multiText, /MARK/);
   // A word that only looks like the rule's prefixes stays.
   const plain = parseFn('A', 'tokens=5 sk-short secret', at('', 3));
-  assert.match(plain, /excerpt: "tokens=5 sk-short secret"/);
+  assert.match(plain, /excerpt: "tok<HERE>ens=5 sk-short secret"/);
   console.log('PASS acceptance parse refusal');
 })().catch(error => { console.error(`FAIL acceptance parse refusal: ${error.stack}`); process.exitCode = 1; });
 

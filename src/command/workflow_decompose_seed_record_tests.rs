@@ -117,7 +117,7 @@ fn check_block_refusals_and_inline_command_match_contract() {
             &mut json!({"id":"A","check":{"kind":"command","command_block":true}}),
             "{}"
         ),
-        Some("acceptance entry A check.command_block is true but no check block is present".into())
+        Some("acceptance entry A check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: none".into())
     );
     assert_eq!(
         resolve_command_block(
@@ -166,7 +166,7 @@ fn check_block_refusals_and_inline_command_match_contract() {
 }
 
 #[test]
-fn recorded_live_replies_use_the_shared_expected_outcomes() {
+fn recorded_live_replies_use_the_shared_expected_outcomes_reply_blocks() {
     let fixtures: Vec<ValueFixture> =
         serde_json::from_str(include_str!("fixtures/decompose_live_reply_outcomes.json")).unwrap();
     for fixture in fixtures {
@@ -200,6 +200,12 @@ fn recorded_live_replies_use_the_shared_expected_outcomes() {
                         .expected
                         .contains("check.command_block is true but no check block is present")
                 );
+            }
+            "unicode-fence-label" => {
+                let text = extract_object(&fixture.reply);
+                let mut entry = reply_entry(&text, &fixture.id).unwrap();
+                let refusal = resolve_command_block(&mut entry, &fixture.reply).unwrap();
+                assert_eq!(refusal, fixture.expected.strip_prefix("refuse: ").unwrap());
             }
             "corrected-fence-layout" => {
                 assert!(reply_entry_with_blocks(&fixture.reply, &fixture.id).is_some());

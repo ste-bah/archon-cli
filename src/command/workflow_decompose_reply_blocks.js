@@ -102,6 +102,18 @@ function extractJsonObject(text) {
   return candidates[0];
 }
 
+function foundFenceLabels(blocks) {
+  const labels = blocks.map((block) => {
+    const info = block.info || "";
+    const label = Array.from(info);
+    return label.length > 40 ? label.slice(0, 40).join("") + "…" : info || "<empty>";
+  });
+  const shown = labels.slice(0, 4).map((label) => "'" + label + "'");
+  const omitted = labels.length - shown.length;
+  if (omitted > 0) return shown.join(", ") + " (and " + omitted + " more)";
+  return shown.length ? shown.join(", ") : "none";
+}
+
 function resolveCommandBlock(entry, text) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
   const check = entry.check;
@@ -117,9 +129,9 @@ function resolveCommandBlock(entry, text) {
     return "acceptance entry " + id + ": check.command_block is only for kind command; a floor check puts its verifier in contract.typed_verifier_command";
   }
   if (commandBlock === true && check && Object.prototype.hasOwnProperty.call(check, "command")) {
-    return "acceptance entry " + id + " returned both check.command and check.command_block";
+    return "acceptance entry " + id + " returned both check.command and check.command_block — remove check.command from the JSON when you use the check block";
   }
-  if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present";
+  if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: " + foundFenceLabels(replyFenceBlocks(text));
   if (hasBlock && commandBlock !== true && !inferredCommandBlock) {
     return "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block";
   }

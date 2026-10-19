@@ -112,7 +112,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "65f46f6c35cc0fcc2b0c3ccee1d12afd9e0793f045e1b53e41c64f9fb99348f4",
+        // #467 round b re-pin only: command-block author guidance affects
+        // what authors submit; host acceptance verdict rules are unchanged.
+        // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
+        // #467 re-pin: diagnostic text changes do not alter this verdict.
+        sources_digest: "0696df195a3c237459fe088abe9db3f0edc7a3c8be54a9729435ea23fedff6cd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -170,7 +174,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "65f46f6c35cc0fcc2b0c3ccee1d12afd9e0793f045e1b53e41c64f9fb99348f4",
+        // #467 round b re-pin only: the shared author prompt changed; a
+        // skeleton freeze judges no checks, so its verdict rule is unchanged.
+        // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
+        // #467 re-pin: diagnostic text changes do not alter this verdict.
+        sources_digest: "0696df195a3c237459fe088abe9db3f0edc7a3c8be54a9729435ea23fedff6cd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -237,7 +245,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
         // #464 re-pin only: scope declarations share recorded repository-root resolution with the body gate; the version-23 verdict change is already counted above.
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
-        sources_digest: "d328b83ae46b1ed8a8be00396957167f093c2c13c68e18d82dc35fdca817b5a1",
+        // #467 re-pin: EOF diagnostic placement changes no body verdict.
+        // #467 re-pin: diagnostic text changes do not alter this verdict.
+        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -296,7 +306,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
         // #464 re-pin only: scope declarations share recorded repository-root resolution with the body gate; the version-19 verdict change is already counted above.
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
-        sources_digest: "d328b83ae46b1ed8a8be00396957167f093c2c13c68e18d82dc35fdca817b5a1",
+        // #467 re-pin: EOF diagnostic placement changes no lint verdict.
+        // #467 re-pin: diagnostic text changes do not alter this verdict.
+        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -384,7 +396,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "6d9a8e6c1e29a0f5e389abb5f4ccbaf2705f8500a2aecf1c8729969ebc275573",
+        // #467 re-pin: EOF diagnostic placement changes no verification verdict.
+        // #467 re-pin: diagnostic text changes do not alter this verdict.
+        sources_digest: "16afd290920d72c0ff3a4b3aef2c2bd07a0e5b74ec6ce2eeb265fcbb1cc2be0a",
         build_bound: true,
     },
     CapabilityLogic {
@@ -440,7 +454,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "6d9a8e6c1e29a0f5e389abb5f4ccbaf2705f8500a2aecf1c8729969ebc275573",
+        // #467 re-pin: EOF diagnostic placement changes no verification verdict.
+        // #467 re-pin: diagnostic text changes do not alter this verdict.
+        sources_digest: "16afd290920d72c0ff3a4b3aef2c2bd07a0e5b74ec6ce2eeb265fcbb1cc2be0a",
         build_bound: true,
     },
 ];

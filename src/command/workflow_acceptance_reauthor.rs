@@ -400,12 +400,12 @@ fn candidate_entry(
         Err(error) => {
             let extracted =
                 crate::command::workflow_task_set::acceptance_reply_blocks::extract_object(reply);
-            serde_json::from_str(&extracted).map_err(|_| {
-                format!(
-                    "the reply for check '{}' is not one JSON entry ({error}); return the raw JSON object alone",
-                    frozen.id
-                )
-            })?
+            let diagnostic =
+                crate::command::workflow_json_parse_diagnostic::describe(&document, &error);
+            serde_json::from_str(&extracted).map_err(|_| format!(
+                "the reply for check '{}' is not one JSON entry ({diagnostic}); return the raw JSON object alone",
+                frozen.id
+            ))?
         }
     };
     if value["id"] != serde_json::json!(frozen.id)

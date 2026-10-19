@@ -411,6 +411,7 @@ mod workflow_host_command_terminal_stop_tests;
 mod workflow_host_command_tests;
 #[cfg(test)]
 mod workflow_host_command_verify_tests;
+pub(crate) mod workflow_json_parse_diagnostic;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_provider_route;
 pub(crate) mod workflow_read_scope;

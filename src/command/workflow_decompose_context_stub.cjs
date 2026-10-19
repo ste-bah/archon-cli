@@ -20,6 +20,7 @@ function authorContext(files = new Map()) {
 // compare the product script against the complete host redactor corpus.
 function redactPublicTextFixture(value) {
   return String(value)
+    .replace(/(["']?(?:x-api-key|api-key)["']\s*:\s*)"[^"\r\n]*"/giu, '$1"<redacted>"')
     .replace(/(?<![\p{L}\p{N}_])authorization:[^\s]*/giu, '<redacted>')
     .replace(/(?<![\p{L}\p{N}_])sk-ant-[A-Za-z0-9_-]{20,}/giu, '<redacted>')
     .replace(/(?<![\p{L}\p{N}_])sk-[A-Za-z0-9_-]{17,}/giu, '<redacted>')
