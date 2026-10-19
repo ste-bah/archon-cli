@@ -176,12 +176,7 @@ pub(crate) fn candidate_refusal<T: serde::de::DeserializeOwned>(
         return None;
     };
     if serde_json::from_slice::<serde_json::Value>(&document).is_err() {
-        // The bytes at fault, marked, and the hint that names the fix: a line
-        // and column alone burned three author attempts on one stray comma.
-        let described = std::str::from_utf8(&document)
-            .ok()
-            .and_then(archon_workflow::describe_json_fault)
-            .unwrap_or_else(|| error.to_string());
+        let described = crate::command::workflow_json_parse_diagnostic::describe(&document, &error);
         return Some((
             "invalid_json",
             format!("the reply is not a JSON document ({described})"),
@@ -189,7 +184,10 @@ pub(crate) fn candidate_refusal<T: serde::de::DeserializeOwned>(
     }
     Some((
         "invalid_candidate_shape",
-        format!("the JSON document does not match the required shape ({error})"),
+        format!(
+            "the JSON document does not match the required shape ({})",
+            crate::command::workflow_json_parse_diagnostic::describe(&document, &error)
+        ),
     ))
 }
 

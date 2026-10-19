@@ -36,12 +36,17 @@
   {
     "id": "live-prose-after-json-close",
     "reply": "```json\n{\"id\":\"live-prose-after-json-close\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n``` plus the command block below.\n```check\nrun focused check\n```",
-    "expected": "refuse: acceptance entry live-prose-after-json-close check.command_block is true but no check block is present"
+    "expected": "refuse: acceptance entry live-prose-after-json-close check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: 'json'"
   },
   {
     "id": "live-close-and-open-same-line",
     "reply": "```json\n{\"id\":\"live-close-and-open-same-line\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n``` ```check\nrun focused check\n```",
-    "expected": "refuse: acceptance entry live-close-and-open-same-line check.command_block is true but no check block is present"
+    "expected": "refuse: acceptance entry live-close-and-open-same-line check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: 'json'"
+  },
+  {
+    "id": "unicode-fence-label",
+    "reply": "{\"id\":\"unicode-fence-label\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n```😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀x\nignored\n```",
+    "expected": "refuse: acceptance entry unicode-fence-label check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: '😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀x'"
   },
   {
     "id": "corrected-fence-layout",
@@ -61,7 +66,7 @@
   {
     "id": "command-and-command-block-with-check-fence",
     "reply": "```json\n{\"id\":\"command-and-command-block-with-check-fence\",\"check\":{\"kind\":\"command\",\"command\":\"inline\",\"command_block\":true}}\n```\n```check\nrun focused check\n```",
-    "expected": "refuse: acceptance entry command-and-command-block-with-check-fence returned both check.command and check.command_block"
+    "expected": "refuse: acceptance entry command-and-command-block-with-check-fence returned both check.command and check.command_block — remove check.command from the JSON when you use the check block"
   },
   {
     "id": "multiple-check-fences",

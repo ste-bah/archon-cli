@@ -16,7 +16,7 @@ fn ids(list: &[&str]) -> BTreeSet<String> {
 }
 
 #[test]
-fn reauthor_accepts_shared_check_blocks_and_refuses_malformed_block_forms() {
+fn acceptance_reauthor_accepts_shared_check_blocks_and_refuses_malformed_block_forms() {
     let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
     let contract = set.contract();
     let frozen = &contract.acceptance[0];
@@ -70,14 +70,14 @@ fn reauthor_accepts_shared_check_blocks_and_refuses_malformed_block_forms() {
                 r#"{"kind":"command","command":"inline","command_block":true,"cwd":"project_root"}"#,
                 "\n```check\nrun\n```",
             ),
-            "returned both check.command and check.command_block",
+            "remove check.command from the JSON when you use the check block",
         ),
         (
             block_reply(
                 r#"{"kind":"command","command_block":true,"cwd":"project_root"}"#,
                 "",
             ),
-            "check.command_block is true but no check block is present",
+            "the fence info string must be exactly 'check'; found fence labels: none",
         ),
     ];
     for (reply, expected) in cases {
@@ -87,6 +87,68 @@ fn reauthor_accepts_shared_check_blocks_and_refuses_malformed_block_forms() {
             "expected {expected:?}, got {error:?}"
         );
     }
+}
+
+#[test]
+fn acceptance_reauthor_prompt_layout_is_accepted_by_the_parser() {
+    let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
+    let contract = set.contract();
+    let frozen = &contract.acceptance[0];
+    let reply = concat!(
+        "```json\n",
+        "{\"id\":\"AC-F-001\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"}}\n",
+        "```\n",
+        "```check\n",
+        "jq -e '.a == true and .b == true' out.json\n",
+        "```"
+    );
+    assert!(candidate_entry(reply, frozen).is_ok());
+}
+
+#[tokio::test]
+async fn acceptance_reauthor_prompts_do_not_ban_their_check_fence() {
+    let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "jq -e '.a == true and .b == true' out.json"),
+        |_, _| true,
+    );
+    let before = set.contract();
+    let _ = reauthor(
+        &client,
+        &before,
+        &ids(&["AC-F-001"]),
+        &scope(&set),
+        "sonnet",
+        &set.gate(),
+    )
+    .await
+    .expect("the corrected entry is accepted");
+    let reauthor_prompt = client.prompts.lock().unwrap()[0].clone();
+    let decomposition_prompt = include_str!("workflow_decompose_v1_acceptance.js");
+    for prompt in [&reauthor_prompt, decomposition_prompt] {
+        assert!(prompt.contains("followed by exactly one non-empty fence labelled `check`"));
+        assert!(prompt.contains("Emit no prose, explanations, headings or other fences."));
+        assert!(!prompt.contains("no Markdown code fences"));
+    }
+}
+
+#[test]
+fn malformed_json_reply_explains_the_escape_at_its_location() {
+    let set = frozen_set(&[("AC-F-001", "run", false)]);
+    let contract = set.contract();
+    let frozen = &contract.acceptance[0];
+    let reply = r#"{"id":"AC-F-001","label":"bad\    if"}"#;
+    let error = candidate_entry(reply, frozen).expect_err("invalid escape is refused");
+    assert!(
+        error.starts_with("the reply for check 'AC-F-001' is not one JSON entry ("),
+        "{error}"
+    );
+    assert!(error.contains("Syntax at line 1 column"), "{error}");
+    assert!(error.contains("<HERE>"), "{error}");
+    assert!(
+        error.contains("literal backslash inside a JSON string must be written as `\\\\`"),
+        "{error}"
+    );
 }
 
 #[tokio::test]

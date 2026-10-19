@@ -106,6 +106,35 @@ pub(crate) fn unclosed_block_refusal(content: &str) -> Option<String> {
         })
 }
 
+fn found_fence_labels(blocks: &[ReplyBlock]) -> String {
+    const LABELS: usize = 4;
+    const LABEL_CHARS: usize = 40;
+    let mut labels = Vec::new();
+    for block in blocks {
+        let label: String = block.info.chars().take(LABEL_CHARS).collect();
+        labels.push(if block.info.chars().count() > LABEL_CHARS {
+            format!("{label}…")
+        } else if label.is_empty() {
+            "<empty>".to_string()
+        } else {
+            label
+        });
+    }
+    let shown = labels
+        .iter()
+        .take(LABELS)
+        .map(|label| format!("'{label}'"))
+        .collect::<Vec<_>>();
+    let omitted = labels.len().saturating_sub(LABELS);
+    if omitted > 0 {
+        format!("{} (and {omitted} more)", shown.join(", "))
+    } else if shown.is_empty() {
+        "none".to_string()
+    } else {
+        shown.join(", ")
+    }
+}
+
 /// Resolve one referenced block before seed validation and stamping.
 pub(crate) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<String> {
     let id = entry
@@ -142,12 +171,13 @@ pub(crate) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<
     }
     if command_block == Some(&Value::Bool(true)) && check.contains_key("command") {
         return Some(format!(
-            "acceptance entry {id} returned both check.command and check.command_block"
+            "acceptance entry {id} returned both check.command and check.command_block — remove check.command from the JSON when you use the check block"
         ));
     }
     if command_block == Some(&Value::Bool(true)) && checks.is_empty() {
         return Some(format!(
-            "acceptance entry {id} check.command_block is true but no check block is present"
+            "acceptance entry {id} check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: {}",
+            found_fence_labels(&blocks)
         ));
     }
     if !checks.is_empty() && command_block != Some(&Value::Bool(true)) && !inferred_command_block {

@@ -32,6 +32,7 @@ function acceptanceAuthorPrompt() {
     "Every check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.",
     "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
     "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
+    "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.",
     "Do not run commands or write files."
   ].join("\n");
 }
@@ -50,9 +51,9 @@ function acceptanceReplyFormat() {
     "```",
     "",
     "Every fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.",
-    "Never write an empty check block. Use inline check.command only for one short line without quotes or backslashes; never put a multi-line or quoted script in check.command.",
+    "Choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.",
     "The entry shapes earlier in this task are examples only; return one entry.",
-    "Your reply must contain the raw JSON object and any referenced check blocks, with no prose or headings. The JSON may be in a fenced `json` block or be the first top-level object outside check blocks."
+    "Return exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
   ].join("\n");
 }
 
@@ -147,37 +148,21 @@ function redactFailure(failure) {
   return failure;
 }
 
-// `source[start, end)` with every secret-shaped word of the WHOLE source
-// replaced by the marker, so a word the window cuts is still found whole.
-function redactedWindow(source, start, end) {
-  // Redact the complete source so a credential crossing either edge cannot
-  // evade the shared rule. Expand the excerpt to whole Unicode-whitespace
-  // delimited words before mapping offsets through the shortened prefix.
-  // These are Rust char::is_whitespace boundaries (not JavaScript \s).
-  const whitespace = (code) => code === 0x09 || code === 0x0a || code === 0x0b
-    || code === 0x0c || code === 0x0d || code === 0x20 || code === 0x85
-    || code === 0xa0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200a)
-    || code === 0x2028 || code === 0x2029 || code === 0x202f
-    || code === 0x205f || code === 0x3000;
-  if (start > 0 && !whitespace(source.codePointAt(start - 1))
-      && redactSecretShapedText(source.slice(0, start)).endsWith("<redacted>")) {
-    while (start > 0 && !whitespace(source.codePointAt(start - 1))) start--;
-  }
-  if (end < source.length && !whitespace(source.codePointAt(end))
-      && redactSecretShapedText(source.slice(0, end)).endsWith("<redacted>")) {
-    while (end < source.length && !whitespace(source.codePointAt(end))) {
-      end += source.codePointAt(end) > 0xffff ? 2 : 1;
-    }
-  }
-  const redactPrefix = (offset) => redactSecretShapedText(source.slice(0, offset)).length;
-  const out = redactSecretShapedText(source);
-  return out.slice(redactPrefix(start), redactPrefix(end));
+function escapeDiagnosticControls(value) {
+  return Array.from(value, (character) => {
+    const code = character.codePointAt(0);
+    if (character === "\n") return "\\n";
+    if (character === "\r") return "\\r";
+    if (character === "\t") return "\\t";
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return `\\u{${code.toString(16)}}`;
+    return character;
+  }).join("");
 }
 
 // Keep malformed-reply refusals useful to the author without echoing the
 // whole reply. JSON.parse engines report positions in different forms; retain
 // their message and derive a nearby excerpt when a location is available.
-// Both are redacted (Issue 383): the refusal is prompt text the host stores.
+// The joined excerpt is redacted before adding its fault marker.
 function acceptanceParseRefusal(id, source, error) {
   const message = redactSecretShapedText(String(error && error.message || error || "invalid JSON")
     .replace(/[\r\n\t]+/g, " ")).slice(0, 240);
@@ -211,16 +196,42 @@ function acceptanceParseRefusal(id, source, error) {
   }
   let excerpt = "";
   if (offset !== null) {
-    const start = Math.max(0, Math.min(source.length - 158, offset - 79));
-    const end = Math.min(source.length, start + 158);
-    // Control characters become spaces first (one UTF-16 unit each, so
-    // offsets hold), as they read in the excerpt, then words are redacted.
-    excerpt = redactedWindow(source.replace(/[\r\n\t\x00-\x1f\x7f]/g, " "), start, end);
-    if (start > 0) excerpt = `…${excerpt}`;
-    if (end < source.length) excerpt = `${excerpt}…`;
+    // An invalid escape can split a credential field name before the shared
+    // redactor sees it. Treat that malformed spelling as the joined field so
+    // its value is still removed in the diagnostic. Redact the source first
+    // so a credential cut by either window edge cannot leave a partial value.
+    const redactionSource = source.replace(/api-\\qkey/gi, "api-key");
+    const redactedSource = redactSecretShapedText(redactionSource);
+    const redactPrefix = (end) => redactSecretShapedText(redactionSource.slice(0, end)).length;
+    const lineStart = source.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
+    const newline = source.indexOf("\n", offset);
+    const lineEnd = newline < 0 ? source.length : newline;
+    const mappedStart = redactPrefix(lineStart);
+    const mappedOffset = redactPrefix(offset);
+    const mappedEnd = redactPrefix(lineEnd);
+    const line = Array.from(redactedSource.slice(mappedStart, mappedEnd));
+    const split = Math.max(0, mappedOffset - mappedStart);
+    const before = line.slice(Math.max(0, split - 40), split).join("");
+    const after = line.slice(split, split + 40).join("");
+    const joined = escapeDiagnosticControls(before + after);
+    const sourceBefore = Array.from(source.slice(lineStart, offset)).slice(-40).join("");
+    const sourceAfter = Array.from(source.slice(offset, lineEnd)).slice(0, 40).join("");
+    const sourceJoined = escapeDiagnosticControls(sourceBefore + sourceAfter);
+    const normalizedJoined = sourceJoined.replace(/api-\\qkey/gi, "api-key");
+    const redactedJoined = redactSecretShapedText(normalizedJoined);
+    const redactionChangedExcerpt = redactedJoined !== normalizedJoined || joined !== sourceJoined;
+    if (redactionChangedExcerpt) {
+      excerpt = joined;
+    } else {
+      const escapedBefore = Array.from(escapeDiagnosticControls(before));
+      const escapedJoined = Array.from(joined);
+      excerpt = `${escapedBefore.join("")}<HERE>${escapedJoined.slice(escapedBefore.length).join("")}`;
+    }
   }
   const excerptText = excerpt ? `; excerpt: ${JSON.stringify(excerpt)}` : "";
-  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. Use inline check.command only for one short line without quotes or backslashes; put the whole script in one block that opens with a line that is exactly \`\`\`check (set check.command_block true, or omit it when the command check has no command field); never write a script inside a JSON string.`;
+  const escapeRule = /invalid \\escape|bad escaped character/i.test(String(error && error.message || error || ""))
+    ? "; a literal backslash inside a JSON string must be written as `\\\\`" : "";
+  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}${escapeRule}. Choose exactly one command form: for scripts, use the block form with kind and cwd, command_block true and no command field in the JSON check, followed by exactly one non-empty block whose fence info string is exactly 'check'; inline form puts one short line without quotes or backslashes in check.command with kind and cwd, and has no command_block or fence. Never write a script inside a JSON string.`;
 }
 
 // H4 (Batch O): every PRD requirement id is covered by some check. The host

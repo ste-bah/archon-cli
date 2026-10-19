@@ -42,6 +42,7 @@ fn author_prompt(
         ),
         "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
         ENTRY_SHAPES.to_string(),
+        "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.".to_string(),
         "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
         "The host also runs the check on the tree before any implementation, where it must fail: a check that passes there proves nothing and is returned to you. If the criterion already holds on that tree, the host runs the check again with every data file it names (by a path relative to its working directory) moved aside -- never its own script, a program it runs, a directory it changes into or a build manifest -- and it must then fail on its own assertion, not by crashing, so read the files that decide the criterion by those paths.".to_string(),
         format!(
@@ -53,7 +54,7 @@ fn author_prompt(
             "Attempt {attempt}; the host stops after {REAUTHOR_ATTEMPTS} consecutive attempts that repair no check. Findings to fix, oldest first:\n- {}",
             notes.join("\n- ")
         ),
-        "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.".to_string(),
+        "Return exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences.".to_string(),
         "Do not run commands or write files.".to_string(),
     ]
     .join("\n")
