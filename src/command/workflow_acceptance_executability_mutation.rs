@@ -17,6 +17,10 @@ use paths::path_tokens;
 
 use super::executed_text;
 
+#[path = "workflow_acceptance_executability_mutation_markers.rs"]
+mod marker_protocol;
+pub(super) use marker_protocol::Markers;
+
 #[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
 mod wrapper_script;
 pub(super) use wrapper_script::wrap;
@@ -336,97 +340,6 @@ pub(super) fn named_inputs(
         .filter(|token| seen.insert(token.clone()))
         .collect();
     found
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Markers {
-    nonce: String,
-}
-
-impl Markers {
-    /// The markers a saved earlier attempt used (Issue 255): the same
-    /// mutated check, and so its saved verdict, is met again on a retry.
-    pub(super) fn with_nonce(nonce: &str) -> Option<Self> {
-        (nonce.len() == 32 && nonce.bytes().all(|b| b.is_ascii_hexdigit())).then(|| Self {
-            nonce: nonce.to_string(),
-        })
-    }
-
-    pub(super) fn nonce(&self) -> &str {
-        &self.nonce
-    }
-
-    pub(super) fn new() -> Self {
-        Self {
-            nonce: uuid::Uuid::new_v4().simple().to_string(),
-        }
-    }
-
-    fn tag(&self) -> String {
-        format!("archon-mutated-{}", &self.nonce[..12])
-    }
-
-    fn moved_prefix(&self) -> String {
-        format!("archon-mutation-moved-{}: ", self.nonce)
-    }
-
-    fn generated_prefix(&self) -> String {
-        format!("archon-mutation-generated-{}: ", self.nonce)
-    }
-
-    fn recreated_prefix(&self) -> String {
-        format!("archon-mutation-recreated-{}: ", self.nonce)
-    }
-
-    fn restored(&self) -> String {
-        format!("archon-mutation-restored-{}", self.nonce)
-    }
-
-    fn guard(&self) -> String {
-        format!(
-            "archon-mutation-guard-{}: refusing to move inputs in a live root",
-            self.nonce
-        )
-    }
-
-    pub(super) fn moved(&self, result: &CheckResult) -> Vec<String> {
-        let prefix = self.moved_prefix();
-        String::from_utf8_lossy(&result.stderr)
-            .lines()
-            .filter_map(|line| line.strip_prefix(prefix.as_str()))
-            .map(str::to_string)
-            .collect()
-    }
-
-    pub(super) fn generated(&self, result: &CheckResult) -> BTreeSet<String> {
-        let prefix = self.generated_prefix();
-        String::from_utf8_lossy(&result.stderr)
-            .lines()
-            .filter_map(|line| line.strip_prefix(prefix.as_str()))
-            .map(str::to_string)
-            .collect()
-    }
-
-    pub(super) fn recreated(&self, result: &CheckResult) -> BTreeSet<String> {
-        let prefix = self.recreated_prefix();
-        String::from_utf8_lossy(&result.stderr)
-            .lines()
-            .filter_map(|line| line.strip_prefix(prefix.as_str()))
-            .map(str::to_string)
-            .collect()
-    }
-
-    pub(super) fn restored_all(&self, result: &CheckResult) -> bool {
-        let restored = self.restored();
-        String::from_utf8_lossy(&result.stdout)
-            .lines()
-            .any(|line| line == restored)
-    }
-
-    pub(super) fn guarded(&self, result: &CheckResult) -> bool {
-        result.exit_code == Some(GUARD_STATUS)
-            && String::from_utf8_lossy(&result.stderr).contains(&self.guard())
-    }
 }
 
 /// `contract` with each of `inputs`' entries' executed text wrapped by

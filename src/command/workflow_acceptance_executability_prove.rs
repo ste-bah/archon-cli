@@ -77,23 +77,70 @@ pub(super) async fn prove(
         }
         // One fresh copy per mutated check; a retry meets the same mutation.
         let markers = probe.mutation_markers(baseline, contract, id);
-        let inputs = BTreeMap::from([(id.clone(), names)]);
+        let inputs = BTreeMap::from([(id.clone(), names.clone())]);
         let mutated = mutated(contract, &inputs, &live, &markers);
+        let save_predicate_markers = markers.clone();
+        let save_predicate_names = names.clone();
+        let save_predicates = BTreeMap::from([(
+            id.clone(),
+            Arc::new(
+                move |result: &archon_workflow::acceptance_scratch::CheckResult| {
+                    all_moved_inputs_restored(
+                        result,
+                        &save_predicate_markers,
+                        &save_predicate_names,
+                    )
+                },
+            ) as super::resume::SavePredicate,
+        )]);
         let Ok(digest) = super::contract_digest(&mutated) else {
             probe.unproven(id, "the mutated contract could not be encoded".into());
             continue;
         };
         let ids = BTreeSet::from([id.clone()]);
         let refs = super::refs_for(&mutated, &digest, &ids);
-        let run =
-            super::repairs::tree_results(probe, baseline, &mutated, &digest, &refs, None, false)
-                .await;
+        let run = super::repairs::tree_results_with_save_predicates(
+            probe,
+            baseline,
+            &mutated,
+            &digest,
+            &refs,
+            None,
+            false,
+            &save_predicates,
+        )
+        .await;
         let result = run.results.get(id);
+        if result.is_none() {
+            probe.unproven(
+                id,
+                format!(
+                    "it passed on the pre-implementation tree at {short}, but the run produced no result, so no input states or exit status were recorded"
+                ),
+            );
+            continue;
+        }
         if result.is_some_and(|result| super::repairs::timed_out(&result.result)) {
             // #356: the mutated check (its nonce kept across retries) is
             // judged on the base like any other stall.
             let commit = &baseline.commit;
-            if let Some(finding) = super::silent::settle_timed_out(probe, commit, &mutated, id) {
+            let result = &result.expect("a timed out result").result;
+            let states = input_states(result, &markers, &names);
+            let diagnostics = format!(
+                "{}; status/signal: {}",
+                describe_states(&states),
+                describe_status(markers.status(result))
+            );
+            if !all_moved_inputs_restored(result, &markers, &names) {
+                super::sites::discard_mutation_evidence(probe, baseline, &mutated, id);
+            }
+            if let Some(finding) = super::silent::settle_timed_out_with_diagnostics(
+                probe,
+                commit,
+                &mutated,
+                id,
+                &diagnostics,
+            ) {
                 findings.insert(id.clone(), finding);
             }
             continue;
@@ -106,33 +153,39 @@ pub(super) async fn prove(
             }
             _ => None,
         };
-        let host = match result {
-            Some(result) if markers.guarded(result) => {
-                Some("the mutation's live-root guard stopped it".to_string())
+        if result.is_some_and(|result| !all_moved_inputs_restored(result, &markers, &names)) {
+            // The result itself cannot be reused if its disposable copy did
+            // not finish restoring the inputs it moved.
+            super::sites::discard_mutation_evidence(probe, baseline, &mutated, id);
+        }
+        match mutation_host_or_author_finding(
+            result.expect("no-result case handled above"),
+            &markers,
+            &names,
+            setup_failure,
+            &passed_there(id),
+        ) {
+            Some(MutationFinding::HostUnproven(reason)) => {
+                probe.unproven(
+                    id,
+                    format!(
+                        "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail"
+                    ),
+                );
+                continue;
             }
-            Some(result) if result.operational_error.is_none() && !markers.restored_all(result) => {
-                Some("the run did not restore every input it moved aside (it was killed, or an input was left behind), so its verdict proves nothing".to_string())
+            Some(MutationFinding::AuthorFinding(finding)) => {
+                findings.insert(id.clone(), finding);
+                continue;
             }
-            _ if setup_failure.is_some() => setup_failure.map(|reason| {
-                format!("the mutation run stopped at a setup failure: {reason}")
-            }),
-            _ => run.unrun(id),
-        };
-        if let Some(reason) = host {
-            probe.unproven(
-                id,
-                format!(
-                    "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail"
-                ),
-            );
-            continue;
+            None => {}
         }
         let result = result.expect("a result when the run completed");
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
-        let generated = markers.generated(result);
-        let recreated = markers.recreated(result);
-        let moved_all = markers.moved(result);
+        let generated = markers.generated(result, &names);
+        let recreated = recreated_inputs(result, &markers, &names);
+        let moved_all = markers.moved(result, &names);
         let moved: Vec<String> = moved_all
             .iter()
             .cloned()
@@ -145,16 +198,7 @@ pub(super) async fn prove(
             || super::silent::silent_failure_off_thread(&mutated, result, &at)
                 .await
                 .is_some();
-        if moved.is_empty() && !recreated.is_empty() {
-            findings.insert(
-                id.clone(),
-                format!(
-                    "{}; {already}; it recreated {} while running (parent-directory metadata changed, so that path is not evidence that the check depends on the moved input)",
-                    passed_there(id),
-                    recreated.iter().cloned().collect::<Vec<_>>().join(", ")
-                ),
-            );
-        } else if moved.is_empty() {
+        if moved.is_empty() {
             findings.insert(
                 id.clone(),
                 format!(
@@ -199,3 +243,176 @@ pub(super) async fn prove(
     }
     findings
 }
+
+enum MutationFinding {
+    HostUnproven(String),
+    AuthorFinding(String),
+}
+
+fn mutation_host_or_author_finding(
+    result: &CheckEvidence,
+    markers: &mutation::Markers,
+    inputs: &[String],
+    setup_failure: Option<String>,
+    passed_there: &str,
+) -> Option<MutationFinding> {
+    if let Some(reason) = mutation_host_failure(result, markers, inputs, setup_failure) {
+        return Some(MutationFinding::HostUnproven(reason));
+    }
+    let recreated = recreated_inputs(&result.result, markers, inputs);
+    (!recreated.is_empty())
+        .then(|| MutationFinding::AuthorFinding(author_recreated_finding(passed_there, &recreated)))
+}
+
+fn recreated_inputs(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    inputs: &[String],
+) -> Vec<String> {
+    recreated_paths(&input_states(result, markers, inputs))
+        .into_iter()
+        .chain(markers.recreated(result, inputs))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn mutation_host_failure(
+    result: &CheckEvidence,
+    markers: &mutation::Markers,
+    inputs: &[String],
+    setup_failure: Option<String>,
+) -> Option<String> {
+    let states = input_states(&result.result, markers, inputs);
+    let status = describe_status(markers.status(&result.result));
+    let details = format!(
+        "{}; check status/signal: {status}",
+        describe_states(&states)
+    );
+    if result.result.operational_error.is_some() {
+        return Some(operational_error_diagnostics(
+            &result.result,
+            markers,
+            inputs,
+        ));
+    }
+    let cause = if markers.guarded(&result.result) {
+        Some("the mutation's live-root guard stopped it".to_string())
+    } else if let Some(signal) = markers.observed_signal(&result.result) {
+        Some(format!("the check wrapper observed signal {signal}"))
+    } else if let Some(reason) = setup_failure {
+        Some(format!(
+            "the mutation run stopped at a setup failure: {reason}"
+        ))
+    } else {
+        let moved = markers.moved(&result.result, inputs);
+        let states = markers.states(&result.result, inputs);
+        let incomplete_states = moved.iter().any(|path| !states.contains_key(path));
+        if incomplete_states {
+            Some("the mutation run did not record a state for every moved input".into())
+        } else if markers.status(&result.result).is_none() {
+            Some("the mutation run did not record its exit status".into())
+        } else {
+            let unrestored = states
+                .iter()
+                .any(|(_, state)| state != "restored" && state != "original-recreated");
+            unrestored.then(|| "the mutation run left input state unproven".into())
+        }
+    };
+    cause.map(|cause| format!("{cause}; {details}"))
+}
+
+fn describe_states(states: &std::collections::BTreeMap<String, String>) -> String {
+    format!(
+        "input states: {}",
+        states
+            .iter()
+            .map(|(path, state)| format!("{path}={state}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+pub(super) fn input_states(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    inputs: &[String],
+) -> std::collections::BTreeMap<String, String> {
+    let mut states = markers.states(result, inputs);
+    for path in markers.moved(result, inputs) {
+        states.entry(path).or_insert_with(|| "aside-missing".into());
+    }
+    for input in inputs {
+        states
+            .entry(input.clone())
+            .or_insert_with(|| "unreported".into());
+    }
+    states
+}
+
+pub(super) fn all_moved_inputs_restored(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    inputs: &[String],
+) -> bool {
+    let states = markers.states(result, inputs);
+    markers
+        .moved(result, inputs)
+        .iter()
+        .all(|path| states.get(path).is_some_and(|state| state == "restored"))
+}
+
+fn operational_error_diagnostics(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    inputs: &[String],
+) -> String {
+    format!(
+        "{}; {}; check status/signal: {}",
+        result.operational_error.as_deref().unwrap_or_default(),
+        describe_states(&input_states(result, markers, inputs)),
+        describe_status(markers.status(result))
+    )
+}
+
+fn recreated_paths(states: &std::collections::BTreeMap<String, String>) -> Vec<String> {
+    states
+        .iter()
+        .filter_map(|(path, state)| (state == "original-recreated").then_some(path.clone()))
+        .collect()
+}
+
+fn author_recreated_finding(passed_there: &str, paths: &[String]) -> String {
+    format!(
+        "{passed_there}; it recreated {} while running; stop the check's program from regenerating the named input or stop naming it",
+        paths.join(", ")
+    )
+}
+
+fn describe_status(status: Option<String>) -> String {
+    match status {
+        Some(status) => {
+            let code = status
+                .split(':')
+                .nth(1)
+                .and_then(|code| code.parse::<i32>().ok());
+            let signal = status.split(':').nth(3).unwrap_or("none");
+            if signal != "none" {
+                format!(
+                    "exit status {}, wrapper-observed signal {signal}",
+                    code.unwrap_or_default()
+                )
+            } else {
+                format!(
+                    "exit status {}",
+                    code.map_or(status, |code| code.to_string())
+                )
+            }
+        }
+        None => "signal/exit status unavailable (wrapper interrupted before recording it)".into(),
+    }
+}
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_prove_tests.rs"]
+mod tests;

@@ -18,6 +18,12 @@ use crate::command::workflow_task_set::passability::evidence::Redactor;
 
 const SCHEMA: u32 = 4;
 
+#[path = "workflow_acceptance_executability_resume_files.rs"]
+mod result_files;
+use result_files::{write_archive, write_owner_only};
+
+pub(super) type SavePredicate = Arc<dyn Fn(&CheckResult) -> bool + Send + Sync>;
+
 #[derive(Serialize, Deserialize)]
 struct Saved {
     schema: u32,
@@ -38,7 +44,7 @@ struct Saved {
 /// remain on disk, but are not reused.
 #[derive(Clone)]
 pub(super) struct ResultStore {
-    dir: PathBuf,
+    pub(super) dir: PathBuf,
     redactor: Arc<Redactor>,
 }
 
@@ -50,7 +56,7 @@ impl ResultStore {
         }
     }
 
-    fn path(&self, key: &str) -> Option<PathBuf> {
+    pub(super) fn path(&self, key: &str) -> Option<PathBuf> {
         (key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
             .then(|| self.dir.join(format!("{key}.json")))
     }
@@ -217,68 +223,6 @@ impl ResultStore {
     }
 }
 
-fn write_archive(path: &std::path::Path, bytes: &[u8]) -> bool {
-    use std::io::Write;
-    for index in 0.. {
-        let candidate = if index == 0 {
-            path.to_path_buf()
-        } else {
-            let extension = path
-                .extension()
-                .and_then(|value| value.to_str())
-                .unwrap_or("");
-            path.with_extension(format!("{extension}.{index}"))
-        };
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        match options.open(&candidate) {
-            Ok(mut file) => {
-                if file.write_all(bytes).is_ok() {
-                    return true;
-                }
-                drop(file);
-                let _ = std::fs::remove_file(&candidate);
-                return false;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                if std::fs::read(&candidate).is_ok_and(|archived| archived == bytes) {
-                    return true;
-                }
-            }
-            Err(_) => return false,
-        }
-    }
-    false
-}
-
-/// Write `bytes` to `path`, readable by its owner only (a stale file left
-/// at `path` by an earlier process keeps no wider mode).
-fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> bool {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let restrict = |file: &std::fs::File| {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = file;
-            Ok(())
-        }
-    };
-    options
-        .open(path)
-        .and_then(|mut file| restrict(&file).and_then(|()| file.write_all(bytes)))
-        .is_ok()
-}
-
 impl HostProbe {
     /// Run under `resume`'s budget, saving verdicts when it says so.
     pub(crate) fn with_resume(mut self, resume: &FreezeResume) -> Self {
@@ -327,7 +271,14 @@ impl HostProbe {
     /// at a hermetic site, under its build cache (outside every live root)
     /// or the project's freeze cache.
     pub(super) fn store(&self) -> Option<ResultStore> {
-        if !(self.memo && self.resume.persist) {
+        if !self.memo || !self.resume.persist {
+            return None;
+        }
+        self.result_store()
+    }
+
+    pub(super) fn result_store(&self) -> Option<ResultStore> {
+        if !self.memo {
             return None;
         }
         let dir = match &self.site {
@@ -355,8 +306,10 @@ impl HostProbe {
         id: &str,
     ) -> super::mutation::Markers {
         use super::mutation::Markers;
-        let (Some(store), Some(check)) = (self.store(), sites::check_key(self, tree, contract, id))
-        else {
+        let (Some(store), Some(check)) = (
+            self.result_store(),
+            sites::check_key(self, tree, contract, id),
+        ) else {
             return Markers::new();
         };
         let key = content_digest(format!("mutation-nonce\n{check}").as_bytes());
@@ -384,7 +337,13 @@ impl HostProbe {
         store: Option<&ResultStore>,
         written: &Arc<Mutex<Vec<String>>>,
     ) -> ObserveHooks {
-        self.observe_hooks_with_layout(keys, store, written, &Arc::new(Mutex::new(None)))
+        self.observe_hooks_with_layout(
+            keys,
+            store,
+            written,
+            &Arc::new(Mutex::new(None)),
+            &BTreeMap::new(),
+        )
     }
 
     pub(super) fn observe_hooks_with_layout(
@@ -393,17 +352,22 @@ impl HostProbe {
         store: Option<&ResultStore>,
         written: &Arc<Mutex<Vec<String>>>,
         copy_layout: &Arc<Mutex<Option<CopyLayout>>>,
+        save_predicates: &BTreeMap<String, SavePredicate>,
     ) -> ObserveHooks {
         let (budget, cap) = (self.resume.budget.clone(), self.check_bound_secs());
         let on_check = store.map(|store| {
-            let (store, keys, written, copy_layout) = (
+            let (store, keys, written, copy_layout, save_predicates) = (
                 store.clone(),
                 keys.clone(),
                 written.clone(),
                 copy_layout.clone(),
+                save_predicates.clone(),
             );
             Arc::new(move |result: &CheckResult| {
                 if let Some(key) = keys.get(&result.acceptance_id)
+                    && save_predicates
+                        .get(&result.acceptance_id)
+                        .is_none_or(|predicate| predicate(result))
                     && store.save_evidence(
                         key,
                         result,
@@ -442,11 +406,12 @@ impl HostProbe {
             return;
         };
         for key in written.drain(..) {
-            if let Some(path) = store.path(&key)
-                && store.preserve_replaced(&path)
-                && std::fs::rename(path.with_extension("provisional"), path).is_ok()
-            {
-                self.resume.progress.saved(false);
+            if let Some(path) = store.path(&key) {
+                if store.preserve_replaced(&path)
+                    && std::fs::rename(path.with_extension("provisional"), &path).is_ok()
+                {
+                    self.resume.progress.saved(false);
+                }
             }
         }
     }

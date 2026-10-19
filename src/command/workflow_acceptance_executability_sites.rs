@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use archon_workflow::acceptance_check_environment as check_env;
 use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_commands_hooked};
 
-use super::hermetic::{CheckEvidence, CopyLayout, Unrun, data_digest, data_digest_scoped};
+use super::hermetic::{CheckEvidence, CopyLayout, Unrun};
 use super::*;
 
 #[path = "workflow_acceptance_executability_sites_observe.rs"]
@@ -68,67 +68,18 @@ impl HostProbe {
 
 /// Verdicts already observed in this process, by site, tree and check: a
 /// freeze's trees do not move under it, so each check is run once per tree.
-fn memo() -> &'static Mutex<BTreeMap<String, CheckEvidence>> {
+pub(super) fn memo() -> &'static Mutex<BTreeMap<String, CheckEvidence>> {
     static MEMO: OnceLock<Mutex<BTreeMap<String, CheckEvidence>>> = OnceLock::new();
     MEMO.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-/// The state of the project data the site copies, for `tree`.
-fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<String>, Unrun> {
-    let mut states = probe.data_states.lock().expect("data states lock");
-    if let Some(state) = states.get(&tree.repository) {
-        return Ok(state.clone());
-    }
-    let state = match &probe.site {
-        Site::Scratch(binding) => {
-            let policy = &binding.policy;
-            let project = archon_shell::paths::canonicalize(&policy.project).map_err(|error| {
-                Unrun(format!(
-                    "could not canonicalize project root {}: {error}",
-                    policy.project.display()
-                ))
-            })?;
-            let task_root =
-                archon_shell::paths::canonicalize(&policy.task_root).map_err(|error| {
-                    Unrun(format!(
-                        "could not canonicalize task root {}: {error}",
-                        policy.task_root.display()
-                    ))
-                })?;
-            let task_root_relative = task_root
-                .strip_prefix(&project)
-                .map_err(|_| Unrun("scratch task root is outside the project root".into()))?;
-            let mut state = policy
-                .project_inputs
-                .iter()
-                .map(|input| {
-                    data_digest_scoped(
-                        &policy.project,
-                        &policy.repository,
-                        Some(task_root_relative),
-                        input,
-                        &policy.project_input_excludes,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            state.push(data_digest_scoped(
-                &policy.project,
-                &policy.repository,
-                Some(task_root_relative),
-                task_root_relative,
-                &policy.project_input_excludes,
-            )?);
-            state
-        }
-        Site::Direct | Site::Hermetic | Site::Unavailable(_) => vec![data_digest(
-            &probe.project,
-            &tree.repository,
-            probe.task_root.as_deref(),
-        )?],
-    };
-    states.insert(tree.repository.clone(), state.clone());
-    Ok(state)
-}
+#[path = "workflow_acceptance_executability_sites_discard.rs"]
+mod discard;
+pub(super) use discard::discard_mutation_evidence;
+
+#[path = "workflow_acceptance_executability_sites_data.rs"]
+mod data;
+use data::data_state;
 
 #[path = "workflow_acceptance_executability_sites_reuse.rs"]
 mod reuse;
@@ -146,6 +97,7 @@ pub(super) async fn run_at(
     digest: &str,
     refs: &[FrozenCommandRef],
     cold: bool,
+    save_predicates: &BTreeMap<String, super::resume::SavePredicate>,
 ) -> Result<SiteRun, Unrun> {
     if let Site::Unavailable(reason) = &probe.site {
         return Err(Unrun(reason.clone()));
@@ -164,17 +116,30 @@ pub(super) async fn run_at(
         .collect();
     let store = probe.store();
     let seen: Vec<Option<CheckEvidence>> = (keys.iter())
-        .map(|key| {
+        .enumerate()
+        .map(|(index, key)| {
             let key = key.as_ref()?;
+            let acceptance_id = &refs[index].acceptance_id;
             // A saved verdict is reusable only with valid durable evidence.
             let store = store.as_ref()?;
             let saved = store.load(key, matches!(probe.site, Site::Scratch(_)))?;
+            if save_predicates
+                .get(acceptance_id)
+                .is_some_and(|predicate| !predicate(&saved.result))
+            {
+                return None;
+            }
             if matches!(probe.site, Site::Hermetic) && saved.copy_layout.is_none() {
                 return None;
             }
             let remembered = (probe.process_memo())
                 .then(|| memo().lock().ok()?.get(key).cloned())
-                .flatten();
+                .flatten()
+                .filter(|remembered| {
+                    save_predicates
+                        .get(acceptance_id)
+                        .is_none_or(|predicate| predicate(&remembered.result))
+                });
             probe.reused_from_disk();
             if let Ok(mut memo) = memo().lock() {
                 memo.insert(key.clone(), saved.clone());
@@ -240,8 +205,13 @@ pub(super) async fn run_at(
         .collect();
     let written = Arc::new(Mutex::new(Vec::new()));
     let observed_layout = Arc::new(Mutex::new(None::<CopyLayout>));
-    let hooks =
-        probe.observe_hooks_with_layout(&pending_keys, store.as_ref(), &written, &observed_layout);
+    let hooks = probe.observe_hooks_with_layout(
+        &pending_keys,
+        store.as_ref(),
+        &written,
+        &observed_layout,
+        save_predicates,
+    );
     let ran = if pending.is_empty() {
         Ok(SiteRun {
             results: Vec::new(),
@@ -271,14 +241,16 @@ pub(super) async fn run_at(
         .await
         .map_err(|error| Unrun(format!("scratch probe task failed: {error}")))
         .and_then(|observed| observed.map_err(|error| Unrun(format!("{error:#}"))))
-        .map(|(results, sibling_revisions, check_siblings)| {
-            let mut layout = layout;
-            layout.siblings = sibling_revisions;
-            layout.check_siblings = check_siblings;
-            SiteRun {
-                results: CheckEvidence::from_results(results, Some(layout)),
-            }
-        })
+        .map(
+            |(results, sibling_revisions, check_siblings, _disposable_root)| {
+                let mut layout = layout;
+                layout.siblings = sibling_revisions;
+                layout.check_siblings = check_siblings;
+                SiteRun {
+                    results: CheckEvidence::from_results(results, Some(layout)),
+                }
+            },
+        )
     } else {
         hermetic::run_in_copy(
             probe,
@@ -300,7 +272,12 @@ pub(super) async fn run_at(
     if let Some(store) = store.as_ref() {
         for evidence in &ran.results {
             if let Some(key) = pending_keys.get(&evidence.acceptance_id) {
-                store.save_evidence(key, &evidence.result, evidence.copy_layout.clone());
+                if save_predicates
+                    .get(&evidence.acceptance_id)
+                    .is_none_or(|predicate| predicate(&evidence.result))
+                {
+                    store.save_evidence(key, &evidence.result, evidence.copy_layout.clone());
+                }
             }
         }
     }
@@ -323,6 +300,9 @@ pub(super) async fn run_at(
             continue;
         };
         if let (Some(key), None) = (key, &result.operational_error)
+            && save_predicates
+                .get(&result.acceptance_id)
+                .is_none_or(|predicate| predicate(&result.result))
             && !super::verdict::may_be_host_failure(&result)
             && let Ok(mut memo) = memo().lock()
         {

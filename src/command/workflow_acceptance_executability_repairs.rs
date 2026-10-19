@@ -113,6 +113,29 @@ pub(super) async fn tree_results(
     known: Option<&[CheckEvidence]>,
     cold: bool,
 ) -> TreeRun {
+    tree_results_with_save_predicates(
+        probe,
+        tree,
+        contract,
+        digest,
+        refs,
+        known,
+        cold,
+        &BTreeMap::new(),
+    )
+    .await
+}
+
+pub(super) async fn tree_results_with_save_predicates(
+    probe: &HostProbe,
+    tree: &Baseline,
+    contract: &AcceptanceContract,
+    digest: &str,
+    refs: &[FrozenCommandRef],
+    known: Option<&[CheckEvidence]>,
+    cold: bool,
+    save_predicates: &BTreeMap<String, super::resume::SavePredicate>,
+) -> TreeRun {
     let mut run = TreeRun::known(&[], "");
     run.results = (known.into_iter().flatten())
         .filter(|result| result.operational_error.is_none() || timed_out(result))
@@ -152,7 +175,17 @@ pub(super) async fn tree_results(
             ));
             run.repairs.push(entry);
         }
-        match run_at(probe, tree, contract, digest, &pending, cold).await {
+        match run_at(
+            probe,
+            tree,
+            contract,
+            digest,
+            &pending,
+            cold,
+            save_predicates,
+        )
+        .await
+        {
             Ok(ran) => {
                 for result in ran.results {
                     run.results.insert(result.acceptance_id.clone(), result);

@@ -72,7 +72,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // scanned, changing can-fail proof verdicts for repeated flags.
         // 33: mutation wrappers preserve named sibling setup paths, so their
         // copy layout matches baseline and absent-sibling failures give no verdict.
-        version: 36,
+        // 37: #468 mutation verdicts route every final or transiently recreated input to the author, and are saved or memoized only when that run's markers show every moved input was restored.
+        version: 37,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -115,8 +116,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 round b re-pin only: command-block author guidance affects
         // what authors submit; host acceptance verdict rules are unchanged.
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
-        // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "0696df195a3c237459fe088abe9db3f0edc7a3c8be54a9729435ea23fedff6cd",
+        // #468 follow-up re-pin: complete per-input state, transient recreation markers and status markers route recreated inputs to the author, unrestored inputs to host-unproven, and only restored inputs to the normal verdict; persistence still requires restoration markers.
+        sources_digest: "f5d93919e912ee69076fd5b2ddcec1d233b6ef0afa15dcc445e5bc572a5d2737",
         build_bound: false,
     },
     CapabilityLogic {
@@ -177,8 +178,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 round b re-pin only: the shared author prompt changed; a
         // skeleton freeze judges no checks, so its verdict rule is unchanged.
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
-        // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "0696df195a3c237459fe088abe9db3f0edc7a3c8be54a9729435ea23fedff6cd",
+        // #467/#468 re-pin: diagnostic text changes do not alter this verdict.
+        // #468 re-pin only: save-time mutation restoration gating does not change skeleton verdicts.
+        sources_digest: "f5d93919e912ee69076fd5b2ddcec1d233b6ef0afa15dcc445e5bc572a5d2737",
         build_bound: false,
     },
     CapabilityLogic {
@@ -398,7 +400,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "16afd290920d72c0ff3a4b3aef2c2bd07a0e5b74ec6ce2eeb265fcbb1cc2be0a",
+        // #468 re-pin only: an unrestored mutation result cannot be reused; frozen-chain verification runs no mutation probe.
+        sources_digest: "cc15b6b654522512541c47a24baa12c9d9537f774f2e1727956def024e2e0a88",
         build_bound: true,
     },
     CapabilityLogic {
@@ -456,7 +459,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "16afd290920d72c0ff3a4b3aef2c2bd07a0e5b74ec6ce2eeb265fcbb1cc2be0a",
+        // #468 re-pin only: save-time mutation restoration gating does not change frozen skeleton verification.
+        sources_digest: "cc15b6b654522512541c47a24baa12c9d9537f774f2e1727956def024e2e0a88",
         build_bound: true,
     },
 ];

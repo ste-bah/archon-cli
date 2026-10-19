@@ -5,6 +5,88 @@ use crate::command::workflow_task_set::executability::probe_tests::trees;
 use archon_workflow::task_set_contract::TrustedCwd;
 
 #[tokio::test]
+async fn unrestored_mutation_results_are_not_saved_or_memoized_across_same_key_runs() {
+    for (command, expected_state) in [
+        (
+            "printf recreated > data/state.txt; false",
+            "original-recreated",
+        ),
+        ("rm -rf data; false", "aside-missing"),
+    ] {
+        let trees = trees(&[("AC-M-001", command, TrustedCwd::ProjectRoot)]);
+        let copies = tempfile::tempdir().unwrap();
+        let resume =
+            crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+        let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+            .with_resume(&resume)
+            .with_copy_parent(copies.path().to_path_buf());
+        let baseline = Baseline {
+            commit: trees.base.clone(),
+            repository: trees.repo.clone(),
+        };
+        let original = trees.contract();
+        let markers = super::super::mutation::Markers::new();
+        let names = vec!["data/state.txt".to_string()];
+        let inputs = BTreeMap::from([("AC-M-001".to_string(), names.clone())]);
+        let contract = super::super::mutation::mutated(&original, &inputs, &[], &markers);
+        let digest = super::super::contract_digest(&contract).unwrap();
+        let refs = super::super::refs_for(&contract, &digest, &trees.ids());
+        let save_markers = markers.clone();
+        let save_names = names.clone();
+        let predicates = BTreeMap::from([(
+            "AC-M-001".to_string(),
+            Arc::new(
+                move |result: &archon_workflow::acceptance_scratch::CheckResult| {
+                    super::super::prove::all_moved_inputs_restored(
+                        result,
+                        &save_markers,
+                        &save_names,
+                    )
+                },
+            ) as super::super::resume::SavePredicate,
+        )]);
+        let data = data_state(&probe, &baseline).unwrap();
+        let key = reuse::memo_key(&probe, &baseline, &data, &contract, "AC-M-001").unwrap();
+        memo().lock().unwrap().remove(&key);
+
+        let (first, second) = tokio::join!(
+            run_at(
+                &probe,
+                &baseline,
+                &contract,
+                &digest,
+                &refs,
+                false,
+                &predicates
+            ),
+            run_at(
+                &probe,
+                &baseline,
+                &contract,
+                &digest,
+                &refs,
+                false,
+                &predicates
+            ),
+        );
+        let store = probe.store().unwrap();
+        let path = store.path(&key).unwrap();
+        assert!(first.is_ok() && second.is_ok());
+        for result in first.into_iter().chain(second) {
+            let result = result.results.into_iter().next().unwrap().result;
+            let states = super::super::prove::input_states(&result, &markers, &names);
+            assert_eq!(
+                states.get(&names[0]).map(String::as_str),
+                Some(expected_state)
+            );
+        }
+        assert!(!path.with_extension("provisional").exists());
+        assert!(!path.exists());
+        assert!(!memo().lock().unwrap().contains_key(&key));
+    }
+}
+
+#[tokio::test]
 async fn scratch_layout_unions_all_checks_and_keeps_each_check_siblings() {
     let trees = trees(&[
         (
@@ -96,4 +178,52 @@ async fn scratch_layout_unions_all_checks_and_keeps_each_check_siblings() {
         None,
         "the second check's behavioral failure is not discarded as setup"
     );
+}
+
+#[tokio::test]
+async fn normal_run_saves_and_reuses_evidence_with_an_existing_lock_path() {
+    let trees = trees(&[(
+        "AC-M-001",
+        "grep -q ready data/state.txt",
+        TrustedCwd::ProjectRoot,
+    )]);
+    let copies = tempfile::tempdir().unwrap();
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_resume(&resume)
+        .with_copy_parent(copies.path().to_path_buf());
+    let baseline = Baseline {
+        commit: trees.base.clone(),
+        repository: trees.repo.clone(),
+    };
+    let contract = trees.contract();
+    let ids = trees.ids();
+    let digest = super::super::contract_digest(&contract).unwrap();
+    let refs = super::super::refs_for(&contract, &digest, &ids);
+    let key = reuse::memo_key(
+        &probe,
+        &baseline,
+        &data_state(&probe, &baseline).unwrap(),
+        &contract,
+        "AC-M-001",
+    )
+    .unwrap();
+    let store = probe.store().unwrap();
+    let result_path = std::path::PathBuf::from(store.evidence_ref(&key).unwrap());
+    std::fs::create_dir_all(result_path.parent().unwrap()).unwrap();
+    // A normal run should still produce and reuse evidence when this path exists.
+    std::fs::create_dir(result_path.with_extension("lock")).unwrap();
+    let run = run_at(
+        &probe,
+        &baseline,
+        &contract,
+        &digest,
+        &refs,
+        false,
+        &BTreeMap::new(),
+    )
+    .await
+    .expect("normal run should not fail on obsolete lock state");
+    assert_eq!(run.results.len(), 1);
+    assert!(store.load(&key, false).is_some());
 }
