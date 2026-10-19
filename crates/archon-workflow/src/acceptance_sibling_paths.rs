@@ -101,8 +101,15 @@ pub fn discover(project: &std::path::Path, checks: &[String]) -> Vec<SiblingSour
     let mut siblings = Vec::new();
     for check in checks {
         for named in scan(check) {
+            if !names_entry_below_parent(&named.path) {
+                continue;
+            }
             let candidate = normalize(project.join(named.path));
-            if candidate.starts_with(&project) || !candidate.exists() {
+            if candidate.starts_with(&project)
+                || candidate == project.parent().unwrap_or(&project)
+                || project.starts_with(&candidate)
+                || !candidate.exists()
+            {
                 continue;
             }
             let alias = if candidate.is_dir()
@@ -115,8 +122,10 @@ pub fn discover(project: &std::path::Path, checks: &[String]) -> Vec<SiblingSour
                 continue;
             };
             if !alias.starts_with(&project)
+                && !project.starts_with(&alias)
                 && let Ok(source) = archon_shell::paths::canonicalize(&alias)
                 && !source.starts_with(&project)
+                && !project.starts_with(&source)
                 && (source.is_dir() || source.is_file())
             {
                 siblings.push(SiblingSource { alias, source });
@@ -147,7 +156,8 @@ fn normalize(path: PathBuf) -> PathBuf {
 /// Existing paths are useful inputs even when mentioned as ordinary
 /// arguments; missing ordinary arguments are not setup failures.
 pub fn scan(command: &str) -> Vec<SiblingPath> {
-    let words = crate::check_source_resolve::words(command);
+    let command = strip_quote_prefixes(command);
+    let words = crate::check_source_resolve::words(&command);
     let mut found = Vec::new();
     let mut command_start = 0;
     let mut redirect_target = false;
@@ -215,7 +225,8 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
         }
         command_start = end + 1;
     }
-    for program in program_texts(command) {
+    for program in program_texts(&command) {
+        let program = strip_quote_prefixes(&program);
         for word in crate::check_source_resolve::words(&program) {
             if let Some(path) = sibling_word(&word) {
                 push(&mut found, path, true);
@@ -236,7 +247,53 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
 
 fn sibling_word(word: &str) -> Option<PathBuf> {
     let value = word.split_once('=').map_or(word, |(_, value)| value);
-    value.starts_with("../").then(|| PathBuf::from(value))
+    let path = PathBuf::from(value);
+    names_entry_below_parent(&path).then_some(path)
+}
+
+fn names_entry_below_parent(path: &std::path::Path) -> bool {
+    let mut components = path.components();
+    if !matches!(components.next(), Some(std::path::Component::ParentDir)) {
+        return false;
+    }
+    let mut depth = 0usize;
+    for component in components {
+        match component {
+            std::path::Component::Normal(_) => depth += 1,
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir if depth > 0 => depth -= 1,
+            std::path::Component::ParentDir => return false,
+            _ => return false,
+        }
+    }
+    depth > 0
+}
+
+/// The shell lexer removes quote delimiters. Remove a short ASCII prefix
+/// immediately before a quote first, so the resulting token still starts at
+/// the quoted path.
+fn strip_quote_prefixes(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for index in 1..bytes.len() {
+        if !matches!(bytes[index], b'\'' | b'"') {
+            continue;
+        }
+        if !text[index + 1..].starts_with("../") {
+            continue;
+        }
+        let mut start = index;
+        while start > cursor && bytes[start - 1].is_ascii_alphabetic() && index - start < 3 {
+            start -= 1;
+        }
+        if start < index {
+            out.push_str(&text[cursor..start]);
+            cursor = index;
+        }
+    }
+    out.push_str(&text[cursor..]);
+    out
 }
 
 fn is_assignment(word: &str) -> bool {
@@ -314,5 +371,50 @@ mod tests {
             scan("python3 -c 'MANIFEST=\"crates/inside/Cargo.toml\"'"),
             []
         );
+    }
+
+    #[test]
+    fn parent_paths_are_not_sibling_entries() {
+        for command in [
+            "echo ../",
+            "echo ..",
+            "echo ../..",
+            "echo ../../x",
+            "echo ../x/../../outside",
+            "python3 -c 'value = \"../../x\"'",
+        ] {
+            assert!(scan(command).is_empty(), "{command}: {:?}", scan(command));
+        }
+    }
+
+    #[test]
+    fn short_letter_prefixes_before_quotes_preserve_sibling_paths() {
+        for command in [
+            "echo f\"../x/y\"",
+            "echo r'../x'",
+            "echo b\"../x\"",
+            "python3 -c 'value = f\"../x/y\"'",
+        ] {
+            let paths = scan(command);
+            assert_eq!(paths.len(), 1, "{command}: {paths:?}");
+            assert!(paths[0].path.starts_with("../"), "{command}: {paths:?}");
+        }
+    }
+
+    #[test]
+    fn discovery_never_returns_the_project_parent_or_ancestor() {
+        let tree = tempfile::tempdir().unwrap();
+        let project = tree.path().join("parent/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(tree.path().join("parent/file"), "parent").unwrap();
+        let checks = [
+            "echo ../".to_string(),
+            "echo ../..".to_string(),
+            "echo ../../file".to_string(),
+            "echo ../project/../..".to_string(),
+        ];
+        for check in checks {
+            assert!(discover(&project, &[check.clone()]).is_empty(), "{check}");
+        }
     }
 }

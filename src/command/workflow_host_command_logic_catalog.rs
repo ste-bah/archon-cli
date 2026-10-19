@@ -112,7 +112,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "9c29b5280f1188d869d2beda172071ab06b2fb968ebe20ac67a215aa031681f1",
+        sources_digest: "65f46f6c35cc0fcc2b0c3ccee1d12afd9e0793f045e1b53e41c64f9fb99348f4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -170,7 +170,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "9c29b5280f1188d869d2beda172071ab06b2fb968ebe20ac67a215aa031681f1",
+        sources_digest: "65f46f6c35cc0fcc2b0c3ccee1d12afd9e0793f045e1b53e41c64f9fb99348f4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -384,7 +384,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "ef1fbbe4ba0de9396a0e7d836fe1f492f439e53b643509bfe0610f8a8c8c06b1",
+        sources_digest: "6d9a8e6c1e29a0f5e389abb5f4ccbaf2705f8500a2aecf1c8729969ebc275573",
         build_bound: true,
     },
     CapabilityLogic {
@@ -440,7 +440,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "ef1fbbe4ba0de9396a0e7d836fe1f492f439e53b643509bfe0610f8a8c8c06b1",
+        sources_digest: "6d9a8e6c1e29a0f5e389abb5f4ccbaf2705f8500a2aecf1c8729969ebc275573",
         build_bound: true,
     },
 ];

@@ -197,6 +197,15 @@ pub(super) fn named_inputs(
         .collect();
     let bases = paths::command_directories(&commands, bases);
     let inline_programs = inline::program_positions(&commands);
+    let structured_program_texts: BTreeSet<String> = inline::programs(&commands)
+        .into_iter()
+        .map(|(_, _, program)| program.trim_end_matches('\n').to_string())
+        .chain(
+            bodies
+                .iter()
+                .map(|(_, body)| body.trim_end_matches('\n').to_string()),
+        )
+        .collect();
     let mut words: Vec<(String, Option<PathBuf>)> = commands
         .iter()
         .enumerate()
@@ -239,6 +248,11 @@ pub(super) fn named_inputs(
     words.extend(
         archon_workflow::acceptance_sibling_paths::program_texts(&text)
             .into_iter()
+            // The structured pass already has the effective directory for
+            // these programs. Re-adding them here would resolve their paths
+            // from the initial cwd as well, potentially naming project files
+            // that do not exist there when the command has changed directory.
+            .filter(|program| !structured_program_texts.contains(program.trim_end_matches('\n')))
             .map(|program| (program, Some(cwd.clone()))),
     );
     if let AcceptanceCheck::Floor { contract } = &entry.check {

@@ -49,6 +49,12 @@ pub(super) fn copy_external(
         };
         for sibling in crate::acceptance_sibling_paths::discover(root, std::slice::from_ref(check))
         {
+            if is_project_or_ancestor(&sibling.source, &project) {
+                return Err(invalid(format!(
+                    "refusing to copy sibling source {} because it is the project root or an ancestor",
+                    sibling.source.display()
+                )));
+            }
             let path = relative(root, &sibling.alias);
             siblings.push((copied_root.join(&path), path, sibling.source, *cwd));
         }
@@ -141,6 +147,10 @@ pub(super) fn copy_external(
         }
     }
     Ok(evidence)
+}
+
+fn is_project_or_ancestor(source: &Path, project: &Path) -> bool {
+    project.starts_with(source)
 }
 
 fn git_head(path: &Path) -> WorkflowResult<String> {
@@ -239,6 +249,18 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn refuses_project_root_and_ancestor_sources() {
+        let project = Path::new("/work/project");
+        for source in ["/work/project", "/work", "/"] {
+            assert!(
+                is_project_or_ancestor(Path::new(source), project),
+                "{source}"
+            );
+        }
+        assert!(!is_project_or_ancestor(Path::new("/work/sibling"), project));
     }
 
     #[test]
