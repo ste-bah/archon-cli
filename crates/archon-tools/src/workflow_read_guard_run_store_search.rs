@@ -20,11 +20,11 @@ impl RunStoreScope {
                 let Some(resolved) = self.resolve(root) else {
                     continue;
                 };
-                let within = |dir: &PathBuf| resolved == *dir || resolved.starts_with(dir);
+                let within = |dir: &PathBuf| archon_shell::paths::path_starts_with(&resolved, dir);
                 // A search that skips hidden directories never enters a
                 // store below one.
                 let walks = |store: &PathBuf| {
-                    store.starts_with(&resolved)
+                    archon_shell::paths::path_starts_with(store, &resolved)
                         && !(search.skips_hidden && hidden_between(&resolved, store))
                 };
                 let reason = if self.roots.iter().any(walks) {
@@ -44,7 +44,10 @@ impl RunStoreScope {
                     .working_root
                     .as_ref()
                     .map(|root| {
-                        let holds_store = self.roots.iter().any(|store| store.starts_with(root));
+                        let holds_store = self
+                            .roots
+                            .iter()
+                            .any(|store| archon_shell::paths::path_starts_with(store, root));
                         format!(
                             " Search {} {} instead, naming the narrowest path you need, or use \
                              the Grep or Glob tool, which never walk the host's records.",
@@ -75,7 +78,7 @@ impl RunStoreScope {
 /// (the store itself included) is hidden: a search that skips hidden
 /// directories then never reaches `store`.
 fn hidden_between(root: &Path, store: &Path) -> bool {
-    store.strip_prefix(root).is_ok_and(|rest| {
+    archon_shell::paths::comparable_strip_prefix(store, root).is_some_and(|rest| {
         rest.components().any(|part| {
             matches!(part, Component::Normal(name) if name.to_string_lossy().starts_with('.'))
         })
@@ -97,9 +100,12 @@ fn scratch(path: &Path) -> bool {
         .into_iter()
         .flatten()
         .any(|root| {
-            let root = archon_write_plan::lexical_path::portable(&root.to_string_lossy());
-            path == root.trim_end_matches('/')
-                || archon_write_plan::lexical_path::under_root(&path, &root).is_some()
+            archon_shell::paths::path_starts_with(
+                std::path::Path::new(&path),
+                std::path::Path::new(&archon_write_plan::lexical_path::portable(
+                    &root.to_string_lossy(),
+                )),
+            )
         });
     }
     #[cfg(not(windows))]
@@ -110,5 +116,5 @@ fn scratch(path: &Path) -> bool {
         "/private/var/folders",
     ]
     .iter()
-    .any(|dir| path.starts_with(dir))
+    .any(|dir| archon_shell::paths::path_starts_with(path, Path::new(dir)))
 }

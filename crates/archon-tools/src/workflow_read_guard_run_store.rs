@@ -164,7 +164,7 @@ impl RunStoreScope {
         let contains_store = workspace.iter().any(|dir| {
             roots
                 .iter()
-                .any(|root| root == dir || root.starts_with(dir))
+                .any(|root| archon_shell::paths::path_starts_with(root, dir))
         });
         if !contains_store {
             for spelling in &workspace {
@@ -227,9 +227,10 @@ impl RunStoreScope {
             push_unique(&mut candidates, canonical);
         }
         let within = |dirs: &[PathBuf]| {
-            candidates
-                .iter()
-                .any(|path| dirs.iter().any(|dir| path.starts_with(dir)))
+            candidates.iter().any(|path| {
+                dirs.iter()
+                    .any(|dir| archon_shell::paths::path_starts_with(path, dir))
+            })
         };
         within(&self.artifact_dirs) && !within(&self.workspace)
     }
@@ -276,7 +277,7 @@ impl RunStoreScope {
         if self
             .exempt
             .iter()
-            .any(|dir| resolved == *dir || resolved.starts_with(dir))
+            .any(|dir| archon_shell::paths::path_starts_with(&resolved, dir))
         {
             return false;
         }
@@ -289,7 +290,7 @@ impl RunStoreScope {
         }
         self.roots
             .iter()
-            .any(|root| resolved == *root || resolved.starts_with(root))
+            .any(|root| archon_shell::paths::path_starts_with(&resolved, root))
     }
 
     /// Whether a recursive walk should stop at the directory `dir` rather
@@ -313,7 +314,10 @@ impl RunStoreScope {
         let Some(resolved) = self.resolve(&dir.to_string_lossy()) else {
             return false;
         };
-        !self.exempt.iter().any(|tree| tree.starts_with(&resolved))
+        !self
+            .exempt
+            .iter()
+            .any(|tree| archon_shell::paths::path_starts_with(tree, &resolved))
     }
 
     /// Whether `dir` is on the way to, or inside, a tree exempt from the
@@ -322,9 +326,10 @@ impl RunStoreScope {
         let Some(resolved) = self.resolve(&dir.to_string_lossy()) else {
             return false;
         };
-        self.exempt
-            .iter()
-            .any(|tree| tree.starts_with(&resolved) || resolved.starts_with(tree))
+        self.exempt.iter().any(|tree| {
+            archon_shell::paths::path_starts_with(tree, &resolved)
+                || archon_shell::paths::path_starts_with(&resolved, tree)
+        })
     }
 
     fn judge(&self, named: &str, head: Option<&str>) -> Option<String> {

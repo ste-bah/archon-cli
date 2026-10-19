@@ -71,6 +71,7 @@ use std::path::PathBuf;
 
 use crate::tool::{ToolContext, ToolResult};
 use crate::workflow_read_guard::{BoundaryPaths, checkout_common_dir, spellings};
+use archon_shell::paths::path_starts_with;
 use archon_shell::write_boundary::landlock::LandlockSandbox;
 use archon_shell::write_boundary::{Mechanism, SnapshotBoundary, refusal, warn_unbounded_once};
 
@@ -210,10 +211,10 @@ pub(super) fn for_shell(
     // one atomically through a sibling (`<file>.tmp` then rename, `sed -i`'s
     // backup) and may first create its missing parent directories: allow
     // exactly those, never the directory the file sits in.
-    let mut siblings = Vec::new();
-    let mut new_dirs = Vec::new();
+    let (mut siblings, mut new_dirs) = (Vec::new(), Vec::new());
+    let protected = &paths.protected;
     for entry in &paths.writable {
-        if entry.is_dir() || !paths.protected.iter().any(|root| entry.starts_with(root)) {
+        if entry.is_dir() || !protected.iter().any(|root| path_starts_with(entry, root)) {
             continue;
         }
         push_unique(&mut siblings, entry.clone());

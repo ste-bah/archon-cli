@@ -154,9 +154,11 @@ fn within(path: &Path, root: &Path) -> bool {
         return false;
     }
     let roots = spellings(root);
-    spellings(path)
-        .iter()
-        .any(|candidate| roots.iter().any(|root| candidate.starts_with(root)))
+    spellings(path).iter().any(|candidate| {
+        roots
+            .iter()
+            .any(|root| archon_shell::paths::path_starts_with(candidate, root))
+    })
 }
 
 #[cfg(test)]

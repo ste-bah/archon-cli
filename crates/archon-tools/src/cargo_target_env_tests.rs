@@ -64,6 +64,13 @@ fn external_volume_cargo_gets_local_target_dir() {
     assert!(target.starts_with(local_target_root()));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn the_volumes_mount_point_itself_is_not_an_external_volume() {
+    assert!(!is_macos_external_volume(Path::new("/Volumes")));
+    assert!(!is_macos_external_volume(Path::new("/Volumes-other/disk")));
+}
+
 #[test]
 fn agent_cargo_target_assignment_is_replaced_by_host_value() {
     let command =

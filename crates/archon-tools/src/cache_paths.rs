@@ -77,7 +77,8 @@ pub fn apply_shell_roots(
         crate::bash::bash_env::set_env_override(env, key, &scratch.to_string_lossy());
     }
     let configured = cache_root();
-    let external = cfg!(target_os = "macos") && repository.starts_with("/Volumes/");
+    let external = cfg!(target_os = "macos")
+        && archon_shell::paths::path_starts_with(&repository, Path::new("/Volumes"));
     if leased || (configured.is_none() && !external) {
         return Ok(None);
     }
@@ -151,7 +152,10 @@ mod tests {
             "CUSTOM_CACHE",
         ] {
             let (_, value) = vars.iter().find(|(name, _)| name == key).unwrap();
-            assert!(Path::new(value).starts_with(root.path()));
+            assert!(archon_shell::paths::path_starts_with(
+                Path::new(value),
+                root.path()
+            ));
         }
     }
 }

@@ -102,7 +102,7 @@ impl ForbiddenPathScope {
         }
         self.roots
             .iter()
-            .find_map(|root| path.strip_prefix(root).ok())
+            .find_map(|root| archon_shell::paths::path_strip_prefix(path, root))
             .map(|relative| relative.to_string_lossy().replace('\\', "/"))
     }
 }

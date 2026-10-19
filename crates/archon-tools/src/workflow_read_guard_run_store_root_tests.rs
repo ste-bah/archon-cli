@@ -106,6 +106,20 @@ fn a_workspace_inside_the_store_is_still_exempt() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn verbatim_store_paths_keep_the_same_boundary_as_plain_paths() {
+    let project = project();
+    let scope = scope_at(&project, &project.root);
+    let verbatim = |path: &Path| format!(r"\\?\{}", path.display());
+
+    let record = project.run.join("state.json");
+    assert!(scope.holds_host_records(Path::new(&verbatim(&record))));
+
+    let artifact = project.run.join("artifacts/report.json");
+    assert!(!scope.holds_host_records(Path::new(&verbatim(&artifact))));
+}
+
 /// The host's admission rule is the only widening, and it widens exactly by
 /// what it accepts: the admitted file is writable, its neighbours are not.
 #[test]

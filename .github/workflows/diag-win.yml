@@ -1,0 +1,20 @@
+name: diag-win
+on:
+  push:
+    branches: [diag-466]
+jobs:
+  diag:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        shell: pwsh
+        run: cargo --version
+      - uses: Swatinem/rust-cache@v2
+      - name: glob tests
+        shell: pwsh
+        env:
+          RUST_BACKTRACE: "0"
+        run: |
+          cargo test --locked -p archon-tools -p archon-shell --no-fail-fast
