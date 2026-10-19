@@ -316,6 +316,17 @@ impl RunStoreScope {
         !self.exempt.iter().any(|tree| tree.starts_with(&resolved))
     }
 
+    /// Whether `dir` is on the way to, or inside, a tree exempt from the
+    /// run-store walk boundary.
+    pub fn leads_to_owned_tree(&self, dir: &Path) -> bool {
+        let Some(resolved) = self.resolve(&dir.to_string_lossy()) else {
+            return false;
+        };
+        self.exempt
+            .iter()
+            .any(|tree| tree.starts_with(&resolved) || resolved.starts_with(tree))
+    }
+
     fn judge(&self, named: &str, head: Option<&str>) -> Option<String> {
         self.holds_host_records(Path::new(named))
             .then(|| self.refusal_text(named, head))

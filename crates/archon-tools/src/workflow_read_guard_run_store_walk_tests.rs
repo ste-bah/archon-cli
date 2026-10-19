@@ -58,8 +58,8 @@ fn ctx(tree: &Tree) -> ToolContext {
     }
 }
 
-/// Without the boundary the same walk reaches every record, so the assertions
-/// below are about the boundary and not about the fixture.
+/// Without a run scope, the walk still prunes harness state roots, so the
+/// assertions below cover ordinary project files.
 fn unbounded_ctx(tree: &Tree) -> ToolContext {
     ToolContext {
         working_dir: tree.project.clone(),
@@ -102,20 +102,165 @@ async fn glob_skips_the_run_bookkeeping_and_keeps_what_the_agent_owns() {
 }
 
 #[tokio::test]
-async fn glob_without_the_boundary_walks_straight_into_the_records() {
+async fn glob_keeps_owned_files_visible_through_gitignore() {
     let tree = tree();
+    std::fs::write(tree.project.join(".gitignore"), ".archon/\n").unwrap();
     let result = GlobTool
-        .execute(json!({ "pattern": "**/*.json" }), &unbounded_ctx(&tree))
+        .execute(json!({ "pattern": "**/*.json" }), &ctx(&tree))
         .await;
     assert!(!result.is_error, "{}", result.content);
     assert!(
         result
             .content
             .replace('\\', "/")
-            .contains("v2/results/call-1.json")
-            && result.content.replace('\\', "/").contains("run-0"),
-        "the fixture must be reachable at all: {}",
+            .contains("artifacts/report.json"),
+        "owned artifacts stay visible: {}",
         result.content
+    );
+    assert!(
+        !result.content.replace('\\', "/").contains("run-0"),
+        "past runs stay hidden: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn glob_explicitly_targets_state_inside_gitignored_directory() {
+    let tree = tree();
+    std::fs::write(tree.project.join(".gitignore"), ".archon/\n").unwrap();
+    let result = GlobTool
+        .execute(
+            json!({ "pattern": "**/.archon/workflows/run-0/**/*.json" }),
+            &unbounded_ctx(&tree),
+        )
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+    assert!(
+        result.content.replace('\\', "/").contains("run-0"),
+        "explicitly targeted state files stay visible: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn glob_applies_ancestor_gitignore_from_subdirectory_base() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let base = repo.join("subdir");
+    std::fs::create_dir_all(base.join("secret")).unwrap();
+    std::fs::write(repo.join(".gitignore"), "secret/\n").unwrap();
+    std::fs::create_dir(repo.join(".git")).unwrap();
+    std::fs::write(base.join("secret/x.txt"), "hidden").unwrap();
+    std::fs::write(base.join("other.txt"), "visible").unwrap();
+    let ctx = ToolContext {
+        working_dir: repo,
+        ..ToolContext::default()
+    };
+    let result = GlobTool
+        .execute(json!({ "pattern": "**/*.txt", "path": base }), &ctx)
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("other.txt"), "{}", result.content);
+    assert!(
+        !result.content.contains("secret/x.txt"),
+        "{}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn glob_ignore_file_overrides_gitignore_in_the_same_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::write(repo.join(".gitignore"), "secret.txt\n").unwrap();
+    std::fs::write(repo.join(".ignore"), "!secret.txt\n").unwrap();
+    std::fs::write(repo.join("secret.txt"), "visible").unwrap();
+    let ctx = ToolContext {
+        working_dir: repo.clone(),
+        ..ToolContext::default()
+    };
+
+    let result = GlobTool
+        .execute(json!({ "pattern": "**/*.txt" }), &ctx)
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("secret.txt"), "{}", result.content);
+}
+
+#[tokio::test]
+async fn glob_applies_repository_info_exclude() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join(".git/info")).unwrap();
+    std::fs::write(repo.join(".git/info/exclude"), "x.txt\n").unwrap();
+    std::fs::write(repo.join("x.txt"), "hidden").unwrap();
+    std::fs::write(repo.join("y.txt"), "visible").unwrap();
+    let ctx = ToolContext {
+        working_dir: repo.clone(),
+        ..ToolContext::default()
+    };
+
+    let result = GlobTool
+        .execute(json!({ "pattern": "**/*.txt" }), &ctx)
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("y.txt"), "{}", result.content);
+    assert!(!result.content.contains("x.txt"), "{}", result.content);
+}
+
+#[tokio::test]
+async fn glob_without_run_scope_still_skips_hidden_harness_state() {
+    let tree = tree();
+    let result = GlobTool
+        .execute(json!({ "pattern": "**/*" }), &unbounded_ctx(&tree))
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+    assert!(
+        !result.content.replace('\\', "/").contains("run-0"),
+        "hidden harness state stays out of broad searches: {}",
+        result.content
+    );
+    assert!(
+        result.content.contains("crates/thing/src/lib.rs"),
+        "ordinary files remain searchable: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn glob_searches_ordinary_hidden_project_directories() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let github_workflow = project.join(".github/workflows/ci.yml");
+    let cargo_config = project.join(".cargo/config.toml");
+    std::fs::create_dir_all(github_workflow.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(cargo_config.parent().unwrap()).unwrap();
+    std::fs::write(&github_workflow, "name: ci").unwrap();
+    std::fs::write(&cargo_config, "[build]").unwrap();
+    let ctx = ToolContext {
+        working_dir: project,
+        ..ToolContext::default()
+    };
+
+    let yml = GlobTool.execute(json!({"pattern": "**/*.yml"}), &ctx).await;
+    assert!(!yml.is_error, "{}", yml.content);
+    assert!(
+        yml.content.contains(".github/workflows/ci.yml"),
+        "{}",
+        yml.content
+    );
+
+    let config = GlobTool
+        .execute(json!({"pattern": "**/config.toml"}), &ctx)
+        .await;
+    assert!(!config.is_error, "{}", config.content);
+    assert!(
+        config.content.contains(".cargo/config.toml"),
+        "{}",
+        config.content
     );
 }
 
@@ -190,4 +335,127 @@ async fn glob_rooted_in_a_finished_run_matches_nothing() {
         "a finished run is not walked even when named: {}",
         result.content
     );
+}
+
+#[tokio::test]
+async fn glob_prunes_hidden_harness_state_but_allows_an_explicit_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    for n in 0..64 {
+        let file = project
+            .join(".archon/workflows")
+            .join(format!("run-{n}/results/match.json"));
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "{}").unwrap();
+    }
+    let ctx = ToolContext {
+        working_dir: project.clone(),
+        ..ToolContext::default()
+    };
+    let hidden = GlobTool
+        .execute(json!({"pattern": "**/*.json"}), &ctx)
+        .await;
+    assert!(!hidden.is_error, "{}", hidden.content);
+    assert!(!hidden.content.contains(".archon"), "{}", hidden.content);
+
+    let targeted = GlobTool
+        .execute(
+            json!({"pattern": "**/.archon/workflows/run-0/**/*.json"}),
+            &ctx,
+        )
+        .await;
+    assert!(!targeted.is_error, "{}", targeted.content);
+    assert!(
+        targeted.content.contains("match.json"),
+        "{}",
+        targeted.content
+    );
+}
+
+#[tokio::test]
+async fn glob_does_not_target_a_nested_state_root_from_an_unrelated_prefix() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let state_root = project.join("src/store");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/ordinary.json"), "{}").unwrap();
+    for n in 0..64 {
+        let file = state_root.join(format!("run-{n}/match.json"));
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "{}").unwrap();
+    }
+    let ctx = ToolContext {
+        working_dir: project.clone(),
+        ..ToolContext::default()
+    };
+    let matches = crate::glob_tool::bounded_glob_with_test_state_roots(
+        &project,
+        "src/**/*.json",
+        &ctx,
+        vec![state_root.clone()],
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches
+            .iter()
+            .any(|path| path.ends_with("src/ordinary.json"))
+    );
+    assert!(
+        matches.iter().all(|path| !path.starts_with(&state_root)),
+        "nested state files must be pruned: {matches:?}"
+    );
+}
+
+#[tokio::test]
+async fn glob_targets_a_nested_state_root_when_its_path_is_explicit() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let state_root = project.join("src/store");
+    for n in 0..64 {
+        let file = state_root.join(format!("run-{n}/match.json"));
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "{}").unwrap();
+    }
+    let ctx = ToolContext {
+        working_dir: project.clone(),
+        ..ToolContext::default()
+    };
+    let matches = crate::glob_tool::bounded_glob_with_test_state_roots(
+        &project,
+        "src/store/**/*.json",
+        &ctx,
+        vec![state_root.clone()],
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches.iter().any(|path| path.starts_with(&state_root)),
+        "explicitly targeted state files should be found: {matches:?}"
+    );
+}
+
+#[tokio::test]
+async fn glob_honors_gitignore_directories() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(project.join("ignored/nested")).unwrap();
+    std::fs::create_dir_all(project.join("visible")).unwrap();
+    std::fs::write(project.join(".gitignore"), "ignored/\n").unwrap();
+    std::fs::write(project.join("ignored/nested/match.txt"), "hidden").unwrap();
+    std::fs::write(project.join("visible/match.txt"), "visible").unwrap();
+    let ctx = ToolContext {
+        working_dir: project,
+        ..ToolContext::default()
+    };
+    let result = GlobTool.execute(json!({"pattern": "**/*.txt"}), &ctx).await;
+    assert!(!result.is_error, "{}", result.content);
+    assert!(
+        result.content.contains("visible/match.txt"),
+        "{}",
+        result.content
+    );
+    assert!(!result.content.contains("ignored"), "{}", result.content);
 }

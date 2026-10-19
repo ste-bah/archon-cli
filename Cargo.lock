@@ -1134,6 +1134,7 @@ dependencies = [
  "futures-util",
  "git2",
  "glob",
+ "ignore",
  "libc",
  "lsp-types",
  "once_cell",

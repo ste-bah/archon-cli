@@ -29,6 +29,7 @@ tracing.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 glob.workspace = true
+ignore.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 futures-util.workspace = true

@@ -85,6 +85,17 @@ pub trait FileSystem: Send + Sync + std::fmt::Debug {
     /// Immediate children of `path`, in whatever order the world lists them.
     async fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>>;
 
+    /// Immediate children and directory type when the backend can provide it
+    /// without a separate metadata request.
+    async fn read_dir_with_types(&self, path: &Path) -> io::Result<Vec<(PathBuf, Option<bool>)>> {
+        Ok(self
+            .read_dir(path)
+            .await?
+            .into_iter()
+            .map(|path| (path, None))
+            .collect())
+    }
+
     async fn remove_file(&self, path: &Path) -> io::Result<()>;
 
     /// Remove an EMPTY directory.
@@ -259,6 +270,23 @@ impl FileSystem for LocalFs {
             let mut entries = Vec::new();
             for entry in std::fs::read_dir(&path)? {
                 entries.push(entry?.path());
+            }
+            Ok(entries)
+        })
+        .await
+    }
+
+    async fn read_dir_with_types(&self, path: &Path) -> io::Result<Vec<(PathBuf, Option<bool>)>> {
+        let path = path.to_path_buf();
+        spawn_blocking_io(move || {
+            let mut entries = Vec::new();
+            for entry in std::fs::read_dir(&path)? {
+                let entry = entry?;
+                let is_dir = entry
+                    .file_type()
+                    .ok()
+                    .and_then(|kind| (!kind.is_symlink()).then(|| kind.is_dir()));
+                entries.push((entry.path(), is_dir));
             }
             Ok(entries)
         })
