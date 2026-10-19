@@ -72,7 +72,7 @@ fn plus_bullet_declared_path_has_the_same_forbidden_collision_finding() {
         .expect("the path is forbidden");
     assert_eq!(
         conflict.finding(),
-        "declared `src/a.rs` is also named by forbidden bullet \"src/a.rs\"; a forbidden file cannot be changed — remove it from Files Forbidden to Change or forbid only symbols within it"
+        "declared `src/a.rs` is also named by forbidden bullet \"src/a.rs\"; this bullet names a declared file; forbidden bullets naming files forbid whole files. Remove it from Files Forbidden to Change; state protections for individual symbols in it in the body, outside that section."
     );
 }
 

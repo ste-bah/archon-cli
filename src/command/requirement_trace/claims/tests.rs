@@ -255,7 +255,9 @@ fn forbidden_bullet_path_qualifiers_and_bare_paths_name_the_conflicting_declarat
         );
         assert!(finding.text.contains(forbidden), "{}", finding.text);
         assert!(
-            finding.text.contains("a forbidden file cannot be changed"),
+            finding
+                .text
+                .contains("forbidden bullets naming files forbid whole files"),
             "{}",
             finding.text
         );
@@ -292,7 +294,7 @@ fn subject_extraction_avoids_symbol_false_collisions_and_catches_plain_paths() {
         .unwrap_or_else(|| panic!("{}", trace.report));
     assert!(
         finding.text.contains(
-            "declared `src/a.rs`: declared `src/a.rs` is also named by forbidden bullet \"src/a.rs\"; a forbidden file cannot be changed"
+            "declared `src/a.rs`: declared `src/a.rs` is also named by forbidden bullet \"src/a.rs\"; this bullet names a declared file; forbidden bullets naming files forbid whole files. Remove it from Files Forbidden to Change; state protections for individual symbols in it in the body, outside that section."
         ),
         "{}",
         finding.text

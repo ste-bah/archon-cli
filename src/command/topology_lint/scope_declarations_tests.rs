@@ -1,6 +1,6 @@
 //! Batch O: an empty write set and prose forbidden entries are findings.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::*;
 
@@ -15,6 +15,89 @@ fn task(owns: &[&str], forbids: &[&str]) -> WorkflowV2TaskUniverseTask {
 
 fn raw(owns: &str, forbids: &str) -> String {
     format!("## Files Expected to Change\n\n{owns}\n\n## Files Forbidden to Change\n\n{forbids}\n")
+}
+
+fn grounded_task_set() -> (tempfile::TempDir, PathBuf, PathBuf, String) {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let repository = temp.path().join("repository");
+    let tasks = project.join("tasks/PRD-X");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::create_dir_all(repository.join("scripts")).unwrap();
+    let repository_root = repository.canonicalize().unwrap();
+    let declared = format!("{}/scripts/x.sh", repository_root.display());
+    let body = format!(
+        "```yaml\ntask_id: TASK-X-001\ntitle: Example\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{declared}` — exists\n\n## Files Forbidden to Change\n\n- scripts/x.sh\n\n## Focused Tests\n\n- `cargo test -p example`\n"
+    );
+    let record = archon_workflow::repository_record::RepositoryRecordV1 {
+        schema_version: archon_workflow::repository_record::REPOSITORY_RECORD_SCHEMA_VERSION,
+        repository_root: repository_root.display().to_string(),
+        base_commit: archon_workflow::repository_record::UNBORN_BASE_COMMIT.into(),
+        decomposition_run_id: "test".into(),
+        recorded_at: "now".into(),
+    };
+    archon_workflow::repository_record::write_repository_record(&tasks, &record).unwrap();
+    std::fs::write(tasks.join("TASK-X-001.md"), &body).unwrap();
+    (temp, project, tasks, body)
+}
+
+#[test]
+fn body_and_set_gates_use_the_recorded_repository_root_for_absolute_declarations() {
+    let (_temp, project, tasks, body) = grounded_task_set();
+    let task_path = tasks.join("TASK-X-001.md");
+    let body_gate = super::super::task_file::inspect_raw(
+        &project,
+        &task_path,
+        &body,
+        archon_core::config::GateMode::Enforce,
+    );
+    let expected = body_gate
+        .blockers
+        .iter()
+        .find(|finding| finding.contains("declared `scripts/x.sh`"))
+        .expect("body gate reports the declared and forbidden path collision");
+    let set_gate = set_findings(&tasks);
+    let set_collision = set_gate
+        .iter()
+        .map(|finding| &finding.text)
+        .find(|finding| finding.contains("declared `scripts/x.sh`"))
+        .expect("set gate reports the declared and forbidden path collision");
+    assert_eq!(expected, set_collision);
+}
+
+#[test]
+fn missing_repository_record_keeps_each_gate_fallback_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let tasks = project.join("tasks/PRD-X");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let repository = temp.path().join("repository");
+    std::fs::create_dir_all(repository.join("scripts")).unwrap();
+    let body = format!(
+        "```yaml\ntask_id: TASK-X-001\ntitle: Example\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{}/scripts/x.sh` — exists\n\n## Files Forbidden to Change\n\n- scripts/x.sh\n\n## Focused Tests\n\n- `cargo test -p example`\n",
+        repository.display()
+    );
+    let task_path = tasks.join("TASK-X-001.md");
+    std::fs::write(&task_path, &body).unwrap();
+    let body_gate = super::super::task_file::inspect_raw(
+        &project,
+        &task_path,
+        &body,
+        archon_core::config::GateMode::Enforce,
+    );
+    assert!(
+        body_gate
+            .blockers
+            .iter()
+            .all(|finding| !finding.contains("declared `scripts/x.sh`")),
+        "{:#?}",
+        body_gate.blockers
+    );
+    assert!(
+        set_findings(&tasks)
+            .iter()
+            .all(|finding| !finding.text.contains("declared `scripts/x.sh`"))
+    );
 }
 
 #[test]
@@ -86,7 +169,7 @@ fn declared_path_forbidden_by_qualified_or_bare_bullet_is_a_scope_finding() {
             "{collision}"
         );
         assert!(
-            collision.contains("remove it from Files Forbidden to Change"),
+            collision.contains("forbidden bullets naming files forbid whole files"),
             "{collision}"
         );
     }

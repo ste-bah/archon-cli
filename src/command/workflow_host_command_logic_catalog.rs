@@ -109,7 +109,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "ea5ab89bf5858c090a90a44424ba5c92134568a009a4d6e84d2dd7063b30f560",
+        sources_digest: "e895fb0b0183e3c583e5fe725035a5c47b67fd62f64aecc82c66f6d6b893230b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -167,7 +167,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter freeze verdicts.
         // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
-        sources_digest: "ea5ab89bf5858c090a90a44424ba5c92134568a009a4d6e84d2dd7063b30f560",
+        sources_digest: "e895fb0b0183e3c583e5fe725035a5c47b67fd62f64aecc82c66f6d6b893230b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -200,7 +200,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 20: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
         // 21: reported claims are excluded and short negated path subjects are read as absence claims.
         // 22: declared write paths that match Files Forbidden to Change are rejected by the body scope gate using the shared matcher and refutation wording.
-        version: 22,
+        // 23: #464 body and set gates normalize absolute declared paths against the task set's recorded repository root, changing collision findings when project and repository roots differ.
+        version: 23,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -231,8 +232,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; body-landing verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; staged body lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        // #464 re-pin only: review 4's verdict change is already counted in version 22.
-        sources_digest: "8bda227be59ae88d09b3cce664462a78349bc2f89b3a9cfa5fecb1fe328bcbc7",
+        // #464 re-pin only: scope declarations share recorded repository-root resolution with the body gate; the version-23 verdict change is already counted above.
+        sources_digest: "2bd3dec97d5e08e9ee8715a379e30f2784da85e39ce6232ae819c304e1ba92d9",
         build_bound: false,
     },
     CapabilityLogic {
@@ -256,7 +257,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 16: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
         // 17: reported claims are excluded and short negated path subjects are read as absence claims.
         // 18: declared write paths that match Files Forbidden to Change are rejected by scope declarations using the shared matcher and refutation wording.
-        version: 18,
+        // 19: #464 absolute declared paths use the task set's recorded repository root, matching the body gate when project and repository roots differ.
+        version: 19,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -288,8 +290,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; lint verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        // #464 re-pin only: review 4's verdict change is already counted in version 18.
-        sources_digest: "8bda227be59ae88d09b3cce664462a78349bc2f89b3a9cfa5fecb1fe328bcbc7",
+        // #464 re-pin only: scope declarations share recorded repository-root resolution with the body gate; the version-19 verdict change is already counted above.
+        sources_digest: "2bd3dec97d5e08e9ee8715a379e30f2784da85e39ce6232ae819c304e1ba92d9",
         build_bound: false,
     },
     CapabilityLogic {
@@ -313,7 +315,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not trace verdicts.
         // #464 re-pin only: review 4's verdict change is already counted in version 6.
         version: 6,
-        sources_digest: "ef2080de961b31180c6f5c0e197bd5d268222239f721873c9c5c5f2d6018ffec",
+        sources_digest: "3b3d12392dff9d57c2fb91c1688411973f5b2920489e109eb6fbd49b36747c31",
         build_bound: true,
     },
     CapabilityLogic {
@@ -376,7 +378,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "4fd94aae75f3fdb6d7109f986f5dc30cd7b4f24c6fc1c6c4c8bbc2e30fc1bdcc",
+        sources_digest: "642d204512589251f39e6d351fdc07f6a590d8f370f18ceec79b58e44d3e32c3",
         build_bound: true,
     },
     CapabilityLogic {
@@ -432,7 +434,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the parser change does not alter verification verdicts.
         // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
-        sources_digest: "4fd94aae75f3fdb6d7109f986f5dc30cd7b4f24c6fc1c6c4c8bbc2e30fc1bdcc",
+        sources_digest: "642d204512589251f39e6d351fdc07f6a590d8f370f18ceec79b58e44d3e32c3",
         build_bound: true,
     },
 ];

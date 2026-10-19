@@ -125,7 +125,7 @@ fn declaration_conflict_bounds_a_long_declared_path_in_the_finding() {
         .next()
         .expect("the declared path conflicts with the forbidden path");
     let finding = conflict.finding();
-    assert!(finding.len() < 600, "finding was {} chars", finding.len());
+    assert!(finding.len() < 700, "finding was {} chars", finding.len());
     assert!(finding.contains(&format!("declared `src/{}", "a".repeat(175))));
     assert!(!finding.contains(&"a".repeat(176)));
 }

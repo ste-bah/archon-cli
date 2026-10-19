@@ -360,7 +360,7 @@ impl ForbiddenDeclarationConflict {
     /// The common actionable explanation used by every declaration gate.
     pub fn finding(&self) -> String {
         format!(
-            "declared `{}` is also named by forbidden bullet \"{}\"; a forbidden file cannot be changed — remove it from Files Forbidden to Change or forbid only symbols within it",
+            "declared `{}` is also named by forbidden bullet \"{}\"; this bullet names a declared file; forbidden bullets naming files forbid whole files. Remove it from Files Forbidden to Change; state protections for individual symbols in it in the body, outside that section.",
             bounded_bullet(&self.path),
             self.bullet
         )

@@ -12,11 +12,23 @@
 //!   basename or glob.
 
 use std::path::Path;
+use std::path::PathBuf;
 
 use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
 use archon_workflow::task_universe::parsing::parse_task_file;
 
 use crate::command::workflow_gate::{GateFinding, GateId};
+
+/// Resolve declared paths against the repository grounded by this task set.
+/// Before repository records existed, each lint entry point supplied its own
+/// fallback root; keep that fallback for older task sets.
+pub(super) fn repository_root(fallback: &Path, tasks_root: &Path) -> PathBuf {
+    archon_workflow::repository_record::read_repository_record(tasks_root)
+        .ok()
+        .flatten()
+        .map(|record| PathBuf::from(record.repository_root))
+        .unwrap_or_else(|| fallback.to_path_buf())
+}
 
 /// The scope findings of one parsed task.
 pub(super) fn inspect(
@@ -85,6 +97,7 @@ fn prose_entry(entry: &str) -> bool {
 /// [`inspect`] over every task file under `root`, as body findings of the
 /// file each names.
 pub(super) fn set_findings(root: &Path) -> Vec<GateFinding> {
+    let repository_root = repository_root(root, root);
     let mut findings = Vec::new();
     for path in archon_workflow::task_universe::task_files_under(root).unwrap_or_default() {
         let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -93,15 +106,19 @@ pub(super) fn set_findings(root: &Path) -> Vec<GateFinding> {
         let Ok(task) = parse_task_file(&path, &raw) else {
             continue;
         };
-        findings.extend(inspect(&task, &raw, root).into_iter().map(|text| {
-            GateFinding::new(
-                GateId::WorkflowLintTaskSet,
-                text,
-                &task.canonical_task_id,
-                Some(path.clone()),
-                archon_workflow::RemediationScope::Body,
-            )
-        }));
+        findings.extend(
+            inspect(&task, &raw, &repository_root)
+                .into_iter()
+                .map(|text| {
+                    GateFinding::new(
+                        GateId::WorkflowLintTaskSet,
+                        text,
+                        &task.canonical_task_id,
+                        Some(path.clone()),
+                        archon_workflow::RemediationScope::Body,
+                    )
+                }),
+        );
     }
     findings
 }

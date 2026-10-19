@@ -141,8 +141,10 @@ pub(super) fn inspect_raw(
         shown(&path),
         task.canonical_task_id
     ));
+    let tasks_root = path.parent().unwrap_or(cwd);
+    let repository_root = super::scope_declarations::repository_root(cwd, tasks_root);
     validate_declared_shape(
-        cwd,
+        &repository_root,
         &task,
         raw,
         &mut report,
@@ -326,7 +328,7 @@ pub(super) fn inspect_raw(
 }
 
 fn validate_declared_shape(
-    cwd: &Path,
+    repository_root: &Path,
     task: &WorkflowV2TaskUniverseTask,
     raw: &str,
     report: &mut String,
@@ -348,7 +350,7 @@ fn validate_declared_shape(
         let defect = DeterministicDefect::new("invalid_declared_status", id, "status");
         block(blockers, identities, error.to_string(), defect);
     }
-    for (index, text) in super::scope_declarations::inspect(task, raw, cwd)
+    for (index, text) in super::scope_declarations::inspect(task, raw, repository_root)
         .into_iter()
         .enumerate()
     {
