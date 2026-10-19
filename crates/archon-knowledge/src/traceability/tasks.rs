@@ -318,42 +318,18 @@ fn collect_typed_verifiers(yaml: &serde_yaml_ng::Value, output: &mut Vec<Verifie
     }
 }
 
-/// Backticked spans under `## Files Expected to Change` that look like paths.
-///
-/// The real corpus writes these as prose — *"Likely anchors: `a.rs`, `b.rs`"* —
-/// so the paths have to be lifted out of the sentence. A span counts as a path
-/// when it contains a separator or a file extension; a backticked prose word
-/// does not.
+/// Paths under `## Files Expected to Change`, using the shared declaration
+/// grammar so both workflow gates resolve each bullet the same way.
 fn collect_path_scopes(raw: &str) -> Vec<String> {
     let mut scopes: Vec<String> = Vec::new();
     for bullet in section_bullets(raw, "files expected to change") {
-        for caps in backtick_re().captures_iter(&bullet) {
-            let span = caps[1].trim().replace('\\', "/");
-            if looks_like_path(&span) && !scopes.contains(&span) {
-                scopes.push(span);
+        for path in archon_write_plan::declared_paths::declared_file_paths(&bullet) {
+            if !scopes.contains(&path) {
+                scopes.push(path);
             }
         }
     }
     scopes
-}
-
-fn looks_like_path(span: &str) -> bool {
-    if span.is_empty() || span.contains(char::is_whitespace) {
-        return false;
-    }
-    if span.contains('/') {
-        return true;
-    }
-    // A bare filename: `module.rs`. A backticked prose word has no
-    // extension, and `status=passed` has no dot.
-    match span.rsplit_once('.') {
-        Some((stem, ext)) => {
-            !stem.is_empty()
-                && (1..=4).contains(&ext.len())
-                && ext.chars().all(|c| c.is_ascii_alphanumeric())
-        }
-        None => false,
-    }
 }
 
 fn collect_focused_tests(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry> {

@@ -18,7 +18,7 @@ const TASK: &str = concat!(
     "## Files Expected to Change\n",
     "\n",
     "- Existing files only unless implementation requires a new module.\n",
-    "- Likely anchors: `crates/archon-trading/src/data_lake.rs`, `src/command/trading_data.rs`.\n",
+    "- crates/archon-trading/src/data_lake.rs — likely anchor; `src/command/trading_data.rs` is a secondary anchor.\n",
     "\n",
     "## Focused Tests\n",
     "\n",
@@ -64,14 +64,51 @@ fn missing_task_id_fails_closed() {
 }
 
 #[test]
-fn path_scopes_are_lifted_out_of_prose_bullets() {
-    let b = binding();
+fn short_label_bullets_declare_backticked_paths() {
+    let raw = TASK.replace(
+        "- crates/archon-trading/src/data_lake.rs — likely anchor; `src/command/trading_data.rs` is a secondary anchor.",
+        "- Likely anchors: `crates/archon-trading/src/data_lake.rs`, `src/command/trading_data.rs`.",
+    );
+    let b = parse_task_binding(&raw, "TASK-TDL-080.md").expect("parses");
     assert_eq!(
         b.path_scopes,
         [
             "crates/archon-trading/src/data_lake.rs",
             "src/command/trading_data.rs"
         ]
+    );
+}
+
+#[test]
+fn restored_tdl_010_fixture_declares_its_backticked_anchor_paths() {
+    let raw = include_str!(
+        "../../../../../tests/fixtures/prd-trading-data-lake-ahdm-001/TASK-TDL-010-registry-schema-v1.md"
+    );
+    let binding = parse_task_binding(raw, "TASK-TDL-010-registry-schema-v1.md").expect("parses");
+    assert_eq!(
+        binding.path_scopes,
+        [
+            "crates/archon-trading/src/data_lake.rs",
+            "crates/archon-trading/src/data_store.rs",
+            "src/command/trading_data.rs",
+            "src/cli_args/trading_market_actions.rs",
+            "src/cli_args/tests.rs"
+        ]
+    );
+}
+
+#[test]
+fn plus_bullet_declared_path_has_the_same_forbidden_collision_finding() {
+    let raw = "## Files Expected to Change\n+ src/a.rs — exists\n\n## Files Forbidden to Change\n- src/a.rs\n";
+    let path_scopes = collect_path_scopes(raw);
+    assert_eq!(path_scopes, ["src/a.rs"]);
+    let conflict = archon_write_plan::declaration_conflicts(path_scopes.iter(), ["src/a.rs"])
+        .into_iter()
+        .next()
+        .expect("the path is forbidden");
+    assert_eq!(
+        conflict.finding(),
+        "declared `src/a.rs` is also named by forbidden bullet \"src/a.rs\"; a forbidden file cannot be changed — remove it from Files Forbidden to Change or forbid only symbols within it"
     );
 }
 

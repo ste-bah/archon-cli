@@ -5,7 +5,7 @@
 //! shelled out to `cargo` to prove a mutation broke a build would be the
 //! workspace-wide test run NFR-004 forbids, wearing a different hat.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use archon_knowledge::traceability::anchors::file_hash;
 use archon_knowledge::traceability::{FalsificationPlan, MutationKind, RefusedToRun};
@@ -185,7 +185,20 @@ fn a_dirty_target_file_is_refused_and_left_alone() {
 
 #[test]
 fn a_tree_that_is_not_a_repository_is_treated_as_dirty() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    // Cargo's configured TMPDIR can sit under the checkout, where Git would
+    // discover the parent's repository and this fixture would test another case.
+    let checkout = std::env::current_dir().expect("current directory");
+    let temp_root = std::env::var_os("TEMP")
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir() && !path.starts_with(&checkout))
+        .or_else(|| {
+            ["/private/tmp", "/tmp"]
+                .into_iter()
+                .map(PathBuf::from)
+                .find(|path| path.is_dir() && !path.starts_with(&checkout))
+        })
+        .expect("system temp directory outside the checkout");
+    let dir = tempfile::tempdir_in(temp_root).expect("tempdir");
     std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
     std::fs::write(dir.path().join("src/a.rs"), "fn a() {}\nfn b() {}\n").expect("write");
 

@@ -311,6 +311,75 @@ impl ForbiddenPaths {
     }
 }
 
+/// A declared file that also matches a task's forbidden-path bullets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForbiddenDeclarationConflict {
+    pub path: String,
+    pub bullet: String,
+}
+
+/// Find normalized declared paths that the same matcher used by write guards forbids.
+/// The returned text is shared by body lint and requirement tracing so both
+/// gates explain the collision and its repair in the same way.
+pub fn declaration_conflicts<I, P, B, S>(
+    declared: I,
+    forbidden_bullets: B,
+) -> Vec<ForbiddenDeclarationConflict>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<str>,
+    B: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let bullets: Vec<String> = forbidden_bullets
+        .into_iter()
+        .map(|bullet| bullet.as_ref().to_string())
+        .collect();
+    let mut conflicts = Vec::new();
+    for declared in declared {
+        let path = declared.as_ref().to_string();
+        if path.is_empty() {
+            continue;
+        }
+        for bullet in &bullets {
+            if ForbiddenPaths::from_entries([bullet.as_str()]).matches(&path) {
+                let conflict = ForbiddenDeclarationConflict {
+                    path: path.clone(),
+                    bullet: bounded_bullet(bullet),
+                };
+                if !conflicts.contains(&conflict) {
+                    conflicts.push(conflict);
+                }
+            }
+        }
+    }
+    conflicts
+}
+
+impl ForbiddenDeclarationConflict {
+    /// The common actionable explanation used by every declaration gate.
+    pub fn finding(&self) -> String {
+        format!(
+            "declared `{}` is also named by forbidden bullet \"{}\"; a forbidden file cannot be changed — remove it from Files Forbidden to Change or forbid only symbols within it",
+            bounded_bullet(&self.path),
+            self.bullet
+        )
+    }
+}
+
+fn bounded_bullet(bullet: &str) -> String {
+    let compact = bullet.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_CHARS: usize = 180;
+    if compact.chars().count() <= MAX_CHARS {
+        compact
+    } else {
+        format!(
+            "{}…",
+            compact.chars().take(MAX_CHARS - 1).collect::<String>()
+        )
+    }
+}
+
 #[cfg(test)]
 #[path = "forbidden_paths_tests.rs"]
 mod tests;

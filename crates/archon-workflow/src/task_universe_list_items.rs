@@ -11,12 +11,8 @@ use super::sorted_unique;
 /// the repair loop could never satisfy a field no agent controls — twelve
 /// identical iterations before the run halted.
 pub(super) fn list_item_text(trimmed: &str) -> Option<&str> {
-    if let Some(rest) = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .or_else(|| trimmed.strip_prefix("+ "))
-    {
-        return Some(rest.trim());
+    if let Some(item) = archon_write_plan::declared_paths::markdown_bullet_item(trimmed) {
+        return Some(item);
     }
     // `1. criterion`, `12) criterion` — the ordinal is the marker, not content.
     let digits = trimmed.len()

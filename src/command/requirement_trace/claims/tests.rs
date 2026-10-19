@@ -228,6 +228,78 @@ fn a_claim_no_declared_file_can_serve_is_refuted() {
 }
 
 #[test]
+fn forbidden_bullet_path_qualifiers_and_bare_paths_name_the_conflicting_declaration() {
+    let deliverables = r#"[{"kind":"rust-source","artifact_path":"tests/contract.rs"}]"#;
+    for forbidden in [
+        "`tests/contract.rs` existing test functions `checks_contract`, and helpers `build_case`",
+        "`tests/contract.rs`",
+    ] {
+        let body = task_with(
+            "TASK-X-010",
+            "REQ-X-001",
+            deliverables,
+            &format!(
+                "## Scope\n\n- REQ-X-001 is delivered by `checks_contract` in `tests/contract.rs`.\n\n## Files Expected to Change\n\n- `tests/contract.rs` — exists (2 lines)\n\n## Files Forbidden to Change\n\n- {forbidden}\n"
+            ),
+        );
+        let trace = run(&[("TASK-X-010", &body)]);
+        let finding = trace
+            .findings
+            .iter()
+            .find(|finding| finding.text.contains("declared `tests/contract.rs`"))
+            .unwrap_or_else(|| panic!("{}", trace.report));
+        assert!(
+            finding.text.contains("is also named by forbidden bullet"),
+            "{}",
+            finding.text
+        );
+        assert!(finding.text.contains(forbidden), "{}", finding.text);
+        assert!(
+            finding.text.contains("a forbidden file cannot be changed"),
+            "{}",
+            finding.text
+        );
+        assert!(
+            trace
+                .report
+                .contains("1 claim(s): 1 tested, 1 refuted, 0 untestable"),
+            "{}",
+            trace.report
+        );
+    }
+}
+
+#[test]
+fn subject_extraction_avoids_symbol_false_collisions_and_catches_plain_paths() {
+    let false_body = task(
+        "TASK-X-010",
+        "REQ-X-001",
+        "## Files Expected to Change\n\n- `src/a.rs` — updates the `state.load` helper\n\n## Files Forbidden to Change\n\n- `**/state.load`\n\n## Scope\n\n- REQ-X-001 lives in `present_symbol` in `src/lib.rs`.\n",
+    );
+    let trace = run(&[("TASK-X-010", &false_body)]);
+    assert!(trace.findings.is_empty(), "{}", trace.report);
+
+    let collision_body = task(
+        "TASK-X-010",
+        "REQ-X-001",
+        "## Files Expected to Change\n\n- src/a.rs — exists\n\n## Files Forbidden to Change\n\n- src/a.rs\n\n## Scope\n\n- REQ-X-001 lives in `present_symbol` in `src/lib.rs`.\n",
+    );
+    let trace = run(&[("TASK-X-010", &collision_body)]);
+    let finding = trace
+        .findings
+        .iter()
+        .find(|finding| finding.text.contains("declared `src/a.rs`"))
+        .unwrap_or_else(|| panic!("{}", trace.report));
+    assert!(
+        finding.text.contains(
+            "declared `src/a.rs`: declared `src/a.rs` is also named by forbidden bullet \"src/a.rs\"; a forbidden file cannot be changed"
+        ),
+        "{}",
+        finding.text
+    );
+}
+
+#[test]
 fn a_verifier_naming_a_test_target_nothing_creates_is_refuted() {
     let body = task(
         "TASK-X-010",
@@ -418,3 +490,6 @@ fn claim_trace_of_a_recorded_task_set() {
     }
     println!("elapsed {:?}", started.elapsed());
 }
+
+#[path = "review_blocker_tests.rs"]
+mod review_blocker_tests;

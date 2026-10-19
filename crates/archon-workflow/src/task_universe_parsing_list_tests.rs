@@ -57,6 +57,25 @@ fn bullet_and_paren_markers_still_parse() {
     assert!(criteria.iter().any(|c| c == "Paren-numbered criterion."));
 }
 
+#[test]
+fn plus_bullet_declared_path_has_the_same_forbidden_collision_finding() {
+    let raw = "## Files Expected to Change\n+ src/a.rs — exists\n\n## Files Forbidden to Change\n- src/a.rs\n";
+    let expected = declared_task_section_items(raw, "files expected to change");
+    let declared = expected
+        .iter()
+        .flat_map(|item| archon_write_plan::declared_paths::declared_file_paths(item))
+        .collect::<Vec<_>>();
+    assert_eq!(declared, ["src/a.rs"]);
+    let conflict = archon_write_plan::declaration_conflicts(declared, ["src/a.rs"])
+        .into_iter()
+        .next()
+        .expect("the path is forbidden");
+    assert_eq!(
+        conflict.finding(),
+        "declared `src/a.rs` is also named by forbidden bullet \"src/a.rs\"; a forbidden file cannot be changed — remove it from Files Forbidden to Change or forbid only symbols within it"
+    );
+}
+
 /// A section with no list yields nothing rather than swallowing prose.
 #[test]
 fn prose_without_list_markers_is_not_a_criterion() {

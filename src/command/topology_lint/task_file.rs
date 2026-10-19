@@ -141,7 +141,14 @@ pub(super) fn inspect_raw(
         shown(&path),
         task.canonical_task_id
     ));
-    validate_declared_shape(&task, &mut report, &mut blockers, &mut deterministic);
+    validate_declared_shape(
+        cwd,
+        &task,
+        raw,
+        &mut report,
+        &mut blockers,
+        &mut deterministic,
+    );
     for (index, text) in super::tool_obligations::inspect(cwd, &task, raw)
         .into_iter()
         .enumerate()
@@ -319,7 +326,9 @@ pub(super) fn inspect_raw(
 }
 
 fn validate_declared_shape(
+    cwd: &Path,
     task: &WorkflowV2TaskUniverseTask,
+    raw: &str,
     report: &mut String,
     blockers: &mut Vec<String>,
     identities: &mut Identities,
@@ -339,7 +348,7 @@ fn validate_declared_shape(
         let defect = DeterministicDefect::new("invalid_declared_status", id, "status");
         block(blockers, identities, error.to_string(), defect);
     }
-    for (index, text) in super::scope_declarations::inspect(task)
+    for (index, text) in super::scope_declarations::inspect(task, raw, cwd)
         .into_iter()
         .enumerate()
     {

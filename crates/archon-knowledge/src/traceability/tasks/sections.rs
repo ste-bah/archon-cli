@@ -53,11 +53,7 @@ pub(super) fn section_bullets(raw: &str, heading: &str) -> Vec<String> {
         if !inside {
             continue;
         }
-        if let Some(item) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            let item = item.trim();
+        if let Some(item) = archon_write_plan::declared_paths::markdown_bullet_item(trimmed) {
             if !item.is_empty() {
                 items.push(item.to_string());
             }

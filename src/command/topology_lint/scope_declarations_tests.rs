@@ -1,5 +1,7 @@
 //! Batch O: an empty write set and prose forbidden entries are findings.
 
+use std::path::Path;
+
 use super::*;
 
 fn task(owns: &[&str], forbids: &[&str]) -> WorkflowV2TaskUniverseTask {
@@ -11,9 +13,13 @@ fn task(owns: &[&str], forbids: &[&str]) -> WorkflowV2TaskUniverseTask {
     }
 }
 
+fn raw(owns: &str, forbids: &str) -> String {
+    format!("## Files Expected to Change\n\n{owns}\n\n## Files Forbidden to Change\n\n{forbids}\n")
+}
+
 #[test]
 fn a_task_that_declares_no_file_is_a_finding_naming_it() {
-    let findings = inspect(&task(&[], &[]));
+    let findings = inspect(&task(&[], &[]), "", Path::new("/repo"));
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(
         findings[0].starts_with("task TASK-X-001:")
@@ -22,12 +28,12 @@ fn a_task_that_declares_no_file_is_a_finding_naming_it() {
     );
     let mut shared = task(&[], &[]);
     shared.shared_append_target_files = vec!["`src/registry.rs`".into()];
-    assert!(inspect(&shared).is_empty());
+    assert!(inspect(&shared, "", Path::new("/repo")).is_empty());
 }
 
 #[test]
 fn catch_all_forbidden_prose_is_a_finding_and_literal_entries_are_not() {
-    let findings = inspect(&task(
+    let task = task(
         &["`src/a.rs` — exists (3 lines)"],
         &[
             "Everything else in the repository",
@@ -36,10 +42,199 @@ fn catch_all_forbidden_prose_is_a_finding_and_literal_entries_are_not() {
             ".mcp.json",
             "*.lock",
         ],
-    ));
+    );
+    let findings = inspect(
+        &task,
+        &raw(
+            "- `src/a.rs` — exists (3 lines)",
+            "- Everything else in the repository\n- `docs/`\n- crates/x/src/store.rs — owned by another task\n- .mcp.json\n- *.lock",
+        ),
+        Path::new("/repo"),
+    );
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(
         findings[0].contains("Everything else in the repository"),
         "{findings:?}"
     );
+}
+
+#[test]
+fn declared_path_forbidden_by_qualified_or_bare_bullet_is_a_scope_finding() {
+    for forbidden in [
+        "- `src/owned.rs` existing test functions `checks_owned`",
+        "- `src/owned.rs`",
+    ] {
+        let task = task(
+            &["`src/owned.rs` — exists (3 lines)"],
+            &[forbidden.trim_start_matches("- ")],
+        );
+        let findings = inspect(
+            &task,
+            &raw("- `src/owned.rs` — exists (3 lines)", forbidden),
+            Path::new("/repo"),
+        );
+        let collision = findings
+            .iter()
+            .find(|finding| finding.contains("declared `src/owned.rs`"))
+            .unwrap_or_else(|| panic!("{findings:?}"));
+        assert!(
+            collision.contains("is also named by forbidden bullet"),
+            "{collision}"
+        );
+        assert!(
+            collision.contains(forbidden.trim_start_matches("- ")),
+            "{collision}"
+        );
+        assert!(
+            collision.contains("remove it from Files Forbidden to Change"),
+            "{collision}"
+        );
+    }
+}
+
+#[test]
+fn declared_path_without_forbidden_collision_has_no_scope_finding() {
+    let task = task(&["`src/owned.rs` — exists (3 lines)"], &["`src/other.rs`"]);
+    assert!(
+        inspect(
+            &task,
+            &raw("- `src/owned.rs` — exists (3 lines)", "- `src/other.rs"),
+            Path::new("/repo")
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn the_two_review_blockers_agree_on_scope_collisions() {
+    let false_collision = "## Files Expected to Change\n\n- `src/a.rs` — updates the `state.load` helper\n\n## Files Forbidden to Change\n\n- `**/state.load`\n";
+    let first_task = task(&["src/a.rs"], &["**/state.load"]);
+    assert!(inspect(&first_task, false_collision, Path::new("/repo")).is_empty());
+    let binding = archon_knowledge::traceability::tasks::parse_task_binding(
+        &format!("```yaml\ntask_id: TASK-X-001\nimplements: []\n```\n\n{false_collision}"),
+        "TASK-X-001.md",
+    )
+    .unwrap();
+    assert!(
+        archon_write_plan::declaration_conflicts(
+            binding.path_scopes.iter().filter_map(|path| {
+                archon_write_plan::normalize_declared_path(path, Path::new("/repo"))
+            }),
+            &first_task.files_forbidden_to_change
+        )
+        .is_empty()
+    );
+
+    let real_collision = "## Files Expected to Change\n\n- src/a.rs — exists\n\n## Files Forbidden to Change\n\n- src/a.rs\n";
+    let second_task = task(&["src/a.rs"], &["src/a.rs"]);
+    let body = inspect(&second_task, real_collision, Path::new("/repo"));
+    let body_conflict = body
+        .iter()
+        .find(|finding| finding.contains("declared `src/a.rs`"))
+        .expect("body gate must refuse the plain path");
+    let binding = archon_knowledge::traceability::tasks::parse_task_binding(
+        &format!("```yaml\ntask_id: TASK-X-001\nimplements: []\n```\n\n{real_collision}"),
+        "TASK-X-001.md",
+    )
+    .unwrap();
+    let trace_conflict = archon_write_plan::declaration_conflicts(
+        binding.path_scopes.iter().filter_map(|path| {
+            archon_write_plan::normalize_declared_path(path, Path::new("/repo"))
+        }),
+        &second_task.files_forbidden_to_change,
+    );
+    assert_eq!(trace_conflict.len(), 1);
+    assert_eq!(
+        body_conflict,
+        &format!("task TASK-X-001: {}", trace_conflict[0].finding())
+    );
+}
+
+#[test]
+fn body_and_trace_collision_sets_match_for_six_bullet_and_forbidden_shapes() {
+    let cases = [
+        ("`src/a.rs` — exists", "src/a.rs"),
+        ("src/a.rs — exists", "src/a.rs"),
+        (
+            "`src/a.rs` updates `state.load` and `helper.rs`",
+            "src/a.rs",
+        ),
+        ("`./src/a.rs` exists", "src/a.rs"),
+        ("Likely anchors: `src/a.rs`, `src/b.rs`", "src/a.rs"),
+        ("src/a.rs — exists", "src/"),
+        ("src/a.rs — exists", "src/*.rs"),
+    ];
+    for (bullet, forbidden) in cases {
+        let body = format!(
+            "## Files Expected to Change\n\n- {bullet}\n\n## Files Forbidden to Change\n\n- {forbidden}\n"
+        );
+        let parsed = task(&["src/a.rs"], &[forbidden]);
+        let body_findings = inspect(&parsed, &body, Path::new("/repo"));
+        let body_paths = body_findings
+            .iter()
+            .filter_map(|finding| {
+                finding
+                    .split("declared `")
+                    .nth(1)
+                    .and_then(|tail| tail.split('`').next())
+                    .map(str::to_string)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let binding = archon_knowledge::traceability::tasks::parse_task_binding(
+            &format!("```yaml\ntask_id: TASK-X-001\nimplements: []\n```\n\n{body}"),
+            "TASK-X-001.md",
+        )
+        .unwrap();
+        let trace_paths = archon_write_plan::declaration_conflicts(
+            binding.path_scopes.iter().filter_map(|path| {
+                archon_write_plan::normalize_declared_path(path, Path::new("/repo"))
+            }),
+            &parsed.files_forbidden_to_change,
+        )
+        .into_iter()
+        .map(|conflict| conflict.path)
+        .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            body_paths, trace_paths,
+            "bullet={bullet:?}, forbidden={forbidden:?}"
+        );
+    }
+}
+
+#[test]
+fn review_examples_use_the_opening_subject_and_shared_path_normalization() {
+    let root = Path::new("/repo");
+    let prose = "## Files Expected to Change\n\n- `state_load` updates `src/a.rs`\n\n## Files Forbidden to Change\n\n- src/a.rs\n";
+    let findings = inspect(&task(&[], &["src/a.rs"]), prose, root);
+    assert!(
+        findings
+            .iter()
+            .all(|finding| !finding.contains("declared `src/a.rs`")),
+        "{findings:?}"
+    );
+
+    let labeled = "## Files Expected to Change\n\n- Likely anchors: `src/a.rs`, `src/b.rs`\n\n## Files Forbidden to Change\n\n- src/a.rs\n";
+    let findings = inspect(&task(&[], &["src/a.rs"]), labeled, root);
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.contains("declared `src/a.rs`")),
+        "{findings:?}"
+    );
+
+    for (declared, forbidden, expected) in [
+        ("/repo/src/a.rs — exists", "src/a.rs", "src/a.rs"),
+        ("`.mcp.json` — exists", ".mcp.json", ".mcp.json"),
+    ] {
+        let body = format!(
+            "## Files Expected to Change\n\n- {declared}\n\n## Files Forbidden to Change\n\n- {forbidden}\n"
+        );
+        let findings = inspect(&task(&[], &[forbidden]), &body, root);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.contains(&format!("declared `{expected}`"))),
+            "{findings:?}"
+        );
+    }
 }

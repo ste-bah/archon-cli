@@ -117,6 +117,19 @@ fn describe_is_bounded() {
     assert_eq!(forbidden(&["a/b.rs", "c/"]).describe(), "a/b.rs, c/");
 }
 
+#[test]
+fn declaration_conflict_bounds_a_long_declared_path_in_the_finding() {
+    let path = format!("src/{}.rs", "a".repeat(1_000));
+    let conflict = super::declaration_conflicts([path.as_str()], [path.as_str()])
+        .into_iter()
+        .next()
+        .expect("the declared path conflicts with the forbidden path");
+    let finding = conflict.finding();
+    assert!(finding.len() < 600, "finding was {} chars", finding.len());
+    assert!(finding.contains(&format!("declared `src/{}", "a".repeat(175))));
+    assert!(!finding.contains(&"a".repeat(176)));
+}
+
 /// Only a pattern that names nothing outside the declared paths is dropped;
 /// one that merely contains or intersects a declared path keeps freezing
 /// everything else it names.

@@ -107,7 +107,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // sibling inputs cannot reuse an earlier check result.
         // #219 re-pin only: reverify remediation routes check defects to frozen check entries; freeze verdicts are unchanged.
         // Re-pin only: the parser change does not alter freeze verdicts.
-        sources_digest: "cb1f5f6fa54ead8df91b7fabb40798f1ffcbcf6ec38c4e19e270276dbecb1fbb",
+        // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
+        // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
+        sources_digest: "ea5ab89bf5858c090a90a44424ba5c92134568a009a4d6e84d2dd7063b30f560",
         build_bound: false,
     },
     CapabilityLogic {
@@ -163,7 +165,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
         // #219 re-pin only: reverify remediation routing does not change frozen skeleton verification verdicts.
         // Re-pin only: the parser change does not alter freeze verdicts.
-        sources_digest: "cb1f5f6fa54ead8df91b7fabb40798f1ffcbcf6ec38c4e19e270276dbecb1fbb",
+        // #464 re-pin only: source closure drift in this checkout; freeze verdicts are unchanged.
+        // #464 re-pin only: catalog version entries changed; freeze verdict logic is unchanged.
+        sources_digest: "ea5ab89bf5858c090a90a44424ba5c92134568a009a4d6e84d2dd7063b30f560",
         build_bound: false,
     },
     CapabilityLogic {
@@ -195,7 +199,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 19: landing repair uses the store's platform-aware directory flush, so recovered bodies can be judged on Windows.
         // 20: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
         // 21: reported claims are excluded and short negated path subjects are read as absence claims.
-        version: 21,
+        // 22: declared write paths that match Files Forbidden to Change are rejected by the body scope gate using the shared matcher and refutation wording.
+        version: 22,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -226,7 +231,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; body-landing verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; staged body lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "d052b7539d6c98b81d15ad52afb1474800b6a3c3580542c4a004f8663e386de7",
+        // #464 re-pin only: review 4's verdict change is already counted in version 22.
+        sources_digest: "8bda227be59ae88d09b3cce664462a78349bc2f89b3a9cfa5fecb1fe328bcbc7",
         build_bound: false,
     },
     CapabilityLogic {
@@ -249,7 +255,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 15: malformed task-body parse failures are now body findings, changing task-set lint verdicts.
         // 16: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
         // 17: reported claims are excluded and short negated path subjects are read as absence claims.
-        version: 17,
+        // 18: declared write paths that match Files Forbidden to Change are rejected by scope declarations using the shared matcher and refutation wording.
+        version: 18,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -281,7 +288,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // recovery; lint verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
-        sources_digest: "d052b7539d6c98b81d15ad52afb1474800b6a3c3580542c4a004f8663e386de7",
+        // #464 re-pin only: review 4's verdict change is already counted in version 18.
+        sources_digest: "8bda227be59ae88d09b3cce664462a78349bc2f89b3a9cfa5fecb1fe328bcbc7",
         build_bound: false,
     },
     CapabilityLogic {
@@ -292,7 +300,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // own packages first) and refuted only when every reading refutes; a placeholder cargo target
         // is no observable; a bare name that is a Cargo target exists (or is derived when declared).
         // 5: typed malformed-body errors change task-universe parsing in requirements trace.
-        version: 5,
+        // 6: #464 declared files forbidden by a whole-file bullet now refute the claim and name the conflicting declaration and bullet.
         sources: &[GATE, CONTRACT, TRACE],
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
@@ -303,7 +311,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not trace verdicts.
-        sources_digest: "82860cd934b1173968563bd548c96bd1ada1360dcd70a4ab3c3f633a69462ad1",
+        // #464 re-pin only: review 4's verdict change is already counted in version 6.
+        version: 6,
+        sources_digest: "ef2080de961b31180c6f5c0e197bd5d268222239f721873c9c5c5f2d6018ffec",
         build_bound: true,
     },
     CapabilityLogic {
@@ -364,7 +374,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: frozen acceptance checks run under the build-bound verifier.
         // #219 re-pin only: report remediation routing does not alter frozen acceptance verification verdicts.
         // Re-pin only: the parser change does not alter verification verdicts.
-        sources_digest: "e374ec73892723cd13598a18f867bf06c025c499d43541ac8e21de756b22f1d9",
+        // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
+        // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
+        sources_digest: "4fd94aae75f3fdb6d7109f986f5dc30cd7b4f24c6fc1c6c4c8bbc2e30fc1bdcc",
         build_bound: true,
     },
     CapabilityLogic {
@@ -418,7 +430,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: sibling revision evidence is outside skeleton judgments.
         // #219 re-pin only: report remediation routing does not alter frozen skeleton verification verdicts.
         // Re-pin only: the parser change does not alter verification verdicts.
-        sources_digest: "e374ec73892723cd13598a18f867bf06c025c499d43541ac8e21de756b22f1d9",
+        // #464 re-pin only: source closure drift in this checkout; verification verdicts are unchanged.
+        // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
+        sources_digest: "4fd94aae75f3fdb6d7109f986f5dc30cd7b4f24c6fc1c6c4c8bbc2e30fc1bdcc",
         build_bound: true,
     },
 ];

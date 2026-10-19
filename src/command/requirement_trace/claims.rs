@@ -67,11 +67,14 @@ struct TaskInputs {
     binding: TaskBinding,
     raw: String,
     changeable: BTreeSet<String>,
+    forbidden_conflicts: Vec<ForbiddenConflict>,
     outside: Vec<String>,
     /// Why the task-universe reader refused the file, when it did: its
     /// deliverables and forbidden files are then unknown.
     unread: Option<String>,
 }
+
+type ForbiddenConflict = archon_write_plan::ForbiddenDeclarationConflict;
 
 /// Test every claim in `task_dir` against its recorded repository.
 pub(super) fn falsify_claims(task_dir: &Path, bindings: Vec<TaskBinding>) -> Result<ClaimTrace> {
@@ -111,14 +114,12 @@ pub(super) fn falsify_claims(task_dir: &Path, bindings: Vec<TaskBinding>) -> Res
 }
 
 fn task_inputs(index: &EvidenceIndex, binding: TaskBinding, raw: String) -> TaskInputs {
-    let tools = binding.required_tools.clone();
-    let runners = runner_check(&tools);
     let path = Path::new(&binding.source_path);
     let universe = archon_workflow::task_universe::parsing::parse_task_file(path, &raw);
     let unread = universe.as_ref().err().map(ToString::to_string);
     let universe = universe.ok();
     let mut declared: Vec<String> = binding.path_scopes.clone();
-    let mut forbidden = BTreeSet::new();
+    let mut forbidden_bullets = Vec::new();
     if let Some(task) = &universe {
         declared.extend(
             task.deliverable_contracts
@@ -126,31 +127,33 @@ fn task_inputs(index: &EvidenceIndex, binding: TaskBinding, raw: String) -> Task
                 .map(|c| c.artifact_path.clone()),
         );
         declared.extend(task.shared_append_target_files.iter().cloned());
-        for bullet in &task.files_forbidden_to_change {
-            for span in observe::spans(bullet, &runners) {
-                if let Span::Path { raw, .. } = span
-                    && let Some(relative) = index.relative(&raw)
-                {
-                    forbidden.insert(relative);
-                }
-            }
-        }
+        forbidden_bullets = task.files_forbidden_to_change.clone();
     }
     let mut changeable = BTreeSet::new();
+    let mut normalized_declared = Vec::new();
     let mut outside = Vec::new();
+    let root = PathBuf::from(index.root_text());
     for entry in declared {
-        match index.relative(entry.trim()) {
-            Some(relative) if !relative.is_empty() && !forbidden.contains(&relative) => {
+        match archon_write_plan::normalize_declared_path(entry.trim(), &root) {
+            Some(relative) => {
+                normalized_declared.push(relative.clone());
                 changeable.insert(relative);
             }
-            Some(_) => {}
             None => outside.push(entry),
         }
     }
+    let forbidden_conflicts =
+        archon_write_plan::declaration_conflicts(normalized_declared, &forbidden_bullets);
+    changeable.retain(|path| {
+        !forbidden_conflicts
+            .iter()
+            .any(|conflict| conflict.path == *path)
+    });
     TaskInputs {
         binding,
         raw,
         changeable,
+        forbidden_conflicts,
         outside,
         unread,
     }
@@ -177,13 +180,20 @@ fn test_claim(index: &EvidenceIndex, task: &TaskInputs, requirement: &str) -> Cl
     let named: Vec<usize> = (0..lines.len())
         .filter(|&i| !lines[i].metadata && observe::mentions(&lines[i].text, requirement))
         .collect();
+    let mut checked = BTreeSet::new();
+    for conflict in &task.forbidden_conflicts {
+        checked.insert(Checked {
+            subject: format!("declared `{}`", conflict.path),
+            verdict: Verdict::Refuted(conflict.finding()),
+        });
+    }
     if named.is_empty() {
+        result.checked = checked.into_iter().collect();
         result.untestable = Some(format!(
             "the body never names {requirement} outside its implements list, so no file, symbol or command it promises is tied to the claim"
         ));
         return result;
     }
-    let mut checked = BTreeSet::new();
     for &at in &named {
         line_observables(index, &scope, &lines, at, &runners, &mut checked);
     }
@@ -195,12 +205,21 @@ fn test_claim(index: &EvidenceIndex, task: &TaskInputs, requirement: &str) -> Cl
             )),
         });
     } else if task.changeable.is_empty() && task.outside.is_empty() {
-        checked.insert(Checked {
-            subject: "declared files".into(),
-            verdict: Verdict::Refuted(format!(
+        let reason = if task.forbidden_conflicts.is_empty() {
+            format!(
                 "{} declares no file it may change (Files Expected to Change and deliverable_contracts name nothing outside its forbidden files), so no declared file can serve its claims",
                 task.binding.task_id
-            )),
+            )
+        } else {
+            task.forbidden_conflicts
+                .iter()
+                .map(ForbiddenConflict::finding)
+                .collect::<Vec<_>>()
+                .join("; ")
+        };
+        checked.insert(Checked {
+            subject: "declared files".into(),
+            verdict: Verdict::Refuted(reason),
         });
     }
     for path in &task.changeable {

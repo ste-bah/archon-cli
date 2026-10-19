@@ -40,6 +40,7 @@
 //! - [`host_internal`] — the host's own bookkeeping basenames, read by both
 //!   the landing's drop and the tool guard's refusal (Issue-76/120).
 
+pub mod declared_paths;
 pub mod forbidden_paths;
 pub mod host_internal;
 pub mod lexical_path;
@@ -47,7 +48,8 @@ pub mod read_only_tools;
 pub mod shared_append;
 pub mod write_plan;
 
-pub use forbidden_paths::ForbiddenPaths;
+pub use declared_paths::{declared_file_subject, normalize_declared_path};
+pub use forbidden_paths::{ForbiddenDeclarationConflict, ForbiddenPaths, declaration_conflicts};
 
 pub use shared_append::{
     SHARED_APPEND_TARGETS_KEY, resolve_shared_append_targets,

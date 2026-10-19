@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+archon-write-plan = { path = "../archon-write-plan" }
 archon-context = { path = "../archon-context" }
 archon-cozo = { path = "../archon-cozo" }
 chrono.workspace = true

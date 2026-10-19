@@ -19,7 +19,11 @@ use archon_workflow::task_universe::parsing::parse_task_file;
 use crate::command::workflow_gate::{GateFinding, GateId};
 
 /// The scope findings of one parsed task.
-pub(super) fn inspect(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
+pub(super) fn inspect(
+    task: &WorkflowV2TaskUniverseTask,
+    raw: &str,
+    repository_root: &Path,
+) -> Vec<String> {
     let id = &task.canonical_task_id;
     let mut findings = Vec::new();
     if task.files_expected_to_change.is_empty()
@@ -38,7 +42,34 @@ pub(super) fn inspect(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
             ));
         }
     }
+    let declared = declared_paths(task, raw, repository_root);
+    for conflict in
+        archon_write_plan::declaration_conflicts(declared, &task.files_forbidden_to_change)
+    {
+        findings.push(format!("task {id}: {}", conflict.finding()));
+    }
     findings
+}
+
+fn declared_paths(
+    task: &WorkflowV2TaskUniverseTask,
+    raw: &str,
+    repository_root: &Path,
+) -> Vec<String> {
+    let mut paths = archon_workflow::task_universe::parsing::declared_files_expected_to_change_items_preserving_lines(raw)
+        .into_iter()
+        .flat_map(|item| archon_write_plan::declared_paths::declared_file_paths(&item))
+        .filter_map(|path| archon_write_plan::normalize_declared_path(&path, repository_root))
+        .collect::<Vec<_>>();
+    paths.extend(task.deliverable_contracts.iter().filter_map(|contract| {
+        archon_write_plan::normalize_declared_path(&contract.artifact_path, repository_root)
+    }));
+    paths.extend(
+        task.shared_append_target_files
+            .iter()
+            .filter_map(|path| archon_write_plan::normalize_declared_path(path, repository_root)),
+    );
+    paths
 }
 
 /// An entry with no backticked span whose first word is no path shape.
@@ -62,7 +93,7 @@ pub(super) fn set_findings(root: &Path) -> Vec<GateFinding> {
         let Ok(task) = parse_task_file(&path, &raw) else {
             continue;
         };
-        findings.extend(inspect(&task).into_iter().map(|text| {
+        findings.extend(inspect(&task, &raw, root).into_iter().map(|text| {
             GateFinding::new(
                 GateId::WorkflowLintTaskSet,
                 text,
