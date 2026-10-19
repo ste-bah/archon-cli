@@ -286,7 +286,8 @@ fn body_and_trace_collision_sets_match_for_six_bullet_and_forbidden_shapes() {
 
 #[test]
 fn review_examples_use_the_opening_subject_and_shared_path_normalization() {
-    let root = Path::new("/repo");
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
     let prose = "## Files Expected to Change\n\n- `state_load` updates `src/a.rs`\n\n## Files Forbidden to Change\n\n- src/a.rs\n";
     let findings = inspect(&task(&[], &["src/a.rs"]), prose, root);
     assert!(
@@ -305,9 +306,14 @@ fn review_examples_use_the_opening_subject_and_shared_path_normalization() {
         "{findings:?}"
     );
 
+    let absolute_declared_path = root.join("src/a.rs");
     for (declared, forbidden, expected) in [
-        ("/repo/src/a.rs — exists", "src/a.rs", "src/a.rs"),
-        ("`.mcp.json` — exists", ".mcp.json", ".mcp.json"),
+        (
+            format!("{} — exists", absolute_declared_path.display()),
+            "src/a.rs",
+            "src/a.rs",
+        ),
+        ("`.mcp.json` — exists".into(), ".mcp.json", ".mcp.json"),
     ] {
         let body = format!(
             "## Files Expected to Change\n\n- {declared}\n\n## Files Forbidden to Change\n\n- {forbidden}\n"

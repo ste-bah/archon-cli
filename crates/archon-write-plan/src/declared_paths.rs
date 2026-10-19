@@ -119,10 +119,11 @@ fn looks_like_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{declared_file_subject, normalize_declared_path};
-    use std::path::Path;
-
     #[test]
     fn reads_only_the_opening_subject_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let repository_root = temp.path();
+        let absolute_declared_path = repository_root.join("src/a.rs");
         assert_eq!(
             declared_file_subject("- `src/a.rs` — updates `state.load` helper"),
             Some("src/a.rs".into())
@@ -146,6 +147,7 @@ mod tests {
             super::declared_file_paths("- `src/a.rs` and `src/b.rs`"),
             ["src/a.rs"]
         );
+        #[cfg(unix)]
         assert_eq!(
             declared_file_subject("- /repo/src/a.rs — exists"),
             Some("/repo/src/a.rs".into())
@@ -155,11 +157,18 @@ mod tests {
             Some(".mcp.json".into())
         );
         assert_eq!(
-            normalize_declared_path("/repo/src/a.rs", Path::new("/repo")),
+            normalize_declared_path(&absolute_declared_path.to_string_lossy(), repository_root),
             Some("src/a.rs".into())
         );
         assert_eq!(
-            normalize_declared_path(".mcp.json", Path::new("/repo")),
+            normalize_declared_path(
+                &absolute_declared_path.to_string_lossy().replace('\\', "/"),
+                repository_root
+            ),
+            Some("src/a.rs".into())
+        );
+        assert_eq!(
+            normalize_declared_path(".mcp.json", repository_root),
             Some(".mcp.json".into())
         );
     }
