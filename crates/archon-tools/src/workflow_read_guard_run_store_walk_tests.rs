@@ -218,13 +218,14 @@ async fn glob_without_run_scope_still_skips_hidden_harness_state() {
         .execute(json!({ "pattern": "**/*" }), &unbounded_ctx(&tree))
         .await;
     assert!(!result.is_error, "{}", result.content);
+    let output = result.content.replace('\\', "/");
     assert!(
-        !result.content.replace('\\', "/").contains("run-0"),
+        !output.contains("run-0"),
         "hidden harness state stays out of broad searches: {}",
         result.content
     );
     assert!(
-        result.content.contains("crates/thing/src/lib.rs"),
+        output.contains("crates/thing/src/lib.rs"),
         "ordinary files remain searchable: {}",
         result.content
     );
@@ -247,8 +248,9 @@ async fn glob_searches_ordinary_hidden_project_directories() {
 
     let yml = GlobTool.execute(json!({"pattern": "**/*.yml"}), &ctx).await;
     assert!(!yml.is_error, "{}", yml.content);
+    let yml_output = yml.content.replace('\\', "/");
     assert!(
-        yml.content.contains(".github/workflows/ci.yml"),
+        yml_output.contains(".github/workflows/ci.yml"),
         "{}",
         yml.content
     );
@@ -257,8 +259,9 @@ async fn glob_searches_ordinary_hidden_project_directories() {
         .execute(json!({"pattern": "**/config.toml"}), &ctx)
         .await;
     assert!(!config.is_error, "{}", config.content);
+    let config_output = config.content.replace('\\', "/");
     assert!(
-        config.content.contains(".cargo/config.toml"),
+        config_output.contains(".cargo/config.toml"),
         "{}",
         config.content
     );
@@ -452,10 +455,7 @@ async fn glob_honors_gitignore_directories() {
     };
     let result = GlobTool.execute(json!({"pattern": "**/*.txt"}), &ctx).await;
     assert!(!result.is_error, "{}", result.content);
-    assert!(
-        result.content.contains("visible/match.txt"),
-        "{}",
-        result.content
-    );
-    assert!(!result.content.contains("ignored"), "{}", result.content);
+    let output = result.content.replace('\\', "/");
+    assert!(output.contains("visible/match.txt"), "{}", result.content);
+    assert!(!output.contains("ignored"), "{}", result.content);
 }

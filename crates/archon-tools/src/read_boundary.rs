@@ -35,11 +35,24 @@ pub(crate) fn check(
                 .unwrap_or_else(|_| root.clone());
             [root.clone(), canonical]
         })
-        .filter_map(|root| path.strip_prefix(&root).ok().map(Path::to_path_buf))
+        .filter_map(|root| archon_shell::paths::comparable_strip_prefix(path, &root))
         .min_by_key(|p| p.components().count());
     let relative = relative.unwrap_or_else(|| path.to_path_buf());
-    if relative.components().any(|c| matches!(c, Component::Normal(n) if ctx.denied_directory_names.iter().any(|name| n == std::ffi::OsStr::new(name)))) {
+    if relative.components().any(|component| {
+        matches!(component, Component::Normal(name) if ctx.denied_directory_names.iter().any(|denied| is_denied_name(name, denied)))
+    }) {
         return Err(crate::path_guard::guard_refusal(format!("Path '{}' is in a host-excluded subtree; read current source outside excluded directories", path.display())));
     }
     Ok(())
+}
+
+fn is_denied_name(name: &std::ffi::OsStr, denied: &str) -> bool {
+    #[cfg(windows)]
+    {
+        name.to_string_lossy().eq_ignore_ascii_case(denied)
+    }
+    #[cfg(not(windows))]
+    {
+        name == std::ffi::OsStr::new(denied)
+    }
 }

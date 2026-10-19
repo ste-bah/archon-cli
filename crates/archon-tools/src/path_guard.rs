@@ -259,7 +259,7 @@ fn ensure_write_allowed(
     }
     if let Some(root) = roots
         .iter()
-        .find(|root| resolved_path == *root || resolved_path.starts_with(root))
+        .find(|root| archon_shell::paths::path_starts_with(resolved_path, root))
     {
         return crate::path_guard_symlink::reject_symlinked_descent(
             root,
@@ -382,7 +382,7 @@ fn ensure_allowed(
     let roots = allowed_roots(ctx)?;
     if roots
         .iter()
-        .any(|root| resolved_path == root || resolved_path.starts_with(root))
+        .any(|root| archon_shell::paths::path_starts_with(resolved_path, root))
     {
         return Ok(());
     }

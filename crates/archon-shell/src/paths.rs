@@ -20,6 +20,44 @@
 //! add the long-path prefix back internally when a plain path needs it.
 use std::path::{Path, PathBuf};
 
+/// Strip `root` from `path` after making Windows verbatim and ordinary path
+/// spellings comparable. The returned suffix is only used for policy checks;
+/// callers should keep the original canonical path for filesystem access.
+pub fn comparable_strip_prefix(path: &Path, root: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let path = comparable_windows_spelling(path)?;
+        let root = comparable_windows_spelling(root)?;
+        return Path::new(&path)
+            .strip_prefix(Path::new(&root))
+            .ok()
+            .map(Path::to_path_buf);
+    }
+    #[cfg(not(windows))]
+    {
+        path.strip_prefix(root).ok().map(Path::to_path_buf)
+    }
+}
+
+/// Whether `path` is equal to or beneath `root` under the host path rules.
+pub fn path_starts_with(path: &Path, root: &Path) -> bool {
+    comparable_strip_prefix(path, root).is_some()
+}
+
+#[cfg(windows)]
+fn comparable_windows_spelling(path: &Path) -> Option<String> {
+    let text = path.to_str()?;
+    let slashed = text.replace('/', "\\");
+    let plain = if let Some(rest) = slashed.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = slashed.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        slashed
+    };
+    Some(plain.to_lowercase())
+}
+
 /// Best-effort plain spelling; returns the original path when its verbatim
 /// prefix cannot safely be removed. Use [`try_plain`] when the caller cannot
 /// consume a verbatim path.
@@ -167,6 +205,39 @@ fn stored_text_for(text: &str, backslash_separator: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn comparable_prefix_is_component_aware() {
+        assert!(path_starts_with(Path::new("/a/b/c.txt"), Path::new("/a/b")));
+        assert!(!path_starts_with(Path::new("/a/bc/d"), Path::new("/a/b")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_verbatim_paths_match_plain_roots_without_losing_components() {
+        let root = Path::new(r"C:\a\b");
+        for candidate in [r"\\?\C:\a\b\c.txt", r"\\?\c:\A\B\c.txt"] {
+            assert!(path_starts_with(Path::new(candidate), root), "{candidate}");
+        }
+        for candidate in [r"\\?\C:\a\bc\d", r"\\?\D:\a\b\c"] {
+            assert!(!path_starts_with(Path::new(candidate), root), "{candidate}");
+        }
+
+        let unc_root = Path::new(r"\\server\share\a\b");
+        for candidate in [
+            r"\\?\UNC\server\share\a\b\c.txt",
+            r"\\?\UNC\SERVER\SHARE\A\B\c.txt",
+        ] {
+            assert!(
+                path_starts_with(Path::new(candidate), unc_root),
+                "{candidate}"
+            );
+        }
+        assert!(!path_starts_with(
+            Path::new(r"\\?\UNC\server\share\a\bc\d"),
+            unc_root
+        ));
+    }
 
     #[test]
     fn a_windows_stored_path_uses_forward_slashes_and_keeps_its_prefix() {
