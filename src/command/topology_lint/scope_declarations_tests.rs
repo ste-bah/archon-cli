@@ -17,7 +17,7 @@ fn raw(owns: &str, forbids: &str) -> String {
     format!("## Files Expected to Change\n\n{owns}\n\n## Files Forbidden to Change\n\n{forbids}\n")
 }
 
-fn grounded_task_set() -> (tempfile::TempDir, PathBuf, PathBuf, String) {
+fn grounded_task_set() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("project");
     let repository = temp.path().join("repository");
@@ -25,10 +25,6 @@ fn grounded_task_set() -> (tempfile::TempDir, PathBuf, PathBuf, String) {
     std::fs::create_dir_all(&tasks).unwrap();
     std::fs::create_dir_all(repository.join("scripts")).unwrap();
     let repository_root = repository.canonicalize().unwrap();
-    let declared = format!("{}/scripts/x.sh", repository_root.display());
-    let body = format!(
-        "```yaml\ntask_id: TASK-X-001\ntitle: Example\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{declared}` — exists\n\n## Files Forbidden to Change\n\n- scripts/x.sh\n\n## Focused Tests\n\n- `cargo test -p example`\n"
-    );
     let record = archon_workflow::repository_record::RepositoryRecordV1 {
         schema_version: archon_workflow::repository_record::REPOSITORY_RECORD_SCHEMA_VERSION,
         repository_root: repository_root.display().to_string(),
@@ -37,32 +33,39 @@ fn grounded_task_set() -> (tempfile::TempDir, PathBuf, PathBuf, String) {
         recorded_at: "now".into(),
     };
     archon_workflow::repository_record::write_repository_record(&tasks, &record).unwrap();
-    std::fs::write(tasks.join("TASK-X-001.md"), &body).unwrap();
-    (temp, project, tasks, body)
+    (temp, project, tasks, repository_root)
 }
 
 #[test]
 fn body_and_set_gates_use_the_recorded_repository_root_for_absolute_declarations() {
-    let (_temp, project, tasks, body) = grounded_task_set();
+    let (_temp, project, tasks, repository_root) = grounded_task_set();
     let task_path = tasks.join("TASK-X-001.md");
-    let body_gate = super::super::task_file::inspect_raw(
-        &project,
-        &task_path,
-        &body,
-        archon_core::config::GateMode::Enforce,
-    );
-    let expected = body_gate
-        .blockers
-        .iter()
-        .find(|finding| finding.contains("declared `scripts/x.sh`"))
-        .expect("body gate reports the declared and forbidden path collision");
-    let set_gate = set_findings(&tasks);
-    let set_collision = set_gate
-        .iter()
-        .map(|finding| &finding.text)
-        .find(|finding| finding.contains("declared `scripts/x.sh`"))
-        .expect("set gate reports the declared and forbidden path collision");
-    assert_eq!(expected, set_collision);
+    let native = repository_root.join("scripts/x.sh").display().to_string();
+    let declarations = [native.clone(), native.replace('\\', "/")];
+    for declared in declarations {
+        let body = format!(
+            "```yaml\ntask_id: TASK-X-001\ntitle: Example\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{declared}` — exists\n\n## Files Forbidden to Change\n\n- scripts/x.sh\n\n## Focused Tests\n\n- `cargo test -p example`\n"
+        );
+        std::fs::write(&task_path, &body).unwrap();
+        let body_gate = super::super::task_file::inspect_raw(
+            &project,
+            &task_path,
+            &body,
+            archon_core::config::GateMode::Enforce,
+        );
+        let expected = body_gate
+            .blockers
+            .iter()
+            .find(|finding| finding.contains("declared `scripts/x.sh`"))
+            .expect("body gate reports the declared and forbidden path collision");
+        let set_gate = set_findings(&tasks);
+        let set_collision = set_gate
+            .iter()
+            .map(|finding| &finding.text)
+            .find(|finding| finding.contains("declared `scripts/x.sh`"))
+            .expect("set gate reports the declared and forbidden path collision");
+        assert_eq!(expected, set_collision);
+    }
 }
 
 #[test]

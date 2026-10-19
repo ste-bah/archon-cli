@@ -233,7 +233,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; staged body lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
         // #464 re-pin only: scope declarations share recorded repository-root resolution with the body gate; the version-23 verdict change is already counted above.
-        sources_digest: "2bd3dec97d5e08e9ee8715a379e30f2784da85e39ce6232ae819c304e1ba92d9",
+        // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
+        sources_digest: "d328b83ae46b1ed8a8be00396957167f093c2c13c68e18d82dc35fdca817b5a1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -291,7 +292,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; lint verdict rules are unchanged.
         // #448 re-pin only: script-tool config propagation and Bash classifier preservation do not change host-command verdicts.
         // #464 re-pin only: scope declarations share recorded repository-root resolution with the body gate; the version-19 verdict change is already counted above.
-        sources_digest: "2bd3dec97d5e08e9ee8715a379e30f2784da85e39ce6232ae819c304e1ba92d9",
+        // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
+        sources_digest: "d328b83ae46b1ed8a8be00396957167f093c2c13c68e18d82dc35fdca817b5a1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -314,8 +316,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not trace verdicts.
         // #464 re-pin only: review 4's verdict change is already counted in version 6.
+        // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         version: 6,
-        sources_digest: "3b3d12392dff9d57c2fb91c1688411973f5b2920489e109eb6fbd49b36747c31",
+        sources_digest: "1d0bdcbc9dc69037a6524cb245c6cab4bcfcf2c09324ebca5d784ef883fd9812",
         build_bound: true,
     },
     CapabilityLogic {

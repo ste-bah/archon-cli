@@ -77,10 +77,11 @@ pub fn normalize_declared_path(candidate: &str, repository_root: &Path) -> Optio
     if candidate.is_empty() || candidate.contains(char::is_whitespace) {
         return None;
     }
-    let candidate = candidate.replace('\\', "/");
+    let candidate = normalized_path_spelling(candidate);
+    let root = normalized_path_spelling(&repository_root.to_string_lossy());
     let path = Path::new(&candidate);
     let candidate = if path.is_absolute() {
-        path.strip_prefix(repository_root).ok()?
+        path.strip_prefix(Path::new(&root)).ok()?
     } else {
         path
     };
@@ -94,6 +95,24 @@ pub fn normalize_declared_path(candidate: &str, repository_root: &Path) -> Optio
     }
     let normalized = components.join("/");
     (!normalized.is_empty()).then_some(normalized)
+}
+
+/// Give both sides of an absolute-path comparison the same spelling before
+/// asking `Path` to compare their components. Windows canonical paths may
+/// carry the `\\?\` verbatim prefix, while declarations commonly use forward
+/// slashes; drive-letter casing is also insignificant on Windows.
+fn normalized_path_spelling(path: &str) -> String {
+    let mut path = path.replace('\\', "/");
+    if let Some(rest) = path.strip_prefix("//?/UNC/") {
+        path = format!("//{rest}");
+    } else if let Some(rest) = path.strip_prefix("//?/") {
+        path = rest.to_string();
+    }
+    #[cfg(windows)]
+    if path.as_bytes().get(1) == Some(&b':') {
+        path.replace_range(..1, &path[..1].to_ascii_lowercase());
+    }
+    path
 }
 
 fn strip_trailing_sentence_punctuation(candidate: &str) -> &str {
@@ -171,5 +190,22 @@ mod tests {
             normalize_declared_path(".mcp.json", repository_root),
             Some(".mcp.json".into())
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn absolute_windows_paths_match_plain_verbatim_and_drive_case_forms() {
+        let root = std::path::Path::new(r"\\?\C:\work\repo");
+        for candidate in [
+            r"\\?\c:\work\repo\src\a.rs",
+            "c:/work/repo/src/a.rs",
+            "C:/work/repo/src/a.rs",
+        ] {
+            assert_eq!(
+                normalize_declared_path(candidate, root),
+                Some("src/a.rs".into()),
+                "candidate: {candidate}"
+            );
+        }
     }
 }
