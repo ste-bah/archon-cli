@@ -116,7 +116,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // what authors submit; host acceptance verdict rules are unchanged.
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "0696df195a3c237459fe088abe9db3f0edc7a3c8be54a9729435ea23fedff6cd",
+        // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
+        sources_digest: "7ec66ecb352c74316903e52d519daf9e54843feb66ef53bece5ce96be993c806",
         build_bound: false,
     },
     CapabilityLogic {
@@ -178,7 +179,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // skeleton freeze judges no checks, so its verdict rule is unchanged.
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "0696df195a3c237459fe088abe9db3f0edc7a3c8be54a9729435ea23fedff6cd",
+        // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
+        sources_digest: "7ec66ecb352c74316903e52d519daf9e54843feb66ef53bece5ce96be993c806",
         build_bound: false,
     },
     CapabilityLogic {
@@ -247,7 +249,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         // #467 re-pin: EOF diagnostic placement changes no body verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
+        // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
+        sources_digest: "92ae63870b3069c82fc539a1d21c6354e740f697bd3aee3dd4ae42299cc78656",
         build_bound: false,
     },
     CapabilityLogic {
@@ -308,7 +311,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         // #467 re-pin: EOF diagnostic placement changes no lint verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
+        // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
+        sources_digest: "92ae63870b3069c82fc539a1d21c6354e740f697bd3aee3dd4ae42299cc78656",
         build_bound: false,
     },
     CapabilityLogic {
@@ -333,7 +337,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: review 4's verdict change is already counted in version 6.
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         version: 6,
-        sources_digest: "1d0bdcbc9dc69037a6524cb245c6cab4bcfcf2c09324ebca5d784ef883fd9812",
+        // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
+        sources_digest: "37eb344b1ea02d97f33ec49919ca22207e8fdf3100e480a7f90e62dbf621b461",
         build_bound: true,
     },
     CapabilityLogic {
@@ -398,7 +403,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "16afd290920d72c0ff3a4b3aef2c2bd07a0e5b74ec6ce2eeb265fcbb1cc2be0a",
+        // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
+        sources_digest: "b77efa7b79798011f64974f757ca770497df448a787b4e6ca70920d2ba1976d8",
         build_bound: true,
     },
     CapabilityLogic {
@@ -456,7 +462,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: catalog version entries changed; verification verdict logic is unchanged.
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "16afd290920d72c0ff3a4b3aef2c2bd07a0e5b74ec6ce2eeb265fcbb1cc2be0a",
+        // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
+        sources_digest: "b77efa7b79798011f64974f757ca770497df448a787b4e6ca70920d2ba1976d8",
         build_bound: true,
     },
 ];
