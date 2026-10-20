@@ -300,6 +300,13 @@ function acceptanceParseRefusal(id, source, error) {
   return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}${escapeRule}.${blockDirection} Choose exactly one command form: for scripts, use the block form with kind and cwd, command_block true and no command field in the JSON check, followed by exactly one non-empty block whose fence info string is exactly 'check'; inline form puts one short line without quotes or backslashes in check.command with kind and cwd, and has no command_block or fence. Never write a script inside a JSON string.`;
 }
 
+function fencedEntryLinePrefix(reply, markers) {
+  const block = replyFenceBlocks(stripReplyMarkers(reply, markers)).find((candidate) => candidate.info === "json");
+  if (!block) return 0;
+  const openerLine = String(reply).slice(0, block.start).split(/\r\n|\r|\n/).length;
+  return openerLine;
+}
+
 // H4 (Batch O): every PRD requirement id is covered by some check. The host
 // freeze names each requirement no entry covers as the supplementary check it
 // is owed ("check 'SUP-<id>': PRD requirement <id> is covered by no
@@ -375,7 +382,8 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     let entry;
     let json;
     try {
-      json = extractJsonObject(result.content, args.replyLeakedMarkers);
+      json = "\n".repeat(fencedEntryLinePrefix(result.content, args.replyLeakedMarkers))
+        + extractJsonObject(result.content, args.replyLeakedMarkers);
       entry = unwrapEntry(JSON.parse(json), id);
     } catch (error) {
       if (error && / is never closed \(the reply may have been cut off\)/.test(error.message)) {

@@ -363,6 +363,14 @@ pub(crate) fn resolve_command_block_with_markers(
             "acceptance entry {id} returned both check.command and check.command_block — remove check.command from the JSON when you use the check block"
         ));
     }
+    if !checks.is_empty()
+        && command_block != Some(&Value::Bool(true))
+        && check.contains_key("command")
+    {
+        return Some(format!(
+            "acceptance entry {id} mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence"
+        ));
+    }
     if command_block == Some(&Value::Bool(true)) && checks.is_empty() {
         return Some(format!(
             "acceptance entry {id} check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: {}",

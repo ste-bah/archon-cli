@@ -1,0 +1,157 @@
+```json
+{"id":"SUP-REQ-DL-110","criterion":"Capability checks must not perform expensive full downloads.","check":{"kind":"command","command":"set -eu\nTMP=$(mktemp -d /tmp/supdl110.XXXXXX)\nSERVER_PID=''\ncleanup() {\n  if [ -n \"$SERVER_PID\" ]; then kill \"$SERVER_PID\" 2>/dev/null || true; fi\n  rm -rf \"$TMP\"\n}\ntrap cleanup EXIT\nfail() { echo \"SUP-REQ-DL-110 FAIL: $1\" >&2; exit 1; }\nif [ -x ../archon-cli/target/release/archon ]; then\n  ARCHON() { ../archon-cli/target/release/archon \"$@\"; }\nelse\n  ARCHON() { cargo run --quiet --release --manifest-path ../archon-cli/Cargo.toml --bin archon -- \"$@\"; }\nfi\npin() {\  name=\"$1\"\n  selector=\"$2\"\n  kind=\"$3\"\n  log=\"$4\"\n  if ! cargo test --quiet --release --manifest-path ../archon-cli/Cargo.toml -p archon-trading $kind \"$selector\" >\"$log\" 2>&1; then\n    fail \"pinned REQ-DL-110 capability-probe boundary test $name exited non-zero: $(tail -c 400 \"$log\")\"\n  fi\n  grep -q 'test result: ok. 1 passed' \"$log\" || fail \"pinned REQ-DL-110 capability-probe boundary test $name did not pass exactly one matched test: $(tail -c 400 \"$log\")\"\n}\npin provider_capability_never_calls_full_history data_lake::provider_capability_tests::provider_capability_never_calls_full_history --lib \"$TMP/pin-dispatcher.log\"\npin capability_probe_is_bounded_and_non_publishing capability_probe_is_bounded_and_non_publishing '--test openbb_polygon_native_ingest' \"$TMP/pin-adapter.log\"\nmkdir -p \"$TMP/serve\" \"$TMP/lake\"\ncat > \"$TMP/serve/server.py\" <<'PY'\nimport http.server, json, socketserver, sys\nlog_path, port_path = sys.argv[1], sys.argv[2]\npayload = json.dumps({\n    'provider': 'polygon', 'symbol': 'BTCUSDT', 'timeframe': '15',\n    'adjustment': 'splits', 'corporate_action_source': 'polygon',\n    'exchange': 'XNAS', 'timezone': 'America/New_York', 'session': 'regular',\n    'calendar': 'XNYS', 'asset_class': 'equity', 'license': 'Polygon terms',\n    'requested_start': '2026-01-01T00:00:00Z', 'requested_end': '2026-01-02T00:00:00Z',\n    'expected_bars': 2, 'native': True, 'derived': False,\n    'response_schema': 'openbb-equity-historical', 'response_version': '1',\n    'results': [\n        {'timestamp': '2026-01-01T00:00:00Z', 'open': 1.0, 'high': 2.0, 'low': 0.5, 'close': 1.5, 'volume': 10.0},\n        {'timestamp': '2026-01-02T00:00:00Z', 'open': 2.0, 'high': 3.0, 'low': 1.5, 'close': 2.5, 'volume': 20.0}\n    ]\n}).encode()\nclass Handler(http.server.BaseHTTPRequestHandler):\n    protocol_version = 'HTTP/1.1'\n    def do_GET(self):\n        with open(log_path, 'a', encoding='utf-8') as handle:\n            handle.write(self.path + '\\n')\n        self.send_response(200)\n        self.send_header('Content-Type', 'application/json')\n        self.send_header('Content-Length', str(len(payload)))\n        self.end_headers()\n        self.wfile.write(payload)\n    def log_message(self, *args):\n        pass\nserver = socketserver.ThreadingTCPServer(('127.0.0.1', 0), Handler)\nserver.daemon_threads = True\nwith open(port_path, 'w') as handle:\n    handle.write(str(server.server_address[1]))\nserver.serve_forever()\nPY\npython3 \"$TMP/serve/server.py\" \"$TMP/serve/requests.log\" \"$TMP/serve/port\" &\nSERVER_PID=$!\nfor _ in $(seq 1 100); do\n  if [ -s \"$TMP/serve/port\" ]; then break; fi\n  sleep 0.2\ndone\nif [ ! -s \"$TMP/serve/port\" ]; then fail 'the request-recording capability fixture server never became ready'; fi\nPORT=$(cat \"$TMP/serve/port\")\nexport OPENBB_API_URL=\"http://127.0.0.1:${PORT}\"\nexport POLYGON_API_KEY='sup-req-dl-110-fixture-key'\nif ! ARCHON trading data capability --target \"$TMP/lake\" --provider openbb_polygon --symbol BTCUSDT --timeframe 15 >\"$TMP/capability.json\" 2>\"$TMP/capability.log\"; then\n  fail \"the delivered 'trading data capability' command exited non-zero for openbb_polygon/BTCUSDT/15 and produced no section-22 report: $(tail -c 300 \"$TMP/capability.log\")\"\nfi\npython3 - \"$TMP/lake\" \"$TMP/capability.json\" \"$TMP/serve/requests.log\" <<'PY'\nimport json, os, sys\nfrom urllib.parse import parse_qs, urlsplit\nlake, report_path, requests_log = sys.argv[1], sys.argv[2], sys.argv[3]\nPROVIDER, SYMBOL, TIMEFRAME = 'openbb_polygon', 'BTCUSDT', '15'\nARTIFACT_REL = '.archon/trading-lab/data/provider-capabilities.json'\nSCHEMAS = ('archon-trading-provider-capabilities-v1', 'archon-provider-capabilities-v1')\nMAX_PROBE_CANDLES = 2\nMAX_PROBE_REQUESTS = 2\ndef fail(message):\n    sys.stderr.write('SUP-REQ-DL-110 FAIL: ' + message + '\\n')\n    sys.exit(1)\ntry:\n    with open(report_path, encoding='utf-8') as handle:\n        text = handle.read().strip()\nexcept OSError as error:\n    fail('the capability report is unreadable: %s' % error)\nstart, end = text.find('{'), text.rfind('}')\nif start < 0 or end <= start:\n    fail('the delivered capability command printed no JSON report: %r' % text[:200])\ntry:\n    report = json.loads(text[start:end + 1])\nexcept ValueError as error:\n    fail('the capability report is not valid JSON: %s' % error)\nif not isinstance(report, dict):\n    fail('the capability report is not a JSON object')\nif report.get('provider') != PROVIDER or report.get('canonical_instrument') != SYMBOL or report.get('symbol') != SYMBOL or report.get('timeframe') != TIMEFRAME:\n    fail('the capability report identity (%r/%r/%r) does not echo the requested openbb_polygon/BTCUSDT/15' % (report.get('provider'), report.get('canonical_instrument'), report.get('timeframe')))\ncan_fetch = report.get('can_fetch')\nif not isinstance(can_fetch, bool):\n    fail('the capability report carries no boolean can_fetch (%r)' % (can_fetch,))\nif not isinstance(report.get('checked_at'), str) or not report['checked_at'].strip():\n    fail('the capability report carries no checked_at observation stamp')\nreason = report.get('unavailable_reason')\nif can_fetch and reason is not None:\n    fail('the capability report claims can_fetch=true while also carrying unavailable_reason %r' % (reason,))\nif not can_fetch and not (isinstance(reason, str) and reason.strip()):\n    fail('the capability report claims can_fetch=false without an exact unavailable_reason')\nif not isinstance(report.get('capability_artifact'), str) or not report['capability_artifact'].strip():\n    fail('the capability report names no capability_artifact path')\nartifact_path = os.path.join(lake, ARTIFACT_REL)\nif not os.path.isfile(artifact_path):\n    fail('the capability command persisted no provider-capabilities artifact at %s under the --target root, so the verdict is recorded nowhere' % artifact_path)\ntry:\n    with open(artifact_path, encoding='utf-8') as handle:\n        artifact = json.load(handle)\nexcept (OSError, ValueError) as error:\n    fail('the persisted capability artifact is unreadable or not valid JSON: %s' % error)\nif not isinstance(artifact, dict):\n    fail('the persisted capability artifact is not a JSON object')\nschema = artifact.get('schema_version', artifact.get('schema'))\nif schema not in SCHEMAS:\n    fail('the persisted capability artifact schema is %r, expected the frozen provider-capabilities schema id' % (schema,))\ncells = artifact.get('capabilities')\nif isinstance(cells, dict):\n    cells = list(cells.values())\nif not isinstance(cells, list):\n    fail('the persisted capability artifact carries no capabilities collection')\nmatching = [cell for cell in cells if isinstance(cell, dict) and str(cell.get('provider') or '').lower() == PROVIDER and (cell.get('canonical_instrument') or cell.get('symbol')) == SYMBOL and cell.get('timeframe') == TIMEFRAME]\nif not matching:\n    fail('the persisted capability artifact records no cell for openbb_polygon/BTCUSDT/15')\nif matching[0].get('can_fetch') != can_fetch:\n    fail('the persisted cell can_fetch %r disagrees with the printed report can_fetch %r' % (matching[0].get('can_fetch'), can_fetch))\nrequests = []\nif os.path.isfile(requests_log):\n    with open(requests_log, encoding='utf-8') as handle:\n        requests = [line.strip() for line in handle.read().splitlines() if line.strip()]\nif len(requests) > MAX_PROBE_REQUESTS:\n    fail('REQ-DL-110 violated: one capability check drove %d provider request(s) (%s); a capability check must never degrade into a download campaign' % (len(requests), ' | '.join(requests[:3])))\nfor request_line in requests:\n    limits = parse_qs(urlsplit(request_line).query).get('limit', [])\n    if not limits or not limits[0].isdigit() or int(limits[0]) > MAX_PROBE_CANDLES:\n        fail('REQ-DL-110 violated: the capability check performed an unbounded provider download - request %r carries no bar limit <= %d, i.e. a full-history fetch instead of a bounded probe' % (request_line, MAX_PROBE_CANDLES))\nnote = 'no provider request at all, so the capability verdict resolved from static support tables and credential detection and downloaded nothing' if not requests else '%d bounded probe request(s), each carrying the %d-candle bar cap' % (len(requests), MAX_PROBE_CANDLES)\nsys.stderr.write('SUP-REQ-DL-110 exercise ok: the delivered capability command reported openbb_polygon/BTCUSDT/15 (can_fetch=%r), persisted the frozen-schema artifact cell, and the request-recording fixture observed %s\\n' % (can_fetch, note))\nPY\necho 'SUP-REQ-DL-110 PASS: capability checks never perform expensive full downloads - the pinned dispatcher test provider_capability_never_calls_full_history (crates/archon-trading/src/data_lake/provider_capability_tests.rs) proves the capability path performs zero full-history fetches, the pinned integration test capability_probe_is_bounded_and_non_publishing (crates/archon-trading/tests/openbb_polygon_native_ingest.rs) proves the provider capability probe is exactly one request carrying the limit=2 bar cap with candles_examined=2 and publishes nothing, and the delivered trading data capability command for openbb_polygon/BTCUSDT/15 returned a section-22 report persisted to .archon/trading-lab/data/provider-capabilities.json under the --target root while the request-recording fixture server observed either no provider request at all or only bar-capped probe requests (limit<=2), so a capability check can never silently turn into an expensive full download'","cwd":"project_root"},"covers":["REQ-DL-110"],"gap_permitted":false,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}
+```
+
+```check
+set -eu
+TMP=$(mktemp -d /tmp/supdl110.XXXXXX)
+SERVER_PID=''
+cleanup() {
+  if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null || true; fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+fail() { echo "SUP-REQ-DL-110 FAIL: $1" >&2; exit 1; }
+if [ -x ../archon-cli/target/release/archon ]; then
+  ARCHON() { ../archon-cli/target/release/archon "$@"; }
+else
+  ARCHON() { cargo run --quiet --release --manifest-path ../archon-cli/Cargo.toml --bin archon -- "$@"; }
+fi
+pin() {
+  name="$1"
+  selector="$2"
+  kind="$3"
+  log="$4"
+  if ! cargo test --quiet --release --manifest-path ../archon-cli/Cargo.toml -p archon-trading $kind "$selector" >"$log" 2>&1; then
+    fail "pinned REQ-DL-110 capability-probe boundary test $name exited non-zero: $(tail -c 400 "$log")"
+  fi
+  grep -q 'test result: ok. 1 passed' "$log" || fail "pinned REQ-DL-110 capability-probe boundary test $name did not pass exactly one matched test: $(tail -c 400 "$log")"
+}
+pin provider_capability_never_calls_full_history data_lake::provider_capability_tests::provider_capability_never_calls_full_history --lib "$TMP/pin-dispatcher.log"
+pin capability_probe_is_bounded_and_non_publishing capability_probe_is_bounded_and_non_publishing '--test openbb_polygon_native_ingest' "$TMP/pin-adapter.log"
+mkdir -p "$TMP/serve" "$TMP/lake"
+cat > "$TMP/serve/server.py" <<'PY'
+import http.server, json, socketserver, sys
+log_path, port_path = sys.argv[1], sys.argv[2]
+payload = json.dumps({
+    'provider': 'polygon', 'symbol': 'BTCUSDT', 'timeframe': '15',
+    'adjustment': 'splits', 'corporate_action_source': 'polygon',
+    'exchange': 'XNAS', 'timezone': 'America/New_York', 'session': 'regular',
+    'calendar': 'XNYS', 'asset_class': 'equity', 'license': 'Polygon terms',
+    'requested_start': '2026-01-01T00:00:00Z', 'requested_end': '2026-01-02T00:00:00Z',
+    'expected_bars': 2, 'native': True, 'derived': False,
+    'response_schema': 'openbb-equity-historical', 'response_version': '1',
+    'results': [
+        {'timestamp': '2026-01-01T00:00:00Z', 'open': 1.0, 'high': 2.0, 'low': 0.5, 'close': 1.5, 'volume': 10.0},
+        {'timestamp': '2026-01-02T00:00:00Z', 'open': 2.0, 'high': 3.0, 'low': 1.5, 'close': 2.5, 'volume': 20.0}
+    ]
+}).encode()
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    def do_GET(self):
+        with open(log_path, 'a', encoding='utf-8') as handle:
+            handle.write(self.path + '\n')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+    def log_message(self, *args):
+        pass
+server = socketserver.ThreadingTCPServer(('127.0.0.1', 0), Handler)
+server.daemon_threads = True
+with open(port_path, 'w') as handle:
+    handle.write(str(server.server_address[1]))
+server.serve_forever()
+PY
+python3 "$TMP/serve/server.py" "$TMP/serve/requests.log" "$TMP/serve/port" &
+SERVER_PID=$!
+for _ in $(seq 1 100); do
+  if [ -s "$TMP/serve/port" ]; then break; fi
+  sleep 0.2
+done
+if [ ! -s "$TMP/serve/port" ]; then fail 'the request-recording capability fixture server never became ready'; fi
+PORT=$(cat "$TMP/serve/port")
+export OPENBB_API_URL="http://127.0.0.1:${PORT}"
+export POLYGON_API_KEY='sup-req-dl-110-fixture-key'
+if ! ARCHON trading data capability --target "$TMP/lake" --provider openbb_polygon --symbol BTCUSDT --timeframe 15 >"$TMP/capability.json" 2>"$TMP/capability.log"; then
+  fail "the delivered 'trading data capability' command exited non-zero for openbb_polygon/BTCUSDT/15 and produced no section-22 report: $(tail -c 300 "$TMP/capability.log")"
+fi
+python3 - "$TMP/lake" "$TMP/capability.json" "$TMP/serve/requests.log" <<'PY'
+import json, os, sys
+from urllib.parse import parse_qs, urlsplit
+lake, report_path, requests_log = sys.argv[1], sys.argv[2], sys.argv[3]
+PROVIDER, SYMBOL, TIMEFRAME = 'openbb_polygon', 'BTCUSDT', '15'
+ARTIFACT_REL = '.archon/trading-lab/data/provider-capabilities.json'
+SCHEMAS = ('archon-trading-provider-capabilities-v1', 'archon-provider-capabilities-v1')
+MAX_PROBE_CANDLES = 2
+MAX_PROBE_REQUESTS = 2
+def fail(message):
+    sys.stderr.write('SUP-REQ-DL-110 FAIL: ' + message + '\n')
+    sys.exit(1)
+try:
+    with open(report_path, encoding='utf-8') as handle:
+        text = handle.read().strip()
+except OSError as error:
+    fail('the capability report is unreadable: %s' % error)
+start, end = text.find('{'), text.rfind('}')
+if start < 0 or end <= start:
+    fail('the delivered capability command printed no JSON report: %r' % text[:200])
+try:
+    report = json.loads(text[start:end + 1])
+except ValueError as error:
+    fail('the capability report is not valid JSON: %s' % error)
+if not isinstance(report, dict):
+    fail('the capability report is not a JSON object')
+if report.get('provider') != PROVIDER or report.get('canonical_instrument') != SYMBOL or report.get('symbol') != SYMBOL or report.get('timeframe') != TIMEFRAME:
+    fail('the capability report identity (%r/%r/%r) does not echo the requested openbb_polygon/BTCUSDT/15' % (report.get('provider'), report.get('canonical_instrument'), report.get('timeframe')))
+can_fetch = report.get('can_fetch')
+if not isinstance(can_fetch, bool):
+    fail('the capability report carries no boolean can_fetch (%r)' % (can_fetch,))
+if not isinstance(report.get('checked_at'), str) or not report['checked_at'].strip():
+    fail('the capability report carries no checked_at observation stamp')
+reason = report.get('unavailable_reason')
+if can_fetch and reason is not None:
+    fail('the capability report claims can_fetch=true while also carrying unavailable_reason %r' % (reason,))
+if not can_fetch and not (isinstance(reason, str) and reason.strip()):
+    fail('the capability report claims can_fetch=false without an exact unavailable_reason')
+if not isinstance(report.get('capability_artifact'), str) or not report['capability_artifact'].strip():
+    fail('the capability report names no capability_artifact path')
+artifact_path = os.path.join(lake, ARTIFACT_REL)
+if not os.path.isfile(artifact_path):
+    fail('the capability command persisted no provider-capabilities artifact at %s under the --target root, so the verdict is recorded nowhere' % artifact_path)
+try:
+    with open(artifact_path, encoding='utf-8') as handle:
+        artifact = json.load(handle)
+except (OSError, ValueError) as error:
+    fail('the persisted capability artifact is unreadable or not valid JSON: %s' % error)
+if not isinstance(artifact, dict):
+    fail('the persisted capability artifact is not a JSON object')
+schema = artifact.get('schema_version', artifact.get('schema'))
+if schema not in SCHEMAS:
+    fail('the persisted capability artifact schema is %r, expected the frozen provider-capabilities schema id' % (schema,))
+cells = artifact.get('capabilities')
+if isinstance(cells, dict):
+    cells = list(cells.values())
+if not isinstance(cells, list):
+    fail('the persisted capability artifact carries no capabilities collection')
+matching = [cell for cell in cells if isinstance(cell, dict) and str(cell.get('provider') or '').lower() == PROVIDER and (cell.get('canonical_instrument') or cell.get('symbol')) == SYMBOL and cell.get('timeframe') == TIMEFRAME]
+if not matching:
+    fail('the persisted capability artifact records no cell for openbb_polygon/BTCUSDT/15')
+if matching[0].get('can_fetch') != can_fetch:
+    fail('the persisted cell can_fetch %r disagrees with the printed report can_fetch %r' % (matching[0].get('can_fetch'), can_fetch))
+requests = []
+if os.path.isfile(requests_log):
+    with open(requests_log, encoding='utf-8') as handle:
+        requests = [line.strip() for line in handle.read().splitlines() if line.strip()]
+if len(requests) > MAX_PROBE_REQUESTS:
+    fail('REQ-DL-110 violated: one capability check drove %d provider request(s) (%s); a capability check must never degrade into a download campaign' % (len(requests), ' | '.join(requests[:3])))
+for request_line in requests:
+    limits = parse_qs(urlsplit(request_line).query).get('limit', [])
+    if not limits or not limits[0].isdigit() or int(limits[0]) > MAX_PROBE_CANDLES:
+        fail('REQ-DL-110 violated: the capability check performed an unbounded provider download - request %r carries no bar limit <= %d, i.e. a full-history fetch instead of a bounded probe' % (request_line, MAX_PROBE_CANDLES))
+note = 'no provider request at all, so the capability verdict resolved from static support tables and credential detection and downloaded nothing' if not requests else '%d bounded probe request(s), each carrying the %d-candle bar cap' % (len(requests), MAX_PROBE_CANDLES)
+sys.stderr.write('SUP-REQ-DL-110 exercise ok: the delivered capability command reported openbb_polygon/BTCUSDT/15 (can_fetch=%r), persisted the frozen-schema artifact cell, and the request-recording fixture observed %s\n' % (can_fetch, note))
+PY
+echo 'SUP-REQ-DL-110 PASS: capability checks never perform expensive full downloads - the pinned dispatcher test provider_capability_never_calls_full_history (crates/archon-trading/src/data_lake/provider_capability_tests.rs) proves the capability path performs zero full-history fetches, the pinned integration test capability_probe_is_bounded_and_non_publishing (crates/archon-trading/tests/openbb_polygon_native_ingest.rs) proves the provider capability probe is exactly one request carrying the limit=2 bar cap with candles_examined=2 and publishes nothing, and the delivered trading data capability command for openbb_polygon/BTCUSDT/15 returned a section-22 report persisted to .archon/trading-lab/data/provider-capabilities.json under the --target root while the request-recording fixture server observed either no provider request at all or only bar-capped probe requests (limit<=2), so a capability check can never silently turn into an expensive full download'
+```

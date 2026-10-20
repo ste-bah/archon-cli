@@ -132,7 +132,7 @@ fn check_block_refusals_and_inline_command_match_contract() {
     );
     assert_eq!(
         resolve_command_block(&mut json!({"id":"A","check":{"kind":"command","command":"run"}}), "```check\nrun\n```"),
-        Some("check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block".into())
+        Some("acceptance entry A mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence".into())
     );
     let mut inferred = json!({"id":"A","check":{"kind":"command","cwd":"project_root"}});
     assert_eq!(

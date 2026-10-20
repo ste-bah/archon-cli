@@ -122,7 +122,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: reply marker stripping and midline-fence diagnosis change source closure; freeze behavior version stays fixed.
         // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
-        sources_digest: "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
+        // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
+        sources_digest: "f10c8ba8ac1c0ddcbf4a47d64394b8818aa47bc1289977d4a0aaa1d3ae14805d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -190,7 +191,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: shared reply parsing changed source closure; skeleton verdict logic stays fixed.
         // #471 re-pin only: shared acceptance diagnostics distinguish text-derived writes from observed recreation; skeleton verdicts are unchanged. The helper split only moves this source closure.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
-        sources_digest: "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
+        // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
+        sources_digest: "f10c8ba8ac1c0ddcbf4a47d64394b8818aa47bc1289977d4a0aaa1d3ae14805d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -262,7 +264,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; body landing version stays fixed.
         // #471 re-pin only: shared baseline-pass guidance changes messages; body verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
-        sources_digest: "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+        // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
+        sources_digest: "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -326,7 +329,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; lint version stays fixed.
         // #471 re-pin only: shared baseline-pass guidance changes messages; lint verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
-        sources_digest: "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+        // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
+        sources_digest: "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -424,7 +428,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: shared reply parsing changed source closure; frozen acceptance verification stays fixed.
         // #471 re-pin only: acceptance author guidance changes messages; frozen verification verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
-        sources_digest: "b5de16da1514e25aa46a553056d06e80089a8cbcffb0fd2d1bd474ebd064b4c9",
+        // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
+        sources_digest: "ec2130a53ca0722230425da5b77191ace521dddd5be4ac75df565c3a36780804",
         build_bound: true,
     },
     CapabilityLogic {
@@ -487,7 +492,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: shared reply parsing changed source closure; frozen skeleton verification stays fixed.
         // #471 re-pin only: acceptance author guidance changes messages; skeleton verification verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
-        sources_digest: "b5de16da1514e25aa46a553056d06e80089a8cbcffb0fd2d1bd474ebd064b4c9",
+        // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
+        sources_digest: "ec2130a53ca0722230425da5b77191ace521dddd5be4ac75df565c3a36780804",
         build_bound: true,
     },
 ];

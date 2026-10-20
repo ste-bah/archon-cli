@@ -20,8 +20,30 @@ pub(super) fn candidate_entry_with_markers(
     if let Some(refusal) = blocks::unclosed_block_refusal_with_markers(reply, markers) {
         return Err(refusal);
     }
-    let document =
-        crate::command::workflow_freeze_candidate::candidate_document(reply.trim().as_bytes());
+    let reply_blocks = blocks::reply_blocks_with_markers(reply, markers);
+    let has_fenced_entry_and_check = reply_blocks.iter().any(|block| block.info == "json")
+        && reply_blocks.iter().any(|block| block.info == "check");
+    let document = if has_fenced_entry_and_check {
+        let json_block = reply_blocks
+            .iter()
+            .find(|block| block.info == "json")
+            .expect("the JSON block was observed");
+        let entry_prefix_lines = json_block
+            .content
+            .find('{')
+            .map(|start| json_block.content[..start].matches('\n').count())
+            .unwrap_or_default();
+        let source_line_prefix = "\n".repeat(json_block.opened_line + entry_prefix_lines);
+        std::borrow::Cow::Owned(
+            format!(
+                "{source_line_prefix}{}",
+                blocks::extract_object_with_markers(reply, markers)
+            )
+            .into_bytes(),
+        )
+    } else {
+        crate::command::workflow_freeze_candidate::candidate_document(reply.trim().as_bytes())
+    };
     let mut value: serde_json::Value = match serde_json::from_slice(&document) {
         Ok(value) => value,
         Err(error) => {

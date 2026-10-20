@@ -193,6 +193,77 @@ fn malformed_json_reply_explains_the_escape_at_its_location() {
     );
 }
 
+#[test]
+fn live_fenced_replies_report_locations_inside_the_json_entry() {
+    let set = frozen_set(&[("AC-F-001", "run", false)]);
+    let contract = set.contract();
+    let frozen = &contract.acceptance[0];
+    for (fixture, expected) in [
+        (
+            include_str!("../../tests/fixtures/reply-parser/reply-one.txt"),
+            "Syntax at line 2 column 631",
+        ),
+        (
+            include_str!("../../tests/fixtures/reply-parser/reply-two.txt"),
+            "Syntax at line 2 column 6520",
+        ),
+    ] {
+        let error = candidate_entry(fixture, frozen).expect_err("fixture contains malformed JSON");
+        assert!(error.contains(expected), "{error}");
+        assert!(error.contains("<HERE>"), "{error}");
+    }
+    let first = include_str!("../../tests/fixtures/reply-parser/reply-one.txt");
+    let error = candidate_entry(first, frozen).expect_err("invalid escape is refused");
+    assert!(
+        error.contains("the check is a multi-line script; return it in block form instead:"),
+        "{error}"
+    );
+}
+
+#[test]
+fn inline_command_and_check_fence_have_one_shared_refusal() {
+    let set = frozen_set(&[("AC-F-001", "run", false)]);
+    let contract = set.contract();
+    let frozen = &contract.acceptance[0];
+    let reply = concat!(
+        "```json\n",
+        r#"{"id":"AC-F-001","check":{"kind":"command","command":"run","cwd":"project_root"}}"#,
+        "\n```\n```check\nrun\n```"
+    );
+    assert_eq!(
+        candidate_entry(reply, frozen).unwrap_err(),
+        "acceptance entry AC-F-001 mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence"
+    );
+}
+
+#[test]
+fn command_block_accepts_absent_command_and_refuses_empty_command() {
+    let set = frozen_set(&[("AC-F-001", "old", false)]);
+    let contract = set.contract();
+    let frozen = &contract.acceptance[0];
+    let reply = concat!(
+        "```json\n",
+        r#"{"id":"AC-F-001","check":{"kind":"command","cwd":"project_root","command_block":true}}"#,
+        "\n```\n```check\nrun\n```"
+    );
+    let entry = candidate_entry(reply, frozen)
+        .expect("block form with no inline command is accepted");
+    let AcceptanceCheck::Command { command, .. } = entry.check else {
+        panic!("expected a command check");
+    };
+    assert_eq!(command, "run");
+
+    let empty_command_reply = concat!(
+        "```json\n",
+        r#"{"id":"AC-F-001","check":{"kind":"command","cwd":"project_root","command":"","command_block":true}}"#,
+        "\n```\n```check\nrun\n```"
+    );
+    assert_eq!(
+        candidate_entry(empty_command_reply, frozen).unwrap_err(),
+        "acceptance entry AC-F-001 returned both check.command and check.command_block — remove check.command from the JSON when you use the check block"
+    );
+}
+
 #[tokio::test]
 async fn a_refuted_check_is_reauthored_and_rejudged_and_nothing_else_changes() {
     let set = frozen_set(&[

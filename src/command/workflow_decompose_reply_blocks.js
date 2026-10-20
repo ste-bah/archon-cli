@@ -219,6 +219,9 @@ function resolveCommandBlock(entry, text, markers) {
   if (commandBlock === true && check && Object.prototype.hasOwnProperty.call(check, "command")) {
     return "acceptance entry " + id + " returned both check.command and check.command_block — remove check.command from the JSON when you use the check block";
   }
+  if (hasBlock && commandBlock !== true && check && Object.prototype.hasOwnProperty.call(check, "command")) {
+    return "acceptance entry " + id + " mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence";
+  }
   if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: " + foundFenceLabels(replyFenceBlocks(normalizedText));
   if (hasBlock && commandBlock !== true && !inferredCommandBlock) {
     return "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block";

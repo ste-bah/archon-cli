@@ -60,7 +60,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.equal(blockRefusal('```check\na\n```\n```check\nb\n```', {kind:'command', command_block:true}),
     'acceptance reply contains more than one check block');
   assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'run'}}, '```check\nrun\n```'),
-    'check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block');
+    'acceptance entry A mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence');
   const inferred = {id:'A', check:{kind:'command', cwd:'project_root'}};
   assert.equal(json.resolveCommandBlock(inferred, '```check\nrun\n```'), null);
   assert.deepEqual(JSON.parse(JSON.stringify(inferred.check)), {kind:'command', cwd:'project_root', command:'run'});
@@ -135,7 +135,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   await exact('```check\na\n```\n```check\nb\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
     'acceptance reply contains more than one check block');
   await exact('```check\nrun\n```\n{"id":"A","check":{"kind":"command","command":"run"}}',
-    'check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block');
+    'acceptance entry A mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence');
   await exact('```check\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
     'acceptance entry A check block is empty');
   const malformed = `{"id":"A","check":{"kind":"command","command":"${'x'.repeat(90)}${'\\q'}${'y'.repeat(290)}"}}`;
