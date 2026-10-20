@@ -15,6 +15,48 @@ fn ids(list: &[&str]) -> BTreeSet<String> {
     list.iter().map(|id| id.to_string()).collect()
 }
 
+fn baseline_finding(id: &str, candidates: &str) -> String {
+    format!(
+        "check '{id}': it {} at base; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside; considered inputs: {candidates}",
+        super::executability::CANNOT_FAIL
+    )
+}
+
+#[test]
+fn escalation_requires_route_diagnostics_for_every_pending_check_and_reports_them() {
+    let pending = ids(&["AC-F-001", "AC-F-002"]);
+    let lines = vec![
+        baseline_finding(
+            "AC-F-001",
+            "state.txt (generated or recreated by the check's own run)",
+        ),
+        baseline_finding(
+            "AC-F-002",
+            "../source.rs (sibling tree seen from this root, not movable)",
+        ),
+    ];
+    let escalation = super::escalation::baseline_escalation(&pending, &lines, 6)
+        .expect("complete route on all checks");
+    assert!(
+        escalation.contains("repair route 6 time(s)"),
+        "{escalation}"
+    );
+    assert!(
+        escalation.contains("Last exclusion reasons:"),
+        "{escalation}"
+    );
+    assert!(escalation.contains("generated or recreated by the check's own run"));
+    assert!(escalation.contains("sibling tree seen from this root, not movable"));
+    assert!(!escalation.contains("restate"));
+    assert!(!escalation.contains("drop it"));
+
+    let incomplete = vec![
+        lines[0].clone(),
+        "check 'AC-F-002': it passed before implementation".into(),
+    ];
+    assert!(super::escalation::baseline_escalation(&pending, &incomplete, 6).is_none());
+}
+
 #[test]
 fn acceptance_reauthor_accepts_shared_check_blocks_and_refuses_malformed_block_forms() {
     let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);

@@ -23,6 +23,24 @@ pub struct SiblingSource {
     pub source: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiblingExclusionReason {
+    MissingAtRoot,
+    SiblingTreeFromSelectedRoot,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SiblingCandidate {
+    pub path: PathBuf,
+    pub reason: SiblingExclusionReason,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SiblingDiscovery {
+    pub siblings: Vec<SiblingSource>,
+    pub candidates: Vec<SiblingCandidate>,
+}
+
 /// Program text carried by interpreter flags or shell here-documents.
 /// Shared with acceptance input discovery so both scanners see the same code.
 pub fn program_texts(command: &str) -> Vec<String> {
@@ -95,23 +113,40 @@ fn heredoc_bodies(command: &str) -> Vec<String> {
 /// path spelling the check uses; `source` follows symlinks for materializing
 /// their content.
 pub fn discover(project: &std::path::Path, checks: &[String]) -> Vec<SiblingSource> {
+    discover_with_diagnostics(project, checks).siblings
+}
+
+/// Resolve sibling inputs while preserving every sibling-shaped path the
+/// checks considered and the generic reason it cannot be moved as evidence.
+pub fn discover_with_diagnostics(project: &std::path::Path, checks: &[String]) -> SiblingDiscovery {
     let Ok(project) = archon_shell::paths::canonicalize(project) else {
-        return Vec::new();
+        return SiblingDiscovery::default();
     };
     let mut siblings = Vec::new();
+    let mut candidates = Vec::new();
     for check in checks {
         for named in scan(check) {
             if !names_entry_below_parent(&named.path) {
                 continue;
             }
-            let candidate = normalize(project.join(named.path));
+            let candidate = normalize(project.join(&named.path));
+            if !candidate.exists() {
+                candidates.push(SiblingCandidate {
+                    path: named.path,
+                    reason: SiblingExclusionReason::MissingAtRoot,
+                });
+                continue;
+            }
             if candidate.starts_with(&project)
                 || candidate == project.parent().unwrap_or(&project)
                 || project.starts_with(&candidate)
-                || !candidate.exists()
             {
                 continue;
             }
+            candidates.push(SiblingCandidate {
+                path: named.path.clone(),
+                reason: SiblingExclusionReason::SiblingTreeFromSelectedRoot,
+            });
             let alias = if candidate.is_dir()
                 || (candidate.is_file() && candidate.parent() == project.parent())
             {
@@ -134,7 +169,12 @@ pub fn discover(project: &std::path::Path, checks: &[String]) -> Vec<SiblingSour
     }
     siblings.sort_by(|left, right| left.alias.cmp(&right.alias));
     siblings.dedup_by(|left, right| left.alias == right.alias);
-    siblings
+    candidates.sort_by(|left, right| left.path.cmp(&right.path));
+    candidates.dedup_by(|left, right| left.path == right.path);
+    SiblingDiscovery {
+        siblings,
+        candidates,
+    }
 }
 
 fn normalize(path: PathBuf) -> PathBuf {
@@ -416,5 +456,28 @@ mod tests {
         for check in checks {
             assert!(discover(&project, &[check.clone()]).is_empty(), "{check}");
         }
+    }
+
+    #[test]
+    fn diagnostic_discovery_keeps_missing_and_sibling_paths() {
+        let tree = tempfile::tempdir().unwrap();
+        let project = tree.path().join("project");
+        let sibling = tree.path().join("sibling");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        std::fs::write(sibling.join("input.txt"), "ready").unwrap();
+        let found = discover_with_diagnostics(
+            &project,
+            &["test -f ../sibling/input.txt && test -f ../missing/input.txt".into()],
+        );
+        assert_eq!(found.siblings.len(), 1);
+        assert!(found.candidates.contains(&SiblingCandidate {
+            path: PathBuf::from("../sibling/input.txt"),
+            reason: SiblingExclusionReason::SiblingTreeFromSelectedRoot,
+        }));
+        assert!(found.candidates.contains(&SiblingCandidate {
+            path: PathBuf::from("../missing/input.txt"),
+            reason: SiblingExclusionReason::MissingAtRoot,
+        }));
     }
 }

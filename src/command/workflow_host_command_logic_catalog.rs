@@ -117,7 +117,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // what authors submit; host acceptance verdict rules are unchanged.
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #468 follow-up re-pin: complete per-input state, transient recreation markers and status markers route recreated inputs to the author, unrestored inputs to host-unproven, and only restored inputs to the normal verdict; persistence still requires restoration markers.
-        sources_digest: "f5d93919e912ee69076fd5b2ddcec1d233b6ef0afa15dcc445e5bc572a5d2737",
+        // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
+        sources_digest: "0d716b589250159727c7c22ce5e0709d2780616ae6862db872c9f49f376d7467",
         build_bound: false,
     },
     CapabilityLogic {
@@ -180,7 +181,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #467/#468 re-pin: diagnostic text changes do not alter this verdict.
         // #468 re-pin only: save-time mutation restoration gating does not change skeleton verdicts.
-        sources_digest: "f5d93919e912ee69076fd5b2ddcec1d233b6ef0afa15dcc445e5bc572a5d2737",
+        // #471 re-pin only: shared acceptance diagnostics distinguish text-derived writes from observed recreation; skeleton verdicts are unchanged. The helper split only moves this source closure.
+        sources_digest: "0d716b589250159727c7c22ce5e0709d2780616ae6862db872c9f49f376d7467",
         build_bound: false,
     },
     CapabilityLogic {
@@ -249,7 +251,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         // #467 re-pin: EOF diagnostic placement changes no body verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
+        // #471 re-pin only: shared baseline-pass guidance changes messages; body verdicts are unchanged.
+        sources_digest: "549c0fb2b630602630311184d012da35c2d10388efe1c669d51eff3452a64e23",
         build_bound: false,
     },
     CapabilityLogic {
@@ -310,7 +313,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         // #467 re-pin: EOF diagnostic placement changes no lint verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
+        // #471 re-pin only: shared baseline-pass guidance changes messages; lint verdicts are unchanged.
+        sources_digest: "549c0fb2b630602630311184d012da35c2d10388efe1c669d51eff3452a64e23",
         build_bound: false,
     },
     CapabilityLogic {
@@ -401,7 +405,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #468 re-pin only: an unrestored mutation result cannot be reused; frozen-chain verification runs no mutation probe.
-        sources_digest: "cc15b6b654522512541c47a24baa12c9d9537f774f2e1727956def024e2e0a88",
+        // #471 re-pin only: acceptance author guidance changes messages; frozen verification verdicts are unchanged.
+        sources_digest: "b3306280dd1cdbf016d5aaa15ae81748da31ac1b3ea0638d1651cceb525324b0",
         build_bound: true,
     },
     CapabilityLogic {
@@ -460,7 +465,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #468 re-pin only: save-time mutation restoration gating does not change frozen skeleton verification.
-        sources_digest: "cc15b6b654522512541c47a24baa12c9d9537f774f2e1727956def024e2e0a88",
+        // #471 re-pin only: acceptance author guidance changes messages; skeleton verification verdicts are unchanged.
+        sources_digest: "b3306280dd1cdbf016d5aaa15ae81748da31ac1b3ea0638d1651cceb525324b0",
         build_bound: true,
     },
 ];

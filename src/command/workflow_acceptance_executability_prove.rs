@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::mutation::{mutated, named_inputs};
+use super::mutation::{input_discovery, mutated};
 use super::*;
 
 /// Findings for every check of `passing` (which passed on `baseline`) that
@@ -28,13 +28,6 @@ pub(super) async fn prove(
     passing: &[String],
 ) -> BTreeMap<String, String> {
     let short: String = baseline.commit.chars().take(12).collect();
-    let passed_there = |id: &str| {
-        format!(
-            "check '{id}': it {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing; make it exercise what the implementation must add, so that it fails on that tree and passes only once the criterion holds",
-            mutation::CANNOT_FAIL
-        )
-    };
-    let already = "if the criterion already holds on that tree, the check must still be able to fail: name the input files explicitly with paths relative to the check's working directory, so the host can move them aside and verify that the check fails";
     let mut findings = BTreeMap::new();
     let live = [
         baseline
@@ -58,20 +51,23 @@ pub(super) async fn prove(
                         })
                 })
         });
-        let names = (contract.acceptance.iter())
+        let discovery = (contract.acceptance.iter())
             .chain(&contract.supplementary)
             .find(|entry| &entry.id == id)
-            .map(|entry| named_inputs(entry, &probe.project, &baseline.repository))
+            .map(|entry| input_discovery(entry, &probe.project, &baseline.repository))
             .unwrap_or_default();
+        let names = discovery.eligible.clone();
+        let baseline_finding = format!(
+            "{}; considered inputs: {}",
+            baseline_pass_finding(id, &short),
+            describe_candidates(&discovery.candidates)
+        );
         if names.is_empty() {
             // Unresolvable inputs never count as moved; a check with no
             // resolvable input routes here so its author can make paths explicit.
             findings.insert(
                 id.clone(),
-                format!(
-                    "{}; {already}; it names none that exists there (no resolvable input)",
-                    passed_there(id)
-                ),
+                format!("{baseline_finding}; no movable input exists under the selected root"),
             );
             continue;
         }
@@ -158,12 +154,32 @@ pub(super) async fn prove(
             // not finish restoring the inputs it moved.
             super::sites::discard_mutation_evidence(probe, baseline, &mutated, id);
         }
+        let result = result.expect("no-result case handled above");
+        let generated = markers.generated(result, &names);
+        let recreated = recreated_inputs(result, &markers, &names);
+        let moved: BTreeSet<String> = markers.moved(result, &names).into_iter().collect();
+        let original_recreated: BTreeSet<String> =
+            recreated_paths(&input_states(&result.result, &markers, &names))
+                .into_iter()
+                .collect();
+        let baseline_finding = format!(
+            "{}; considered inputs: {}",
+            baseline_pass_finding(id, &short),
+            describe_candidates_with_run_state(
+                &discovery.candidates,
+                &generated,
+                &recreated,
+                &moved,
+                &original_recreated,
+                true,
+            )
+        );
         match mutation_host_or_author_finding(
-            result.expect("no-result case handled above"),
+            result,
             &markers,
             &names,
             setup_failure,
-            &passed_there(id),
+            &baseline_finding,
         ) {
             Some(MutationFinding::HostUnproven(reason)) => {
                 probe.unproven(
@@ -180,11 +196,8 @@ pub(super) async fn prove(
             }
             None => {}
         }
-        let result = result.expect("a result when the run completed");
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
-        let generated = markers.generated(result, &names);
-        let recreated = recreated_inputs(result, &markers, &names);
         let moved_all = markers.moved(result, &names);
         let moved: Vec<String> = moved_all
             .iter()
@@ -201,10 +214,7 @@ pub(super) async fn prove(
         if moved.is_empty() {
             findings.insert(
                 id.clone(),
-                format!(
-                    "{}; {already}; it names none that exists there",
-                    passed_there(id)
-                ),
+                format!("{baseline_finding}; no movable input exists under the selected root"),
             );
         } else if super::baseline::passed(result) {
             if bound_accepted && recreated.is_empty() && !crashed {
@@ -219,8 +229,7 @@ pub(super) async fn prove(
                 findings.insert(
                     id.clone(),
                     format!(
-                        "{}; {already}; it still passed with {} moved aside, so it does not depend on them",
-                        passed_there(id),
+                        "{baseline_finding}; it still passed with {} moved aside, so it does not depend on them",
                         moved.join(", ")
                     ),
                 );
@@ -229,8 +238,7 @@ pub(super) async fn prove(
             findings.insert(
                 id.clone(),
                 format!(
-                    "{}; {already}; with {} moved aside it only crashed, failed to start a program or failed to build, which says nothing about its criterion",
-                    passed_there(id),
+                        "{baseline_finding}; with {} moved aside it only crashed, failed to start a program or failed to build, which says nothing about its criterion",
                     moved.join(", ")
                 ),
             );
@@ -242,6 +250,59 @@ pub(super) async fn prove(
         }
     }
     findings
+}
+
+fn baseline_pass_finding(id: &str, short: &str) -> String {
+    format!(
+        "check '{id}': it {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside",
+        mutation::CANNOT_FAIL
+    )
+}
+
+fn describe_candidates(candidates: &[mutation::CandidateDiagnostic]) -> String {
+    describe_candidates_with_run_state(
+        candidates,
+        &BTreeSet::new(),
+        &[],
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        false,
+    )
+}
+
+fn describe_candidates_with_run_state(
+    candidates: &[mutation::CandidateDiagnostic],
+    generated: &BTreeSet<String>,
+    recreated: &[String],
+    moved: &BTreeSet<String>,
+    original_recreated: &BTreeSet<String>,
+    run_observed: bool,
+) -> String {
+    if candidates.is_empty() {
+        return "none discovered".into();
+    }
+    let mut grouped = BTreeMap::<&str, Vec<&str>>::new();
+    for candidate in candidates {
+        let was_moved =
+            moved.contains(&candidate.path) || original_recreated.contains(&candidate.path);
+        let reason = if was_moved
+            && (recreated.contains(&candidate.path) || generated.contains(&candidate.path))
+        {
+            mutation::ExclusionReason::CheckRecreatedPathObserved.label()
+        } else if run_observed && candidate.exclusion.is_none() && !was_moved {
+            "the host could not move this input aside"
+        } else {
+            candidate
+                .exclusion
+                .map_or("eligible movable input", mutation::ExclusionReason::label)
+        };
+        grouped.entry(reason).or_default().push(&candidate.path);
+    }
+    grouped
+        .into_iter()
+        .map(|(reason, paths)| format!("{reason}: {}", paths.join(", ")))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 enum MutationFinding {
@@ -384,7 +445,7 @@ fn recreated_paths(states: &std::collections::BTreeMap<String, String>) -> Vec<S
 
 fn author_recreated_finding(passed_there: &str, paths: &[String]) -> String {
     format!(
-        "{passed_there}; it recreated {} while running; stop the check's program from regenerating the named input or stop naming it",
+        "{passed_there}; it recreated {} while running, so that data is not evidence; use a movable input that exists under the selected root before the run and make the check fail on its own assertion when it is moved aside",
         paths.join(", ")
     )
 }

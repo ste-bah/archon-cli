@@ -348,29 +348,7 @@ pub(crate) async fn reauthor(
                 .unwrap_or_default()
         })
         .collect::<Vec<_>>();
-    // A check whose every repair still passes before any implementation may
-    // answer a criterion that tree already meets, which no author can make
-    // fail: that is the PRD owner's to resolve, and the freeze says so
-    // rather than asking the author again.
-    let escalated: Vec<&String> = (pending.iter())
-        .zip(&lines)
-        .filter(|(_, line)| {
-            line.contains(super::executability::CANNOT_FAIL) && !line.contains("could not run")
-        })
-        .map(|(id, _)| id)
-        .collect();
-    let escalation = if escalated.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\nescalated to the PRD owner: {} still pass(es) on the pre-implementation tree after every repair, so the criterion may already hold before any implementation; restate what the requirement must change, or drop it -- nothing unproven is published",
-            escalated
-                .iter()
-                .map(|id| id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
+    let escalation = escalation::baseline_escalation(&pending, &lines, attempt).unwrap_or_default();
     Err(ReauthorStalled {
         report: format!(
             "{}\nthe re-author stopped after {attempt} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}",
@@ -481,6 +459,8 @@ fn check_defects(
 
 #[path = "workflow_acceptance_reauthor_author.rs"]
 mod author;
+#[path = "workflow_acceptance_reauthor_escalation.rs"]
+mod escalation;
 #[path = "workflow_acceptance_reauthor_stalled.rs"]
 mod stalled;
 use author::author_entry;

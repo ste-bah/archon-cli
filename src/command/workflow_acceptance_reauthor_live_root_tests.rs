@@ -49,6 +49,17 @@ async fn the_reauthor_prompt_states_where_a_check_runs_and_the_relative_path_rul
         !prompt.contains("never runs a check in the live"),
         "{prompt}"
     );
+    for fact in [
+        "data the check writes itself is never evidence",
+        "movable inputs must exist under the check's selected root before the run",
+        "select the root that contains the existing implementation or test dependency",
+        "the check must still fail on its own assertion",
+    ] {
+        assert!(
+            prompt.contains(fact),
+            "missing baseline-pass guidance {fact:?}: {prompt}"
+        );
+    }
 }
 
 /// Issue 366 N3: the live-root reply never reaches the judge. Every check

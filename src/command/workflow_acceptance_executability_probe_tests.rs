@@ -37,7 +37,7 @@ pub(crate) fn git(repo: &Path, args: &[&str]) -> String {
 /// Checks (id, command, cwd), all judged accepted, in a project outside a
 /// repository whose `repository.lock` records the base commit. The project
 /// holds `data/state.txt` ("ready"); the repository tracks `src/state.txt`
-/// ("ready") at base and adds `feature.txt` at HEAD.
+/// and a focused test at base, then adds `feature.txt` at HEAD.
 pub(crate) fn trees(checks: &[(&str, &str, TrustedCwd)]) -> Trees {
     trees_in(checks, &["init", "-q"])
 }
@@ -53,10 +53,12 @@ pub(crate) fn trees_in(checks: &[(&str, &str, TrustedCwd)], init: &[&str]) -> Tr
     let outside = tempfile::tempdir().unwrap();
     let repo = outside.path().join("repo");
     std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::create_dir_all(repo.join("tests")).unwrap();
     git(&repo, init);
     git(&repo, &["config", "user.email", "test@example.invalid"]);
     git(&repo, &["config", "user.name", "test"]);
     std::fs::write(repo.join("src/state.txt"), "ready").unwrap();
+    std::fs::write(repo.join("tests/focused.rs"), "#[test]\nfn focused() {}\n").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-qm", "base"]);
     let base = git(&repo, &["rev-parse", "HEAD"]);
@@ -174,6 +176,7 @@ async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_th
             PROJECT,
         ),
         ("AC-P-006", "grep -q ready src/state.txt", REPO),
+        ("AC-P-007", "test -s tests/focused.rs", REPO),
     ]);
     let copies = tempfile::tempdir().unwrap();
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
@@ -194,12 +197,14 @@ async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_th
     let vacuous = &findings["AC-P-002"];
     assert!(
         vacuous.contains("passed on the pre-implementation tree")
-            && vacuous.contains("it names none that exists there"),
+            && vacuous.contains("no movable input exists under the selected root")
+            && vacuous.contains("considered inputs: none discovered"),
         "{vacuous}"
     );
     for (id, input) in [
         ("AC-P-003", "data/state.txt"),
         ("AC-P-006", "src/state.txt"),
+        ("AC-P-007", "tests/focused.rs"),
     ] {
         assert!(
             diagnostics

@@ -13,10 +13,89 @@ fn recreated_inputs_route_to_author_action_with_the_named_path() {
     let finding = author_recreated_finding("check 'AC-1': it passed", &paths);
     assert!(finding.contains("it recreated data/state.txt while running"));
     assert!(
+        finding.contains("use a movable input that exists under the selected root before the run")
+    );
+}
+
+#[test]
+fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
+    let finding = baseline_pass_finding("check-id", "0123456789ab");
+    let candidate = super::mutation::CandidateDiagnostic {
+        path: "tests/focused.rs".into(),
+        exclusion: Some(super::mutation::ExclusionReason::MissingAtRoot),
+    };
+    let finding = format!(
+        "{finding}; considered inputs: {}",
+        describe_candidates(&[candidate])
+    );
+    assert!(finding.contains("missing at the selected root: tests/focused.rs"));
+    assert!(finding.contains("data the check writes itself is never evidence"));
+    assert!(
+        finding
+            .contains("movable inputs must exist under the check's selected root before the run")
+    );
+    assert!(
         finding.contains(
-            "stop the check's program from regenerating the named input or stop naming it"
+            "select the root that contains the existing implementation or test dependency"
         )
     );
+    assert!(
+        finding.contains(
+            "the check must still fail on its own assertion when that input is moved aside"
+        )
+    );
+    let recreated = ["output/state.txt".to_string()];
+    let diagnostics = describe_candidates_with_run_state(
+        &[super::mutation::CandidateDiagnostic {
+            path: recreated[0].clone(),
+            exclusion: None,
+        }],
+        &std::collections::BTreeSet::new(),
+        &recreated,
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::from(recreated.clone()),
+        true,
+    );
+    assert!(
+        diagnostics
+            .contains("the check recreated this path while running (observed): output/state.txt")
+    );
+    assert!(
+        super::mutation::ExclusionReason::CheckRecreatedPathObserved
+            .label()
+            .contains("the check recreated this path while running (observed)")
+    );
+}
+
+#[test]
+fn failed_move_and_recreated_input_get_distinct_grouped_reasons() {
+    let recreated = "data/recreated.txt".to_string();
+    let move_failed = "data/unmoved.txt".to_string();
+    let observed_recreation = super::mutation::ExclusionReason::CheckRecreatedPathObserved.label();
+    let diagnostics = describe_candidates_with_run_state(
+        &[
+            super::mutation::CandidateDiagnostic {
+                path: move_failed.clone(),
+                exclusion: None,
+            },
+            super::mutation::CandidateDiagnostic {
+                path: recreated.clone(),
+                exclusion: None,
+            },
+        ],
+        &std::collections::BTreeSet::from([move_failed.clone(), recreated.clone()]),
+        &[recreated.clone()],
+        &std::collections::BTreeSet::from([recreated.clone()]),
+        &std::collections::BTreeSet::from([recreated.clone()]),
+        true,
+    );
+
+    assert!(diagnostics.contains(&format!(
+        "the host could not move this input aside: {move_failed}"
+    )));
+    assert!(diagnostics.contains(&format!("{observed_recreation}: {recreated}")));
+    assert_eq!(diagnostics.matches(observed_recreation).count(), 1);
+    assert!(!diagnostics.contains(&format!("{observed_recreation}: {move_failed}")));
 }
 
 #[test]
