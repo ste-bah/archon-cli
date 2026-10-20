@@ -1,8 +1,9 @@
-//! Materialize relative check inputs that name project siblings. A Git sibling
-//! is cloned at HEAD, so uncommitted changes are not seen; the copied HEAD is
-//! verified and recorded. A non-Git sibling is copied from its current files,
-//! excluding build-output directories below its root, and its evidence has no
-//! commit.
+//! Materialize relative check inputs that name project siblings. The
+//! repository sibling aliases the site's committed checkout. Other Git
+//! siblings are cloned at HEAD, so uncommitted changes are not seen; the
+//! copied HEAD is verified and recorded. A non-Git sibling is copied from its
+//! current files, excluding build-output directories below its root, and its
+//! evidence has no commit.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -132,15 +133,49 @@ pub(super) fn copy_for_checks_with_check_map(
                     .entry(entry.id.clone())
                     .or_default()
                     .push(sibling.source.clone());
-                paths.push((copied_root.join(&relative), relative, sibling.source));
+                let repository_relative = sibling
+                    .source
+                    .strip_prefix(&repository)
+                    .ok()
+                    .map(Path::to_path_buf);
+                paths.push((
+                    copied_root.join(&relative),
+                    relative,
+                    sibling.source,
+                    repository_relative,
+                ));
             }
         }
     }
     paths.sort();
     paths.dedup_by(|a, b| a.0 == b.0);
     let mut evidence = std::collections::BTreeMap::new();
-    for (destination, relative, source) in paths {
-        let commit = if destination.exists() {
+    for (destination, relative, source, repository_relative) in paths {
+        let commit = if let Some(repository_relative) = repository_relative {
+            let target = copied_repository.join(repository_relative);
+            if destination != target {
+                let already_points_to_target = destination.exists()
+                    && destination
+                        .canonicalize()
+                        .ok()
+                        .zip(target.canonicalize().ok())
+                        .is_some_and(|(destination, target)| destination == target);
+                if destination.exists() && !already_points_to_target {
+                    return Err(Unrun(format!(
+                        "sibling alias {} already exists outside the repository copy",
+                        destination.display()
+                    )));
+                }
+                if !already_points_to_target {
+                    if let Some(parent) = destination.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|error| Unrun(format!("{}: {error}", parent.display())))?;
+                    }
+                    link_repository_copy(&target, &destination)?;
+                }
+            }
+            Some(git_head(copied_repository)?)
+        } else if destination.exists() {
             None
         } else {
             if let Some(parent) = destination.parent() {
@@ -328,6 +363,24 @@ fn sibling_root_name(relative: &Path) -> Option<String> {
 
 fn git_repository(path: &Path) -> bool {
     path.join(".git").exists()
+}
+
+fn link_repository_copy(target: &Path, destination: &Path) -> Result<(), Unrun> {
+    #[cfg(unix)]
+    let result = std::os::unix::fs::symlink(target, destination);
+    #[cfg(windows)]
+    let result = if target.is_dir() {
+        std::os::windows::fs::symlink_dir(target, destination)
+    } else {
+        std::os::windows::fs::symlink_file(target, destination)
+    };
+    result.map_err(|error| {
+        Unrun(format!(
+            "could not link repository copy {} at sibling alias {}: {error}",
+            target.display(),
+            destination.display()
+        ))
+    })
 }
 
 fn clone_head(source: &Path, destination: &Path) -> Result<String, Unrun> {
