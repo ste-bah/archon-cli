@@ -2,11 +2,13 @@
 //! (`workflow_acceptance_executability_verdict`) is unproven: the host's,
 //! retried. But the base commit never changes, so a retry that meets the
 //! same failure would meet it forever, and a task must always stay
-//! implementable (Issue 328 round 2). So the host remembers, per base
-//! commit and exact check text, that it saw no verdict; the next time it
-//! sees none again, the check goes to its author as a finding -- through
-//! the same path as a check that cannot fail -- to make it fail by its own
-//! assertion. A re-authored check has new text and starts afresh; an author
+//! implementable (Issue 328 round 2). The host remembers strikes: a
+//! missing-setup-path strike is keyed by commit, check id and the normalised
+//! path from the selected root, so it survives re-authoring; every other
+//! strike class is keyed by the executed text and starts afresh when the
+//! check changes. The next time it sees the same no-verdict failure again,
+//! the check goes to its author as a finding -- through the same path as a
+//! check that cannot fail -- to make it fail by its own assertion. An author
 //! that makes no progress pauses the run, as every re-author does. A check
 //! that later gives a verdict there forgets the strike.
 //!
@@ -174,9 +176,14 @@ fn setup_path_failure(
     super::verdict::setup_path::failure(text, result, at)
 }
 
-/// The strike file of check `id` of `contract` on `commit`.
+/// The legacy strike file, keyed by the exact check text, id and commit.
 fn strike(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) -> PathBuf {
-    strike_file(probe, "unproven-on-base", commit, contract, id, "")
+    let identity = format!("{commit}\0{id}\0{}", check_text(contract, id));
+    probe
+        .project
+        .join(FREEZE_CACHE_DIR)
+        .join("unproven-on-base")
+        .join(format!("{}.strike", content_digest(identity.as_bytes())))
 }
 
 /// The stall strike of check `id` of `contract` on `commit`: its identity is
@@ -189,30 +196,75 @@ fn stall_strike(
     id: &str,
 ) -> PathBuf {
     let window = probe.check_bound_secs().to_string();
-    strike_file(probe, "stalled-on-base", commit, contract, id, &window)
+    let text = check_text(contract, id);
+    let identity = format!("{commit}\0{id}\0{text}\0{window}");
+    probe
+        .project
+        .join(FREEZE_CACHE_DIR)
+        .join("stalled-on-base")
+        .join(format!("{}.strike", content_digest(identity.as_bytes())))
 }
 
-fn strike_file(
-    probe: &HostProbe,
-    kind: &str,
-    commit: &str,
-    contract: &AcceptanceContract,
-    id: &str,
-    salt: &str,
-) -> PathBuf {
-    let text = (contract.acceptance.iter())
+fn check_text<'a>(contract: &'a AcceptanceContract, id: &str) -> &'a str {
+    (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .find(|entry| entry.id == id)
         .and_then(executed_text)
-        .map_or("", |(_, text)| text);
-    let mut identity = format!("{commit}\0{id}\0{text}");
-    if !salt.is_empty() {
-        identity.push_str(&format!("\0{salt}"));
+        .map_or("", |(_, text)| text)
+}
+
+/// Special identity for a selected missing-setup-path failure. Other
+/// no-verdict failures keep the legacy exact-text identity.
+fn setup_path_signature(
+    contract: &AcceptanceContract,
+    id: &str,
+    result: &CheckResult,
+    selected_why: &str,
+    at: &Context,
+) -> Option<String> {
+    let entry = (contract.acceptance.iter())
+        .chain(&contract.supplementary)
+        .find(|entry| entry.id == id);
+    let (_, text) = executed_text(entry?)?;
+    let why = super::verdict::setup_path::failure(text, result, at)?;
+    if why != selected_why {
+        return None;
     }
-    let key = content_digest(identity.as_bytes());
-    (probe.project.join(FREEZE_CACHE_DIR))
-        .join(kind)
-        .join(format!("{key}.strike"))
+    let path = why.split_once("it names the path `")?.1.split_once('`')?.0;
+    let cwd = match &entry?.check {
+        archon_workflow::task_set_contract::AcceptanceCheck::Command { cwd, .. } => match cwd {
+            archon_workflow::task_set_contract::TrustedCwd::ProjectRoot => "project_root",
+            archon_workflow::task_set_contract::TrustedCwd::RepoRoot => "repo_root",
+        },
+        _ => "selected_root",
+    };
+    Some(format!("setup-path\0{cwd}\0{}", normalize_path(path)))
+}
+
+fn normalize_path(path: &str) -> String {
+    use std::path::Component;
+    let mut parts: Vec<String> = Vec::new();
+    let absolute = std::path::Path::new(path).is_absolute();
+    for component in std::path::Path::new(path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if parts.last().is_some_and(|part| part != "..") {
+                    parts.pop();
+                } else if !std::path::Path::new(path).is_absolute() {
+                    parts.push("..".into());
+                }
+            }
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    let normalized = parts.join("/");
+    if absolute {
+        format!("/{normalized}")
+    } else {
+        normalized
+    }
 }
 
 /// Settle check `id`, which failed on `commit` without a verdict (`why`):
@@ -225,22 +277,32 @@ pub(super) fn settle(
     contract: &AcceptanceContract,
     result: &CheckResult,
     why: &str,
+    at: &Context,
 ) -> Option<String> {
     let id = result.acceptance_id.as_str();
     let short: String = commit.chars().take(12).collect();
     let (environment, forwarded) = super::sites::site_environment(probe);
     let redactor = Redactor::for_environment(environment, &forwarded);
     let evidence = program_output(&result.stderr, &redactor, EVIDENCE_BYTES);
-    strike_or_unproven(probe, commit, contract, id, why, || {
-        (
-            format!(
-                "check '{id}': it cannot be proven on the base commit {short}: {why}. It failed so again when the host ran it on that same commit, and the commit never changes, so no retry can prove it. Its stderr there:\n{evidence}\nMake it fail by its own assertion on that tree -- exercise what the implementation must add -- not through a tool, build or environment it cannot run there"
-            ),
-            format!(
-                "it failed on the pre-implementation tree at {short}, but {why}, so it gave no verdict there and is not proven able to fail; it is probed again on retry, and goes to its author if it fails so again. Its stderr there:\n{evidence}"
-            ),
-        )
-    })
+    let signature = setup_path_signature(contract, id, result, why, at);
+    strike_or_unproven(
+        probe,
+        commit,
+        contract,
+        id,
+        signature.as_deref(),
+        why,
+        || {
+            (
+                format!(
+                    "check '{id}': it cannot be proven on the base commit {short}: {why}. It failed so again when the host ran it on that same commit, and the commit never changes, so no retry can prove it. Its stderr there:\n{evidence}\nMake it fail by its own assertion on that tree -- exercise what the implementation must add -- not through a tool, build or environment it cannot run there"
+                ),
+                format!(
+                    "it failed on the pre-implementation tree at {short}, but {why}, so it gave no verdict there and is not proven able to fail; it is probed again on retry, and goes to its author if it fails so again. Its stderr there:\n{evidence}"
+                ),
+            )
+        },
+    )
 }
 
 /// Settle check `id`, which made no progress (no output, no process-tree
@@ -311,10 +373,20 @@ fn strike_or_unproven(
     commit: &str,
     contract: &AcceptanceContract,
     id: &str,
+    setup_signature: Option<&str>,
     why: &str,
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
-    let path = strike(probe, commit, contract, id);
+    let path = match setup_signature {
+        Some(signature) => probe
+            .project
+            .join(FREEZE_CACHE_DIR)
+            .join("unproven-on-base")
+            .join("setup")
+            .join(content_digest(format!("{commit}\0{id}").as_bytes()))
+            .join(format!("{}.strike", content_digest(signature.as_bytes()))),
+        None => strike(probe, commit, contract, id),
+    };
     struck(probe, &path, id, why, Credit::Saved, texts)
 }
 
@@ -388,8 +460,36 @@ fn struck(
 
 /// Forget any strike of check `id` on `commit`: it gave a verdict there.
 pub(super) fn clear(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
-    let path = strike(probe, commit, contract, id);
-    let cleared = archon_workflow::stage_write::remove_file(&path);
+    let legacy = strike(probe, commit, contract, id);
+    let setup = probe
+        .project
+        .join(FREEZE_CACHE_DIR)
+        .join("unproven-on-base")
+        .join("setup")
+        .join(content_digest(format!("{commit}\0{id}").as_bytes()));
+    let cleared = archon_workflow::stage_write::with_write(|| {
+        match std::fs::remove_file(&legacy) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(archon_workflow::WorkflowError::Io {
+                    path: legacy,
+                    source,
+                });
+            }
+        }
+        match std::fs::remove_dir_all(&setup) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(archon_workflow::WorkflowError::Io {
+                    path: setup,
+                    source,
+                });
+            }
+        }
+        Ok(())
+    });
     if let Err(error) = cleared {
         probe.unproven(id, format!("baseline strike could not be cleared: {error}"));
     }

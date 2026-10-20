@@ -78,6 +78,7 @@ async fn takeover(case: u8) {
                 classified
                     .as_deref()
                     .expect("missing tool must give no verdict"),
+                &at,
             );
             assert!(
                 finding.is_none(),

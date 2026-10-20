@@ -385,7 +385,7 @@ pub(super) async fn cannot_fail_findings(
                 // Issue 328: failing without a verdict proves nothing; failing
                 // so again on the same base goes to the author.
                 let commit = &baseline.commit;
-                if let Some(finding) = silent::settle(probe, commit, contract, result, &why) {
+                if let Some(finding) = silent::settle(probe, commit, contract, result, &why, &at) {
                     findings.insert(id.clone(), finding);
                 }
                 continue;

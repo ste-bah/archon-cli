@@ -65,7 +65,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // copy layout matches baseline and absent-sibling failures give no verdict.
         // 37: #468 mutation verdicts route every final or transiently recreated input to the author, and are saved or memoized only when that run's markers show every moved input was restored.
         // 38: saved re-author candidates skip only authoring and candidate judging; every reuse reruns host proof and passability gates, and prompt and judge instruction sources bind the key.
-        version: 38,
+        // 39: baseline no-verdict strikes identify the failure cause, so re-authoring the same missing setup path still reaches its author.
+        version: 39,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -90,7 +91,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #422 #386 #387 #442 #443 #441 #447 #446 #340 #457 #444 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
+        sources_digest: "968c0e3e9525d94579d6755114de4799e929356793b11e44b570705372440967",
         build_bound: false,
     },
     CapabilityLogic {
@@ -109,7 +110,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #366 #422 #386 #387 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
+        sources_digest: "968c0e3e9525d94579d6755114de4799e929356793b11e44b570705372440967",
         build_bound: false,
     },
     CapabilityLogic {
@@ -246,7 +247,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #417 #434 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "3e82ebb50e460b2e0de7c2018dbc47b78b06cc0c6116d1366cc0284e36277456",
+        sources_digest: "15474c316dc9f267a08621b6d8af296965fa389c0c9fb389dd10e24195906a6e",
         build_bound: true,
     },
     CapabilityLogic {
@@ -263,7 +264,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #366 #434 #417 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "3e82ebb50e460b2e0de7c2018dbc47b78b06cc0c6116d1366cc0284e36277456",
+        sources_digest: "15474c316dc9f267a08621b6d8af296965fa389c0c9fb389dd10e24195906a6e",
         build_bound: true,
     },
 ];
