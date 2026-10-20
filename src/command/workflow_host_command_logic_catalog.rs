@@ -117,7 +117,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // what authors submit; host acceptance verdict rules are unchanged.
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #468 follow-up re-pin: complete per-input state, transient recreation markers and status markers route recreated inputs to the author, unrestored inputs to host-unproven, and only restored inputs to the normal verdict; persistence still requires restoration markers.
-        sources_digest: "f5d93919e912ee69076fd5b2ddcec1d233b6ef0afa15dcc445e5bc572a5d2737",
+        // #469 re-pin only: reply marker stripping and midline-fence diagnosis change source closure; freeze behavior version stays fixed.
+        sources_digest: "52f30e787857aff394b2206d8308457c04babc9cbf3c9bc1ed83c3c5a8f2912b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -180,7 +181,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #467/#468 re-pin: diagnostic text changes do not alter this verdict.
         // #468 re-pin only: save-time mutation restoration gating does not change skeleton verdicts.
-        sources_digest: "f5d93919e912ee69076fd5b2ddcec1d233b6ef0afa15dcc445e5bc572a5d2737",
+        // #469 re-pin only: shared reply parsing changed source closure; skeleton verdict logic stays fixed.
+        sources_digest: "52f30e787857aff394b2206d8308457c04babc9cbf3c9bc1ed83c3c5a8f2912b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -249,7 +251,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         // #467 re-pin: EOF diagnostic placement changes no body verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
+        // #469 re-pin only: acceptance reply marker handling changed the shared source closure; body landing version stays fixed.
+        sources_digest: "0caae72f6125094f2518e627a57ec599a5aafef43ceb8855c64ae74653f60414",
         build_bound: false,
     },
     CapabilityLogic {
@@ -310,7 +313,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         // #467 re-pin: EOF diagnostic placement changes no lint verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
-        sources_digest: "861d4dc584f8cd6e477374a544aa766851c84c8c77d3bc109161ba2bf5225d2f",
+        // #469 re-pin only: acceptance reply marker handling changed the shared source closure; lint version stays fixed.
+        sources_digest: "0caae72f6125094f2518e627a57ec599a5aafef43ceb8855c64ae74653f60414",
         build_bound: false,
     },
     CapabilityLogic {
@@ -335,7 +339,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: review 4's verdict change is already counted in version 6.
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         version: 6,
-        sources_digest: "1d0bdcbc9dc69037a6524cb245c6cab4bcfcf2c09324ebca5d784ef883fd9812",
+        // #469 re-pin only: shared acceptance reply parsing changed source closure; trace verdict logic stays fixed.
+        sources_digest: "6015a6e24b2baa7bdf4a68b0be85249acb8eb5678550904cd50cf08bfcc05cc6",
         build_bound: true,
     },
     CapabilityLogic {
@@ -401,7 +406,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #468 re-pin only: an unrestored mutation result cannot be reused; frozen-chain verification runs no mutation probe.
-        sources_digest: "cc15b6b654522512541c47a24baa12c9d9537f774f2e1727956def024e2e0a88",
+        // #469 re-pin only: shared reply parsing changed source closure; frozen acceptance verification stays fixed.
+        sources_digest: "6978ffd72bf364870066d56fd31e4602cd8a907ffe8cd9da1fcf0285136716dc",
         build_bound: true,
     },
     CapabilityLogic {
@@ -460,7 +466,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #468 re-pin only: save-time mutation restoration gating does not change frozen skeleton verification.
-        sources_digest: "cc15b6b654522512541c47a24baa12c9d9537f774f2e1727956def024e2e0a88",
+        // #469 re-pin only: shared reply parsing changed source closure; frozen skeleton verification stays fixed.
+        sources_digest: "6978ffd72bf364870066d56fd31e4602cd8a907ffe8cd9da1fcf0285136716dc",
         build_bound: true,
     },
 ];

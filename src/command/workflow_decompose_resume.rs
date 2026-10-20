@@ -36,6 +36,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         return Err(anyhow!(DECOMPOSE_GATE_OFF_REMEDY));
     }
     let project_root = canonical_existing(cwd, "project root")?;
+    let reply_leaked_markers =
+        crate::command::workflow_live::load_reply_leaked_markers_for_fixed(&project_root)?;
     let store = WorkflowStore::project(&project_root);
     let execution_lease =
         crate::command::workflow_task_root_reclaim::begin_execution(&store, run_id)?;
@@ -308,13 +310,14 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
     let criteria = crate::command::workflow_decompose_seed::host_criteria(&expected_arguments);
-    let seed = crate::command::workflow_decompose_seed::current_seed_with_requirement_texts(
+    let seed = crate::command::workflow_decompose_seed::current_seed_with_reply_markers(
         &store,
         run_id,
         &log_path,
         &criteria,
         &prd_requirement_texts,
         Some(&resume_chain.argument),
+        &reply_leaked_markers,
     )?;
     let (mut script_arguments, script_seed) =
         crate::command::workflow_decompose_seed::resume_script_arguments(
@@ -327,6 +330,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             (&expected_arguments, prd_text),
             false,
         )?;
+    script_arguments =
+        super::script_arguments_with_reply_markers(&script_arguments, &reply_leaked_markers);
     let ledger = crate::command::workflow_decompose_remediation::prepare(
         &store,
         run_id,

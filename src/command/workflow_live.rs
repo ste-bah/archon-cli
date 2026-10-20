@@ -330,3 +330,7 @@ pub(crate) mod criterion_results_test_support;
 pub(crate) fn load_learning_config_for_fixed(cwd: &Path) -> archon_core::config::LearningConfig {
     workflow_live_config_layers::load_learning_config(cwd, None)
 }
+
+pub(crate) fn load_reply_leaked_markers_for_fixed(cwd: &Path) -> anyhow::Result<Vec<String>> {
+    workflow_live_config_layers::load_reply_leaked_markers(cwd, None)
+}

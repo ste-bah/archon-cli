@@ -1,4 +1,8 @@
-use super::{extract_object, reply_entry, reply_entry_with_blocks, resolve_command_block};
+use super::{
+    extract_object, extract_object_with_markers, reply_entry, reply_entry_with_blocks,
+    resolve_command_block, resolve_command_block_with_markers, unclosed_block_refusal,
+    unclosed_block_refusal_with_markers,
+};
 use serde_json::json;
 
 #[derive(serde::Deserialize)]
@@ -166,6 +170,65 @@ fn check_block_refusals_and_inline_command_match_contract() {
 }
 
 #[test]
+fn live_midline_fence_diagnosis_and_marker_removal_match_javascript() {
+    let marker = "</think>".to_string();
+    let mut lines = vec![format!(
+        "{{\"id\":\"A\",\"check\":{{\"kind\":\"command\",\"command_block\":true}}}}{marker}```check"
+    )];
+    lines.extend((1..=73).map(|line| format!("script line {line}")));
+    lines.push("```".into());
+    let reply = lines.join("\n");
+    assert_eq!(reply.lines().count(), 75);
+    let refusal = unclosed_block_refusal(&reply).unwrap();
+    assert!(refusal.starts_with("fence marker on line 1 follows text; a fence must start its own line; text before the marker: "));
+    assert!(refusal.contains("\\\"id\\\":\\\"A\\\""));
+    assert!(!refusal.contains("may have been cut off"));
+
+    let object = extract_object_with_markers(&reply, std::slice::from_ref(&marker));
+    let mut entry: serde_json::Value = serde_json::from_str(&object).unwrap();
+    assert_eq!(
+        resolve_command_block_with_markers(&mut entry, &reply, std::slice::from_ref(&marker)),
+        None
+    );
+    let expected = (1..=73)
+        .map(|line| format!("script line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(entry["check"]["command"], expected);
+
+    let js_source = include_str!("workflow_decompose_reply_blocks.js");
+    let script = format!(
+        "{js_source}\nconst reply = {}; const markers = {}; let diagnostic = ''; try {{ extractJsonObject(reply); }} catch (error) {{ diagnostic = error.message; }} const entry = JSON.parse(extractJsonObject(reply, markers)); const refusal = resolveCommandBlock(entry, reply, markers); if (refusal) throw new Error(refusal); process.stdout.write(JSON.stringify({{command:entry.check.command, diagnostic}}));",
+        serde_json::to_string(&reply).unwrap(),
+        serde_json::to_string(&[marker]).unwrap()
+    );
+    let output = std::process::Command::new("node")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .expect("node must be available for the JavaScript resolver parity check");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parity: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parity["command"], expected);
+    assert_eq!(parity["diagnostic"], refusal);
+
+    let cut_off = "{\"id\":\"A\"}\n```check\nscript";
+    assert!(
+        unclosed_block_refusal(cut_off)
+            .unwrap()
+            .contains("may have been cut off")
+    );
+    assert_eq!(
+        unclosed_block_refusal("```json\n{}\n```\n```").unwrap(),
+        "closing fence on line 4 has no opener; every closing fence must close an open block"
+    );
+}
+
+#[test]
 fn recorded_live_replies_use_the_shared_expected_outcomes_reply_blocks() {
     let fixtures: Vec<ValueFixture> =
         serde_json::from_str(include_str!("fixtures/decompose_live_reply_outcomes.json")).unwrap();
@@ -253,4 +316,71 @@ fn non_entry_json_replies_are_unreadable_without_panicking() {
             "non-entry reply should follow the missing-entry path: {reply}"
         );
     }
+}
+
+#[test]
+fn configured_reply_markers_are_removed_outside_fences_and_preserved_inside_with_javascript_parity()
+{
+    let markers = vec!["<LEAK_A>".to_string(), "<LEAK_B>".to_string()];
+    let reply = "<LEAK_A><LEAK_B>\r\n{\"id\":\"A\",\"check\":{\"kind\":\"command\",\"command_block\":true}}<LEAK_A><LEAK_B>```check\r\necho \"<LEAK_A><LEAK_B>\"\r\n```\r\n<LEAK_B>tail";
+    let json = extract_object_with_markers(reply, &markers);
+    assert_eq!(
+        json,
+        "{\"id\":\"A\",\"check\":{\"kind\":\"command\",\"command_block\":true}}"
+    );
+    let mut entry = json!( {"id":"A","check":{"kind":"command","command_block":true}} );
+    assert_eq!(
+        resolve_command_block_with_markers(&mut entry, reply, &markers),
+        None
+    );
+    assert_eq!(entry["check"]["command"], "echo \"<LEAK_A><LEAK_B>\"");
+    assert!(
+        unclosed_block_refusal_with_markers("<LEAK_A>```check\r\necho x", &markers)
+            .unwrap()
+            .contains("the reply may have been cut off")
+    );
+
+    let js_source = include_str!("workflow_decompose_reply_blocks.js");
+    let script = format!(
+        "{js_source}\nconst reply = {}; const markers = {}; const json = extractJsonObject(reply, markers); const entry = {{id:'A',check:{{kind:'command',command_block:true}}}}; const refusal = resolveCommandBlock(entry, reply, markers); if (refusal) throw new Error(refusal); let cutoff = ''; try {{ replyFenceBlocks('```check\\r\\necho x',markers); }} catch (error) {{ cutoff = error.message; }} process.stdout.write(JSON.stringify({{json,command:entry.check.command,cutoff}}));",
+        serde_json::to_string(reply).unwrap(),
+        serde_json::to_string(&markers).unwrap()
+    );
+    let output = std::process::Command::new("node")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .expect("node must be available for the JavaScript resolver parity check");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let js: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(js["json"], json);
+    assert_eq!(js["command"], entry["check"]["command"]);
+    assert!(js["cutoff"].as_str().unwrap().contains("the reply may have been cut off"));
+}
+
+#[test]
+fn midline_fence_boundary_requires_the_first_complete_json_object() {
+    let marker = "<LEAK_A>".to_string();
+    let markers = std::slice::from_ref(&marker);
+    let json = r#"{"id":"A","note":"a}b","nested":{"value":{"ok":true}},"check":{"kind":"command","command_block":true}}"#;
+    let valid = format!("{json}{marker}```check\necho ok\n```");
+    assert_eq!(extract_object_with_markers(&valid, markers), json);
+    assert!(unclosed_block_refusal_with_markers(&valid, markers).is_none());
+
+    let prose =
+        format!("{{\"id\":\"A\",\"nested\":{{\"ok\":true}}}} prose }}{marker}```check\nbody\n```");
+    let refusal = unclosed_block_refusal_with_markers(&prose, markers).unwrap();
+    assert!(
+        refusal
+            .starts_with("fence marker on line 1 follows text; a fence must start its own line;")
+    );
+    assert!(
+        unclosed_block_refusal_with_markers(&valid, &[])
+            .unwrap()
+            .starts_with("fence marker on line 1 follows text; a fence must start its own line;")
+    );
 }

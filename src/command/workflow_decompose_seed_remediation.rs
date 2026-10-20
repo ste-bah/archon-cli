@@ -30,6 +30,7 @@ pub(crate) fn completed_remediation_seed(
         criteria,
         requirement_texts,
         Some(resume_frozen_chain),
+        &[],
     )?;
     seed.subjects.clear();
     Ok(Some(seed))

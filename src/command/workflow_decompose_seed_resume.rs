@@ -110,6 +110,7 @@ pub(crate) fn resume_script_seed(
             criteria,
             requirement_texts,
             Some(resume_frozen_chain),
+            &[],
         )?;
         let source = if read_only {
             format!(

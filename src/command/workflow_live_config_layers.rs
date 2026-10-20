@@ -47,6 +47,38 @@ fn config_table(merged: &toml::Value, path: &[&str]) -> toml::Value {
         .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
 }
 
+/// Literal reply text markers that an upstream provider may leak into the
+/// visible reply. An empty or omitted list strips nothing.
+pub(super) fn load_reply_leaked_markers(
+    cwd: &Path,
+    config_path: Option<&Path>,
+) -> anyhow::Result<Vec<String>> {
+    let merged = merged_config_layers(cwd, config_path);
+    let Some(value) = merged
+        .get("workflow")
+        .and_then(|table| table.get("reply_leaked_markers"))
+    else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_array()
+        .ok_or_else(|| {
+            anyhow::anyhow!("workflow.reply_leaked_markers must be an array of literal strings")
+        })?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .filter(|marker| !marker.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "workflow.reply_leaked_markers entries must be non-empty strings"
+                    )
+                })
+        })
+        .collect()
+}
+
 fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfig {
     config_table(&merged_config_layers(cwd, config_path), &["workflow"])
         .try_into()

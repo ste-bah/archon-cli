@@ -171,6 +171,7 @@ fn a_crash_between_the_seed_record_and_its_event_writes_the_event_once() {
         &criteria(),
         &std::collections::BTreeMap::new(),
         None,
+        &[],
     )
     .unwrap();
     write_seed(&store, &run_id, &derived).unwrap();
@@ -209,6 +210,7 @@ fn resume_frozen_chain_is_durable_and_overrides_only_runtime_arguments() {
         &criteria(),
         &std::collections::BTreeMap::new(),
         Some(&live_chain),
+        &[],
     )
     .unwrap();
     write_seed(&store, &run_id, &seed).unwrap();

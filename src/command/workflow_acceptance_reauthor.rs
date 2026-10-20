@@ -9,12 +9,19 @@ use std::collections::BTreeMap;
 
 use archon_core::agents::harness::HOST_READ_ONLY_TOOLS;
 use archon_workflow::task_set_contract::{
-    AcceptanceCheck, AcceptanceCriterion, JudgeDecision, JudgeVerdict, refuted_check_message,
+    AcceptanceCriterion, JudgeDecision, refuted_check_message,
 };
+#[cfg(test)]
+use archon_workflow::task_set_contract::AcceptanceCheck;
 
 use super::executability::ExecutabilityProbe;
 use super::live_root;
 use super::*;
+#[path = "workflow_acceptance_reauthor_parse.rs"]
+mod reply_parse;
+use reply_parse::candidate_entry_with_markers;
+#[cfg(test)]
+use reply_parse::candidate_entry;
 
 /// Consecutive author-then-judge attempts that repair no named check before
 /// the operation stops and fails with its report.
@@ -221,6 +228,8 @@ pub(crate) async fn reauthor(
     // Issue 275: a replacement is held to the requirements it covers.
     let prd_text = std::fs::read_to_string(&scope.prd_path)
         .with_context(|| format!("reading the PRD {}", scope.prd_path.display()))?;
+    let reply_leaked_markers =
+        crate::command::workflow_live::load_reply_leaked_markers_for_fixed(&scope.project_root)?;
     for id in ids {
         let frozen = entry(contract, id).expect("named ids were checked above");
         let first = if let Some(seed) = gate.seeds.get(id).or_else(|| crashed.get(id)) {
@@ -248,7 +257,7 @@ pub(crate) async fn reauthor(
             let frozen = entry(contract, id).expect("named ids were checked above");
             let notes = feedback.get_mut(id).expect("feedback seeded per id");
             let reply = author_entry(client, scope, frozen, notes, attempt).await?;
-            match candidate_entry(&reply, frozen)
+            match candidate_entry_with_markers(&reply, frozen, &reply_leaked_markers)
                 .and_then(|candidate| author::live_root_refusal(candidate, &refused))
                 .and_then(|candidate| check_defects(&working, candidate))
             {
@@ -379,83 +388,6 @@ pub(crate) async fn reauthor(
         pending: pending.into_iter().collect(),
     }
     .into())
-}
-
-/// The host-owned parts of a re-authored entry are never the author's:
-/// criterion text and gap declaration stay frozen, the judgment is the
-/// judge's. A reply that is not one entry for this id is the author's defect.
-fn candidate_entry(
-    reply: &str,
-    frozen: &AcceptanceCriterion,
-) -> std::result::Result<AcceptanceCriterion, String> {
-    if let Some(refusal) =
-        crate::command::workflow_task_set::acceptance_reply_blocks::unclosed_block_refusal(reply)
-    {
-        return Err(refusal);
-    }
-    let document =
-        crate::command::workflow_freeze_candidate::candidate_document(reply.trim().as_bytes());
-    let mut value: serde_json::Value = match serde_json::from_slice(&document) {
-        Ok(value) => value,
-        Err(error) => {
-            let extracted =
-                crate::command::workflow_task_set::acceptance_reply_blocks::extract_object(reply);
-            let diagnostic =
-                crate::command::workflow_json_parse_diagnostic::describe(&document, &error);
-            serde_json::from_str(&extracted).map_err(|_| format!(
-                "the reply for check '{}' is not one JSON entry ({diagnostic}); return the raw JSON object alone",
-                frozen.id
-            ))?
-        }
-    };
-    if value["id"] != serde_json::json!(frozen.id)
-        && let Some([only]) = value["acceptance"].as_array().map(Vec::as_slice)
-        && only["id"] == serde_json::json!(frozen.id)
-    {
-        value = only.clone();
-    }
-    if value["id"] != serde_json::json!(frozen.id) {
-        return Err(format!(
-            "the reply is not an entry with id '{}'; return exactly that entry",
-            frozen.id
-        ));
-    }
-    if let Some(refusal) =
-        crate::command::workflow_task_set::acceptance_reply_blocks::resolve_command_block(
-            &mut value, reply,
-        )
-    {
-        return Err(refusal);
-    }
-    let check: AcceptanceCheck =
-        serde_json::from_value(value["check"].clone()).map_err(|error| {
-            format!(
-                "check '{}': the entry's check does not match either shape ({error})",
-                frozen.id
-            )
-        })?;
-    if check == frozen.check {
-        return Err(format!(
-            "check '{}': the reply repeats the check being replaced; change it so it resolves every finding above",
-            frozen.id
-        ));
-    }
-    Ok(AcceptanceCriterion {
-        id: frozen.id.clone(),
-        criterion: frozen.criterion.clone(),
-        check,
-        gap_permitted: frozen.gap_permitted,
-        // Host-owned like the criterion: the requirements a check answers
-        // for are what it is judged against, never the author's to drop.
-        covers: frozen.covers.clone(),
-        judgment: JudgeVerdict {
-            verdict: JudgeDecision::Refuted,
-            counterexample: String::new(),
-            reason: String::new(),
-            host_call_id: String::new(),
-            sampling: None,
-        },
-    })
 }
 
 /// A candidate whose check carries a host-verifiable defect never reaches

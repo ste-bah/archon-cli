@@ -234,7 +234,7 @@ fn a_carried_entry_this_build_refuses_is_named_invalid() {
         .into_iter()
         .collect();
     let derived =
-        derive_with_requirement_texts(&records, &[], &criteria(&["AC-1"]), &requirements).unwrap();
+        derive_with_reply_markers(&records, &[], &criteria(&["AC-1"]), &requirements, &[]).unwrap();
     let (gates, _, _, invalid, carried) = entries_seed(&derived);
     assert_eq!(gates.len(), 2, "every gate, for the owed checks they name");
     assert_eq!(carried, 2);

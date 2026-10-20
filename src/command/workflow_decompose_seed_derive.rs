@@ -33,7 +33,7 @@ use super::seed_unmapped as unmapped;
 mod host_owned;
 use host_owned::HostOwned;
 #[path = "workflow_decompose_seed_record.rs"]
-mod record;
+pub(super) mod record;
 
 /// The acceptance gate. Its stdin is the candidate the script assembled.
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
@@ -203,14 +203,15 @@ pub(crate) fn derive(
     pause_ids: &[String],
     criteria: &BTreeMap<String, String>,
 ) -> Result<Derived> {
-    derive_with_requirement_texts(records, pause_ids, criteria, &BTreeMap::new())
+    derive_with_reply_markers(records, pause_ids, criteria, &BTreeMap::new(), &[])
 }
 
-pub(crate) fn derive_with_requirement_texts(
+pub(crate) fn derive_with_reply_markers(
     records: &[WorkflowV2CallRecord],
     pause_ids: &[String],
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
+    reply_leaked_markers: &[String],
 ) -> Result<Derived> {
     let records = ordered(records)?;
     let mut derived = Derived::default();
@@ -274,6 +275,7 @@ pub(crate) fn derive_with_requirement_texts(
                     .map(|requirement| format!("SUP-{requirement}")),
             )
             .collect(),
+        reply_leaked_markers,
     )? {
         derived.subjects.insert("acceptance".into(), seed);
     }
@@ -334,6 +336,7 @@ fn acceptance(
     gates: &[Gate<'_>],
     host: &HostOwned<'_>,
     known_ids: &std::collections::BTreeSet<String>,
+    reply_leaked_markers: &[String],
 ) -> Result<Option<SubjectSeed>> {
     let mut replies_read = Vec::new();
     let mut candidates = Vec::new();
@@ -350,7 +353,7 @@ fn acceptance(
             continue;
         };
         any_reply = true;
-        let entry = record::reply_entry_with_blocks(content, &id);
+        let entry = record::reply_entry_with_blocks_and_markers(content, &id, reply_leaked_markers);
         if let Some(entry) = entry.as_ref() {
             let text = serde_json::to_string(entry)?;
             let entry = host.stamp(entry.clone(), &id);

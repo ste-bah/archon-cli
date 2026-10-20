@@ -134,9 +134,9 @@ function seedEntries(seed, policy, state) {
   for (const reply of Array.isArray(seed.replies) ? seed.replies : []) {
     let entry = null;
     try {
-      entry = unwrapEntry(JSON.parse(reply.text), reply.id);
-      if (entry && replyFenceBlocks(reply.text).some((block) => block.info === "check")) {
-        const refusal = resolveCommandBlock(entry, reply.text);
+      entry = unwrapEntry(JSON.parse(extractJsonObject(reply.text, args.replyLeakedMarkers)), reply.id);
+      if (entry && replyFenceBlocks(reply.text, args.replyLeakedMarkers).some((block) => block.info === "check")) {
+        const refusal = resolveCommandBlock(entry, reply.text, args.replyLeakedMarkers);
         if (refusal) entry = null;
       }
     } catch (_) { entry = null; }
