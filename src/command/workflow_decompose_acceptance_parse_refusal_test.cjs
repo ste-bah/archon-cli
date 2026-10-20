@@ -154,6 +154,17 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(first.summary, /; excerpt: ".*<HERE>/);
   assert.ok(first.summary.includes('; a literal backslash inside a JSON string must be written as `\\\\`'), first.summary);
   assert.ok(first.summary.includes("Choose exactly one command form: for scripts, use the block form with kind and cwd, command_block true and no command field in the JSON check, followed by exactly one non-empty block whose fence info string is exactly 'check'; inline form puts one short line without quotes or backslashes in check.command with kind and cwd, and has no command_block or fence. Never write a script inside a JSON string."));
+  const multilineScriptReply = String.raw`{"id":"A","check":{"kind":"command","command":"set -eu\nprintf x\necho \q"}}`;
+  const multilineScriptRefusal = await refusal(multilineScriptReply);
+  assert.ok(multilineScriptRefusal.summary.includes('the check is a multi-line script; return it in block form instead:'), multilineScriptRefusal.summary);
+  assert.ok(multilineScriptRefusal.summary.includes('set "command_block": true in the entry'), multilineScriptRefusal.summary);
+  assert.ok(multilineScriptRefusal.summary.includes('fence labelled check after the JSON entry; then no escaping is needed'), multilineScriptRefusal.summary);
+  assert.ok(multilineScriptRefusal.summary.includes('; a literal backslash inside a JSON string must be written as `\\\\`'));
+  const outsideCommandRefusal = await refusal(String.raw`{"id":"A","label":"bad\q","check":{"kind":"command","command":"echo ok"}}`);
+  assert.ok(!outsideCommandRefusal.summary.includes('multi-line script'), outsideCommandRefusal.summary);
+  const multilineOutsideError = await refusal(String.raw`{"id":"A","check":{"kind":"command","command":"first\nsecond"},"label":"bad\q"}`);
+  assert.ok(multilineOutsideError.summary.includes('multi-line script'), multilineOutsideError.summary);
+  assert.ok(multilineOutsideError.summary.includes('literal backslash inside a JSON string must be written as `\\\\`'));
   assert.equal(first.summary, repeated.summary, 'identical malformed replies have identical refusal text');
   assert.notEqual(first.malformedClass, changed.malformedClass, 'a changed parse position has a distinct diagnostic key');
   const excerpt = first.summary.match(/; excerpt: ("(?:\\.|[^"\\])*")/);
@@ -215,6 +226,22 @@ async function refusal(reply, stopReason = 'end_turn') {
   const fenceRefusal = await refusal(unclosed);
   assert.equal(fenceRefusal.summary, `candidate artifact was refused: acceptance entry A: ${fenceMessage}`);
   assert.equal(fenceRefusal.malformedClass, 'unclosed-fence');
+  const leakedMarker = '</think>';
+  const liveReply = [
+    '{"id":"A","check":{"kind":"command","command_block":true}}' + leakedMarker + '```check',
+    ...Array.from({length:73}, (_, index) => `script line ${index + 1}`),
+    '```'
+  ].join('\n');
+  assert.equal(liveReply.split('\n').length, 75);
+  const livePrefix = '{"id":"A","check":{"kind":"command","command_block":true}}' + leakedMarker;
+  assert.throws(() => json.extractJsonObject(liveReply), error =>
+    error.message === `fence marker on line 1 follows text; a fence must start its own line; text before the marker: ${JSON.stringify(livePrefix)}`);
+  const liveEntry = JSON.parse(json.extractJsonObject(liveReply, [leakedMarker]));
+  assert.equal(json.resolveCommandBlock(liveEntry, liveReply, [leakedMarker]), null);
+  assert.equal(liveEntry.check.command, Array.from({length:73}, (_, index) => `script line ${index + 1}`).join('\n'));
+  assert.throws(() => json.extractJsonObject('```json\n{}\n```\n```'), error =>
+    error.message === 'closing fence on line 4 has no opener; every closing fence must close an open block');
+  assert.throws(() => json.extractJsonObject('{"id":"A"}\n```check\nscript'), /may have been cut off/);
   const trimmedLive = JSON.parse(fs.readFileSync(`${root}/fixtures/acceptance_author_unclosed_check_reply.json`, 'utf8')).content;
   assert.throws(() => json.extractJsonObject(trimmedLive), /the ```check block opened at line 2 is never closed/);
   const maxTokenRefusal = await refusal('{"id":"A"}', 'max_tokens');

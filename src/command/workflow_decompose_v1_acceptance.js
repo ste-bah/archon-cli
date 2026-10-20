@@ -33,6 +33,7 @@ function acceptanceAuthorPrompt() {
     "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
     "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
     "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.",
+    "For a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.",
     "Do not run commands or write files."
   ].join("\n");
 }
@@ -52,6 +53,7 @@ function acceptanceReplyFormat() {
     "",
     "Every fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.",
     "Choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.",
+    "For a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.",
     "The entry shapes earlier in this task are examples only; return one entry.",
     "Return exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
   ].join("\n");
@@ -159,6 +161,67 @@ function escapeDiagnosticControls(value) {
   }).join("");
 }
 
+function commandScriptNeedsBlock(source, offset) {
+  if (offset === null) return false;
+  const limit = Math.min(source.length, Math.max(0, offset));
+  const stack = [];
+  for (let index = 0; index < limit;) {
+    const character = source[index];
+    const parent = stack[stack.length - 1];
+    if (character === '"') {
+      const isKey = parent && parent.type === "object" && parent.expectKey;
+      const isCommand = !isKey && stack.length === 2 && stack[0].isTop && stack[1].isCheck
+        && stack[1].key === "command";
+      const valueStart = index + 1;
+      let cursor = valueStart, escapedNewline = false, closed = false;
+      for (; cursor < source.length; cursor++) {
+        if (source[cursor] === "\\") {
+          const escaped = source[cursor + 1];
+          if (escaped === "n" || escaped === "r") escapedNewline = true;
+          cursor += escaped === "u" && /^[0-9a-fA-F]{4}$/.test(source.slice(cursor + 2, cursor + 6)) ? 5 : 1;
+        } else if (source[cursor] === '"') {
+          closed = true;
+          break;
+        }
+      }
+      if (isCommand && offset >= valueStart && (!closed || offset <= cursor)) {
+        return hasEscapedLineBreak(source.slice(valueStart, Math.min(offset, cursor)))
+          || hasEscapedLineBreak(source.slice(Math.min(offset, cursor), cursor));
+      }
+      if (isCommand && closed && cursor < limit && escapedNewline) return true;
+      const raw = source.slice(valueStart, Math.min(cursor, limit));
+      if (isKey && closed && cursor < limit) {
+        try { parent.key = JSON.parse(`"${raw}"`); } catch { parent.key = ""; }
+        parent.expectKey = false;
+      }
+      index = Math.min(closed ? cursor + 1 : source.length, limit);
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      const isTop = stack.length === 0 && character === "{";
+      const isCheck = character === "{" && stack.length === 1 && parent.isTop && parent.key === "check";
+      stack.push({type:character === "{" ? "object" : "array", key:null, expectKey:character === "{", isTop, isCheck});
+    } else if (character === "}" || character === "]") {
+      stack.pop();
+    } else if (character === "," && parent && parent.type === "object") {
+      parent.key = null;
+      parent.expectKey = true;
+    }
+    index++;
+  }
+  return false;
+}
+
+function hasEscapedLineBreak(value) {
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] !== "\\" || index + 1 >= value.length) continue;
+    const escaped = value[index + 1];
+    if (escaped === "n" || escaped === "r") return true;
+    index += escaped === "u" && /^[0-9a-fA-F]{4}$/.test(value.slice(index + 2, index + 6)) ? 5 : 1;
+  }
+  return false;
+}
+
 // Keep malformed-reply refusals useful to the author without echoing the
 // whole reply. JSON.parse engines report positions in different forms; retain
 // their message and derive a nearby excerpt when a location is available.
@@ -194,6 +257,9 @@ function acceptanceParseRefusal(id, source, error) {
     offset = Math.min(Number(position[1]), source.length);
     location = ` at offset ${offset}`;
   }
+  const blockDirection = commandScriptNeedsBlock(source, offset)
+    ? ' the check is a multi-line script; return it in block form instead: set "command_block": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.'
+    : "";
   let excerpt = "";
   if (offset !== null) {
     // An invalid escape can split a credential field name before the shared
@@ -231,7 +297,7 @@ function acceptanceParseRefusal(id, source, error) {
   const excerptText = excerpt ? `; excerpt: ${JSON.stringify(excerpt)}` : "";
   const escapeRule = /invalid \\escape|bad escaped character/i.test(String(error && error.message || error || ""))
     ? "; a literal backslash inside a JSON string must be written as `\\\\`" : "";
-  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}${escapeRule}. Choose exactly one command form: for scripts, use the block form with kind and cwd, command_block true and no command field in the JSON check, followed by exactly one non-empty block whose fence info string is exactly 'check'; inline form puts one short line without quotes or backslashes in check.command with kind and cwd, and has no command_block or fence. Never write a script inside a JSON string.`;
+  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}${escapeRule}.${blockDirection} Choose exactly one command form: for scripts, use the block form with kind and cwd, command_block true and no command field in the JSON check, followed by exactly one non-empty block whose fence info string is exactly 'check'; inline form puts one short line without quotes or backslashes in check.command with kind and cwd, and has no command_block or fence. Never write a script inside a JSON string.`;
 }
 
 // H4 (Batch O): every PRD requirement id is covered by some check. The host
@@ -309,7 +375,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     let entry;
     let json;
     try {
-      json = extractJsonObject(result.content);
+      json = extractJsonObject(result.content, args.replyLeakedMarkers);
       entry = unwrapEntry(JSON.parse(json), id);
     } catch (error) {
       if (error && / is never closed \(the reply may have been cut off\)/.test(error.message)) {
@@ -323,7 +389,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       }
       return malformedAcceptanceFailure(id, acceptanceParseRefusal(id, json, error), parseErrorClass(error));
     }
-    const blockRefusal = resolveCommandBlock(entry, result.content);
+    const blockRefusal = resolveCommandBlock(entry, result.content, args.replyLeakedMarkers);
     if (blockRefusal) return malformedAcceptanceFailure(id, blockRefusal, "command-block-refusal");
     if (entry && entry.id === id) {
       setHostOwnedFields(entry, criteria);

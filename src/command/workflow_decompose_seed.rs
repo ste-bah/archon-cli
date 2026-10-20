@@ -23,6 +23,10 @@ pub(crate) const SEEDS_DIR: &str = "decomposition/phase-seeds";
 pub(crate) const SEED_SCHEMA_VERSION: u32 = 1;
 pub(crate) const SEED_EVENT: &str = "decomposition_phase_seeded";
 
+#[path = "workflow_decompose_seed_reply_markers.rs"]
+mod reply_markers;
+pub(crate) use reply_markers::current_seed_with_reply_markers;
+
 pub(crate) fn seed_unmapped(field: &str, reason: &str) -> anyhow::Error {
     crate::command::workflow_decompose::unmapped(field, reason)
 }
@@ -174,14 +178,16 @@ fn derive_seed(
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
     resume_frozen_chain: Option<&serde_json::Value>,
+    reply_leaked_markers: &[String],
 ) -> Result<PhaseSeed> {
     let results = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let records = results.load_call_records()?;
-    let derived = derive::derive_with_requirement_texts(
+    let derived = derive::derive_with_reply_markers(
         &records,
         &taken_pauses(store, run_id)?,
         criteria,
         requirement_texts,
+        reply_leaked_markers,
     )?;
     let generation = store.load_state(run_id)?.generation;
     // Archived attempts included: a slot may hold a restored older attempt.
@@ -218,29 +224,14 @@ pub(crate) fn current_seed(
     log_path: &Path,
     criteria: &BTreeMap<String, String>,
 ) -> Result<Option<PhaseSeed>> {
-    current_seed_with_requirement_texts(store, run_id, log_path, criteria, &BTreeMap::new(), None)
-}
-
-pub(crate) fn current_seed_with_requirement_texts(
-    store: &WorkflowStore,
-    run_id: &str,
-    log_path: &Path,
-    criteria: &BTreeMap<String, String>,
-    requirement_texts: &BTreeMap<String, String>,
-    resume_frozen_chain: Option<&serde_json::Value>,
-) -> Result<Option<PhaseSeed>> {
-    let Some((index, runtime)) = seeded_transition(store, run_id)? else {
-        return Ok(None);
-    };
-    seed_for_transition(
+    current_seed_with_reply_markers(
         store,
         run_id,
-        index,
-        &runtime,
+        log_path,
         criteria,
-        requirement_texts,
-        resume_frozen_chain,
-        Some(log_path),
+        &BTreeMap::new(),
+        None,
+        &[],
     )
 }
 
@@ -285,6 +276,7 @@ pub(crate) fn current_seed_read_only_for_transition(
         criteria,
         requirement_texts,
         resume_frozen_chain,
+        &[],
         None,
     )
 }
@@ -299,6 +291,7 @@ fn seed_for_transition(
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
     resume_frozen_chain: Option<&serde_json::Value>,
+    reply_leaked_markers: &[String],
     log_path: Option<&Path>,
 ) -> Result<Option<PhaseSeed>> {
     let mut seed = match read_seed(store, run_id, index, runtime)? {
@@ -311,6 +304,7 @@ fn seed_for_transition(
                 criteria,
                 requirement_texts,
                 resume_frozen_chain,
+                reply_leaked_markers,
             )?;
             if log_path.is_some() {
                 write_seed(store, run_id, &seed)?;

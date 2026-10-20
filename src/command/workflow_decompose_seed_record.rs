@@ -51,7 +51,14 @@ pub(super) fn authored_criterion(record: &WorkflowV2CallRecord, id: &str) -> Opt
     Some(criterion.to_string())
 }
 
+#[cfg(test)]
 pub(super) use crate::command::workflow_task_set::acceptance_reply_blocks::extract_object;
+#[cfg(test)]
+use crate::command::workflow_task_set::acceptance_reply_blocks::{
+    extract_object_with_markers, resolve_command_block_with_markers,
+    unclosed_block_refusal, unclosed_block_refusal_with_markers,
+};
+#[cfg(test)]
 use crate::command::workflow_task_set::acceptance_reply_blocks::resolve_command_block;
 
 /// The entry `id` a reply holds, as the script's `unwrapEntry` reads it.
@@ -66,12 +73,26 @@ pub(super) fn reply_entry(text: &str, id: &str) -> Option<Value> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn reply_entry_with_blocks(content: &str, id: &str) -> Option<Value> {
-    let text = extract_object(content);
+    reply_entry_with_blocks_and_markers(content, id, &[])
+}
+
+pub(super) fn reply_entry_with_blocks_and_markers(
+    content: &str,
+    id: &str,
+    markers: &[String],
+) -> Option<Value> {
+    let text =
+        crate::command::workflow_task_set::acceptance_reply_blocks::extract_object_with_markers(
+            content, markers,
+        );
     let mut entry = reply_entry(&text, id)?;
-    resolve_command_block(&mut entry, content)
-        .is_none()
-        .then_some(entry)
+    crate::command::workflow_task_set::acceptance_reply_blocks::resolve_command_block_with_markers(
+        &mut entry, content, markers,
+    )
+    .is_none()
+    .then_some(entry)
 }
 
 /// This build's freeze shape refusals of one carried entry.

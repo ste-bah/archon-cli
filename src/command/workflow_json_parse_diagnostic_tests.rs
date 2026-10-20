@@ -99,3 +99,68 @@ fn invalid_escape_excerpt_matches_the_javascript_refusal_window() {
         "{diagnostic}"
     );
 }
+
+#[test]
+fn invalid_escape_inside_multiline_command_recommends_block_form() {
+    let reply = r#"{"id":"A","check":{"kind":"command","command":"set -eu\nprintf x\necho \q"}}"#;
+    let error = parse_error(reply);
+    let diagnostic = describe(reply.as_bytes(), &error);
+    assert!(diagnostic.contains(&format!("line {} column {}", error.line(), error.column())));
+    assert!(
+        diagnostic.contains("literal backslash inside a JSON string must be written as `\\\\`")
+    );
+    assert!(
+        diagnostic.contains("the check is a multi-line script; return it in block form instead:")
+    );
+    assert!(diagnostic.contains("set \"command_block\": true in the entry"));
+    assert!(diagnostic.contains("fence labelled check after the JSON entry"));
+}
+
+#[test]
+fn syntax_error_outside_command_keeps_the_existing_diagnostic() {
+    let reply = r#"{"id":"A","label":"bad\q","check":{"kind":"command","command":"echo ok"}}"#;
+    let error = parse_error(reply);
+    let diagnostic = describe(reply.as_bytes(), &error);
+    assert!(!diagnostic.contains("multi-line script"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("literal backslash inside a JSON string must be written as `\\\\`")
+    );
+}
+
+#[test]
+fn escaped_newline_in_command_recommends_block_form_even_when_error_is_elsewhere() {
+    let reply =
+        r#"{"id":"A","check":{"kind":"command","command":"first\nsecond"},"label":"bad\q"}"#;
+    let error = parse_error(reply);
+    let diagnostic = describe(reply.as_bytes(), &error);
+    assert!(diagnostic.contains("multi-line script"), "{diagnostic}");
+}
+
+#[test]
+fn shared_command_block_form_direction_cases() {
+    const DIRECTION: &str = "the check is a multi-line script; return it in block form instead: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed";
+    for (line_number, line) in include_str!("workflow_parse_block_form_direction_cases.jsonl")
+        .lines()
+        .enumerate()
+    {
+        let case: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|error| panic!("fixture line {}: {error}", line_number + 1));
+        let reply = case["reply"].as_str().expect("reply string");
+        let expected = case["expectedBlockFormDirection"]
+            .as_str()
+            .expect("expectedBlockFormDirection string");
+        let error = parse_error(reply);
+        let diagnostic = describe(reply.as_bytes(), &error);
+        // Only the block-form direction is shared: parser-generated refusal text differs legitimately between V8 and serde.
+        assert_eq!(
+            if diagnostic.contains(DIRECTION) {
+                DIRECTION
+            } else {
+                ""
+            },
+            expected,
+            "fixture line {} produced: {diagnostic}",
+            line_number + 1
+        );
+    }
+}

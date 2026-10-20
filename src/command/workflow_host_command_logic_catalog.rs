@@ -120,7 +120,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #468 follow-up re-pin: complete per-input state, transient recreation markers and status markers route recreated inputs to the author, unrestored inputs to host-unproven, and only restored inputs to the normal verdict; persistence still requires restoration markers.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
-        sources_digest: "4e7e957bfa18b8d1954e3c083656cf6a52fdf31c26ffc312338f55a93c033364",
+        // #469 re-pin only: reply marker stripping and midline-fence diagnosis change source closure; freeze behavior version stays fixed.
+        sources_digest: "52f30e787857aff394b2206d8308457c04babc9cbf3c9bc1ed83c3c5a8f2912b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -186,7 +187,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467/#468 re-pin: diagnostic text changes do not alter this verdict.
         // #468 re-pin only: save-time mutation restoration gating does not change skeleton verdicts.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
-        sources_digest: "4e7e957bfa18b8d1954e3c083656cf6a52fdf31c26ffc312338f55a93c033364",
+        // #469 re-pin only: shared reply parsing changed source closure; skeleton verdict logic stays fixed.
+        sources_digest: "52f30e787857aff394b2206d8308457c04babc9cbf3c9bc1ed83c3c5a8f2912b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -256,7 +258,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no body verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
-        sources_digest: "92ae63870b3069c82fc539a1d21c6354e740f697bd3aee3dd4ae42299cc78656",
+        // #469 re-pin only: acceptance reply marker handling changed the shared source closure; body landing version stays fixed.
+        sources_digest: "0caae72f6125094f2518e627a57ec599a5aafef43ceb8855c64ae74653f60414",
         build_bound: false,
     },
     CapabilityLogic {
@@ -318,7 +321,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no lint verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
-        sources_digest: "92ae63870b3069c82fc539a1d21c6354e740f697bd3aee3dd4ae42299cc78656",
+        // #469 re-pin only: acceptance reply marker handling changed the shared source closure; lint version stays fixed.
+        sources_digest: "0caae72f6125094f2518e627a57ec599a5aafef43ceb8855c64ae74653f60414",
         build_bound: false,
     },
     CapabilityLogic {
@@ -344,7 +348,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #464 re-pin only: Windows declared-path normalization does not change macOS/Linux verdicts.
         version: 6,
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
-        sources_digest: "37eb344b1ea02d97f33ec49919ca22207e8fdf3100e480a7f90e62dbf621b461",
+        // #469 re-pin only: shared acceptance reply parsing changed source closure; trace verdict logic stays fixed.
+        sources_digest: "6015a6e24b2baa7bdf4a68b0be85249acb8eb5678550904cd50cf08bfcc05cc6",
         build_bound: true,
     },
     CapabilityLogic {
@@ -412,7 +417,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #468 re-pin only: an unrestored mutation result cannot be reused; frozen-chain verification runs no mutation probe.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
-        sources_digest: "8f8a2fb6f083adbd0bad9c7ca78b353690544d692959f6b4875ae5c0a706552c",
+        // #469 re-pin only: shared reply parsing changed source closure; frozen acceptance verification stays fixed.
+        sources_digest: "6978ffd72bf364870066d56fd31e4602cd8a907ffe8cd9da1fcf0285136716dc",
         build_bound: true,
     },
     CapabilityLogic {
@@ -473,7 +479,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #468 re-pin only: save-time mutation restoration gating does not change frozen skeleton verification.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
-        sources_digest: "8f8a2fb6f083adbd0bad9c7ca78b353690544d692959f6b4875ae5c0a706552c",
+        // #469 re-pin only: shared reply parsing changed source closure; frozen skeleton verification stays fixed.
+        sources_digest: "6978ffd72bf364870066d56fd31e4602cd8a907ffe8cd9da1fcf0285136716dc",
         build_bound: true,
     },
 ];

@@ -52,8 +52,7 @@ pub(crate) const FIXED_GENERATED_METADATA_PATH: &str = "v2/generated-metadata.js
 pub(crate) const FIXED_LAUNCH_DIGEST_PERMISSION: &str = "archon.fixed_decomposition_launch_digest";
 pub(crate) const DECOMPOSE_GATE_OFF_REMEDY: &str = "workflow decompose requires workflow.gate_mode=observe or enforce; set [workflow] gate_mode = \"observe\" and retry";
 
-/// `repository` is the `--repository` flag; `None` falls through to the
-/// configured sources (see `workflow_decompose_repository`), never to `cwd`.
+/// `repository` is the flag; `None` falls through to configured sources, never `cwd`.
 pub(crate) async fn run_fixed_decomposition_with_factory(
     cwd: &Path,
     prd: &Path,
@@ -106,6 +105,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     }
 
     let project_root = canonical_existing(cwd, "project root")?;
+    let reply_leaked_markers =
+        super::workflow_live::load_reply_leaked_markers_for_fixed(&project_root)?;
     let prd_path = canonical_project_path(&project_root, prd, "PRD path")?;
     // A destination that does not exist yet is created when it is claimed.
     let task_root = claim::resolve_task_root(&project_root, tasks)?;
@@ -135,8 +136,6 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let deferred_frozen_chain = snapshot.deferred;
     let mut frozen_chain = snapshot.frozen_chain;
     let mut launch_decision = snapshot.decision;
-    // A task root that already records its repository must name this one; a
-    // moved base commit is reported below, once the run exists to log it.
     let existing_record =
         super::workflow_decompose_repository::verify_existing_record(&task_root, &repository)?;
     let mut arguments = fixed_script_arguments(
@@ -149,8 +148,12 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         &repository.root,
         frozen_chain.to_argument(),
     );
-    let mut script_arguments =
-        super::workflow_task_set::script_arguments_with_prd_requirement_texts(&arguments, prd_text);
+    let mut script_arguments = script_arguments_with_reply_markers(
+        &super::workflow_task_set::script_arguments_with_prd_requirement_texts(
+            &arguments, prd_text,
+        ),
+        &reply_leaked_markers,
+    );
     let log_path = task_root.join(".decompose.log");
     let identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -238,10 +241,12 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
                     &catalog,
                 )?;
             arguments["frozenChain"] = frozen_chain.to_argument();
-            script_arguments =
-                super::workflow_task_set::script_arguments_with_prd_requirement_texts(
+            script_arguments = script_arguments_with_reply_markers(
+                &super::workflow_task_set::script_arguments_with_prd_requirement_texts(
                     &arguments, prd_text,
-                );
+                ),
+                &reply_leaked_markers,
+            );
             plan.script_args = Some(script_arguments.clone());
         }
         if let Some(slot) = persisted_run_id {
@@ -489,3 +494,7 @@ mod repair_tests;
 #[cfg(test)]
 #[path = "workflow_decompose_progress_tests.rs"]
 pub(crate) mod progress_tests;
+
+#[path = "workflow_decompose_runtime_arguments.rs"]
+mod runtime_arguments;
+pub(crate) use runtime_arguments::script_arguments_with_reply_markers;

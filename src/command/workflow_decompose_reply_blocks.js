@@ -1,7 +1,74 @@
 // Reply fences are parsed before JSON so a check script never has to be
 // represented as a JSON string. Rust seed reconstruction mirrors this rule.
-function replyFenceBlocks(text) {
+function completeJsonObjectEnd(text) {
+  const start = text.search(/\S/);
+  if (start < 0 || text[start] !== "{") return -1;
+  const stack = [];
+  let quoted = false, escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "{" || char === "[") stack.push(char);
+    else if (char === "}" || char === "]") {
+      const expected = char === "}" ? "{" : "[";
+      if (stack.pop() !== expected) return -1;
+      if (!stack.length) {
+        try { JSON.parse(text.slice(start, i + 1)); return i + 1; }
+        catch (_) { return -1; }
+      }
+    }
+  }
+  return -1;
+}
+
+function stripReplyMarkers(text, markers) {
   const source = String(text || "");
+  const configured = (Array.isArray(markers) ? markers : []).filter((marker) => typeof marker === "string" && marker.length);
+  if (!configured.length) return source;
+  const lines = source.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g).filter(Boolean);
+  let inFence = false, fenceLength = 0;
+  return lines.map((line) => {
+    if (inFence) {
+      const body = line.replace(/[\r\n]+$/, "");
+      const close = /^( {0,3})(`+)[ \t]*$/.exec(body);
+      if (close && close[2].length >= fenceLength) inFence = false;
+      return line;
+    }
+    const ending = /(?:\r\n|\r|\n)$/.exec(line)?.[0] || "";
+    let body = ending ? line.slice(0, -ending.length) : line;
+    // Only a marker directly between a completed JSON object and an opener
+    // may split a line; every other fence opener must already start its line.
+    const ticks = /`{3,}/g;
+    let fenceMatch;
+    while ((fenceMatch = ticks.exec(body))) {
+      const prefix = body.slice(0, fenceMatch.index);
+      const boundary = completeJsonObjectEnd(prefix);
+      let rest = boundary >= 0 ? prefix.slice(boundary) : "", removed = false;
+      while (rest) {
+        const marker = configured.find((candidate) => rest.startsWith(candidate));
+        if (!marker) break;
+        rest = rest.slice(marker.length);
+        removed = true;
+      }
+      const allowed = boundary >= 0 && removed && !rest.trim();
+      if (allowed) { body = body.slice(0, fenceMatch.index) + "\n" + body.slice(fenceMatch.index); break; }
+    }
+    for (const marker of configured) body = body.split(marker).join("");
+    const openLines = body.split(/\r\n|\r|\n/);
+    const open = /^( {0,3})(`{3,})(.*)$/.exec(openLines[openLines.length - 1]);
+    if (open && !open[3].includes("`")) inFence = true, fenceLength = open[2].length;
+    return body + ending;
+  }).join("");
+}
+
+function replyFenceBlocks(text, markers) {
+  const source = stripReplyMarkers(text, markers);
   const lines = [];
   let offset = 0;
   while (offset < source.length) {
@@ -19,6 +86,12 @@ function replyFenceBlocks(text) {
   }
   const blocks = [];
   for (let i = 0; i < lines.length; i++) {
+    const marker = /`{3,}/.exec(lines[i].body);
+    if (marker && /\S/.test(lines[i].body.slice(0, marker.index))) {
+      const before = lines[i].body.slice(0, marker.index).trim();
+      const quote = Array.from(before).slice(0, 80).join("") + (Array.from(before).length > 80 ? "…" : "");
+      throw new Error(`fence marker on line ${i + 1} follows text; a fence must start its own line; text before the marker: ${JSON.stringify(quote)}`);
+    }
     const open = /^( {0,3})(`{3,})(.*)$/.exec(lines[i].body);
     if (!open || open[3].includes("`")) continue;
     const info = open[3].trim();
@@ -28,6 +101,20 @@ function replyFenceBlocks(text) {
       if (closing && closing[2].length >= open[2].length) { close = j; break; }
     }
     if (close < 0) {
+      const midline = lines.findIndex((line) => /\S.*`{3,}/.test(line.body));
+      if (midline >= 0) {
+        const marker = /`{3,}/.exec(lines[midline].body);
+        const before = lines[midline].body.slice(0, marker.index).trim();
+        const quote = Array.from(before).slice(0, 80).join("") + (Array.from(before).length > 80 ? "…" : "");
+        throw new Error(`fence marker on line ${midline + 1} follows text; a fence must start its own line; text before the marker: ${JSON.stringify(quote)}`);
+      }
+      for (let j = lines.length - 1; j >= 0; j--) {
+        if (!lines[j].body.trim()) continue;
+        if (/^ {0,3}`{3,}[ \t]*$/.test(lines[j].body)) {
+          throw new Error(`closing fence on line ${j + 1} has no opener; every closing fence must close an open block`);
+        }
+        break;
+      }
       throw new Error(`the \`\`\`${info} block opened at line ${i + 1} is never closed (the reply may have been cut off); close every block with a line that is exactly \`\`\``);
     }
     let content = source.slice(lines[i].end, lines[close].start);
@@ -65,8 +152,8 @@ function jsonEqual(left, right) {
   return true;
 }
 
-function extractJsonObject(text) {
-  const raw = String(text || "");
+function extractJsonObject(text, markers) {
+  const raw = stripReplyMarkers(text, markers);
   const blocks = replyFenceBlocks(raw);
   const jsonBlocks = blocks.filter((block) => block.info === "json");
   const outside = raw.split("");
@@ -114,12 +201,13 @@ function foundFenceLabels(blocks) {
   return shown.length ? shown.join(", ") : "none";
 }
 
-function resolveCommandBlock(entry, text) {
+function resolveCommandBlock(entry, text, markers) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
   const check = entry.check;
   const id = String(entry.id || "");
   // Only the exact info string `check` denotes the command block; `check <something>` is a different fence label.
-  const blocks = replyFenceBlocks(text).filter((block) => block.info === "check");
+  const normalizedText = stripReplyMarkers(text, markers);
+  const blocks = replyFenceBlocks(normalizedText).filter((block) => block.info === "check");
   if (blocks.length > 1) return "acceptance reply contains more than one check block";
   const hasBlock = blocks.length === 1;
   const commandBlock = check && typeof check === "object" ? check.command_block : undefined;
@@ -131,7 +219,7 @@ function resolveCommandBlock(entry, text) {
   if (commandBlock === true && check && Object.prototype.hasOwnProperty.call(check, "command")) {
     return "acceptance entry " + id + " returned both check.command and check.command_block — remove check.command from the JSON when you use the check block";
   }
-  if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: " + foundFenceLabels(replyFenceBlocks(text));
+  if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: " + foundFenceLabels(replyFenceBlocks(normalizedText));
   if (hasBlock && commandBlock !== true && !inferredCommandBlock) {
     return "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block";
   }
