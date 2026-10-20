@@ -359,7 +359,12 @@ fn configured_reply_markers_are_removed_outside_fences_and_preserved_inside_with
     let js: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(js["json"], json);
     assert_eq!(js["command"], entry["check"]["command"]);
-    assert!(js["cutoff"].as_str().unwrap().contains("the reply may have been cut off"));
+    assert!(
+        js["cutoff"]
+            .as_str()
+            .unwrap()
+            .contains("the reply may have been cut off")
+    );
 }
 
 #[test]

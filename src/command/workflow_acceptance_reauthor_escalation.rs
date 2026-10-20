@@ -36,6 +36,6 @@ pub(super) fn baseline_escalation(
         .collect::<Vec<_>>()
         .join("; ");
     Some(format!(
-        "\nescalated for review: {ids} still pass(es) on the pre-implementation tree after every repair; the harness gave the repair route {attempt} time(s). Last exclusion reasons: {exclusions}. Reassess the criterion only if every candidate was excluded for a reason other than check-generated data or selected-root choice; nothing unproven is published"
+        "\nescalated to the PRD owner for review: {ids} still pass(es) on the pre-implementation tree after every repair; the harness gave the repair route {attempt} time(s). Last exclusion reasons: {exclusions}. Reassess the criterion only if every candidate was excluded for a reason other than check-generated data or selected-root choice; nothing unproven is published"
     ))
 }

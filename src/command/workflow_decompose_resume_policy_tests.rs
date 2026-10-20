@@ -82,6 +82,18 @@ fn pre_binding_run_copy_is_admitted_with_no_check_policy() {
 }
 
 #[test]
+fn reply_marker_argument_does_not_change_the_launch_snapshot() {
+    let run = RunCopy::new();
+    let mut metadata: serde_json::Value = run.json("v2/generated-metadata.json");
+    metadata["script_args"]["replyLeakedMarkers"] = serde_json::json!(["<old-marker>"]);
+    assert_eq!(run.admit(&metadata).unwrap(), None);
+
+    metadata["script_args"]["taskRoot"] = serde_json::json!("changed durable path");
+    let error = run.admit(&metadata).unwrap_err().to_string();
+    assert!(error.contains("generated metadata differs"), "{error}");
+}
+
+#[test]
 fn pre_binding_run_copy_with_an_added_binding_is_refused() {
     let run = RunCopy::new();
     for binding in [

@@ -90,7 +90,6 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // evidence reruns under the version-18 acceptance pin. Version 19 records #402/#419 changes.
         // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
@@ -122,7 +121,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: reply marker stripping and midline-fence diagnosis change source closure; freeze behavior version stays fixed.
         // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
-        sources_digest: "0d716b589250159727c7c22ce5e0709d2780616ae6862db872c9f49f376d7467",
+        // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
+        sources_digest: "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
         build_bound: false,
     },
     CapabilityLogic {
@@ -159,7 +159,6 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up: archive collisions keep both prior byte sets.
         // #374 re-pin only: skeleton freeze performs no check path classification.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not skeleton verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; skeleton freeze verdicts are unchanged.
@@ -190,7 +189,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: shared reply parsing changed source closure; skeleton verdict logic stays fixed.
         // #471 re-pin only: shared acceptance diagnostics distinguish text-derived writes from observed recreation; skeleton verdicts are unchanged. The helper split only moves this source closure.
-        sources_digest: "0d716b589250159727c7c22ce5e0709d2780616ae6862db872c9f49f376d7467",
+        // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
+        sources_digest: "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
         build_bound: false,
     },
     CapabilityLogic {
@@ -246,7 +246,6 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #447 receipt-mismatch self-healing settles the newest durable task body before judging it.
         // A12 re-pin only: A9 already bumped this version for malformed-body verdicts.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
@@ -262,7 +261,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; body landing version stays fixed.
         // #471 re-pin only: shared baseline-pass guidance changes messages; body verdicts are unchanged.
-        sources_digest: "549c0fb2b630602630311184d012da35c2d10388efe1c669d51eff3452a64e23",
+        // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
+        sources_digest: "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
         build_bound: false,
     },
     CapabilityLogic {
@@ -310,7 +310,6 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #447 re-pin only: receipt mismatch repair stays outside the set lint verdict.
         // A12 re-pin only: A9 already bumped this version for malformed-body verdicts.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
@@ -326,7 +325,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; lint version stays fixed.
         // #471 re-pin only: shared baseline-pass guidance changes messages; lint verdicts are unchanged.
-        sources_digest: "549c0fb2b630602630311184d012da35c2d10388efe1c669d51eff3452a64e23",
+        // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
+        sources_digest: "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
         build_bound: false,
     },
     CapabilityLogic {
@@ -353,7 +353,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 6,
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #469 re-pin only: shared acceptance reply parsing changed source closure; trace verdict logic stays fixed.
-        sources_digest: "6015a6e24b2baa7bdf4a68b0be85249acb8eb5678550904cd50cf08bfcc05cc6",
+        // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
+        sources_digest: "88c153c7f791ddf3b47dafd8dec881f4fca852ed4ab386f40b9997711945b674",
         build_bound: true,
     },
     CapabilityLogic {
@@ -397,7 +398,6 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // but reads no probe result layout or evidence.
         // #374 re-pin only: frozen-chain verification does not classify check paths.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
@@ -423,7 +423,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: shared reply parsing changed source closure; frozen acceptance verification stays fixed.
         // #471 re-pin only: acceptance author guidance changes messages; frozen verification verdicts are unchanged.
-        sources_digest: "b3306280dd1cdbf016d5aaa15ae81748da31ac1b3ea0638d1651cceb525324b0",
+        // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
+        sources_digest: "b5de16da1514e25aa46a553056d06e80089a8cbcffb0fd2d1bd474ebd064b4c9",
         build_bound: true,
     },
     CapabilityLogic {
@@ -460,7 +461,6 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // but reads no probe result layout or evidence.
         // #374 re-pin only: frozen-chain verification does not classify check paths.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
@@ -486,7 +486,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: shared reply parsing changed source closure; frozen skeleton verification stays fixed.
         // #471 re-pin only: acceptance author guidance changes messages; skeleton verification verdicts are unchanged.
-        sources_digest: "b3306280dd1cdbf016d5aaa15ae81748da31ac1b3ea0638d1651cceb525324b0",
+        // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
+        sources_digest: "b5de16da1514e25aa46a553056d06e80089a8cbcffb0fd2d1bd474ebd064b4c9",
         build_bound: true,
     },
 ];

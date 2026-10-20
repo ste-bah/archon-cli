@@ -34,8 +34,8 @@ pub(crate) fn canonical_metadata(
     })
 }
 
-/// Accept both pre-fix launch metadata and the runtime-only PRD text added by
-/// current launches; digest admission still receives the durable arguments.
+/// Accept both pre-PRD-text launch metadata and current launch metadata;
+/// digest admission still receives the durable arguments.
 pub(crate) fn canonical_resume_metadata(
     identity: &FixedRunIdentityV1,
     scaffold_hash: String,
@@ -43,15 +43,30 @@ pub(crate) fn canonical_resume_metadata(
     prd_text: &str,
     metadata: &serde_json::Value,
 ) -> serde_json::Value {
+    let comparable = comparable_metadata(metadata);
     let enriched = crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
         arguments, prd_text,
     );
-    let script_arguments = if metadata.get("script_args") == Some(arguments) {
+    let script_arguments = if comparable.get("script_args") == Some(arguments) {
         arguments
     } else {
         &enriched
     };
     canonical_metadata(identity, scaffold_hash, script_arguments)
+}
+
+/// A #469 intermediate binary persisted its reply marker configuration in
+/// generated metadata. Ignore that one runtime-only field; all other
+/// metadata remains exact.
+fn comparable_metadata(metadata: &serde_json::Value) -> serde_json::Value {
+    let mut comparable = metadata.clone();
+    if let Some(arguments) = comparable
+        .get_mut("script_args")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        arguments.remove("replyLeakedMarkers");
+    }
+    comparable
 }
 
 /// The launch's check policy, admitted against the verified bundle anchor.
@@ -67,8 +82,9 @@ pub(crate) fn admit(
     let differs = || {
         anyhow!("fixed decomposition generated metadata differs from its canonical launch snapshot")
     };
+    let comparable = comparable_metadata(metadata);
     let Some(recorded) = metadata.get(CHECK_POLICY_KEY) else {
-        if metadata != &expected {
+        if comparable != expected {
             return Err(differs());
         }
         if pre_binding_digest(identity, arguments, catalog, route)? != anchored_digest {
@@ -84,7 +100,7 @@ pub(crate) fn admit(
         crate::command::acceptance_check_policy::validate_persisted(policy)?;
     }
     expected[CHECK_POLICY_KEY] = serde_json::to_value(&check_policy)?;
-    if metadata != &expected {
+    if comparable != expected {
         return Err(differs());
     }
     let digest = crate::command::workflow_decompose::fixed_launch_digest(

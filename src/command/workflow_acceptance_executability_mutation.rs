@@ -382,10 +382,10 @@ pub(super) fn input_discovery(
                 Some(ExclusionReason::SiblingFromRoot)
             } else if runs {
                 Some(ExclusionReason::CheckMechanics)
-            } else if !exists && !has_manifest_sibling {
-                Some(ExclusionReason::MissingAtRoot)
             } else if mapped.starts_with("../") {
                 Some(ExclusionReason::OutsideCopiedTree)
+            } else if !exists && !has_manifest_sibling {
+                Some(ExclusionReason::MissingAtRoot)
             } else {
                 None
             };
@@ -400,7 +400,12 @@ pub(super) fn input_discovery(
         .collect();
     let eligible = candidates
         .iter()
-        .filter(|candidate| candidate.exclusion.is_none())
+        // #471 diagnostics report missing paths, but path-shaped inputs
+        // remain eligible just as they were before the diagnostic pass.
+        .filter(|candidate| {
+            candidate.exclusion.is_none()
+                || candidate.exclusion == Some(ExclusionReason::MissingAtRoot)
+        })
         .map(|candidate| candidate.path.clone())
         .collect();
     InputDiscovery {

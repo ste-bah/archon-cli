@@ -395,7 +395,7 @@ async fn fixed_launch_writes_identity_log_header_before_provider_construction() 
 }
 
 #[tokio::test]
-async fn fresh_launch_script_arguments_include_requirement_texts_but_persisted_arguments_do_not() {
+async fn fresh_launch_runtime_and_metadata_include_requirement_texts() {
     let project = fixture_project();
     std::fs::write(
         project.path().join("prds/PRD-X.md"),
@@ -452,7 +452,9 @@ async fn fresh_launch_script_arguments_include_requirement_texts_but_persisted_a
         generated["script_args"]["prdRequirementTexts"],
         serde_json::json!(requirement_texts)
     );
+    assert!(generated["script_args"].get("replyLeakedMarkers").is_none());
     assert!(persisted.get("prdRequirementTexts").is_none());
+    assert!(persisted.get("replyLeakedMarkers").is_none());
 }
 
 #[path = "workflow_decomposition_upgrade_tests.rs"]

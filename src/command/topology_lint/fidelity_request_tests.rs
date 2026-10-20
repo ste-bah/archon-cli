@@ -117,11 +117,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         catalog.digest, old_digest,
         "timeout semantics must change resume identity"
     );
-    // #467 re-pin: author prompt and refusal text changed in the fixed script
+    // #466/#469/#471 re-pin only: author prompt and refusal text changed in the fixed script
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "15e0d0f9e30daeba1533de234730bf00283c42401eaa68c9c5bc797b44df05c1"
+        "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d"
     );
 }

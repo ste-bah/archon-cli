@@ -18,6 +18,14 @@ fn to_pre_binding(store: &WorkflowStore, run_id: &str) {
         .as_object_mut()
         .unwrap()
         .remove("check_environment_policy");
+    // main (6201af9f1) persisted PRD requirement text, but predates the
+    // replyLeakedMarkers runtime argument added by #469.
+    if let Some(arguments) = metadata
+        .get_mut("script_args")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        arguments.remove("replyLeakedMarkers");
+    }
     store.write_run_json(run_id, METADATA, &metadata).unwrap();
     let state: FixedDecompositionStateV1 = read_json(&dir.join(FIXED_DECOMPOSITION_STATE_PATH));
     let arguments: serde_json::Value = read_json(&dir.join(FIXED_ARGUMENTS_PATH));
@@ -39,6 +47,23 @@ fn to_pre_binding(store: &WorkflowStore, run_id: &str) {
         archon_workflow::WorkflowBundleOrigin::GeneratedHarness,
     )
     .unwrap();
+}
+
+/// Shape the metadata as a run launched by main (6201af9f1): retain its
+/// check-policy binding and PRD text, but omit the #469 marker argument.
+fn to_main_shape(store: &WorkflowStore, run_id: &str, prd_text: &str) {
+    let dir = store.run_dir(run_id);
+    let mut metadata: serde_json::Value = read_json(&dir.join(METADATA));
+    metadata["script_args"] =
+        crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
+            &metadata["script_args"],
+            prd_text,
+        );
+    metadata["script_args"]
+        .as_object_mut()
+        .unwrap()
+        .remove("replyLeakedMarkers");
+    store.write_run_json(run_id, METADATA, &metadata).unwrap();
 }
 
 async fn paused_run(project: &Path, config: &ArchonConfig) -> (WorkflowStore, String) {
@@ -86,6 +111,35 @@ async fn pre_binding_fixed_run_resumes_past_admission() {
     assert_eq!(resume.builds.load(Ordering::SeqCst), 1);
     let metadata: serde_json::Value = read_json(&store.run_dir(&run_id).join(METADATA));
     assert!(metadata.get("check_environment_policy").is_none());
+}
+
+#[tokio::test]
+async fn main_shape_fixed_run_resumes_past_admission() {
+    let project = fixture_project();
+    let config = launch_config(project.path());
+    let (store, run_id) = paused_run(project.path(), &config).await;
+    let prd_text = std::fs::read_to_string(project.path().join("prds/PRD-X.md")).unwrap();
+    to_main_shape(&store, &run_id, &prd_text);
+    let resume = BarrierFactory::resume(project.path().canonicalize().map(plain).unwrap());
+
+    let error = resume_fixed_decomposition_with_factory(
+        project.path(),
+        &run_id,
+        true,
+        &config,
+        &empty_env(),
+        &resume,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("barrier observed"),
+        "{error:#}"
+    );
+    assert_eq!(resume.builds.load(Ordering::SeqCst), 1);
+    let metadata: serde_json::Value = read_json(&store.run_dir(&run_id).join(METADATA));
+    assert!(metadata.get("check_environment_policy").is_some());
 }
 
 #[tokio::test]

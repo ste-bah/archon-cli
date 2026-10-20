@@ -54,12 +54,12 @@ pub(super) fn authored_criterion(record: &WorkflowV2CallRecord, id: &str) -> Opt
 #[cfg(test)]
 pub(super) use crate::command::workflow_task_set::acceptance_reply_blocks::extract_object;
 #[cfg(test)]
-use crate::command::workflow_task_set::acceptance_reply_blocks::{
-    extract_object_with_markers, resolve_command_block_with_markers,
-    unclosed_block_refusal, unclosed_block_refusal_with_markers,
-};
-#[cfg(test)]
 use crate::command::workflow_task_set::acceptance_reply_blocks::resolve_command_block;
+#[cfg(test)]
+use crate::command::workflow_task_set::acceptance_reply_blocks::{
+    extract_object_with_markers, resolve_command_block_with_markers, unclosed_block_refusal,
+    unclosed_block_refusal_with_markers,
+};
 
 /// The entry `id` a reply holds, as the script's `unwrapEntry` reads it.
 pub(super) fn reply_entry(text: &str, id: &str) -> Option<Value> {

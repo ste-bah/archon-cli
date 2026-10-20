@@ -132,6 +132,10 @@ pub(crate) fn save_fixed_decomposition_metadata(
     plan: &WorkflowScriptPlan,
     identity: &FixedRunIdentityV1,
 ) -> archon_workflow::WorkflowResult<()> {
+    let script_args = plan
+        .script_args
+        .as_ref()
+        .map(crate::command::workflow_decompose::launch_metadata_arguments);
     let metadata = GeneratedV2Metadata {
         schema_version: "workflow-generated-v2-metadata-v1".to_string(),
         run_kind: Some(WorkflowRunKind::FixedDecompositionV1),
@@ -141,7 +145,7 @@ pub(crate) fn save_fixed_decomposition_metadata(
         scaffold_hash: Some(plan.scaffold_hash()),
         generated_scaffold: None,
         task_universe: None,
-        script_args: plan.script_args.clone(),
+        script_args,
         governed_learning_context: Vec::new(),
         generated_config: None,
         cargo_resource_limits: None,

@@ -8,20 +8,20 @@
 use std::collections::BTreeMap;
 
 use archon_core::agents::harness::HOST_READ_ONLY_TOOLS;
+#[cfg(test)]
+use archon_workflow::task_set_contract::AcceptanceCheck;
 use archon_workflow::task_set_contract::{
     AcceptanceCriterion, JudgeDecision, refuted_check_message,
 };
-#[cfg(test)]
-use archon_workflow::task_set_contract::AcceptanceCheck;
 
 use super::executability::ExecutabilityProbe;
 use super::live_root;
 use super::*;
 #[path = "workflow_acceptance_reauthor_parse.rs"]
 mod reply_parse;
-use reply_parse::candidate_entry_with_markers;
 #[cfg(test)]
 use reply_parse::candidate_entry;
+use reply_parse::candidate_entry_with_markers;
 
 /// Consecutive author-then-judge attempts that repair no named check before
 /// the operation stops and fails with its report.

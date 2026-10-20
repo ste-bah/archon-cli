@@ -110,7 +110,7 @@ async fn an_input_behind_a_tracked_symlink_never_proves_a_check() {
     assert!(
         findings
             .get("AC-4-001")
-            .is_some_and(|f| f.contains("names none that exists there")),
+            .is_some_and(|f| f.contains("the host could not move this input aside")),
         "{findings:?} {:?}",
         probe.take_diagnostics()
     );
@@ -191,7 +191,7 @@ async fn a_host_failure_is_never_fed_to_the_author() {
     assert_eq!(client.authored(), 1, "the author is not asked again");
     let prompt = client.prompts.lock().unwrap()[0].clone();
     assert!(
-        prompt.contains("never its own script"),
+        prompt.contains("never the check's own script"),
         "prompt wording: {prompt}"
     );
 }

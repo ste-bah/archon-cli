@@ -7,6 +7,14 @@ pub(crate) fn script_arguments_with_reply_markers(
     script_arguments
 }
 
+pub(crate) fn launch_metadata_arguments(arguments: &serde_json::Value) -> serde_json::Value {
+    let mut durable = arguments.clone();
+    if let Some(arguments) = durable.as_object_mut() {
+        arguments.remove("replyLeakedMarkers");
+    }
+    durable
+}
+
 #[cfg(test)]
 mod tests {
     use super::script_arguments_with_reply_markers;

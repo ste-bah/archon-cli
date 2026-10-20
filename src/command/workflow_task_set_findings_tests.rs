@@ -158,7 +158,7 @@ async fn an_enforce_freeze_on_a_check_that_cannot_fail_stops_and_escalates() {
         crate::command::workflow_task_set::reauthor::REAUTHOR_ATTEMPTS
     );
     assert!(
-        error.contains("escalated to the PRD owner: AC-X-001"),
+        error.contains("escalated to the PRD owner for review: AC-X-001"),
         "{error}"
     );
     assert_eq!(

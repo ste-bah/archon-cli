@@ -471,7 +471,6 @@ pub(crate) fn is_fixed_decomposition_run(cwd: &Path, run_id: &str) -> Result<boo
 
 #[path = "workflow_decompose_resume.rs"]
 mod resume;
-// Issues 360, 368: tests read records under the resume's own rules.
 pub(crate) use resume::upgrade::{decode, unmapped};
 pub(crate) use resume::{
     dry_run_fixed_decomposition, resume_fixed_decomposition_with_factory,
@@ -497,4 +496,5 @@ pub(crate) mod progress_tests;
 
 #[path = "workflow_decompose_runtime_arguments.rs"]
 mod runtime_arguments;
+pub(crate) use runtime_arguments::launch_metadata_arguments;
 pub(crate) use runtime_arguments::script_arguments_with_reply_markers;

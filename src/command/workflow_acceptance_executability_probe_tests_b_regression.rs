@@ -26,9 +26,9 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
     )
     .await;
     assert!(
-        accepted
-            .get("AC-3B-001")
-            .is_some_and(|finding| finding.contains("names none")),
+        accepted.get("AC-3B-001").is_some_and(
+            |finding| finding.contains("no movable input exists under the selected root")
+        ),
         "a stored verdict cannot make `echo ok` prove its criterion: {accepted:?}"
     );
     let diagnostics = probe.take_diagnostics();
