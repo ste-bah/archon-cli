@@ -7,6 +7,8 @@ use super::Markers;
 pub fn wrap(original: &str, inputs: &[String], live_roots: &[&Path], markers: &Markers) -> String {
     let quote = |text: &str| format!("'{}'", text.replace('\'', r"'\''"));
     let tag = markers.tag();
+    let state_prefix = format!("archon-mutation-state-{}: ", markers.nonce());
+    let status_prefix = format!("archon-mutation-status-{}: ", markers.nonce());
     let mut script = String::new();
     script.push_str(watch_prologue());
     for root in live_roots {
@@ -49,22 +51,33 @@ pub fn wrap(original: &str, inputs: &[String], live_roots: &[&Path], markers: &M
     script.push_str(&snapshot_parents(inputs, &tag));
     script.push_str(&wait_for_timestamp_tick(inputs));
     script.push_str(&format!("(\n{original}\n)\n__archon_status=$?\n"));
+    script.push_str(&format!(
+        "if [ \"$__archon_status\" -gt 128 ] 2>/dev/null; then __archon_signal=$(($__archon_status - 128)); else __archon_signal=none; fi; printf '%s%s:%s:%s:%s\\n' {} {} \"$__archon_status\" \"$__archon_signal\" \"$__archon_observed_signal\"\n",
+        quote(&status_prefix),
+        quote(&tag)
+    ));
     script.push_str(&report_recreated(inputs, &markers.recreated_prefix()));
-    for input in inputs {
+    for (index, input) in inputs.iter().enumerate() {
         let path = quote(input);
         script.push_str(&format!(
-            "if [ -e {path} ] || [ -L {path} ]; then printf '%s%s\\n' {} {path} >&2; fi\n",
+            "if [ -e {path} ] || [ -L {path} ]; then printf '%s{}\\n' {} >&2; fi\n",
+            index,
             quote(&markers.generated_prefix()),
         ));
     }
-    for input in inputs.iter().rev() {
+    script.push_str("__archon_unsafe_restore=0\n");
+    for (index, input) in inputs.iter().enumerate().rev() {
         let path = quote(input);
+        let safe = safe_restore_components(input, &tag)
+            .map(|components| components.join(" && "))
+            .unwrap_or_else(|| "false".into());
         script.push_str(&format!(
-            "if [ -e {path}.{tag} ] || [ -L {path}.{tag} ]; then rm -rf -- {path}; mv -- {path}.{tag} {path}; fi\n"
+            "if [ \"$__archon_moved_{index}\" = 1 ]; then if {safe}; then if [ -e {path}.{tag} ] || [ -L {path}.{tag} ]; then if [ -e {path} ] || [ -L {path} ]; then printf '%s{}:original-recreated\\n' {}; else if mv -- {path}.{tag} {path}; then printf '%s{}:restored\\n' {}; else printf '%s{}:aside-missing\\n' {}; fi; fi; else printf '%s{}:aside-missing\\n' {}; fi; else __archon_unsafe_restore=1; printf '%s{}:unsafe-to-restore\\n' {}; fi; fi\n",
+            index, quote(&state_prefix), index, quote(&state_prefix), index, quote(&state_prefix), index, quote(&state_prefix), index, quote(&state_prefix),
         ));
     }
     script.push_str(&format!(
-        "if [ -z \"$({sweep} | grep -F -- {} | head -n 1)\" ]; then printf '%s\\n' {}; fi\nexit $__archon_status\n",
+        "if [ \"$__archon_unsafe_restore\" = 0 ] && [ -z \"$({sweep} | grep -F -- {} | head -n 1)\" ]; then printf '%s\\n' {}; fi\nexit $__archon_status\n",
         quote(&tag),
         quote(&markers.restored()),
     ));
@@ -82,12 +95,42 @@ pub(super) fn watch_prologue() -> &'static str {
     // Git Bash/MSYS, use stat's %z (Cygwin maps st_ctime to NTFS ChangeTime);
     // if it cannot be read, unavailable is treated as recreated.
     // macOS ctime has second precision, so wait for a timestamp tick.
-    "__archon_dir_state() { stat -c '%Y:%i:%z' -- \"$1\" 2>/dev/null || stat -f '%m:%i:%c' \"$1\" 2>/dev/null || printf '%s' unavailable; }\n__archon_moved_any=0\n"
+    "__archon_dir_state() { stat -c '%Y:%i:%z' -- \"$1\" 2>/dev/null || stat -f '%m:%i:%c' \"$1\" 2>/dev/null || printf '%s' unavailable; }\n__archon_moved_any=0\n__archon_observed_signal=none\ntrap '__archon_observed_signal=HUP' HUP\ntrap '__archon_observed_signal=INT' INT\ntrap '__archon_observed_signal=QUIT' QUIT\ntrap '__archon_observed_signal=TERM' TERM\n"
+}
+
+fn safe_restore_components(input: &str, tag: &str) -> Option<Vec<String>> {
+    let path = Path::new(input);
+    let mut current = String::new();
+    let mut components = path.components().peekable();
+    let mut checks = Vec::new();
+    while let Some(component) = components.next() {
+        match component {
+            std::path::Component::Normal(part) => {
+                if !current.is_empty() {
+                    current.push('/');
+                }
+                current.push_str(&part.to_string_lossy());
+                if components.peek().is_some() {
+                    checks.push(format!("[ ! -L '{}' ]", current.replace('\'', r"'\''")));
+                }
+            }
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    if current.is_empty() {
+        return None;
+    }
+    checks.push(format!(
+        "[ ! -L '{}' ]",
+        format!("{current}.{tag}").replace('\'', r"'\''")
+    ));
+    Some(checks)
 }
 
 pub(super) fn move_inputs(inputs: &[String], tag: &str, moved_prefix: &str) -> String {
     let mut script = String::new();
-    for input in inputs {
+    for (index, input) in inputs.iter().enumerate() {
         let mut prefix = String::new();
         let mut plain = Vec::new();
         for part in input.split('/') {
@@ -100,9 +143,9 @@ pub(super) fn move_inputs(inputs: &[String], tag: &str, moved_prefix: &str) -> S
         }
         let path = quote(input);
         script.push_str(&format!(
-            "if {} && [ -e {path} ]; then mv -- {path} {path}.{tag} 2>/dev/null && {{ __archon_moved_any=1; printf '%s%s\\n' {} {path} >&2; }}; fi\n",
-            plain.join(" && "),
+            "__archon_moved_{index}=0; if {plain} && [ -e {path} ]; then mv -- {path} {path}.{tag} 2>/dev/null && {{ __archon_moved_any=1; __archon_moved_{index}=1; printf '%s{index}\\n' {} >&2; }}; fi\n",
             quote(moved_prefix),
+            plain = plain.join(" && "),
         ));
     }
     script
@@ -132,10 +175,10 @@ pub(super) fn wait_for_timestamp_tick(inputs: &[String]) -> String {
 
 pub(super) fn report_recreated(inputs: &[String], recreated_prefix: &str) -> String {
     let mut script = String::new();
-    for (index, input) in inputs.iter().enumerate() {
-        let path = quote(input);
+    for (index, _input) in inputs.iter().enumerate() {
         script.push_str(&format!(
-            "if [ \"${{__archon_state_{index}+set}}\" = set ] && {{ [ \"$__archon_state_{index}\" = unavailable ] || [ \"$(__archon_dir_state \"$__archon_parent_{index}\")\" != \"$__archon_state_{index}\" ]; }}; then printf '%s%s\\n' {} {path} >&2; fi\n",
+            "if [ \"${{__archon_state_{index}+set}}\" = set ] && {{ [ \"$__archon_state_{index}\" = unavailable ] || [ \"$(__archon_dir_state \"$__archon_parent_{index}\")\" != \"$__archon_state_{index}\" ]; }}; then printf '%s{}\\n' {} >&2; fi\n",
+            index,
             quote(recreated_prefix),
         ));
     }

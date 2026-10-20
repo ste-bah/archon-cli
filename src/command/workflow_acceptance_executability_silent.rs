@@ -253,17 +253,34 @@ pub(super) fn settle_timed_out(
     contract: &AcceptanceContract,
     id: &str,
 ) -> Option<String> {
+    settle_timed_out_with_diagnostics(probe, commit, contract, id, "")
+}
+
+/// Settle a timeout while appending run-specific diagnostics to either
+/// report path without changing its verdict or resumable route.
+pub(super) fn settle_timed_out_with_diagnostics(
+    probe: &HostProbe,
+    commit: &str,
+    contract: &AcceptanceContract,
+    id: &str,
+    diagnostics: &str,
+) -> Option<String> {
     let short: String = commit.chars().take(12).collect();
     let window = probe.check_bound_secs();
     let why = format!("no output or process-tree activity for {window}s");
+    let diagnostic_suffix = if diagnostics.is_empty() {
+        String::new()
+    } else {
+        format!("; {diagnostics}")
+    };
     let path = stall_strike(probe, commit, contract, id);
     struck(probe, &path, id, &why, Credit::None, || {
         (
             format!(
-                "check '{id}': it made no progress on the base commit {short} twice: {why}, and so again when the host ran it on that same commit after a resume. A check that waits forever (on input, a socket, a lock or a timer) gives no verdict on any tree. Repair or replace it so that it ends by its own assertion"
+                "check '{id}': it made no progress on the base commit {short} twice: {why}, and so again when the host ran it on that same commit after a resume. A check that waits forever (on input, a socket, a lock or a timer) gives no verdict on any tree. Repair or replace it so that it ends by its own assertion{diagnostic_suffix}"
             ),
             format!(
-                "unproven (timed out): {why} on the pre-implementation tree at {short}; every saved verdict is kept and the run pauses resumably, since the host may be at fault. If it stalls so again on that commit after a resume, it goes to its author"
+                "unproven (timed out): {why} on the pre-implementation tree at {short}; every saved verdict is kept and the run pauses resumably, since the host may be at fault. If it stalls so again on that commit after a resume, it goes to its author{diagnostic_suffix}"
             ),
         )
     })

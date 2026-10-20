@@ -260,8 +260,14 @@ async fn issue356_elapsed_scratch_freeze_reuses_full_closure_results() {
             .unwrap()
             .flatten();
         (caches.filter_map(|cache| std::fs::read_dir(cache.path().join("probe-results")).ok()))
-            .map(|entries| entries.count())
-            .sum()
+            .flat_map(|entries| entries.flatten())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "json" || ext == "provisional")
+            })
+            .count()
     };
     let budget = FreezeBudget::within(7_800, spent_after(4));
     let first = freeze(&trees, copies.path(), &saving(budget));

@@ -176,7 +176,7 @@ fn the_mutation_moves_named_inputs_aside_and_restores_them_whatever_the_check_tr
     let names = names_of(&["data/state.txt", "absent"]);
     let ran = sh(dir.path(), &wrap(original, &names, &[], &markers));
     assert_ne!(ran.exit_code, Some(0), "fails with its input moved aside");
-    assert_eq!(markers.moved(&ran), names_of(&["data/state.txt"]));
+    assert_eq!(markers.moved(&ran, &names), names_of(&["data/state.txt"]));
     assert!(
         markers.restored_all(&ran),
         "{}",
@@ -191,15 +191,60 @@ fn the_mutation_moves_named_inputs_aside_and_restores_them_whatever_the_check_tr
     let recreate_markers = Markers::new();
     let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &recreate_markers));
     assert_eq!(
-        recreate_markers.recreated(&recreated),
+        recreate_markers.recreated(&recreated, &names),
         BTreeSet::from(["data/state.txt".to_string()]),
         "{}",
         String::from_utf8_lossy(&recreated.stderr)
     );
     assert_eq!(
         std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
+        "other"
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            dir.path()
+                .join(format!("data/state.txt.{}", recreate_markers.tag()))
+        )
+        .unwrap(),
         "ready"
     );
+    assert_eq!(
+        recreate_markers
+            .states(&recreated, &names)
+            .get("data/state.txt")
+            .map(String::as_str),
+        Some("original-recreated")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_parent_makes_the_wrapper_report_unsafe_to_restore() {
+    let outside = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("data")).unwrap();
+    std::fs::write(dir.path().join("data/state.txt"), "inside").unwrap();
+    let markers = Markers::new();
+    let outside_aside = outside.path().join(format!("state.txt.{}", markers.tag()));
+    std::fs::write(&outside_aside, "outside aside").unwrap();
+    let command = format!("rm -rf data; ln -s '{}' data", outside.path().display());
+
+    let result = sh(
+        dir.path(),
+        &wrap(&command, &["data/state.txt".into()], &[], &markers),
+    );
+
+    let names = names_of(&["data/state.txt"]);
+    assert_eq!(
+        markers
+            .states(&result, &names)
+            .get("data/state.txt")
+            .map(String::as_str),
+        Some("unsafe-to-restore")
+    );
+    assert!(outside_aside.exists());
+    assert!(!outside.path().join("state.txt").exists());
+    assert!(!markers.restored_all(&result));
 }
 
 #[cfg(unix)]
@@ -267,7 +312,7 @@ fn sibling_only_input_is_never_moved_during_the_can_fail_run() {
         "{}",
         String::from_utf8_lossy(&can_fail.stderr)
     );
-    assert!(markers.moved(&can_fail).is_empty());
+    assert!(markers.moved(&can_fail, &[]).is_empty());
     let after = std::fs::read_dir(&sibling)
         .unwrap()
         .map(|entry| {
@@ -277,78 +322,6 @@ fn sibling_only_input_is_never_moved_during_the_can_fail_run() {
         .collect::<BTreeMap<_, _>>();
     assert_eq!(after, before, "the sibling copy stays byte-identical");
     assert_eq!(std::fs::read_to_string(fixture).unwrap(), "ready\n");
-}
-
-#[test]
-fn a_recreated_input_read_and_deleted_by_the_check_is_marked_recreated() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("data")).unwrap();
-    std::fs::write(dir.path().join("data/state.txt"), "ready").unwrap();
-    let names = names_of(&["data/state.txt"]);
-    let recreates = "d=data; f=state.txt; printf 'other' > \"$d/$f\"; cat \"$d/$f\" >/dev/null; rm \"$d/$f\"; exit 0";
-    let markers = Markers::new();
-    let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &markers));
-    assert_eq!(recreated.exit_code, Some(0));
-    assert_eq!(
-        markers.recreated(&recreated),
-        BTreeSet::from(["data/state.txt".to_string()]),
-        "{}",
-        String::from_utf8_lossy(&recreated.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
-        "ready"
-    );
-}
-
-#[test]
-fn recreating_reading_and_deleting_an_input_cannot_hide_behind_restored_parent_mtime() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("data")).unwrap();
-    std::fs::write(dir.path().join("data/state.txt"), "ready").unwrap();
-
-    // Skip only on hosts whose touch does not implement -r; the regression
-    // needs to restore the directory mtime after the transient recreation.
-    let touch_probe = sh(dir.path(), "touch -r data .parent-time-ref");
-    if touch_probe.exit_code != Some(0) {
-        let stderr = String::from_utf8_lossy(&touch_probe.stderr).to_ascii_lowercase();
-        let unsupported = ["illegal option", "invalid option", "unknown option"]
-            .iter()
-            .any(|message| stderr.contains(message));
-        assert!(
-            unsupported,
-            "touch -r probe failed for a reason other than an unsupported option (exit {:?}): {}",
-            touch_probe.exit_code, stderr
-        );
-        eprintln!("skipping: touch -r is unsupported on this host");
-        return;
-    }
-    std::fs::remove_file(dir.path().join(".parent-time-ref")).unwrap();
-
-    let names = names_of(&["data/state.txt"]);
-    let recreates = "set -e; touch -r data .parent-time-before; touch -r data .parent-time-ref; sleep 1; printf 'other' > data/state.txt; cat data/state.txt >/dev/null; rm data/state.txt; touch -m -r .parent-time-ref data; touch -r data .parent-time-after; rm .parent-time-ref; exit 0";
-    let markers = Markers::new();
-    let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &markers));
-    assert_eq!(recreated.exit_code, Some(0));
-    let parent_mtime_before = std::fs::metadata(dir.path().join(".parent-time-before"))
-        .unwrap()
-        .modified()
-        .unwrap();
-    let parent_mtime_after = std::fs::metadata(dir.path().join(".parent-time-after"))
-        .unwrap()
-        .modified()
-        .unwrap();
-    assert_eq!(parent_mtime_before, parent_mtime_after);
-    assert_eq!(
-        markers.recreated(&recreated),
-        BTreeSet::from(["data/state.txt".to_string()]),
-        "{}",
-        String::from_utf8_lossy(&recreated.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
-        "ready"
-    );
 }
 
 #[test]
@@ -421,7 +394,12 @@ fn an_input_behind_a_symlink_is_never_moved() {
             &markers,
         ),
     );
-    assert!(markers.moved(&ran).is_empty(), "{:?}", markers.moved(&ran));
+    let names = names_of(&["ext/state.txt", "alias"]);
+    assert!(
+        markers.moved(&ran, &names).is_empty(),
+        "{:?}",
+        markers.moved(&ran, &names)
+    );
     assert!(live.path().join("state.txt").exists());
     assert!(dir.path().join("link-file").exists());
 }
@@ -430,9 +408,9 @@ fn an_input_behind_a_symlink_is_never_moved() {
 fn a_forged_marker_without_the_nonce_counts_for_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let markers = Markers::new();
-    let forged = "printf 'archon-mutation-moved-0: data\\n' >&2; printf 'archon-mutation-restored-0\\n'; exit 1";
+    let forged = "printf 'archon-mutation-moved-0: 0\\n' >&2; printf 'archon-mutation-restored-0\\n'; exit 1";
     let ran = sh(dir.path(), forged);
-    assert!(markers.moved(&ran).is_empty());
+    assert!(markers.moved(&ran, &["data".into()]).is_empty());
     assert!(!markers.restored_all(&ran));
 }
 

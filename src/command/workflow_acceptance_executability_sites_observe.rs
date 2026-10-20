@@ -19,6 +19,7 @@ pub(super) async fn observe(
     Vec<CheckResult>,
     Vec<super::hermetic::SiblingRevision>,
     BTreeMap<String, Vec<super::hermetic::SiblingRevision>>,
+    std::path::PathBuf,
 )> {
     let identity = archon_shell::paths::canonicalize(&binding.policy.repository)?;
     let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
@@ -148,7 +149,7 @@ pub(super) async fn observe(
         }
     }
     let siblings = all_siblings.into_values().collect();
-    Ok((observed.checks, siblings, check_siblings))
+    Ok((observed.checks, siblings, check_siblings, evidence))
 }
 
 fn relative_path(from: &std::path::Path, to: &std::path::Path) -> PathBuf {

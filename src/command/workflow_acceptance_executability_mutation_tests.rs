@@ -477,3 +477,6 @@ fn heredoc_bodies_are_not_lexed_as_shell_commands() {
 #[cfg(unix)]
 #[path = "workflow_acceptance_executability_mutation_restoration_tests.rs"]
 mod restoration_tests;
+
+#[path = "workflow_acceptance_executability_mutation_state_tests.rs"]
+mod state_tests;

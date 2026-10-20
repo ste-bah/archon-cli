@@ -72,7 +72,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // scanned, changing can-fail proof verdicts for repeated flags.
         // 33: mutation wrappers preserve named sibling setup paths, so their
         // copy layout matches baseline and absent-sibling failures give no verdict.
-        version: 36,
+        // 37: #468 mutation verdicts route every final or transiently recreated input to the author, and are saved or memoized only when that run's markers show every moved input was restored.
+        version: 37,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -117,7 +118,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
-        sources_digest: "7ec66ecb352c74316903e52d519daf9e54843feb66ef53bece5ce96be993c806",
+        // #468 follow-up re-pin: complete per-input state, transient recreation markers and status markers route recreated inputs to the author, unrestored inputs to host-unproven, and only restored inputs to the normal verdict; persistence still requires restoration markers.
+        // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
+        sources_digest: "4e7e957bfa18b8d1954e3c083656cf6a52fdf31c26ffc312338f55a93c033364",
         build_bound: false,
     },
     CapabilityLogic {
@@ -180,7 +183,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no freeze verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
-        sources_digest: "7ec66ecb352c74316903e52d519daf9e54843feb66ef53bece5ce96be993c806",
+        // #467/#468 re-pin: diagnostic text changes do not alter this verdict.
+        // #468 re-pin only: save-time mutation restoration gating does not change skeleton verdicts.
+        // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
+        sources_digest: "4e7e957bfa18b8d1954e3c083656cf6a52fdf31c26ffc312338f55a93c033364",
         build_bound: false,
     },
     CapabilityLogic {
@@ -404,7 +410,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
-        sources_digest: "b77efa7b79798011f64974f757ca770497df448a787b4e6ca70920d2ba1976d8",
+        // #468 re-pin only: an unrestored mutation result cannot be reused; frozen-chain verification runs no mutation probe.
+        // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
+        sources_digest: "8f8a2fb6f083adbd0bad9c7ca78b353690544d692959f6b4875ae5c0a706552c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -463,7 +471,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: EOF diagnostic placement changes no verification verdict.
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
-        sources_digest: "b77efa7b79798011f64974f757ca770497df448a787b4e6ca70920d2ba1976d8",
+        // #468 re-pin only: save-time mutation restoration gating does not change frozen skeleton verification.
+        // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
+        sources_digest: "8f8a2fb6f083adbd0bad9c7ca78b353690544d692959f6b4875ae5c0a706552c",
         build_bound: true,
     },
 ];
