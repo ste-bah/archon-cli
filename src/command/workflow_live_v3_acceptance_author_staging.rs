@@ -175,13 +175,20 @@ impl Staged {
     }
 
     fn clear_owned(run_dir: &Path) -> Option<String> {
-        match std::fs::remove_file(staging_path(run_dir)) {
+        let staged_error = match std::fs::remove_file(staging_path(run_dir)) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
                 "the published checks' staging {} could not be cleared: {error}",
                 staging_path(run_dir).display()
             )),
             _ => None,
-        }
+        };
+        let cache_error =
+            crate::command::workflow_task_set::reauthor::cache::remove(&run_dir.join("v2"))
+                .err()
+                .map(|error| {
+                    format!("the published checks' candidate records could not be cleared: {error}")
+                });
+        staged_error.or(cache_error)
     }
 }
 

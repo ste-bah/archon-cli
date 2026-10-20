@@ -156,7 +156,9 @@ async fn a_host_failure_is_never_fed_to_the_author() {
     use crate::command::workflow_task_set::reauthor::test_client::{
         ScriptedAuthorJudge, command_entry,
     };
-    use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate, reauthor};
+    use crate::command::workflow_task_set::reauthor::{
+        AuthorScope, ReauthorGate, reauthor_with_cache,
+    };
     let trees = trees(&[("AC-6-001", "test -f nothing-yet", REPO)]);
     let mut contract = trees.contract();
     contract.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
@@ -170,7 +172,7 @@ async fn a_host_failure_is_never_fed_to_the_author() {
         AuthorScope::for_task_set(trees.set.project.path(), &trees.set.tasks, &trees.set.prd)
             .expect("the task set's repository record is believed");
     let seeds = BTreeMap::new();
-    let error = reauthor(
+    let error = reauthor_with_cache(
         &client,
         &contract,
         &trees.ids(),
@@ -180,6 +182,7 @@ async fn a_host_failure_is_never_fed_to_the_author() {
             probe: &probe,
             seeds: &seeds,
         },
+        Some(&trees.set.tasks),
     )
     .await
     .expect_err("an unprovable check is never published");
@@ -189,6 +192,14 @@ async fn a_host_failure_is_never_fed_to_the_author() {
     );
     assert!(format!("{error:#}").contains(HOST_UNPROVEN), "{error:#}");
     assert_eq!(client.authored(), 1, "the author is not asked again");
+    assert!(
+        !trees
+            .set
+            .tasks
+            .join("acceptance-reauthor-candidates")
+            .exists(),
+        "a check that did not clear the proof gate has no saved candidate"
+    );
     let prompt = client.prompts.lock().unwrap()[0].clone();
     assert!(
         prompt.contains("never the check's own script"),

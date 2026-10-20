@@ -23,6 +23,9 @@ mod reply_parse;
 use reply_parse::candidate_entry;
 use reply_parse::candidate_entry_with_markers;
 
+#[path = "workflow_acceptance_reauthor_cache.rs"]
+pub(crate) mod cache;
+
 /// Consecutive author-then-judge attempts that repair no named check before
 /// the operation stops and fails with its report.
 pub(crate) const REAUTHOR_ATTEMPTS: usize = 3;
@@ -201,6 +204,18 @@ pub(crate) async fn reauthor(
     judge_model: &str,
     gate: &ReauthorGate<'_>,
 ) -> Result<AcceptanceContract> {
+    reauthor_with_cache(client, contract, ids, scope, judge_model, gate, None).await
+}
+
+pub(crate) async fn reauthor_with_cache(
+    client: &dyn WorkflowLlmClient,
+    contract: &AcceptanceContract,
+    ids: &BTreeSet<String>,
+    scope: &AuthorScope,
+    judge_model: &str,
+    gate: &ReauthorGate<'_>,
+    state_dir: Option<&Path>,
+) -> Result<AcceptanceContract> {
     let mut feedback: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut unseeded_accepted = BTreeSet::new();
     for id in ids {
@@ -245,15 +260,40 @@ pub(crate) async fn reauthor(
     }
     let mut working = contract.clone();
     let mut pending = ids.clone();
+    let mut reused = BTreeMap::new();
+    if let Some(state_dir) = state_dir {
+        for id in ids {
+            let frozen = entry(contract, id).expect("named ids were checked above");
+            match cache::load(
+                state_dir,
+                frozen,
+                scope,
+                judge_model,
+                client.provider_id().as_deref(),
+                gate.probe,
+            ) {
+                Ok(Some(candidate)) => {
+                    *entry_mut(&mut working, id).expect("named id") = candidate.clone();
+                    reused.insert(id.clone(), candidate);
+                    eprintln!("acceptance re-author reused check {id}");
+                }
+                Ok(None) => {}
+                Err(reason) => eprintln!("acceptance re-author ignored saved check {id}: {reason}"),
+            }
+        }
+    }
     // Bounded by progress: every attempt that repairs a check resets the
     // count, and with finitely many named checks the loop always ends.
     let (mut attempt, mut idle) = (0, 0);
     let refused = author::refused_forms(scope, gate.probe);
-    while !pending.is_empty() && idle < REAUTHOR_ATTEMPTS {
+    while (!pending.is_empty() || !reused.is_empty()) && idle < REAUTHOR_ATTEMPTS {
         attempt += 1;
         let before = pending.len();
         let mut authored = Vec::new();
         for id in &pending {
+            if reused.contains_key(id) {
+                continue;
+            }
             let frozen = entry(contract, id).expect("named ids were checked above");
             let notes = feedback.get_mut(id).expect("feedback seeded per id");
             let reply = author_entry(client, scope, frozen, notes, attempt).await?;
@@ -265,6 +305,11 @@ pub(crate) async fn reauthor(
                 Err(reason) => notes.push(reason),
             }
         }
+        let mut accepted = BTreeSet::new();
+        for (id, candidate) in &reused {
+            *entry_mut(&mut working, id).expect("named id") = candidate.clone();
+            accepted.insert(id.clone());
+        }
         if !authored.is_empty() {
             let mut subset = contract.clone();
             let acceptance_ids: BTreeSet<_> =
@@ -275,7 +320,6 @@ pub(crate) async fn reauthor(
             subset.acceptance = acceptance;
             subset.supplementary = supplementary;
             let judged = judge::judge_entries(client, subset, judge_model).await?;
-            let mut accepted = BTreeSet::new();
             for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
                 if candidate.judgment.verdict == JudgeDecision::Accepted {
                     accepted.insert(candidate.id.clone());
@@ -292,12 +336,10 @@ pub(crate) async fn reauthor(
             // Judged accepted is not yet publishable: a check that crashes in
             // its own code can never assert its criterion. It goes back to
             // its author with the crash, and the frozen entry is restored.
+        }
+        if !accepted.is_empty() {
             let _ = gate.probe.take_baseline_runs();
-            let crashed = if accepted.is_empty() {
-                BTreeMap::new()
-            } else {
-                gate.probe.script_defects(&working, &accepted).await
-            };
+            let crashed = gate.probe.script_defects(&working, &accepted).await;
             // What the host could not prove is the host's: never fed back
             // to the author, never published, and the repair stops here.
             let unproven: BTreeMap<String, String> = (gate.probe.take_unproven().into_iter())
@@ -333,12 +375,26 @@ pub(crate) async fn reauthor(
                     // would weaken its original) goes back like a crash.
                     *entry_mut(&mut working, &id).expect("named id") =
                         entry(contract, &id).expect("named id").clone();
+                    reused.remove(&id);
                     feedback
                         .get_mut(&id)
                         .expect("feedback seeded per id")
                         .push(finding.clone());
                 } else {
                     pending.remove(&id);
+                    reused.remove(&id);
+                    if let Some(state_dir) = state_dir {
+                        let candidate = entry(&working, &id).expect("accepted named id");
+                        cache::store(
+                            state_dir,
+                            candidate,
+                            contract,
+                            scope,
+                            judge_model,
+                            client.provider_id().as_deref(),
+                            gate.probe,
+                        )?;
+                    }
                 }
             }
         }
