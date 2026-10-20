@@ -73,7 +73,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 33: mutation wrappers preserve named sibling setup paths, so their
         // copy layout matches baseline and absent-sibling failures give no verdict.
         // 37: #468 mutation verdicts route every final or transiently recreated input to the author, and are saved or memoized only when that run's markers show every moved input was restored.
-        version: 37,
+        // 38: saved re-author candidates skip only authoring and candidate judging; every reuse reruns host proof and passability gates, and prompt and judge instruction sources bind the key.
+        version: 38,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -123,7 +124,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "f10c8ba8ac1c0ddcbf4a47d64394b8818aa47bc1289977d4a0aaa1d3ae14805d",
+        sources_digest: "a34c30be9340ec3e1b0c2d27568a9262cea63f88be73a73f2746485253e0d7f0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -192,7 +193,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: shared acceptance diagnostics distinguish text-derived writes from observed recreation; skeleton verdicts are unchanged. The helper split only moves this source closure.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "f10c8ba8ac1c0ddcbf4a47d64394b8818aa47bc1289977d4a0aaa1d3ae14805d",
+        sources_digest: "a34c30be9340ec3e1b0c2d27568a9262cea63f88be73a73f2746485253e0d7f0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -429,7 +430,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: acceptance author guidance changes messages; frozen verification verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "ec2130a53ca0722230425da5b77191ace521dddd5be4ac75df565c3a36780804",
+        sources_digest: "550edac269d551672b26b6e5e18c6c4fdb450498a17fe24a495fd2d636527a94",
         build_bound: true,
     },
     CapabilityLogic {
@@ -493,7 +494,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: acceptance author guidance changes messages; skeleton verification verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "ec2130a53ca0722230425da5b77191ace521dddd5be4ac75df565c3a36780804",
+        sources_digest: "550edac269d551672b26b6e5e18c6c4fdb450498a17fe24a495fd2d636527a94",
         build_bound: true,
     },
 ];

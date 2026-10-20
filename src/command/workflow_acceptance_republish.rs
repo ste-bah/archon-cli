@@ -78,13 +78,15 @@ pub(crate) async fn reauthor_and_republish(
             ));
         }
     }
-    let repaired = reauthor::reauthor(
+    let state_dir = request.tasks_root.to_path_buf();
+    let repaired = reauthor::reauthor_with_cache(
         client,
         &verified.contract,
         request.ids,
         scope,
         &judge_model,
         &request.gate,
+        Some(&state_dir),
     )
     .await;
     let diagnostics = request.gate.probe.take_diagnostics();
@@ -102,7 +104,10 @@ pub(crate) async fn reauthor_and_republish(
             reauthor::not_accepted_report(&repaired, &still, reauthor::REAUTHOR_ATTEMPTS)
         ));
     }
-    publish_chain(&request, verified, repaired, diagnostics, None)
+    let result = publish_chain(&request, verified, repaired, diagnostics, None)?;
+    reauthor::cache::remove(&state_dir)
+        .with_context(|| "removing consumed acceptance re-author candidates")?;
+    Ok(result)
 }
 
 /// Publish `repaired` as the successor of the `verified` chain: gates in the

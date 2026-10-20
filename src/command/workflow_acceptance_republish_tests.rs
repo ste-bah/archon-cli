@@ -21,6 +21,9 @@ fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest
     }
 }
 
+#[path = "workflow_acceptance_republish_cache_tests.rs"]
+mod cache_tests;
+
 pub(super) fn ids(list: &[&str]) -> BTreeSet<String> {
     list.iter().map(|id| id.to_string()).collect()
 }
@@ -64,6 +67,10 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
             .unwrap();
     assert_eq!(skeleton.acceptance_digest, pin.acceptance_digest);
     assert!(non_accepted_ids(&set.contract()).is_empty());
+    assert!(
+        !set.tasks.join("acceptance-reauthor-candidates").exists(),
+        "published ledger consumes its saved candidates"
+    );
     assert_eq!(
         *client.resolved_agents.lock().unwrap(),
         vec![archon_core::agents::harness::ACCEPTANCE_REAUTHOR_AGENT.to_string()],

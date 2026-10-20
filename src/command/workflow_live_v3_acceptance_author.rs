@@ -43,7 +43,7 @@ use super::exec::StageContext;
 use crate::command::workflow_task_set::executability::{
     Baseline, ExecutabilityProbe, HostProbe, PLACEHOLDER_REASON,
 };
-use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate, reauthor};
+use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate, reauthor_with_cache};
 
 #[path = "workflow_live_v3_acceptance_author_evidence.rs"]
 mod evidence;
@@ -247,7 +247,18 @@ pub(super) async fn author_owed(
             seeds: &seeds,
         };
         let ids = BTreeSet::from([id.clone()]);
-        match reauthor(llm, &contract, &ids, &scope, judge_model, &gate).await {
+        let cache_dir = site.run_dir.join("v2");
+        match reauthor_with_cache(
+            llm,
+            &contract,
+            &ids,
+            &scope,
+            judge_model,
+            &gate,
+            Some(&cache_dir),
+        )
+        .await
+        {
             Ok(repaired) => {
                 let entry = (repaired.acceptance.iter())
                     .chain(&repaired.supplementary)
