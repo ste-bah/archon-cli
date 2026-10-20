@@ -150,11 +150,61 @@ fn operational_words(commands: &[Vec<String>]) -> BTreeSet<String> {
 }
 
 /// Candidate data paths `entry` names, relative to its working directory.
+#[cfg(test)]
 pub(super) fn named_inputs(
     entry: &AcceptanceCriterion,
     project: &Path,
     repository: &Path,
 ) -> Vec<String> {
+    input_discovery(entry, project, repository).eligible
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ExclusionReason {
+    MissingAtRoot,
+    ManifestOrSetup,
+    SiblingFromRoot,
+    CheckWritesPathInText,
+    CheckRecreatedPathObserved,
+    OutsideCopiedTree,
+    CheckMechanics,
+}
+
+impl ExclusionReason {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::MissingAtRoot => "missing at the selected root",
+            Self::ManifestOrSetup => "build manifest or setup file",
+            Self::SiblingFromRoot => "sibling tree seen from this root; not movable",
+            Self::CheckWritesPathInText => {
+                "a command in the check writes this path (seen in the check text), so it is not a pre-existing input"
+            }
+            Self::CheckRecreatedPathObserved => {
+                "the check recreated this path while running (observed)"
+            }
+            Self::OutsideCopiedTree => "outside the copied check tree",
+            Self::CheckMechanics => "check mechanics or command output",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CandidateDiagnostic {
+    pub(super) path: String,
+    pub(super) exclusion: Option<ExclusionReason>,
+}
+
+#[derive(Default)]
+pub(super) struct InputDiscovery {
+    pub(super) eligible: Vec<String>,
+    pub(super) candidates: Vec<CandidateDiagnostic>,
+}
+
+pub(super) fn input_discovery(
+    entry: &AcceptanceCriterion,
+    project: &Path,
+    repository: &Path,
+) -> InputDiscovery {
     let text = executed_text(entry).map_or_else(String::new, |(_, text)| text.to_string());
     let (raw_commands, bodies) = paths::lex(&text);
     let cwd = match &entry.check {
@@ -263,7 +313,7 @@ pub(super) fn named_inputs(
         words.push((contract.artifact_path.clone(), Some(cwd.clone())));
     }
     let mut seen = BTreeSet::new();
-    let found: Vec<String> = (words.iter())
+    let candidates: Vec<CandidateDiagnostic> = (words.iter())
         .flat_map(|(word, base)| {
             path_tokens(word)
                 .into_iter()
@@ -324,22 +374,39 @@ pub(super) fn named_inputs(
                     .to_string_lossy()
                     .into_owned()
             });
-            if manifest
-                || runs
-                // Sibling trees are copied setup. They remain discoverable
-                // by the wrapper, but must never be moved during proof.
-                || sibling
-                || !(shaped || exists || has_manifest_sibling)
-                || (mapped.starts_with("../") && !sibling && !has_manifest_sibling)
-            {
-                None
+            let exclusion = if written_words.contains(&token) {
+                Some(ExclusionReason::CheckWritesPathInText)
+            } else if manifest {
+                Some(ExclusionReason::ManifestOrSetup)
+            } else if sibling {
+                Some(ExclusionReason::SiblingFromRoot)
+            } else if runs {
+                Some(ExclusionReason::CheckMechanics)
+            } else if !exists && !has_manifest_sibling {
+                Some(ExclusionReason::MissingAtRoot)
+            } else if mapped.starts_with("../") {
+                Some(ExclusionReason::OutsideCopiedTree)
             } else {
-                Some(mapped)
-            }
+                None
+            };
+            (shaped || exists || has_manifest_sibling || written_words.contains(&token)).then_some(
+                CandidateDiagnostic {
+                    path: mapped,
+                    exclusion,
+                },
+            )
         })
-        .filter(|token| seen.insert(token.clone()))
+        .filter(|candidate| seen.insert(candidate.path.clone()))
         .collect();
-    found
+    let eligible = candidates
+        .iter()
+        .filter(|candidate| candidate.exclusion.is_none())
+        .map(|candidate| candidate.path.clone())
+        .collect();
+    InputDiscovery {
+        eligible,
+        candidates,
+    }
 }
 
 /// `contract` with each of `inputs`' entries' executed text wrapped by
@@ -381,3 +448,7 @@ mod variable_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_mutation_inline_tests.rs"]
 mod inline_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_mutation_diagnostics_tests.rs"]
+mod diagnostics_tests;

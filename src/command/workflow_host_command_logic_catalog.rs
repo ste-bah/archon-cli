@@ -121,7 +121,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #468 follow-up re-pin: complete per-input state, transient recreation markers and status markers route recreated inputs to the author, unrestored inputs to host-unproven, and only restored inputs to the normal verdict; persistence still requires restoration markers.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: reply marker stripping and midline-fence diagnosis change source closure; freeze behavior version stays fixed.
-        sources_digest: "52f30e787857aff394b2206d8308457c04babc9cbf3c9bc1ed83c3c5a8f2912b",
+        // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
+        sources_digest: "0d716b589250159727c7c22ce5e0709d2780616ae6862db872c9f49f376d7467",
         build_bound: false,
     },
     CapabilityLogic {
@@ -188,7 +189,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #468 re-pin only: save-time mutation restoration gating does not change skeleton verdicts.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: shared reply parsing changed source closure; skeleton verdict logic stays fixed.
-        sources_digest: "52f30e787857aff394b2206d8308457c04babc9cbf3c9bc1ed83c3c5a8f2912b",
+        // #471 re-pin only: shared acceptance diagnostics distinguish text-derived writes from observed recreation; skeleton verdicts are unchanged. The helper split only moves this source closure.
+        sources_digest: "0d716b589250159727c7c22ce5e0709d2780616ae6862db872c9f49f376d7467",
         build_bound: false,
     },
     CapabilityLogic {
@@ -259,7 +261,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; body landing version stays fixed.
-        sources_digest: "0caae72f6125094f2518e627a57ec599a5aafef43ceb8855c64ae74653f60414",
+        // #471 re-pin only: shared baseline-pass guidance changes messages; body verdicts are unchanged.
+        sources_digest: "549c0fb2b630602630311184d012da35c2d10388efe1c669d51eff3452a64e23",
         build_bound: false,
     },
     CapabilityLogic {
@@ -322,7 +325,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #467 re-pin: diagnostic text changes do not alter this verdict.
         // #466 re-pin only: guard path containment and Glob walk changed; macOS/Linux verdicts are unchanged.
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; lint version stays fixed.
-        sources_digest: "0caae72f6125094f2518e627a57ec599a5aafef43ceb8855c64ae74653f60414",
+        // #471 re-pin only: shared baseline-pass guidance changes messages; lint verdicts are unchanged.
+        sources_digest: "549c0fb2b630602630311184d012da35c2d10388efe1c669d51eff3452a64e23",
         build_bound: false,
     },
     CapabilityLogic {
@@ -418,7 +422,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #468 re-pin only: an unrestored mutation result cannot be reused; frozen-chain verification runs no mutation probe.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: shared reply parsing changed source closure; frozen acceptance verification stays fixed.
-        sources_digest: "6978ffd72bf364870066d56fd31e4602cd8a907ffe8cd9da1fcf0285136716dc",
+        // #471 re-pin only: acceptance author guidance changes messages; frozen verification verdicts are unchanged.
+        sources_digest: "b3306280dd1cdbf016d5aaa15ae81748da31ac1b3ea0638d1651cceb525324b0",
         build_bound: true,
     },
     CapabilityLogic {
@@ -480,7 +485,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #468 re-pin only: save-time mutation restoration gating does not change frozen skeleton verification.
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #469 re-pin only: shared reply parsing changed source closure; frozen skeleton verification stays fixed.
-        sources_digest: "6978ffd72bf364870066d56fd31e4602cd8a907ffe8cd9da1fcf0285136716dc",
+        // #471 re-pin only: acceptance author guidance changes messages; skeleton verification verdicts are unchanged.
+        sources_digest: "b3306280dd1cdbf016d5aaa15ae81748da31ac1b3ea0638d1651cceb525324b0",
         build_bound: true,
     },
 ];
