@@ -136,6 +136,7 @@ const FREEZE: &[&str] = &[
     "src/command/workflow_freeze_staged_output.rs",
     "src/command/workflow_task_set_candidate.rs",
     "src/command/acceptance_chain.rs",
+    "src/command/workflow_acceptance_executability_silent_strike.rs",
 ];
 
 /// `workflow lint`, for one task file and for the whole set.

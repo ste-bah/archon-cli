@@ -91,7 +91,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #422 #386 #387 #442 #443 #441 #447 #446 #340 #457 #444 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "968c0e3e9525d94579d6755114de4799e929356793b11e44b570705372440967",
+        // #475 re-pin only: strike identity helpers moved to their own file.
+        sources_digest: "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -110,7 +111,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #366 #422 #386 #387 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "968c0e3e9525d94579d6755114de4799e929356793b11e44b570705372440967",
+        // #475 re-pin only: freeze source closure shares the moved strike helpers.
+        sources_digest: "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -247,7 +249,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #417 #434 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "15474c316dc9f267a08621b6d8af296965fa389c0c9fb389dd10e24195906a6e",
+        // #475 re-pin only: freeze source closure shares the moved strike helpers.
+        sources_digest: "64106a072c50df937ed6911ed85021607b6f1fdce62b3af05b703ce0af59a589",
         build_bound: true,
     },
     CapabilityLogic {
@@ -264,7 +267,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #466 re-pin only: mutation evidence is discarded unless every moved input is restored.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #366 #434 #417 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
-        sources_digest: "15474c316dc9f267a08621b6d8af296965fa389c0c9fb389dd10e24195906a6e",
+        // #475 re-pin only: freeze source closure shares the moved strike helpers.
+        sources_digest: "64106a072c50df937ed6911ed85021607b6f1fdce62b3af05b703ce0af59a589",
         build_bound: true,
     },
 ];

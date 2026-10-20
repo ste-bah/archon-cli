@@ -246,6 +246,8 @@ mod repairs;
 mod resume;
 #[path = "workflow_acceptance_executability_silent.rs"]
 mod silent;
+#[path = "workflow_acceptance_executability_silent_strike.rs"]
+mod silent_strike;
 #[path = "workflow_acceptance_executability_sites.rs"]
 mod sites;
 #[path = "workflow_acceptance_executability_verdict.rs"]
