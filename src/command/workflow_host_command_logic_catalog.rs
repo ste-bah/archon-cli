@@ -124,7 +124,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: structured mutation-input diagnostics distinguish text-derived writes from observed recreation; findings change, verdict rules do not. The helper split only moves this source closure.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "a34c30be9340ec3e1b0c2d27568a9262cea63f88be73a73f2746485253e0d7f0",
+        sources_digest: "d9dfd78e54df0ee697f92c705f8cdc70ae72422d962d6586552e8d6bc37f218f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -193,7 +193,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: shared acceptance diagnostics distinguish text-derived writes from observed recreation; skeleton verdicts are unchanged. The helper split only moves this source closure.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "a34c30be9340ec3e1b0c2d27568a9262cea63f88be73a73f2746485253e0d7f0",
+        sources_digest: "d9dfd78e54df0ee697f92c705f8cdc70ae72422d962d6586552e8d6bc37f218f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -430,7 +430,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: acceptance author guidance changes messages; frozen verification verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "550edac269d551672b26b6e5e18c6c4fdb450498a17fe24a495fd2d636527a94",
+        sources_digest: "1b52e9fe15115fa16e9637ee7097c3e9135c7c511ba7c234e31fec911ca3cda0",
         build_bound: true,
     },
     CapabilityLogic {
@@ -494,7 +494,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #471 re-pin only: acceptance author guidance changes messages; skeleton verification verdicts are unchanged.
         // #469 re-pin only: reply-marker handling changes the source closure; host verdicts are unchanged.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
-        sources_digest: "550edac269d551672b26b6e5e18c6c4fdb450498a17fe24a495fd2d636527a94",
+        sources_digest: "1b52e9fe15115fa16e9637ee7097c3e9135c7c511ba7c234e31fec911ca3cda0",
         build_bound: true,
     },
 ];

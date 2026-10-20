@@ -1,4 +1,5 @@
-//! Copy relative sibling inputs named by authorized checks. A Git sibling is
+//! Copy relative sibling inputs named by authorized checks. The repository
+//! sibling aliases the site's committed checkout. Other Git siblings are
 //! cloned at HEAD, so uncommitted changes are not seen; the copied HEAD is
 //! verified and recorded. A non-Git sibling is copied from its current files,
 //! excluding build-output directories below its root, and its evidence has no
@@ -63,8 +64,33 @@ pub(super) fn copy_external(
     siblings.dedup_by(|left, right| left.0 == right.0);
     let mut evidence = Vec::new();
     for (destination, relative, source, cwd) in siblings {
+        let repository_relative = source.strip_prefix(&repository).ok();
         let existed = destination.exists();
-        let commit = if source.join(".git").exists() {
+        let commit = if let Some(repository_relative) = repository_relative {
+            let target = copied_repository.join(repository_relative);
+            if destination != target {
+                let already_points_to_target = existed
+                    && destination
+                        .canonicalize()
+                        .ok()
+                        .zip(target.canonicalize().ok())
+                        .is_some_and(|(destination, target)| destination == target);
+                if existed && !already_points_to_target {
+                    return Err(invalid(format!(
+                        "sibling alias {} already exists outside the repository copy",
+                        destination.display()
+                    )));
+                }
+                if !already_points_to_target {
+                    if let Some(parent) = destination.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|error| WorkflowError::io(parent, error))?;
+                    }
+                    link_repository_copy(&target, &destination)?;
+                }
+            }
+            Some(git_head(copied_repository)?)
+        } else if source.join(".git").exists() {
             let head = git_head(&source)?;
             if existed {
                 let copied_head = git_head(&destination)?;
@@ -140,13 +166,36 @@ pub(super) fn copy_external(
             commit,
             cwd: Some(cwd),
         });
-        if !existed && source.join(".git").exists() {
+        if repository_relative.is_none() && !existed && source.join(".git").exists() {
             *remaining = remaining
                 .checked_sub(tree_bytes(&destination)?)
                 .ok_or_else(|| invalid("scratch copy exceeds configured size limit"))?;
         }
     }
     Ok(evidence)
+}
+
+fn link_repository_copy(target: &Path, destination: &Path) -> WorkflowResult<()> {
+    #[cfg(unix)]
+    let result = std::os::unix::fs::symlink(target, destination);
+    #[cfg(windows)]
+    let result = if target.is_dir() {
+        std::os::windows::fs::symlink_dir(target, destination)
+    } else {
+        std::os::windows::fs::symlink_file(target, destination)
+    };
+    result.map_err(|error| {
+        WorkflowError::io(
+            destination,
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "could not link repository copy {} at sibling alias: {error}",
+                    target.display()
+                ),
+            ),
+        )
+    })
 }
 
 fn is_project_or_ancestor(source: &Path, project: &Path) -> bool {
@@ -234,232 +283,5 @@ fn tree_bytes(root: &Path) -> WorkflowResult<u64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run_git(path: &Path, args: &[&str]) {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(path)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    #[test]
-    fn refuses_project_root_and_ancestor_sources() {
-        let project = Path::new("/work/project");
-        for source in ["/work/project", "/work", "/"] {
-            assert!(
-                is_project_or_ancestor(Path::new(source), project),
-                "{source}"
-            );
-        }
-        assert!(!is_project_or_ancestor(Path::new("/work/sibling"), project));
-    }
-
-    #[test]
-    fn configured_copy_keeps_nested_tracked_sibling_and_omits_build_output() {
-        // EXPECTED: `../a/b` runs tracked status 23 from the configured copy;
-        // its untracked target tree is absent.
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let copied = root.path().join("scratch/project");
-        let sibling = root.path().join("a/b");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&sibling).unwrap();
-        std::fs::create_dir_all(&copied).unwrap();
-        std::fs::write(
-            sibling.join("check.sh"),
-            "#!/bin/sh\n# current committed revision\nexit 23\n",
-        )
-        .unwrap();
-        run_git(&sibling, &["init", "-q"]);
-        run_git(&sibling, &["config", "user.email", "test@example.invalid"]);
-        run_git(&sibling, &["config", "user.name", "test"]);
-        run_git(&sibling, &["add", "check.sh"]);
-        run_git(&sibling, &["commit", "-q", "-m", "tracked"]);
-        std::fs::write(sibling.join("check.sh"), "#!/bin/sh\nexit 23\n").unwrap();
-        run_git(&sibling, &["add", "check.sh"]);
-        run_git(&sibling, &["commit", "-q", "-m", "current head"]);
-        let expected_head = git_head(&sibling).unwrap();
-        std::fs::create_dir_all(sibling.join("target/debug")).unwrap();
-        std::fs::write(sibling.join("target/debug/output"), b"untracked").unwrap();
-        let mut remaining = u64::MAX;
-        let evidence = copy_external(
-            &project,
-            &project,
-            &copied,
-            &copied,
-            &[(
-                "cd ../a/b && sh check.sh".into(),
-                crate::task_set_contract::TrustedCwd::ProjectRoot,
-            )],
-            &mut remaining,
-        )
-        .unwrap();
-        #[cfg(unix)]
-        let command = std::process::Command::new("/bin/sh")
-            .args(["-c", "cd ../a/b && sh check.sh"])
-            .current_dir(&copied)
-            .output()
-            .unwrap();
-        #[cfg(unix)]
-        {
-            println!(
-                "EVIDENCE #420 scratch-sibling BEFORE: sibling absent; AFTER: tracked sibling status={:?}; target copied={}",
-                command.status.code(),
-                copied.parent().unwrap().join("a/b/target").exists()
-            );
-            assert_eq!(command.status.code(), Some(23));
-        }
-        assert!(!copied.parent().unwrap().join("a/b/target").exists());
-        let copied_head = git_head(&copied.parent().unwrap().join("a/b")).unwrap();
-        println!(
-            "EVIDENCE #420 scratch-sibling-revision BEFORE: old revision could be copied; AFTER: path=../a/b, source={expected_head}, copied={copied_head}"
-        );
-        assert_eq!(copied_head, expected_head);
-        assert_eq!(evidence[0].path, PathBuf::from("../a/b"));
-        assert_eq!(evidence[0].commit.as_deref(), Some(expected_head.as_str()));
-    }
-
-    #[test]
-    fn a_check_without_an_outside_path_keeps_the_scratch_parent_unchanged() {
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let copied = root.path().join("scratch/project");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&copied).unwrap();
-        let before = std::fs::read_dir(copied.parent().unwrap()).unwrap().count();
-        let mut remaining = u64::MAX;
-        copy_external(
-            &project,
-            &project,
-            &copied,
-            &copied,
-            &[(
-                "cargo test".into(),
-                crate::task_set_contract::TrustedCwd::ProjectRoot,
-            )],
-            &mut remaining,
-        )
-        .unwrap();
-        let after = std::fs::read_dir(copied.parent().unwrap()).unwrap().count();
-        assert_eq!(before, after);
-    }
-
-    #[test]
-    fn sibling_discovery_parses_quotes_and_ignores_prose() {
-        // EXPECTED before running: the scanner returns the quoted manifest
-        // sibling and does not treat an echo argument as a required path.
-        assert_eq!(
-            crate::acceptance_sibling_paths::scan(
-                "cargo test --manifest-path=\"../repo/Cargo.toml\""
-            )
-            .into_iter()
-            .map(|s| s.path)
-            .collect::<Vec<_>>(),
-            vec![PathBuf::from("../repo/Cargo.toml")]
-        );
-        assert!(!crate::acceptance_sibling_paths::scan("echo \"../missing\"")[0].required);
-    }
-
-    #[test]
-    fn copies_a_standalone_sibling_file_and_omits_nested_build_output() {
-        // EXPECTED before implementation: the file is copied in-place while
-        // nested target and node_modules trees are omitted.
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let copied = root.path().join("scratch/project");
-        let sibling = root.path().join("sibling");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&copied).unwrap();
-        std::fs::write(root.path().join("note.txt"), "standalone file").unwrap();
-        std::fs::create_dir_all(sibling.join("target/debug")).unwrap();
-        std::fs::create_dir_all(sibling.join("node_modules/pkg")).unwrap();
-        std::fs::write(sibling.join("note.txt"), "real file").unwrap();
-        std::fs::write(sibling.join("target/debug/output"), "build").unwrap();
-        std::fs::write(sibling.join("node_modules/pkg/output"), "dependency").unwrap();
-        let mut remaining = u64::MAX;
-        let evidence = copy_external(
-            &project,
-            &project,
-            &copied,
-            &copied,
-            &[(
-                "echo ../note.txt ../sibling".into(),
-                crate::task_set_contract::TrustedCwd::ProjectRoot,
-            )],
-            &mut remaining,
-        )
-        .unwrap();
-        let copied_sibling = copied.parent().unwrap().join("sibling");
-        assert_eq!(
-            std::fs::read_to_string(copied.parent().unwrap().join("note.txt")).unwrap(),
-            "standalone file"
-        );
-        assert_eq!(
-            std::fs::read_to_string(copied_sibling.join("note.txt")).unwrap(),
-            "real file"
-        );
-        assert!(!copied_sibling.join("target").exists());
-        assert!(!copied_sibling.join("node_modules").exists());
-        assert!(
-            evidence
-                .iter()
-                .any(|revision| revision.path == PathBuf::from("../note.txt"))
-        );
-        assert!(
-            evidence
-                .iter()
-                .any(|revision| revision.path == PathBuf::from("../sibling"))
-        );
-        assert_eq!(
-            evidence
-                .iter()
-                .find(|revision| revision.path == PathBuf::from("../sibling"))
-                .unwrap()
-                .commit,
-            None
-        );
-    }
-
-    #[test]
-    fn a_sibling_root_named_target_is_copied() {
-        // EXPECTED: the check names ../target itself, so the root is copied;
-        // only target directories below that root are omitted.
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let copied = root.path().join("scratch/project");
-        let sibling = root.path().join("target");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&copied).unwrap();
-        std::fs::create_dir_all(sibling.join("target/debug")).unwrap();
-        std::fs::write(sibling.join("needed.txt"), "current target root").unwrap();
-        std::fs::write(sibling.join("target/debug/output"), "nested build").unwrap();
-        let mut remaining = u64::MAX;
-        copy_external(
-            &project,
-            &project,
-            &copied,
-            &copied,
-            &[(
-                "cat ../target/needed.txt".into(),
-                crate::task_set_contract::TrustedCwd::ProjectRoot,
-            )],
-            &mut remaining,
-        )
-        .unwrap();
-        let copied_target = copied.parent().unwrap().join("target");
-        assert_eq!(
-            std::fs::read_to_string(copied_target.join("needed.txt")).unwrap(),
-            "current target root"
-        );
-        assert!(!copied_target.join("target").exists());
-    }
-}
+#[path = "acceptance_scratch_siblings_tests.rs"]
+mod tests;
