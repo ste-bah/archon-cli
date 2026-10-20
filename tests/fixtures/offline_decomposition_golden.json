@@ -149,7 +149,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -209,7 +209,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -269,7 +269,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -329,7 +329,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -389,7 +389,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -451,7 +451,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -533,8 +533,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
-            "logicVersion": 37,
+            "logicDigest": "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
+            "logicVersion": 38,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -745,7 +745,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -800,8 +800,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
-            "logicVersion": 37,
+            "logicDigest": "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
+            "logicVersion": 38,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -988,7 +988,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1043,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
+            "logicDigest": "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
             "logicVersion": 4,
             "postcondition": {
               "satisfied": true,
@@ -1218,7 +1218,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1281,7 +1281,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+            "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
             "logicVersion": 23,
             "postcondition": {
               "satisfied": true,
@@ -1338,7 +1338,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1401,7 +1401,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+            "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
             "logicVersion": 23,
             "postcondition": {
               "satisfied": true,
@@ -1458,7 +1458,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1567,7 +1567,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1621,7 +1621,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+            "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
             "logicVersion": 19,
             "postcondition": {
               "satisfied": true,
@@ -1676,7 +1676,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1707,8 +1707,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
-                  "logicVersion": 37,
+                  "logicDigest": "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
+                  "logicVersion": 38,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1770,8 +1770,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
-                      "logicVersion": 37,
+                      "logicDigest": "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
+                      "logicVersion": 38,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1853,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
+                  "logicDigest": "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
                   "logicVersion": 4,
                   "postcondition": {
                     "satisfied": true,
@@ -1914,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "fd5d8827bdd31b24bf74ad1e94820104da7e881e79ff0bc5e403d1567260d349",
+                      "logicDigest": "fc643b73ee442b596af11fcc9d623f954d0e6813ab22633a5730dcc5e46a57b2",
                       "logicVersion": 4,
                       "postcondition": {
                         "satisfied": true,
@@ -2015,7 +2015,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+                  "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
                   "logicVersion": 23,
                   "postcondition": {
                     "satisfied": true,
@@ -2065,7 +2065,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+                      "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
                       "logicVersion": 23,
                       "postcondition": {
                         "satisfied": true,
@@ -2147,7 +2147,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+                  "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
                   "logicVersion": 23,
                   "postcondition": {
                     "satisfied": true,
@@ -2197,7 +2197,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+                      "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
                       "logicVersion": 23,
                       "postcondition": {
                         "satisfied": true,
@@ -2279,7 +2279,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+                  "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
                   "logicVersion": 19,
                   "postcondition": {
                     "satisfied": true,
@@ -2324,7 +2324,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "90c163b9b947422953c789a0ff6cba764f2fba946dbd1e442743679d3d2e4ffc",
+                      "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
                       "logicVersion": 19,
                       "postcondition": {
                         "satisfied": true,
@@ -2623,7 +2623,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "48d912829cd6598410b4b9f82280557d70a4b75ff229f0f9a9d8825a2dacd60d",
+        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }

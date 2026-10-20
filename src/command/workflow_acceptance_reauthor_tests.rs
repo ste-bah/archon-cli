@@ -246,8 +246,8 @@ fn command_block_accepts_absent_command_and_refuses_empty_command() {
         r#"{"id":"AC-F-001","check":{"kind":"command","cwd":"project_root","command_block":true}}"#,
         "\n```\n```check\nrun\n```"
     );
-    let entry = candidate_entry(reply, frozen)
-        .expect("block form with no inline command is accepted");
+    let entry =
+        candidate_entry(reply, frozen).expect("block form with no inline command is accepted");
     let AcceptanceCheck::Command { command, .. } = entry.check else {
         panic!("expected a command check");
     };
