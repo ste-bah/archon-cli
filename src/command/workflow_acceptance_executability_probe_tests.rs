@@ -167,7 +167,8 @@ const REPO: TrustedCwd = TrustedCwd::RepoRoot;
 async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_the_repository() {
     let trees = trees(&[
         ("AC-P-001", "test -f built.txt", PROJECT),
-        ("AC-P-002", "python3 -c 'import sys; sys.exit(0)'", PROJECT),
+        ("AC-P-002", "echo focused", PROJECT),
+        ("AC-P-008", "grep -q ready src/state.txt || true", REPO),
         ("AC-P-003", "grep -q ready data/state.txt", PROJECT),
         ("AC-P-004", "test -f feature.txt", REPO),
         (
@@ -191,15 +192,27 @@ async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_th
     let diagnostics = probe.take_diagnostics();
     assert_eq!(
         findings.keys().collect::<Vec<_>>(),
-        vec!["AC-P-002"],
+        vec!["AC-P-002", "AC-P-008"],
         "{findings:?} {diagnostics:?}"
     );
     let vacuous = &findings["AC-P-002"];
     assert!(
         vacuous.contains("passed on the pre-implementation tree")
             && vacuous.contains("no movable input exists under the selected root")
-            && vacuous.contains("considered inputs: none discovered"),
+            && vacuous.contains("considered inputs: none discovered")
+            && vacuous.contains("the command names no existing file path under the selected root")
+            && vacuous.contains("A test, target or module name is not a file path")
+            && vacuous.contains("Put the relative path of the file that decides the criterion literally in the command text, so that moving that file aside makes the check fail")
+            && !vacuous.contains("data the check writes itself is never evidence"),
         "{vacuous}"
+    );
+    let named_path = &findings["AC-P-008"];
+    assert_eq!(
+        named_path,
+        &format!(
+            "{}; considered inputs: eligible movable input: src/state.txt; it still passed with src/state.txt moved aside, so it does not depend on them",
+            super::super::prove::baseline_pass_finding("AC-P-008", &trees.base[..12])
+        )
     );
     for (id, input) in [
         ("AC-P-003", "data/state.txt"),

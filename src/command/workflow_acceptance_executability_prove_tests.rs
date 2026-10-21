@@ -73,6 +73,18 @@ fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
 }
 
 #[test]
+fn undiscovered_input_finding_uses_only_generic_path_repair_text() {
+    let finding = baseline_pass_finding_without_discovered_input("check-id", "0123456789ab");
+    assert!(finding.contains("the command names no existing file path under the selected root"));
+    assert!(finding.contains("A test, target or module name is not a file path"));
+    assert!(finding.contains("Put the relative path of the file that decides the criterion literally in the command text, so that moving that file aside makes the check fail"));
+    assert!(!finding.contains("data the check writes itself is never evidence"));
+    for implementation_name in ["cargo", "rust", "python", "node", "javascript", "provider"] {
+        assert!(!finding.to_ascii_lowercase().contains(implementation_name));
+    }
+}
+
+#[test]
 fn each_move_state_has_a_distinct_candidate_diagnostic() {
     let recreated = "data/recreated.txt".to_string();
     let absent = "data/absent.txt".to_string();

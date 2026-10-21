@@ -4,7 +4,21 @@ use super::mutation;
 
 pub(crate) fn baseline_pass_finding(id: &str, short: &str) -> String {
     format!(
-        "check '{id}': the criterion already holds on the pre-implementation tree; write a regression guard. It {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside",
+        "{}; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside",
+        baseline_pass_lead(id, short)
+    )
+}
+
+pub(crate) fn baseline_pass_finding_without_discovered_input(id: &str, short: &str) -> String {
+    format!(
+        "{}; the command names no existing file path under the selected root. A test, target or module name is not a file path. Put the relative path of the file that decides the criterion literally in the command text, so that moving that file aside makes the check fail",
+        baseline_pass_lead(id, short)
+    )
+}
+
+fn baseline_pass_lead(id: &str, short: &str) -> String {
+    format!(
+        "check '{id}': the criterion already holds on the pre-implementation tree; write a regression guard. It {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing",
         mutation::CANNOT_FAIL
     )
 }

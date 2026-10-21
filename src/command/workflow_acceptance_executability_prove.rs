@@ -19,7 +19,8 @@ mod plan;
 #[path = "workflow_acceptance_executability_prove_diagnostics.rs"]
 mod diagnostics;
 pub(super) use diagnostics::{
-    baseline_pass_finding, describe_candidates, describe_candidates_with_run_state,
+    baseline_pass_finding, baseline_pass_finding_without_discovered_input, describe_candidates,
+    describe_candidates_with_run_state,
 };
 
 use super::*;
@@ -81,9 +82,18 @@ pub(super) async fn prove(
         if names.is_empty() {
             // Unresolvable inputs never count as moved; a check with no
             // resolvable input routes here so its author can make paths explicit.
+            let finding = if discovery.candidates.is_empty() {
+                format!(
+                    "{}; considered inputs: {}; no movable input exists under the selected root",
+                    baseline_pass_finding_without_discovered_input(id, &short),
+                    describe_candidates(&discovery.candidates)
+                )
+            } else {
+                format!("{baseline_finding}; no movable input exists under the selected root")
+            };
             findings.insert(
                 id.clone(),
-                format!("{baseline_finding}; no movable input exists under the selected root"),
+                finding,
             );
             continue;
         }

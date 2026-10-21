@@ -5,7 +5,7 @@ use archon_workflow::task_set_contract::JudgeDecision;
 
 #[tokio::test]
 async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
-    let trees = trees(&[("AC-3B-001", "echo ok", PROJECT)]);
+    let trees = trees(&[("AC-3B-001", "echo focused", PROJECT)]);
     let copies = tempfile::tempdir().unwrap();
     let probe = round_at(&trees, &trees.base, copies.path());
     let mut contract = trees.contract();
@@ -27,10 +27,12 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
     )
     .await;
     assert!(
-        accepted.get("AC-3B-001").is_some_and(
-            |finding| finding.contains("no movable input exists under the selected root")
-        ),
-        "a stored verdict cannot make `echo ok` prove its criterion: {accepted:?}"
+        accepted.get("AC-3B-001").is_some_and(|finding| {
+            finding.contains("no movable input exists under the selected root")
+                && finding.contains("the command names no existing file path under the selected root")
+                && !finding.contains("data the check writes itself is never evidence")
+        }),
+        "a stored verdict cannot make a name-only command prove its criterion: {accepted:?}"
     );
     let diagnostics = probe.take_diagnostics();
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
