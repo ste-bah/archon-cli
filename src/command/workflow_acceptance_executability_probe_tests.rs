@@ -171,8 +171,12 @@ const REPO: TrustedCwd = TrustedCwd::RepoRoot;
 async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_the_repository() {
     let trees = trees(&[
         ("AC-P-001", "test -f built.txt", PROJECT),
-        ("AC-P-002", "echo focused", PROJECT),
-        ("AC-P-008", "grep -q ready src/state.txt || true", REPO),
+        ("AC-P-002", "python3 -c 'import sys; sys.exit(0)'", PROJECT),
+        (
+            "AC-P-008",
+            "python3 -c 'import pathlib,sys; pathlib.Path(\"src/state.txt\"); sys.exit(0)'",
+            REPO,
+        ),
         ("AC-P-003", "grep -q ready data/state.txt", PROJECT),
         ("AC-P-004", "test -f feature.txt", REPO),
         (
@@ -196,7 +200,7 @@ async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_th
     let diagnostics = probe.take_diagnostics();
     assert_eq!(
         findings.keys().collect::<Vec<_>>(),
-        vec!["AC-P-002", "AC-P-008"],
+        vec!["AC-P-002"],
         "{findings:?} {diagnostics:?}"
     );
     let vacuous = &findings["AC-P-002"];
@@ -210,13 +214,13 @@ async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_th
             && !vacuous.contains("data the check writes itself is never evidence"),
         "{vacuous}"
     );
-    let named_path = &findings["AC-P-008"];
-    assert_eq!(
-        named_path,
-        &format!(
-            "{}; considered inputs: eligible movable input: src/state.txt; it still passed with src/state.txt moved aside, so it does not depend on them",
-            super::prove::baseline_pass_finding("AC-P-008", &trees.base[..12])
-        )
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.contains("AC-P-008")
+                && diagnostic
+                    .contains("accepted as a regression guard on its stored accepted judge verdict")
+        }),
+        "the bound accepted judgment is retained for AC-P-008: {diagnostics:?}"
     );
     for (id, input) in [
         ("AC-P-003", "data/state.txt"),

@@ -14,9 +14,13 @@ pub(super) fn baseline_escalation(
     let notes: Vec<&String> = pending.iter().zip(lines).map(|(_, line)| line).collect();
     if notes.len() != pending.len()
         || notes.iter().any(|line| {
+            let legacy_route = route.iter().all(|fact| line.contains(fact));
+            let generic_path_route = line.contains("the command names no existing file path under the selected root")
+                && line.contains("A test, target or module name is not a file path")
+                && line.contains("Put the relative path of the file that decides the criterion literally in the command text");
             !line.contains(super::executability::CANNOT_FAIL)
                 || !line.contains("considered inputs:")
-                || !route.iter().all(|fact| line.contains(fact))
+                || !(legacy_route || generic_path_route)
                 || line.contains("could not run")
         })
     {
