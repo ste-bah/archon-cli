@@ -49,11 +49,19 @@ fn complete_json_object_end(text: &str) -> Option<usize> {
     None
 }
 
-fn strip_reply_markers(content: &str, markers: &[String]) -> String {
+pub(crate) fn strip_reply_markers(content: &str, markers: &[String]) -> String {
+    strip_reply_markers_with_map(content, markers).0
+}
+
+pub(crate) fn strip_reply_markers_with_map(
+    content: &str,
+    markers: &[String],
+) -> (String, Vec<usize>) {
     if markers.iter().all(String::is_empty) {
-        return content.to_string();
+        return (content.to_string(), Vec::new());
     }
     let mut output = String::with_capacity(content.len());
+    let mut inserted_newline_lines = Vec::new();
     let mut in_fence = false;
     let mut fence_len = 0usize;
     for line in content.split_inclusive(['\n', '\r']) {
@@ -100,6 +108,9 @@ fn strip_reply_markers(content: &str, markers: &[String]) -> String {
             }
             let allowed = boundary.is_some() && removed && rest.trim().is_empty();
             if allowed {
+                let inserted_line =
+                    output.matches('\n').count() + owned[..at].matches('\n').count() + 2;
+                inserted_newline_lines.push(inserted_line);
                 owned.insert(at, '\n');
                 break;
             }
@@ -120,7 +131,7 @@ fn strip_reply_markers(content: &str, markers: &[String]) -> String {
         output.push_str(body);
         output.push_str(ending);
     }
-    output
+    (output, inserted_newline_lines)
 }
 
 pub(crate) fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
@@ -214,75 +225,9 @@ pub(crate) fn reply_blocks_with_markers(content: &str, markers: &[String]) -> Ve
     blocks
 }
 
-pub(crate) fn unclosed_block_refusal(content: &str) -> Option<String> {
-    unclosed_block_refusal_with_markers(content, &[])
-}
-
-pub(crate) fn unclosed_block_refusal_with_markers(
-    content: &str,
-    markers: &[String],
-) -> Option<String> {
-    let normalized = strip_reply_markers(content, markers);
-    let content = normalized.as_str();
-    let mut inside_fence = false;
-    let mut fence_len = 0usize;
-    for (index, line) in content.lines().enumerate() {
-        let spaces = line.chars().take_while(|ch| *ch == ' ').count();
-        let suffix = &line[spaces..];
-        let ticks = suffix.bytes().take_while(|byte| *byte == b'`').count();
-        if inside_fence {
-            if spaces <= 3
-                && ticks >= fence_len
-                && suffix[ticks..].trim_matches([' ', '\t']).is_empty()
-            {
-                inside_fence = false;
-            }
-            continue;
-        }
-        if let Some(marker) = line.find("```") {
-            if line[..marker].chars().any(|ch| !ch.is_whitespace()) {
-                let before = line[..marker].trim();
-                let mut quote: String = before.chars().take(80).collect();
-                if before.chars().count() > 80 {
-                    quote.push('…');
-                }
-                return Some(format!(
-                    "fence marker on line {} follows text; a fence must start its own line; text before the marker: {quote:?}",
-                    index + 1
-                ));
-            }
-        }
-        if spaces <= 3 && ticks >= 3 && !suffix[ticks..].contains('`') {
-            inside_fence = true;
-            fence_len = ticks;
-        }
-    }
-    reply_blocks_with_markers(content, markers)
-        .into_iter()
-        .find(|block| !block.closed)
-        .map(|block| {
-            if let Some((line_number, before)) = content.lines().enumerate().find_map(|(index, line)| {
-                let marker = line.find("```")?;
-                (line[..marker].chars().any(|ch| !ch.is_whitespace())).then(|| (index + 1, line[..marker].trim()))
-            }) {
-                let mut quote: String = before.chars().take(80).collect();
-                if before.chars().count() > 80 { quote.push('…'); }
-                return format!("fence marker on line {line_number} follows text; a fence must start its own line; text before the marker: {quote:?}");
-            }
-            if let Some((line_number, line)) = content.lines().collect::<Vec<_>>().into_iter().enumerate().rev().find(|(_, line)| !line.trim().is_empty()) {
-                let spaces = line.chars().take_while(|ch| *ch == ' ').count();
-                let suffix = &line[spaces..];
-                let ticks = suffix.bytes().take_while(|byte| *byte == b'`').count();
-                if spaces <= 3 && ticks >= 3 && suffix[ticks..].trim_matches([' ', '\t']).is_empty() {
-                    return format!("closing fence on line {} has no opener; every closing fence must close an open block", line_number + 1);
-                }
-            }
-            format!(
-                "the ```{} block opened at line {} is never closed (the reply may have been cut off); close every block with a line that is exactly ```",
-                block.info, block.opened_line
-            )
-        })
-}
+pub(crate) use super::acceptance_reply_diagnostics::{
+    unclosed_block_refusal, unclosed_block_refusal_with_markers,
+};
 
 fn found_fence_labels(blocks: &[ReplyBlock]) -> String {
     const LABELS: usize = 4;

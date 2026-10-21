@@ -247,7 +247,7 @@ fn recorded_live_replies_use_the_shared_expected_outcomes_reply_blocks() {
             }
             "SUP-REQ-AHDM-021" => {
                 assert!(reply_entry_with_blocks(&fixture.reply, &fixture.id).is_none());
-                assert!(fixture.expected.contains("more than one entry"));
+                assert!(fixture.expected.contains("info string and cannot close it"));
             }
             "SUP-REQ-BT-001" => {
                 assert!(
@@ -258,11 +258,7 @@ fn recorded_live_replies_use_the_shared_expected_outcomes_reply_blocks() {
             }
             "live-prose-after-json-close" | "live-close-and-open-same-line" => {
                 assert!(reply_entry_with_blocks(&fixture.reply, &fixture.id).is_none());
-                assert!(
-                    fixture
-                        .expected
-                        .contains("check.command_block is true but no check block is present")
-                );
+                assert!(fixture.expected.contains("info string and cannot close it"));
             }
             "unicode-fence-label" => {
                 let text = extract_object(&fixture.reply);
@@ -387,5 +383,13 @@ fn midline_fence_boundary_requires_the_first_complete_json_object() {
         unclosed_block_refusal_with_markers(&valid, &[])
             .unwrap()
             .starts_with("fence marker on line 1 follows text; a fence must start its own line;")
+    );
+
+    let info_after_marker = format!(
+        "{{\"id\":\"A\",\"check\":{{\"kind\":\"command\",\"command_block\":true}}}}{marker}```json\n{{}}\n```check\n```\n```check\nrun\n```"
+    );
+    assert_eq!(
+        unclosed_block_refusal_with_markers(&info_after_marker, markers).unwrap(),
+        "the fence opened on line 1 is not closed; line 3 \"```check\" has an info string and cannot close it; put a bare ``` on its own line before the next fence; keep exactly one non-empty check fence for block form"
     );
 }

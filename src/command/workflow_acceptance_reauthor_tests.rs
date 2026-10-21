@@ -4,6 +4,9 @@ use super::test_client::{ScriptedAuthorJudge, command_entry, resolve_in_bare_pro
 use super::*;
 use crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven as frozen_set;
 
+#[path = "workflow_acceptance_reauthor_fence_tests.rs"]
+mod fence_tests;
+
 fn scope(
     set: &crate::command::workflow_task_set::republish::test_fixture::FrozenSet,
 ) -> AuthorScope {

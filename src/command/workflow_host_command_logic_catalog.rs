@@ -93,7 +93,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #422 #386 #387 #442 #443 #441 #447 #446 #340 #457 #444 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: strike identity helpers moved to their own file.
-        sources_digest: "9b7fa0fbe99f1934184856a75dc60809ad06dce5aa66d2ea28f484354492de50",
+        // Re-pinned only (verdict rules unchanged): #476
+        sources_digest: "5e575e7d543a765c689153825f95ae81c61da9d34a5684edbee5391957a09f17",
         build_bound: false,
     },
     CapabilityLogic {
@@ -113,7 +114,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #366 #422 #386 #387 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
-        sources_digest: "9b7fa0fbe99f1934184856a75dc60809ad06dce5aa66d2ea28f484354492de50",
+        // Re-pinned only (verdict rules unchanged): #476
+        sources_digest: "5e575e7d543a765c689153825f95ae81c61da9d34a5684edbee5391957a09f17",
         build_bound: false,
     },
     CapabilityLogic {
@@ -166,7 +168,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; body landing version stays fixed.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
-        sources_digest: "2f9a311cdafca21a61355cbffb8f0cb3160e9f468c1c80861ac6a5ef2081eea2",
+        // Re-pinned only (verdict rules unchanged): #476
+        sources_digest: "89f09f50fdad9704332fe4c2f668fe04c0487cedde9ec6335249983a22eb414f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -208,7 +211,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #469 re-pin only: acceptance reply marker handling changed the shared source closure; lint version stays fixed.
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
-        sources_digest: "2f9a311cdafca21a61355cbffb8f0cb3160e9f468c1c80861ac6a5ef2081eea2",
+        // Re-pinned only (verdict rules unchanged): #476
+        sources_digest: "89f09f50fdad9704332fe4c2f668fe04c0487cedde9ec6335249983a22eb414f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -251,7 +255,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #417 #434 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
-        sources_digest: "e2eb2cd2f46e1cde6cf3d4300c3be947fd2ebb869adf41b12a070963616d2c14",
+        // Re-pinned only (verdict rules unchanged): #476
+        sources_digest: "1479fe47a7a9369aa8f38ff9acbbef694819fcbf43e54319f52ef0e0b9500a0e",
         build_bound: true,
     },
     CapabilityLogic {
@@ -269,7 +274,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #366 #434 #417 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
-        sources_digest: "e2eb2cd2f46e1cde6cf3d4300c3be947fd2ebb869adf41b12a070963616d2c14",
+        // Re-pinned only (verdict rules unchanged): #476
+        sources_digest: "1479fe47a7a9369aa8f38ff9acbbef694819fcbf43e54319f52ef0e0b9500a0e",
         build_bound: true,
     },
 ];
