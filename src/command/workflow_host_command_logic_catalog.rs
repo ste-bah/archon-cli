@@ -64,7 +64,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 33: mutation wrappers preserve named sibling setup paths, so their
         // copy layout matches baseline and absent-sibling failures give no verdict.
         // 37: #468 mutation verdicts route every final or transiently recreated input to the author, and are saved or memoized only when that run's markers show every moved input was restored.
-        // 38: saved re-author candidates skip only authoring and candidate judging; every reuse reruns host proof and passability gates, and prompt and judge instruction sources bind the key.
+        // 38: saved re-author candidates skip only authoring and candidate judging; every reuse reruns host proof and passability gates. Prompt and judge instruction sources bind the key; freeze logic version and digest do not.
         // 39: baseline no-verdict strikes identify the failure cause, so re-authoring the same missing setup path still reaches its author.
         // 40: alias inputs can change mutation proof verdicts.
         version: 40,
@@ -93,8 +93,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #422 #386 #387 #442 #443 #441 #447 #446 #340 #457 #444 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: strike identity helpers moved to their own file.
-        // Re-pinned only (verdict rules unchanged): #477
-        sources_digest: "9c346032b21eab66d8552b36129da48bdf4f9a49948739c792c459f2f1980c69",
+        // Re-pinned only (verdict rules unchanged): #476 #477 #479
+        sources_digest: "8e8b3dc50f51a5cd58767e837d3fbb0f6508c41b8102a6892f3950ea91ae8498",
         build_bound: false,
     },
     CapabilityLogic {
@@ -114,8 +114,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #366 #422 #386 #387 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
-        // Re-pinned only (verdict rules unchanged): #477
-        sources_digest: "9c346032b21eab66d8552b36129da48bdf4f9a49948739c792c459f2f1980c69",
+        // Re-pinned only (verdict rules unchanged): #476 #477 #479
+        sources_digest: "8e8b3dc50f51a5cd58767e837d3fbb0f6508c41b8102a6892f3950ea91ae8498",
         build_bound: false,
     },
     CapabilityLogic {
@@ -255,7 +255,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #417 #434 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
-        // Re-pinned only (verdict rules unchanged): #477
+        // Re-pinned only (verdict rules unchanged): #476 #477
         sources_digest: "2ea70df8ec8d4f782d04840a9dad13c8d8d0d070deb44b1059fddacd1bd7f36f",
         build_bound: true,
     },
@@ -274,7 +274,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #366 #434 #417 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
-        // Re-pinned only (verdict rules unchanged): #477
+        // Re-pinned only (verdict rules unchanged): #476 #477
         sources_digest: "2ea70df8ec8d4f782d04840a9dad13c8d8d0d070deb44b1059fddacd1bd7f36f",
         build_bound: true,
     },
