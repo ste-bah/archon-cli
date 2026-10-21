@@ -39,7 +39,8 @@ fn digest(bytes: &[u8]) -> String {
 /// The complete source closure for the static author prompt and candidate
 /// judge instruction. `author.rs` assembles the prompt, `reauthor.rs` owns
 /// `ENTRY_SHAPES`, and `live_root.rs` supplies the shared root guidance.
-/// `task_set_judge.rs` assembles the adversarial judge instruction.
+/// `task_set_judge.rs` assembles the adversarial judge instruction, and its
+/// named-file evidence helper supplies the contents included in that prompt.
 pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
     (
         "workflow_acceptance_reauthor_author.rs",
@@ -56,6 +57,14 @@ pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
     (
         "workflow_task_set_judge.rs",
         include_bytes!("workflow_task_set_judge.rs"),
+    ),
+    (
+        "workflow_task_set_judge_named_files.rs",
+        include_bytes!("workflow_task_set_judge_named_files.rs"),
+    ),
+    (
+        "workflow_task_set_judge_incomplete.rs",
+        include_bytes!("workflow_task_set_judge_incomplete.rs"),
     ),
 ];
 
