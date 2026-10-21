@@ -149,7 +149,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -209,7 +209,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -269,7 +269,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -329,7 +329,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -389,7 +389,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -451,7 +451,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -533,7 +533,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
+            "logicDigest": "83c7b797714a779f0ecc128166ece01290d96a32176a8352daf52545818b3bec",
             "logicVersion": 39,
             "postcondition": {
               "satisfied": true,
@@ -745,7 +745,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -800,7 +800,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
+            "logicDigest": "83c7b797714a779f0ecc128166ece01290d96a32176a8352daf52545818b3bec",
             "logicVersion": 39,
             "postcondition": {
               "satisfied": true,
@@ -988,7 +988,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1043,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
+            "logicDigest": "83c7b797714a779f0ecc128166ece01290d96a32176a8352daf52545818b3bec",
             "logicVersion": 4,
             "postcondition": {
               "satisfied": true,
@@ -1218,7 +1218,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1281,7 +1281,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+            "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
             "logicVersion": 23,
             "postcondition": {
               "satisfied": true,
@@ -1338,7 +1338,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1401,7 +1401,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+            "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
             "logicVersion": 23,
             "postcondition": {
               "satisfied": true,
@@ -1458,7 +1458,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1567,7 +1567,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1621,7 +1621,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+            "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
             "logicVersion": 19,
             "postcondition": {
               "satisfied": true,
@@ -1676,7 +1676,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1707,7 +1707,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
+                  "logicDigest": "83c7b797714a779f0ecc128166ece01290d96a32176a8352daf52545818b3bec",
                   "logicVersion": 39,
                   "postcondition": {
                     "satisfied": true,
@@ -1770,7 +1770,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
+                      "logicDigest": "83c7b797714a779f0ecc128166ece01290d96a32176a8352daf52545818b3bec",
                       "logicVersion": 39,
                       "postcondition": {
                         "satisfied": true,
@@ -1853,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
+                  "logicDigest": "83c7b797714a779f0ecc128166ece01290d96a32176a8352daf52545818b3bec",
                   "logicVersion": 4,
                   "postcondition": {
                     "satisfied": true,
@@ -1914,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "22f37b9871e41f341593bbf3be76dedd391a53750b662a1cb87816acdcea06d3",
+                      "logicDigest": "83c7b797714a779f0ecc128166ece01290d96a32176a8352daf52545818b3bec",
                       "logicVersion": 4,
                       "postcondition": {
                         "satisfied": true,
@@ -2015,7 +2015,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+                  "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
                   "logicVersion": 23,
                   "postcondition": {
                     "satisfied": true,
@@ -2065,7 +2065,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+                      "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
                       "logicVersion": 23,
                       "postcondition": {
                         "satisfied": true,
@@ -2147,7 +2147,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+                  "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
                   "logicVersion": 23,
                   "postcondition": {
                     "satisfied": true,
@@ -2197,7 +2197,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+                      "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
                       "logicVersion": 23,
                       "postcondition": {
                         "satisfied": true,
@@ -2279,7 +2279,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+                  "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
                   "logicVersion": 19,
                   "postcondition": {
                     "satisfied": true,
@@ -2324,7 +2324,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "d20fd7d77baf15f2a4fd1ef1bbfbfaff5ff822283ae27c88edd804947ebadce2",
+                      "logicDigest": "ffdb44f0a88e116d6e9b847a5b0867ff8c0f6841975246a7efa31da277044955",
                       "logicVersion": 19,
                       "postcondition": {
                         "satisfied": true,
@@ -2623,7 +2623,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c",
+        "scaffold_hash": "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }

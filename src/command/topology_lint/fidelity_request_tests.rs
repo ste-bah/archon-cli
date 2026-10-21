@@ -118,10 +118,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         "timeout semantics must change resume identity"
     );
     // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
+    // #476 re-pin only: block-form refusal guidance changed; verdict rules unchanged.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "f5da577a9067154e81fa4fca3700d570f8b933769e3ae417f51ca70c815ed56c"
+        "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72"
     );
 }

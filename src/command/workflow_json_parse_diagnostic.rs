@@ -179,6 +179,8 @@ fn command_script_needs_block(source: &str, error_offset: usize) -> bool {
                     expect_key: character == b'{',
                     top_level,
                     check_object,
+                    top_entry: false,
+                    root_array: false,
                 });
             }
             b'}' | b']' => {
@@ -195,6 +197,122 @@ fn command_script_needs_block(source: &str, error_offset: usize) -> bool {
         index += 1;
     }
     false
+}
+
+/// Return offsets for `true` values at `check.command_block` on a top-level
+/// entry object, or on an object that is a direct element of a top-level array.
+/// Strings and escaped key spellings are handled by the same token scan used by
+/// the JSON diagnostics.
+pub(crate) fn entry_check_command_block_true_offsets(source: &str) -> Vec<usize> {
+    let bytes = source.as_bytes();
+    let mut stack: Vec<ScanContext> = Vec::new();
+    let mut offsets = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            let is_key = stack
+                .last()
+                .is_some_and(|context| context.object && context.expect_key);
+            let start = index + 1;
+            let mut cursor = start;
+            let mut closed = false;
+            while cursor < bytes.len() {
+                match bytes[cursor] {
+                    b'\\' if cursor + 1 < bytes.len() => {
+                        cursor += if bytes[cursor + 1] == b'u'
+                            && bytes
+                                .get(cursor + 2..cursor + 6)
+                                .is_some_and(|digits| digits.iter().all(u8::is_ascii_hexdigit))
+                        {
+                            6
+                        } else {
+                            1 + source[cursor + 1..]
+                                .chars()
+                                .next()
+                                .map_or(1, char::len_utf8)
+                        };
+                    }
+                    b'"' => {
+                        closed = true;
+                        break;
+                    }
+                    _ => cursor += source[cursor..].chars().next().map_or(1, char::len_utf8),
+                }
+            }
+            if !closed {
+                break;
+            }
+            if is_key {
+                let raw = &source[start..cursor];
+                if let Ok(key) = serde_json::from_str::<String>(&format!("\"{raw}\"")) {
+                    let qualifies = stack
+                        .last()
+                        .is_some_and(|context| context.check_object && key == "command_block");
+                    if qualifies {
+                        let mut value = cursor + 1;
+                        while bytes.get(value).is_some_and(u8::is_ascii_whitespace) {
+                            value += 1;
+                        }
+                        if bytes.get(value) == Some(&b':') {
+                            value += 1;
+                            while bytes.get(value).is_some_and(u8::is_ascii_whitespace) {
+                                value += 1;
+                            }
+                            let end = value + 4;
+                            if bytes.get(value..end) == Some(b"true")
+                                && bytes.get(end).is_none_or(|byte| {
+                                    byte.is_ascii_whitespace()
+                                        || matches!(*byte, b',' | b'}' | b']')
+                                })
+                            {
+                                offsets.push(index);
+                            }
+                        }
+                    }
+                    if let Some(context) = stack.last_mut() {
+                        context.key = Some(key);
+                        context.expect_key = false;
+                    }
+                }
+            }
+            index = cursor + 1;
+            continue;
+        }
+        match bytes[index] {
+            b'{' | b'[' => {
+                let parent = stack.last();
+                let top_entry = stack.is_empty() && bytes[index] == b'{'
+                    || stack.len() == 1
+                        && bytes[index] == b'{'
+                        && parent.is_some_and(|context| context.root_array);
+                let check_object = bytes[index] == b'{'
+                    && parent.is_some_and(|context| {
+                        context.top_entry && context.key.as_deref() == Some("check")
+                    });
+                stack.push(ScanContext {
+                    object: bytes[index] == b'{',
+                    key: None,
+                    expect_key: bytes[index] == b'{',
+                    top_level: false,
+                    check_object,
+                    top_entry,
+                    root_array: stack.is_empty() && bytes[index] == b'[',
+                });
+            }
+            b'}' | b']' => {
+                stack.pop();
+            }
+            b',' => {
+                if let Some(context) = stack.last_mut().filter(|context| context.object) {
+                    context.key = None;
+                    context.expect_key = true;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    offsets
 }
 
 fn has_escaped_line_break(value: &str) -> bool {
@@ -229,6 +347,8 @@ struct ScanContext {
     expect_key: bool,
     top_level: bool,
     check_object: bool,
+    top_entry: bool,
+    root_array: bool,
 }
 
 fn escape_controls(text: &str) -> String {

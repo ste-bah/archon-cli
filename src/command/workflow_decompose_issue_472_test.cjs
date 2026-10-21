@@ -24,7 +24,7 @@ for (const reply of [
 }
 
 const mixed = context.resolveCommandBlock(structuredClone(base), JSON.stringify(base) + checkFence);
-assert.equal(mixed, 'acceptance entry entry mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence');
+assert.equal(mixed, 'acceptance entry entry mixes an inline command with a check fence and must use one form');
 
 for (const [name, expectedLocation, expectsBlockDirection] of [
   ['reply-one.txt', 'line 2 column 631', true],

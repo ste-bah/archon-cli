@@ -27,13 +27,14 @@ function completeJsonObjectEnd(text) {
   return -1;
 }
 
-function stripReplyMarkers(text, markers) {
+function stripReplyMarkersWithMap(text, markers) {
   const source = String(text || "");
   const configured = (Array.isArray(markers) ? markers : []).filter((marker) => typeof marker === "string" && marker.length);
-  if (!configured.length) return source;
+  if (!configured.length) return {text:source, insertedNewlineLines:[]};
   const lines = source.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g).filter(Boolean);
+  const insertedNewlineLines = [];
   let inFence = false, fenceLength = 0;
-  return lines.map((line) => {
+  const stripped = lines.map((line, lineIndex) => {
     if (inFence) {
       const body = line.replace(/[\r\n]+$/, "");
       const close = /^( {0,3})(`+)[ \t]*$/.exec(body);
@@ -57,7 +58,11 @@ function stripReplyMarkers(text, markers) {
         removed = true;
       }
       const allowed = boundary >= 0 && removed && !rest.trim();
-      if (allowed) { body = body.slice(0, fenceMatch.index) + "\n" + body.slice(fenceMatch.index); break; }
+      if (allowed) {
+        insertedNewlineLines.push(lineIndex + 2);
+        body = body.slice(0, fenceMatch.index) + "\n" + body.slice(fenceMatch.index);
+        break;
+      }
     }
     for (const marker of configured) body = body.split(marker).join("");
     const openLines = body.split(/\r\n|\r|\n/);
@@ -65,10 +70,16 @@ function stripReplyMarkers(text, markers) {
     if (open && !open[3].includes("`")) inFence = true, fenceLength = open[2].length;
     return body + ending;
   }).join("");
+  return {text:stripped, insertedNewlineLines};
+}
+
+function stripReplyMarkers(text, markers) {
+  return stripReplyMarkersWithMap(text, markers).text;
 }
 
 function replyFenceBlocks(text, markers) {
-  const source = stripReplyMarkers(text, markers);
+  const {text:source, insertedNewlineLines} = stripReplyMarkersWithMap(text, markers);
+  const receivedLine = (lineNumber) => lineNumber - insertedNewlineLines.filter((insertedLine) => insertedLine <= lineNumber).length;
   const lines = [];
   let offset = 0;
   while (offset < source.length) {
@@ -85,12 +96,13 @@ function replyFenceBlocks(text, markers) {
     offset = next;
   }
   const blocks = [];
+  const closedJsonInfoLines = [];
   for (let i = 0; i < lines.length; i++) {
     const marker = /`{3,}/.exec(lines[i].body);
     if (marker && /\S/.test(lines[i].body.slice(0, marker.index))) {
       const before = lines[i].body.slice(0, marker.index).trim();
       const quote = Array.from(before).slice(0, 80).join("") + (Array.from(before).length > 80 ? "…" : "");
-      throw new Error(`fence marker on line ${i + 1} follows text; a fence must start its own line; text before the marker: ${JSON.stringify(quote)}`);
+      throw new Error(`fence marker on line ${receivedLine(i + 1)} follows text; a fence must start its own line; text before the marker: ${JSON.stringify(quote)}`);
     }
     const open = /^( {0,3})(`{3,})(.*)$/.exec(lines[i].body);
     if (!open || open[3].includes("`")) continue;
@@ -100,27 +112,64 @@ function replyFenceBlocks(text, markers) {
       const closing = /^( {0,3})(`+)[ \t]*$/.exec(lines[j].body);
       if (closing && closing[2].length >= open[2].length) { close = j; break; }
     }
+    const infoClosers = [];
+    const contentEnd = close < 0 ? lines.length : close;
+    for (let j = i + 1; j < contentEnd; j++) {
+      const nested = /^( {0,3})(`{3,})(.*)$/.exec(lines[j].body);
+      if (nested && nested[2].length >= open[2].length) {
+        const info = nested[3].trim();
+        if (info) infoClosers.push({line:j + 1, info});
+      }
+    }
+    // A genuinely unclosed block is structural. For a closed JSON block, defer
+    // the info-line finding until we know whether JSON/check resolution failed.
+    if (close < 0 && infoClosers.length) {
+      const first = infoClosers[0];
+      const duplicate = infoClosers.filter((candidate) => candidate.info === "check")[1];
+      const displayedInfo = first.info === "check" ? "check" : "<info>";
+      const duplicateText = duplicate
+        ? `; line ${receivedLine(duplicate.line)} is a duplicate check fence opener` : "";
+      throw new Error(`the fence opened on line ${receivedLine(i + 1)} is not closed; line ${receivedLine(first.line)} \"\`\`\`${displayedInfo}\" has an info string and cannot close it${duplicateText}; put a bare \`\`\` on its own line before the next fence; keep exactly one non-empty check fence for block form`);
+    }
+    if (infoClosers.length && info === "json") {
+      closedJsonInfoLines.push({ blockContent: source.slice(lines[i].end, lines[close].start).replace(/(?:\r\n|\n|\r)$/, ""),
+        openedLine: i + 1, line: infoClosers[0].line, info: infoClosers[0].info,
+        duplicateCheckLine: infoClosers.filter((candidate) => candidate.info === "check")[1]?.line });
+    }
     if (close < 0) {
       const midline = lines.findIndex((line) => /\S.*`{3,}/.test(line.body));
       if (midline >= 0) {
         const marker = /`{3,}/.exec(lines[midline].body);
         const before = lines[midline].body.slice(0, marker.index).trim();
         const quote = Array.from(before).slice(0, 80).join("") + (Array.from(before).length > 80 ? "…" : "");
-        throw new Error(`fence marker on line ${midline + 1} follows text; a fence must start its own line; text before the marker: ${JSON.stringify(quote)}`);
+        throw new Error(`fence marker on line ${receivedLine(midline + 1)} follows text; a fence must start its own line; text before the marker: ${JSON.stringify(quote)}`);
       }
       for (let j = lines.length - 1; j >= 0; j--) {
         if (!lines[j].body.trim()) continue;
         if (/^ {0,3}`{3,}[ \t]*$/.test(lines[j].body)) {
-          throw new Error(`closing fence on line ${j + 1} has no opener; every closing fence must close an open block`);
+          throw new Error(`closing fence on line ${receivedLine(j + 1)} has no opener; every closing fence must close an open block`);
         }
         break;
       }
-      throw new Error(`the \`\`\`${info} block opened at line ${i + 1} is never closed (the reply may have been cut off); close every block with a line that is exactly \`\`\``);
+      throw new Error(`the \`\`\`${info} block opened at line ${receivedLine(i + 1)} is never closed (the reply may have been cut off); close every block with a line that is exactly \`\`\``);
     }
     let content = source.slice(lines[i].end, lines[close].start);
     content = content.replace(/(?:\r\n|\n|\r)$/, "");
     blocks.push({ info, content, start: lines[i].start, end: lines[close].end });
     i = close;
+  }
+  if (!blocks.some((block) => block.info === "check")) {
+    const defect = closedJsonInfoLines.find(({blockContent}) => {
+      let entry;
+      try { entry = JSON.parse(blockContent); } catch (_) { return true; }
+      return entry && entry.check && entry.check.command_block === true;
+    });
+    if (defect) {
+      const displayedInfo = defect.info === "check" ? "check" : "<info>";
+      const duplicateText = defect.duplicateCheckLine
+        ? `; line ${receivedLine(defect.duplicateCheckLine)} is a duplicate check fence opener` : "";
+      throw new Error(`the fence opened on line ${receivedLine(defect.openedLine)} is not closed; line ${receivedLine(defect.line)} \"\`\`\`${displayedInfo}\" has an info string and cannot close it${duplicateText}; put a bare \`\`\` on its own line before the next fence; keep exactly one non-empty check fence for block form`);
+    }
   }
   return blocks;
 }
@@ -154,7 +203,7 @@ function jsonEqual(left, right) {
 
 function extractJsonObject(text, markers) {
   const raw = stripReplyMarkers(text, markers);
-  const blocks = replyFenceBlocks(raw);
+  const blocks = replyFenceBlocks(text, markers);
   const jsonBlocks = blocks.filter((block) => block.info === "json");
   const outside = raw.split("");
   for (const block of blocks) for (let i = block.start; i < block.end; i++) outside[i] = " ";
@@ -207,7 +256,7 @@ function resolveCommandBlock(entry, text, markers) {
   const id = String(entry.id || "");
   // Only the exact info string `check` denotes the command block; `check <something>` is a different fence label.
   const normalizedText = stripReplyMarkers(text, markers);
-  const blocks = replyFenceBlocks(normalizedText).filter((block) => block.info === "check");
+  const blocks = replyFenceBlocks(text, markers).filter((block) => block.info === "check");
   if (blocks.length > 1) return "acceptance reply contains more than one check block";
   const hasBlock = blocks.length === 1;
   const commandBlock = check && typeof check === "object" ? check.command_block : undefined;
@@ -220,9 +269,9 @@ function resolveCommandBlock(entry, text, markers) {
     return "acceptance entry " + id + " returned both check.command and check.command_block — remove check.command from the JSON when you use the check block";
   }
   if (hasBlock && commandBlock !== true && check && Object.prototype.hasOwnProperty.call(check, "command")) {
-    return "acceptance entry " + id + " mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence";
+    return "acceptance entry " + id + " mixes an inline command with a check fence and must use one form";
   }
-  if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: " + foundFenceLabels(replyFenceBlocks(normalizedText));
+  if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present — the fence info string must be exactly 'check'; found fence labels: " + foundFenceLabels(replyFenceBlocks(text, markers));
   if (hasBlock && commandBlock !== true && !inferredCommandBlock) {
     return "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block";
   }

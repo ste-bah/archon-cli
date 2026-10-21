@@ -47,6 +47,62 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.equal(entry.check.command, 'printf \'%s\' "quote \\" slash \\\\ literal \\\\n"\necho ```',
     'the check command is the block bytes, except its one delimiter newline');
   assert.deepEqual(JSON.parse(JSON.stringify(entry.check)), {kind:'command', command:entry.check.command});
+  const malformedFenceLayout = [
+    '```json',
+    '{"id":"A","check":{"kind":"command","command_block":true}}',
+    '```check',
+    'echo ok',
+    'true'
+  ].join('\n');
+  assert.throws(() => json.extractJsonObject(malformedFenceLayout), (error) => {
+    assert.equal(error.message,
+      'the fence opened on line 1 is not closed; line 3 "```check" has an info string and cannot close it; put a bare ``` on its own line before the next fence; keep exactly one non-empty check fence for block form');
+    assert.ok(!error.message.includes('raw JSON object alone'));
+    return true;
+  });
+  const markerFenceLayout = '{"id":"A","check":{"kind":"command","command_block":true}}<LEAK>```json\n{}\n```check\nrun';
+  assert.throws(() => json.replyFenceBlocks(markerFenceLayout, ['<LEAK>']), (error) => {
+    assert.equal(error.message,
+      'the fence opened on line 1 is not closed; line 3 "```check" has an info string and cannot close it; put a bare ``` on its own line before the next fence; keep exactly one non-empty check fence for block form');
+    return true;
+  });
+  const liveDuplicateCheckOpeners = [
+    '```json',
+    '{"id":"A","check":{"kind":"command","command_block":true}}',
+    '```check',
+    '```check',
+    '```'
+  ].join('\n');
+  assert.throws(() => json.replyFenceBlocks(liveDuplicateCheckOpeners), (error) => {
+    assert.equal(error.message,
+      'the fence opened on line 1 is not closed; line 3 "```check" has an info string and cannot close it; line 4 is a duplicate check fence opener; put a bare ``` on its own line before the next fence; keep exactly one non-empty check fence for block form');
+    return true;
+  });
+  const leakedMarkerInsideOpenFence = [
+    '```json',
+    'bad {"id":"A"} <LEAK> ```',
+    '```check',
+    'run',
+    '```'
+  ].join('\n');
+  assert.throws(() => json.replyFenceBlocks(leakedMarkerInsideOpenFence, ['<LEAK>']), (error) => {
+    assert.equal(error.message,
+      'the fence opened on line 1 is not closed; line 3 "```check" has an info string and cannot close it; put a bare ``` on its own line before the next fence; keep exactly one non-empty check fence for block form');
+    return true;
+  });
+  const validFenceLayout = [
+    '```json',
+    '{"id":"A","check":{"kind":"command","command_block":true}}',
+    '```',
+    '```check',
+    'echo ok',
+    'true',
+    '```'
+  ].join('\n');
+  const validFenceEntry = JSON.parse(json.extractJsonObject(validFenceLayout));
+  assert.equal(json.resolveCommandBlock(validFenceEntry, validFenceLayout), null);
+  assert.equal(validFenceEntry.check.command, 'echo ok\ntrue');
+  assert.throws(() => json.replyFenceBlocks('```json\n{}'), /block opened at line 1 is never closed/);
   const blockRefusal = (body, check = {kind:'command', command_block:'X'}) => {
     const candidate = {id:'A', check};
     return json.resolveCommandBlock(candidate, body);
@@ -60,7 +116,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.equal(blockRefusal('```check\na\n```\n```check\nb\n```', {kind:'command', command_block:true}),
     'acceptance reply contains more than one check block');
   assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'run'}}, '```check\nrun\n```'),
-    'acceptance entry A mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence');
+    'acceptance entry A mixes an inline command with a check fence and must use one form');
   const inferred = {id:'A', check:{kind:'command', cwd:'project_root'}};
   assert.equal(json.resolveCommandBlock(inferred, '```check\nrun\n```'), null);
   assert.deepEqual(JSON.parse(JSON.stringify(inferred.check)), {kind:'command', cwd:'project_root', command:'run'});
@@ -86,23 +142,33 @@ async function refusal(reply, stopReason = 'end_turn') {
   const singleRefusal = await refusal(singleInvalid.reply);
   assert.match(singleRefusal.summary, /returned no complete entry: JSON parse error.*position/i);
   assert.match(singleRefusal.summary, /excerpt:/);
+  const malformedEntryWithCheckFence = await refusal(
+    '{"id":"A","check":{"kind":"command","command":"run",}}\n```check\nrun\n```');
+  assert.match(malformedEntryWithCheckFence.summary, /JSON parse error.*line 1 column/i,
+    malformedEntryWithCheckFence.summary);
+  assert.ok(!malformedEntryWithCheckFence.summary.includes('return the raw JSON object alone'));
   for (const fixture of liveReplies) {
+    if (fixture.id === 'SUP-REQ-AHDM-021' || fixture.id === 'live-prose-after-json-close' ||
+        fixture.id === 'live-close-and-open-same-line') {
+      assert.throws(() => json.extractJsonObject(fixture.reply), error => {
+        assert.equal(error.message, fixture.expected.slice('refuse: '.length), fixture.id);
+        return true;
+      });
+      continue;
+    }
     let outcome;
     try {
       const candidate = JSON.parse(json.extractJsonObject(fixture.reply));
       const entry = Array.isArray(candidate) && candidate.length === 1 ? candidate[0] : candidate;
       outcome = json.resolveCommandBlock(entry, fixture.reply) || 'accepted';
     } catch (error) {
-      outcome = error.message === 'reply contains more than one entry' || / is never closed /.test(error.message)
+      outcome = error.message === 'reply contains more than one entry' ||
+        /^the ```(?:json|check) block opened at line \d+ is never closed \(the reply may have been cut off\); close every block with a line that is exactly ```$/.test(error.message)
         ? error.message : 'malformed inline JSON escape';
     }
     if (fixture.id === 'SUP-REQ-AHDM-020') assert.equal(outcome, 'malformed inline JSON escape');
     if (fixture.id === 'SUP-REQ-AHDM-022') assert.equal(outcome, 'accepted', fixture.id);
-    if (fixture.id === 'SUP-REQ-AHDM-021') assert.match(outcome, /block opened at line 1 is never closed/);
     if (fixture.id === 'SUP-REQ-BT-001') assert.equal(outcome, 'malformed inline JSON escape');
-    if (fixture.id === 'live-prose-after-json-close' || fixture.id === 'live-close-and-open-same-line') {
-      assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
-    }
     if (fixture.id === 'unicode-fence-label') {
       assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
     }
@@ -116,6 +182,11 @@ async function refusal(reply, stopReason = 'end_turn') {
       assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
     }
   }
+  const heredocReply = '{"id":"A","check":{"kind":"command","command_block":true}}\n```check\ncat <<\'EOF\'\n```js\n{"example": true}\nEOF\n```';
+  const heredocEntry = JSON.parse(json.extractJsonObject(heredocReply));
+  assert.equal(json.resolveCommandBlock(heredocEntry, heredocReply), null);
+  assert.equal(heredocEntry.check.command, 'cat <<\'EOF\'\n```js\n{"example": true}\nEOF',
+    'info-string fence text in a resolved check script is preserved byte for byte');
   const resolved = await refusal('```check\nprintf ok\necho done\ntrue\n```\n{"id":"A","check":{"kind":"command","command_block":true}}');
   assert.equal(JSON.parse(resolved.content).entries[0].check.command, 'printf ok\necho done\ntrue');
   const exact = async (reply, message) => {
@@ -135,7 +206,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   await exact('```check\na\n```\n```check\nb\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
     'acceptance reply contains more than one check block');
   await exact('```check\nrun\n```\n{"id":"A","check":{"kind":"command","command":"run"}}',
-    'acceptance entry A mixes inline check.command and a check fence; for a multi-line script, use block form with check.command_block true, no inline check.command, and the script in the check fence');
+    'acceptance entry A mixes an inline command with a check fence and must use one form');
   await exact('```check\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
     'acceptance entry A check block is empty');
   const malformed = `{"id":"A","check":{"kind":"command","command":"${'x'.repeat(90)}${'\\q'}${'y'.repeat(290)}"}}`;
