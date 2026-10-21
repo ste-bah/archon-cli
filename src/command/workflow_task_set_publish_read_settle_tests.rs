@@ -343,6 +343,7 @@ async fn a_judgment_reuse_over_an_unsettled_journal_stops_instead_of_rejudging_e
         contract.clone(),
         &expected,
         None,
+        &super::super::judge::JudgeRoots::default(),
     )
     .await
     .expect_err("no judgment is made over an unsettled journal");

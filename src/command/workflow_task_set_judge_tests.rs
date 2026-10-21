@@ -103,3 +103,99 @@ fn the_judge_prompt_fixes_the_toolchain_and_bounds_counterexamples() {
     }
     assert!(prompt.contains("AC-X-001"));
 }
+
+#[test]
+fn named_existing_file_content_is_shown_and_judge_rule_is_updated() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("data")).unwrap();
+    std::fs::write(
+        root.path().join("data/input"),
+        "asserts every component against its expected value\n",
+    )
+    .unwrap();
+    let mut subject = contract();
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut subject.acceptance[0].check
+    {
+        *command = "operation data/input".into();
+    }
+    let roots = JudgeRoots {
+        project: Some(root.path().to_path_buf()),
+        repository: None,
+    };
+    let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
+    assert!(prompt.contains("\"named_files\":[{\"content\":\"asserts every component against its expected value\\n\",\"path\":\"data/input\"}]"), "{prompt}");
+    assert!(prompt.contains(NAMED_FILES_INSTRUCTION));
+}
+
+#[test]
+fn checks_without_files_keep_their_entry_shape_and_retain_existing_prompt_bytes() {
+    let mut subject = contract();
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut subject.acceptance[0].check
+    {
+        *command = "true".into();
+    }
+    let original = batched_judge_prompt(&subject).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let rooted = batched_judge_prompt_with_roots(
+        &subject,
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: None,
+        },
+    )
+    .unwrap();
+    let original_json = original.split_once("Checks: ").unwrap().1;
+    let rooted_json = rooted.split_once("Checks: ").unwrap().1;
+    assert_eq!(rooted_json, original_json);
+}
+
+#[test]
+fn outside_and_missing_named_paths_are_omitted() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = root.path().parent().unwrap().join("outside-input");
+    std::fs::write(&outside, "outside").unwrap();
+    let mut subject = contract();
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut subject.acceptance[0].check
+    {
+        *command = "operation ../outside-input && operation missing-input".into();
+    }
+    let prompt = batched_judge_prompt_with_roots(
+        &subject,
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: None,
+        },
+    )
+    .unwrap();
+    let checks: serde_json::Value =
+        serde_json::from_str(prompt.split_once("Checks: ").unwrap().1).unwrap();
+    assert!(checks[0].get("named_files").is_none(), "{checks}");
+    std::fs::remove_file(outside).unwrap();
+}
+
+#[test]
+fn named_file_content_is_truncated_at_existing_judged_source_limit() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("data")).unwrap();
+    let limit = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    std::fs::write(root.path().join("data/input"), vec![b'x'; limit + 1]).unwrap();
+    let mut subject = contract();
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut subject.acceptance[0].check
+    {
+        *command = "operation data/input".into();
+    }
+    let prompt = batched_judge_prompt_with_roots(
+        &subject,
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: None,
+        },
+    )
+    .unwrap();
+    assert!(prompt.contains("[truncated at the existing judged-source byte limit]"));
+    assert!(!prompt.contains(&"x".repeat(limit + 1)));
+}

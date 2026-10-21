@@ -454,7 +454,8 @@ pub(super) fn mutated(
 #[path = "workflow_acceptance_executability_mutation_test_helpers.rs"]
 mod test_helpers;
 #[cfg(test)]
-pub(super) use test_helpers::named_inputs;
+pub(crate) use test_helpers::named_inputs;
+
 #[cfg(all(test, unix))]
 pub(super) use test_helpers::run_with_host_mutation;
 
