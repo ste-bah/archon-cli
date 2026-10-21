@@ -201,6 +201,7 @@ async fn judge_reuse_refuses_saved_verdict_with_mismatched_key_and_rejudges() {
         &tasks.canonicalize().unwrap(),
         &contract.prd.digest,
         &contract.acceptance[1],
+        &super::super::judge::JudgeRoots::default(),
     )
     .unwrap();
     let cache = temp
@@ -270,21 +271,55 @@ fn cache_key_binds_canonical_task_root_and_prd_digest() {
         &tasks_a.canonicalize().unwrap(),
         "prd-digest",
         &entry,
+        &super::super::judge::JudgeRoots::default(),
     );
     let b = super::super::incremental::entry_key(
         &client,
         &tasks_b.canonicalize().unwrap(),
         "prd-digest",
         &entry,
+        &super::super::judge::JudgeRoots::default(),
     );
     let changed_prd = super::super::incremental::entry_key(
         &client,
         &tasks_a.canonicalize().unwrap(),
         "other-prd",
         &entry,
+        &super::super::judge::JudgeRoots::default(),
     );
     assert_ne!(a, b);
     assert_ne!(a, changed_prd);
+}
+
+#[test]
+fn incremental_key_binds_effective_named_file_content() {
+    let temp = tempfile::tempdir().unwrap();
+    let tasks = temp.path().join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::write(temp.path().join("input"), "first").unwrap();
+    let client = RecordingJudge {
+        batches: Mutex::new(vec![]),
+        omit_supplementary: false,
+    };
+    let mut entry = cache_contract().acceptance[0].clone();
+    entry.check = archon_workflow::task_set_contract::AcceptanceCheck::Command {
+        command: "operation input".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let roots = super::super::judge::JudgeRoots {
+        project: Some(temp.path().to_path_buf()),
+        repository: None,
+        task_root: Some(temp.path().to_path_buf()),
+        repository_commit: None,
+    };
+    let task_root = tasks.canonicalize().unwrap();
+    let first = super::super::incremental::entry_key(&client, &task_root, "prd", &entry, &roots);
+    let unchanged =
+        super::super::incremental::entry_key(&client, &task_root, "prd", &entry, &roots);
+    assert_eq!(first, unchanged);
+    std::fs::write(temp.path().join("input"), "changed").unwrap();
+    let changed = super::super::incremental::entry_key(&client, &task_root, "prd", &entry, &roots);
+    assert_ne!(first, changed);
 }
 
 #[test]
@@ -317,6 +352,7 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
         &current,
         &judged,
         &restored,
+        &super::super::judge::JudgeRoots::default(),
     )
     .unwrap();
     let key = super::super::incremental::entry_key(
@@ -324,6 +360,7 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
         &tasks,
         &current.prd.digest,
         &current.acceptance[0],
+        &super::super::judge::JudgeRoots::default(),
     )
     .unwrap();
     assert!(super::super::incremental::load_entry(temp.path(), &key).is_none());

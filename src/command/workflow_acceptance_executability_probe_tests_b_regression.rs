@@ -29,7 +29,8 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
     assert!(
         accepted.get("AC-3B-001").is_some_and(|finding| {
             finding.contains("no movable input exists under the selected root")
-                && finding.contains("the command names no existing file path under the selected root")
+                && finding
+                    .contains("the command names no existing file path under the selected root")
                 && !finding.contains("data the check writes itself is never evidence")
         }),
         "a stored verdict cannot make a name-only command prove its criterion: {accepted:?}"

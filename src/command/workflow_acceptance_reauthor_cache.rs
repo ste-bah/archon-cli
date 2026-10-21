@@ -21,6 +21,8 @@ struct Key {
     judge_provider: Option<String>,
     #[serde(default)]
     prompt_and_judge_source_digest: String,
+    #[serde(default)]
+    named_file_digest: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,6 +81,15 @@ fn key(
     let prd = scope.prd_path.canonicalize()?;
     let prd_bytes = std::fs::read(&prd)?;
     let proof_root = scope.repository_root.canonicalize()?;
+    let roots = super::judge::JudgeRoots {
+        project: Some(scope.project_root.clone()),
+        repository: Some(scope.repository_root.clone()),
+        task_root: Some(scope.task_root.clone()),
+        repository_commit: scope
+            .baseline
+            .as_ref()
+            .map(|baseline| baseline.commit.clone()),
+    };
     Ok(Key {
         check_id: frozen.id.clone(),
         prd_path: prd.display().to_string(),
@@ -91,6 +102,7 @@ fn key(
         judge_model: judge_model.to_string(),
         judge_provider: judge_provider.map(str::to_string),
         prompt_and_judge_source_digest: prompt_and_judge_source_digest(PROMPT_AND_JUDGE_SOURCES),
+        named_file_digest: super::judge::named_files_digest(candidate, &roots),
     })
 }
 
@@ -156,6 +168,8 @@ pub(crate) fn load(
                     != expected.prompt_and_judge_source_digest
                 {
                     "author prompt or judge instruction changed"
+                } else if record.key.named_file_digest != expected.named_file_digest {
+                    "named judge file content changed"
                 } else if record.key.tree_identity != expected.tree_identity {
                     "proof tree changed"
                 } else if record.key.baseline_commit != expected.baseline_commit {

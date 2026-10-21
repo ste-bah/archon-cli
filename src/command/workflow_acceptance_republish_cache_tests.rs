@@ -49,6 +49,43 @@ fn prompt_and_judge_digest_covers_every_static_source_contributor() {
     );
 }
 
+#[test]
+fn reauthor_cache_key_binds_named_file_content() {
+    let set = frozen_set(&[("AC-F-001", "false", false)]);
+    std::fs::write(set.project.path().join("input"), "first assertion").unwrap();
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let contract = set.contract();
+    let frozen = contract.acceptance[0].clone();
+    let mut item = candidate(&frozen);
+    item.check = archon_workflow::task_set_contract::AcceptanceCheck::Command {
+        command: "operation input".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let probe = DataProbe::default();
+    save_with_probe(&set, &contract, &scope, &item, &probe);
+    let cache = crate::command::workflow_task_set::reauthor::cache::load(
+        &set.tasks,
+        &frozen,
+        &scope,
+        super::super::test_fixture::FIXTURE_JUDGE_MODEL,
+        Some(crate::command::workflow_task_set::reauthor::test_client::SCRIPTED_PROVIDER),
+        &probe,
+    )
+    .unwrap();
+    assert!(cache.is_some(), "unchanged named content should reuse");
+    std::fs::write(set.project.path().join("input"), "changed assertion").unwrap();
+    let cache = crate::command::workflow_task_set::reauthor::cache::load(
+        &set.tasks,
+        &frozen,
+        &scope,
+        super::super::test_fixture::FIXTURE_JUDGE_MODEL,
+        Some(crate::command::workflow_task_set::reauthor::test_client::SCRIPTED_PROVIDER),
+        &probe,
+    )
+    .unwrap();
+    assert!(cache.is_none(), "changed named content must miss");
+}
+
 #[derive(Default)]
 struct DataProbe {
     calls: AtomicUsize,

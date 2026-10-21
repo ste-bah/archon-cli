@@ -91,10 +91,7 @@ pub(super) async fn prove(
             } else {
                 format!("{baseline_finding}; no movable input exists under the selected root")
             };
-            findings.insert(
-                id.clone(),
-                finding,
-            );
+            findings.insert(id.clone(), finding);
             continue;
         }
         // One fresh copy per mutated check; a retry meets the same mutation.

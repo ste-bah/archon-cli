@@ -211,7 +211,7 @@ async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_th
         named_path,
         &format!(
             "{}; considered inputs: eligible movable input: src/state.txt; it still passed with src/state.txt moved aside, so it does not depend on them",
-            super::super::prove::baseline_pass_finding("AC-P-008", &trees.base[..12])
+            super::prove::baseline_pass_finding("AC-P-008", &trees.base[..12])
         )
     );
     for (id, input) in [

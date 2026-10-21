@@ -285,6 +285,128 @@ fn tracked_repository_file_is_named_to_the_judge() {
 }
 
 #[test]
+fn repository_named_file_uses_committed_blob_and_skips_committed_symlink() {
+    let root = tempfile::tempdir().unwrap();
+    git(root.path(), &["init", "-q"]);
+    git(root.path(), &["config", "user.email", "judge@example.test"]);
+    git(root.path(), &["config", "user.name", "Judge Test"]);
+    std::fs::write(root.path().join("tracked"), "committed assertion").unwrap();
+    std::fs::write(root.path().join("ignored-target"), "ignored secret").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("ignored-target", root.path().join("link")).unwrap();
+    git(root.path(), &["add", "tracked", "link"]);
+    git(root.path(), &["commit", "-qm", "initial"]);
+    std::fs::write(root.path().join("tracked"), "working tree assertion").unwrap();
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation tracked", TrustedCwd::RepoRoot),
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: Some(root.path().to_path_buf()),
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert!(prompt.contains("committed assertion"), "{prompt}");
+    assert!(!prompt.contains("working tree assertion"), "{prompt}");
+
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation link", TrustedCwd::RepoRoot),
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: Some(root.path().to_path_buf()),
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        prompt_json(&prompt)[0].get("named_files").is_none(),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn project_paths_drop_curdir_and_reject_parent_components() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("x"), "included").unwrap();
+    std::fs::write(root.path().join("secret"), "must not be reached").unwrap();
+    let roots = JudgeRoots {
+        project: Some(root.path().to_path_buf()),
+        repository: None,
+        task_root: Some(root.path().to_path_buf()),
+        repository_commit: None,
+    };
+    let included = batched_judge_prompt_with_roots(
+        &command_check("operation ./x", TrustedCwd::ProjectRoot),
+        &roots,
+    )
+    .unwrap();
+    assert!(included.contains("included"), "{included}");
+    let rejected = batched_judge_prompt_with_roots(
+        &command_check("operation a/../secret", TrustedCwd::ProjectRoot),
+        &roots,
+    )
+    .unwrap();
+    assert!(
+        prompt_json(&rejected)[0].get("named_files").is_none(),
+        "{rejected}"
+    );
+}
+
+#[test]
+fn project_file_under_nested_repository_is_omitted() {
+    let project = tempfile::tempdir().unwrap();
+    let nested = project.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    std::fs::write(nested.join("input"), "nested repository content").unwrap();
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation nested/input", TrustedCwd::ProjectRoot),
+        &JudgeRoots {
+            project: Some(project.path().to_path_buf()),
+            repository: Some(nested),
+            task_root: Some(project.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        prompt_json(&prompt)[0].get("named_files").is_none(),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn named_file_digest_tracks_content_and_truncates_at_utf8_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("x");
+    let mut subject = command_check("operation x", TrustedCwd::ProjectRoot);
+    let roots = JudgeRoots {
+        project: Some(root.path().to_path_buf()),
+        repository: None,
+        task_root: Some(root.path().to_path_buf()),
+        repository_commit: None,
+    };
+    std::fs::write(&path, "first").unwrap();
+    let first = named_files_digest(&subject.acceptance[0], &roots);
+    assert_eq!(first, named_files_digest(&subject.acceptance[0], &roots));
+    std::fs::write(&path, "other").unwrap();
+    assert_ne!(first, named_files_digest(&subject.acceptance[0], &roots));
+
+    let limit = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    let mut bytes = vec![b'a'; limit - 1];
+    bytes.extend_from_slice("é".as_bytes());
+    std::fs::write(&path, bytes).unwrap();
+    let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
+    assert!(!prompt.contains('�'), "{prompt}");
+    assert!(prompt.contains("[truncated at the existing judged-source byte limit]"));
+    subject.acceptance[0].check = AcceptanceCheck::Command {
+        command: "operation nested/file".into(),
+        cwd: TrustedCwd::ProjectRoot,
+    };
+}
+
+#[test]
 fn project_copy_exclusions_are_omitted_and_named_content_is_redacted() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("credentials")).unwrap();

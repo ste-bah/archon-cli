@@ -13,6 +13,7 @@ pub(super) fn entry_key(
     tasks_root: &Path,
     prd_digest: &str,
     entry: &AcceptanceCriterion,
+    roots: &super::judge::JudgeRoots,
 ) -> Option<String> {
     let (version, digest, _) =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
@@ -25,6 +26,7 @@ pub(super) fn entry_key(
             entry.check,
             entry.covers,
             entry.gap_permitted,
+            super::judge::named_files_digest(entry, roots),
             client.resolve_model_alias("sonnet"),
             client.provider_id(),
             version,
@@ -89,13 +91,14 @@ pub(super) fn save_judged_entries(
     contract: &AcceptanceContract,
     judged_ids: &BTreeSet<String>,
     pinned_ids: &BTreeSet<String>,
+    roots: &super::judge::JudgeRoots,
 ) -> Result<()> {
     for entry in contract.acceptance.iter().chain(&contract.supplementary) {
         if judged_ids.contains(&entry.id)
             && !pinned_ids.contains(&entry.id)
             && entry.judgment.verdict == JudgeDecision::Accepted
             && sampling_matches(client, entry)
-            && let Some(key) = entry_key(client, tasks_root, prd_digest, entry)
+            && let Some(key) = entry_key(client, tasks_root, prd_digest, entry, roots)
         {
             save_entry(project, &key, entry)?;
         }
@@ -174,7 +177,7 @@ pub(super) async fn judge(
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
-        let Some(key) = entry_key(client, &tasks_root, &contract.prd.digest, entry) else {
+        let Some(key) = entry_key(client, &tasks_root, &contract.prd.digest, entry, roots) else {
             continue;
         };
         // The exact task root and PRD digest scope this verdict to its history.
@@ -226,6 +229,7 @@ pub(super) async fn judge(
         &contract,
         &judged_ids,
         &pinned_ids,
+        roots,
     )?;
     validate_acceptance_structure(&contract, expected, true).map_err(anyhow::Error::new)?;
     Ok(contract)
