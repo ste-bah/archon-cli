@@ -64,6 +64,7 @@ impl JudgeStore {
     }
 
     /// The digest of the judge's exact input.
+    #[cfg(test)]
     fn key(
         client: &dyn WorkflowLlmClient,
         subset: &AcceptanceContract,

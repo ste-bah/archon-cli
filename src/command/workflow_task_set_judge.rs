@@ -36,6 +36,7 @@ pub(super) struct JudgeRoots {
     pub repository_commit: Option<String>,
 }
 
+#[cfg(test)]
 pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<String> {
     batched_judge_prompt_with_roots(contract, &JudgeRoots::default())
 }
@@ -495,6 +496,7 @@ pub(super) async fn judge_contract_resumable(
         .await
 }
 
+#[cfg(test)]
 pub(super) async fn judge_contract_resumable_with_roots(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
@@ -532,6 +534,7 @@ pub(super) async fn judge_contract_resumable_with_roots(
 
 /// Judge an incremental batch. A partial subset cannot establish full
 /// contract structure, so validate its decisions and required prose only.
+#[cfg(test)]
 pub(super) async fn judge_contract_subset_resumable(
     client: &dyn WorkflowLlmClient,
     subset: AcceptanceContract,
