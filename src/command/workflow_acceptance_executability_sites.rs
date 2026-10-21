@@ -84,6 +84,7 @@ use data::data_state;
 #[path = "workflow_acceptance_executability_sites_reuse.rs"]
 mod reuse;
 pub(super) use reuse::check_key;
+pub(crate) use reuse::repository_tree_contains;
 
 pub(super) struct SiteRun {
     pub(super) results: Vec<CheckEvidence>,

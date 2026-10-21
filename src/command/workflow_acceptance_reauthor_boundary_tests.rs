@@ -18,6 +18,14 @@ use serde_json::Value;
 use super::*;
 use crate::command::workflow_task_set::republish::test_fixture::frozen_set;
 
+fn empty_universe() -> archon_workflow::task_universe::WorkflowV2TaskUniverse {
+    archon_workflow::task_universe::WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: Vec::new(),
+        tasks: Vec::new(),
+    }
+}
+
 /// Records the call and returns an empty reply. The test needs only the call.
 #[derive(Default)]
 struct Capture(Mutex<Vec<WorkflowAgentCall>>);
@@ -109,6 +117,10 @@ async fn every_path_the_reauthor_prompt_names_is_readable_under_the_boundary() {
         prd_path: prd.clone(),
         project_root: project.clone(),
         repository_root: repository.clone(),
+        task_universe: empty_universe(),
+        task_root: PathBuf::new(),
+        baseline: None,
+        project_input_excludes: Vec::new(),
     };
 
     let call = author_call(&scope).await;
@@ -148,6 +160,10 @@ async fn a_prd_outside_the_project_root_is_still_readable() {
         prd_path: prd.clone(),
         project_root: project,
         repository_root: repository,
+        task_universe: empty_universe(),
+        task_root: PathBuf::new(),
+        baseline: None,
+        project_input_excludes: Vec::new(),
     };
 
     let call = author_call(&scope).await;
@@ -167,6 +183,10 @@ async fn a_scope_inside_the_repository_needs_no_read_roots() {
         prd_path: prd,
         project_root: root.clone(),
         repository_root: root,
+        task_universe: empty_universe(),
+        task_root: PathBuf::new(),
+        baseline: None,
+        project_input_excludes: Vec::new(),
     };
     assert!(scope.read_roots().expect("a valid scope").is_empty());
 }
@@ -183,6 +203,10 @@ async fn an_empty_scope_field_fails_by_name_before_the_author_is_spawned() {
         prd_path: prd.clone(),
         project_root: root.clone(),
         repository_root: root.join("repository"),
+        task_universe: empty_universe(),
+        task_root: PathBuf::new(),
+        baseline: None,
+        project_input_excludes: Vec::new(),
     };
     for (field, scope) in [
         (

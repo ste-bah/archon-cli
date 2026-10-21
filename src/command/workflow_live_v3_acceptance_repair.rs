@@ -60,6 +60,25 @@ use crate::command::workflow_task_set::republish::{
 };
 use crate::command::workflow_task_set::{non_accepted_ids, pause_if_unsettled};
 
+pub(super) fn repair_author_scope(
+    project: &Path,
+    task_root: &Path,
+    repository: &Path,
+    prd_path: &Path,
+    base: Option<&str>,
+) -> anyhow::Result<AuthorScope> {
+    let mut scope =
+        AuthorScope::for_task_set(project, task_root, prd_path).map_err(anyhow::Error::msg)?;
+    scope.repository_root = repository.to_path_buf();
+    if let Some(commit) = base {
+        scope.baseline = Some(Baseline {
+            commit: commit.to_string(),
+            repository: repository.to_path_buf(),
+        });
+    }
+    Ok(scope)
+}
+
 /// Contract-defect text per check id the repair could not fix.
 pub(super) type Defects = BTreeMap<String, String>;
 
@@ -105,6 +124,13 @@ pub(super) async fn republish(
         None => probe,
     };
     // Each gate republishes under the mode its stage was frozen in.
+    let scope = repair_author_scope(
+        &context.project,
+        &context.task_root,
+        &context.repository,
+        &prd_path,
+        base,
+    )?;
     reauthor_and_republish(
         llm,
         ReauthorRequest {
@@ -118,11 +144,7 @@ pub(super) async fn republish(
             },
             trigger: "in-round acceptance repair",
         },
-        &AuthorScope {
-            prd_path: prd_path.clone(),
-            project_root: context.project.clone(),
-            repository_root: context.repository.clone(),
-        },
+        &scope,
     )
     .await
 }
@@ -225,7 +247,7 @@ pub(super) async fn apply(
     Ok(Some(defects))
 }
 
-/// Where the round ran its checks, for re-running a repaired one there.
+/// The round's site and baseline for re-running a repaired check.
 pub(super) struct Round<'a> {
     pub(super) llm: Option<&'a dyn WorkflowLlmClient>,
     pub(super) context: &'a StageContext,
@@ -270,9 +292,7 @@ pub(super) async fn repair_crashed(
     repair_ran(round, contract, chain_digest, results, record, defects).await
 }
 
-/// Repair, republish and re-run in this round every check `defects` names
-/// (see [`repair_crashed`]); a repaired check that crashes on its re-run is
-/// a contract defect too.
+/// Repair, republish and re-run every check named in `defects`.
 pub(super) async fn repair_ran(
     round: &Round<'_>,
     contract: &mut AcceptanceContract,

@@ -111,11 +111,7 @@ pub(super) fn finish_acceptance(
     // own finding, carrying its pre-implementation output; the generic
     // refutation would only tell its author to make it fail.
     let cannot_pass: BTreeSet<&str> = (probed.iter())
-        .filter(|finding| {
-            finding
-                .text
-                .starts_with(&cannot_pass_prefix(&finding.subject))
-        })
+        .filter(|finding| is_baseline_pass_finding(finding))
         .map(|finding| finding.subject.as_str())
         .collect();
     findings.retain(|finding| {
@@ -155,7 +151,17 @@ pub(super) fn finish_acceptance(
     })
 }
 
-/// How the finding for check `id` that cannot pass as written starts.
+fn is_baseline_pass_finding(finding: &GateFinding) -> bool {
+    finding
+        .text
+        .starts_with(&cannot_pass_prefix(&finding.subject))
+        || (finding.text.starts_with(&format!(
+            "check '{}': the criterion already holds on the pre-implementation tree;",
+            finding.subject
+        )) && finding.text.contains(super::executability::CANNOT_FAIL))
+}
+
+/// The passability-specific finding added to an ordinary judge refusal.
 fn cannot_pass_prefix(id: &str) -> String {
     format!("check '{id}': {}", super::passability::CANNOT_PASS)
 }
@@ -410,10 +416,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
     // with its pre-implementation output (Issue 275).
     let mut seeds = crashed.clone();
     for finding in &prepared.findings {
-        if finding
-            .text
-            .starts_with(&cannot_pass_prefix(&finding.subject))
-        {
+        if is_baseline_pass_finding(finding) {
             seeds.insert(finding.subject.clone(), finding.text.clone());
         }
     }

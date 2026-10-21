@@ -7,25 +7,46 @@ use archon_workflow::llm_client_port::{
     WorkflowAgentCall, WorkflowAgentSpec, WorkflowAgentToolAccess,
 };
 
-use super::*;
+use std::{collections::BTreeSet, path::Path};
 
-fn author_prompt(
+use super::*;
+pub(super) fn author_prompt(
     scope: &AuthorScope,
     frozen: &AcceptanceCriterion,
     notes: &[String],
     attempt: usize,
 ) -> String {
-    let current = serde_json::json!({
-        "id": frozen.id,
-        "criterion": frozen.criterion,
-        "check": frozen.check,
-        "gap_permitted": frozen.gap_permitted,
+    let baseline_pass = notes.iter().any(|note| {
+        note.contains("criterion already holds on the pre-implementation tree")
+            || note.contains(super::executability::CANNOT_FAIL)
     });
-    [
-        format!(
-            "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The current entry cannot be used as it is: the host judge did not accept it, or it crashed in its own code when the host ran it (the findings below say which). Author ONLY this entry, not the whole contract.",
-            frozen.id
-        ),
+    let current = if baseline_pass {
+        serde_json::json!({
+            "id": frozen.id,
+            "criterion": frozen.criterion,
+            "covers": frozen.covers,
+            "gap_permitted": frozen.gap_permitted,
+        })
+    } else {
+        serde_json::json!({
+            "id": frozen.id,
+            "criterion": frozen.criterion,
+            "check": frozen.check,
+            "gap_permitted": frozen.gap_permitted,
+        })
+    };
+    let mut prompt = Vec::new();
+    if baseline_pass {
+        prompt.extend([
+            "The criterion already holds on the pre-implementation tree. write a regression guard. Run the existing test or implementation file that decides the criterion, and name that file relative to the chosen working directory. The check must fail on its own assertion when that file is moved aside. Do not generate substitute data.".to_string(),
+            "Template: choose the root containing the named file; run the existing test or implementation that decides the criterion; assert the criterion's result; the check fails when the named file is moved aside.".to_string(),
+        ]);
+    }
+    prompt.push(format!(
+        "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The current entry cannot be used as it is: the host judge did not accept it, or it crashed in its own code when the host ran it (the findings below say which). Author ONLY this entry, not the whole contract.",
+        frozen.id
+    ));
+    prompt.extend([
         format!("Read the PRD at {}.", scope.prd_path.display()),
         format!(
             "The code repository is {}. It is the ONLY place to verify source paths, test names, module layout and whether a file exists: a repository path you name must be one you observed there. Never descend into dependency, build-output or earlier-run directories.",
@@ -50,14 +71,195 @@ fn author_prompt(
             frozen.id, frozen.gap_permitted
         ),
         format!("The entry being replaced: {current}"),
+    ]);
+    if baseline_pass {
+        prompt.extend([
+            format!(
+                "Do not repeat the refused approach: {}",
+                refused_reason(notes)
+            ),
+            format!(
+                "candidates to inspect; use only one that decides the criterion: {}",
+                candidate_files(scope, frozen)
+            ),
+        ]);
+    }
+    prompt.extend([
         format!(
             "Attempt {attempt}; the host stops after {REAUTHOR_ATTEMPTS} consecutive attempts that repair no check. Findings to fix, oldest first:\n- {}",
             notes.join("\n- ")
         ),
         "Return exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences.".to_string(),
         "Do not run commands or write files.".to_string(),
-    ]
-    .join("\n")
+    ]);
+    prompt.join("\n")
+}
+
+fn refused_reason(notes: &[String]) -> &'static str {
+    if notes
+        .iter()
+        .any(|note| note.contains("data the check writes itself"))
+    {
+        "it relied on data created during the check"
+    } else {
+        "it did not prove the criterion using an existing deciding file"
+    }
+}
+
+pub(crate) fn candidate_files(scope: &AuthorScope, frozen: &AcceptanceCriterion) -> String {
+    let project_input_excludes = match crate::command::acceptance_scratch_policy::capture(
+        &scope.project_root,
+        &scope.task_root,
+    ) {
+        Ok(Some(binding)) => binding.policy.project_input_excludes,
+        Ok(None) => Vec::new(),
+        Err(error) => {
+            eprintln!(
+                "acceptance re-author candidate discovery: project input copy policy could not be loaded: {error}"
+            );
+            return "none could be verified".into();
+        }
+    };
+    let mut paths = BTreeSet::new();
+    for task in &scope.task_universe.tasks {
+        if !task.implements.iter().any(|id| frozen.covers.contains(id)) {
+            continue;
+        }
+        let mut declared = task
+            .files_expected_to_change
+            .iter()
+            .filter_map(|item| item.split_whitespace().next().map(str::to_string))
+            .collect::<Vec<_>>();
+        declared.extend(
+            task.declared_focused_test_commands()
+                .into_iter()
+                .flat_map(|command| {
+                    command
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                }),
+        );
+        for raw in declared {
+            let candidate =
+                raw.trim_matches(|c: char| !c.is_ascii_alphanumeric() && !"._/-\\".contains(c));
+            if candidate.is_empty() {
+                continue;
+            }
+            let declared_path = Path::new(candidate);
+            let roots = if declared_path.is_absolute() {
+                let canonical_candidate = declared_path.canonicalize().ok();
+                [
+                    ("repository root", &scope.repository_root),
+                    ("project root", &scope.project_root),
+                ]
+                .into_iter()
+                .filter_map(|(label, root)| {
+                    let canonical_root = root.canonicalize().ok()?;
+                    let canonical_candidate = canonical_candidate.as_ref()?;
+                    let relative = canonical_candidate.strip_prefix(canonical_root).ok()?;
+                    let project_relative = declared_path
+                        .strip_prefix(root)
+                        .ok()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| relative.to_path_buf());
+                    Some((label, root, relative.to_path_buf(), project_relative))
+                })
+                .collect::<Vec<_>>()
+            } else {
+                vec![
+                    (
+                        "repository root",
+                        &scope.repository_root,
+                        declared_path.to_path_buf(),
+                        declared_path.to_path_buf(),
+                    ),
+                    (
+                        "project root",
+                        &scope.project_root,
+                        declared_path.to_path_buf(),
+                        declared_path.to_path_buf(),
+                    ),
+                ]
+            };
+            for (label, root, relative, project_relative) in roots {
+                if relative.components().any(|part| {
+                    matches!(
+                        part,
+                        std::path::Component::ParentDir | std::path::Component::RootDir
+                    )
+                }) {
+                    continue;
+                }
+                let full = root.join(&relative);
+                let inside_tree = if label == "repository root" {
+                    scope.baseline.as_ref().is_some_and(|baseline| {
+                        crate::command::workflow_task_set::executability::repository_tree_contains(
+                            &baseline.repository,
+                            &baseline.commit,
+                            &relative.to_string_lossy(),
+                        )
+                    })
+                } else {
+                    let project_relative_task_root =
+                        scope.task_root.strip_prefix(&scope.project_root).ok();
+                    let nested_repository = archon_workflow::acceptance_scratch::nested_repository(
+                        &scope.project_root,
+                        &scope.repository_root,
+                    );
+                    let excluded = archon_workflow::acceptance_scratch::acceptance_input_excluded(
+                        &relative,
+                        &project_input_excludes,
+                        project_relative_task_root,
+                    ) || nested_repository.as_ref().is_some_and(|nested| {
+                        archon_workflow::acceptance_scratch::nested_repository_skipped(
+                            &relative,
+                            Some(nested.as_path()),
+                        )
+                    });
+                    !excluded && project_candidate_is_copied_file(root, &project_relative)
+                };
+                if inside_tree {
+                    if let Ok(path) = full.strip_prefix(root) {
+                        paths.insert(format!("{label}: {}", path.display()));
+                    }
+                }
+            }
+        }
+    }
+    if paths.is_empty() {
+        "none found".into()
+    } else {
+        paths.into_iter().collect::<Vec<_>>().join(", ")
+    }
+}
+
+/// The project input copier skips symlink entries. A declared path must walk
+/// through ordinary directories and end at an ordinary file so the scratch
+/// copy contains the path the prompt names.
+fn project_candidate_is_copied_file(project_root: &Path, relative: &Path) -> bool {
+    let mut current = project_root.to_path_buf();
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let std::path::Component::Normal(name) = component else {
+            return false;
+        };
+        current.push(name);
+        let Ok(metadata) = current.symlink_metadata() else {
+            return false;
+        };
+        if metadata.file_type().is_symlink() {
+            return false;
+        }
+        if components.peek().is_some() {
+            if !metadata.is_dir() {
+                return false;
+            }
+        } else if !metadata.is_file() {
+            return false;
+        }
+    }
+    !relative.as_os_str().is_empty()
 }
 
 /// The live root forms a re-authored check must not name (Issue 366): the

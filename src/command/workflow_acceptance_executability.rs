@@ -255,6 +255,7 @@ mod verdict;
 #[path = "workflow_acceptance_executability_verdict_shell.rs"]
 mod verdict_shell;
 pub(crate) use mutation::CANNOT_FAIL;
+pub(crate) use sites::repository_tree_contains;
 #[cfg(test)]
 pub(crate) use verdict::HOST_PATH;
 pub(crate) use verdict::{Context as CheckSite, unresolved_on_path};

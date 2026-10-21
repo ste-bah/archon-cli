@@ -4,7 +4,7 @@ use super::mutation;
 
 pub(crate) fn baseline_pass_finding(id: &str, short: &str) -> String {
     format!(
-        "check '{id}': it {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside",
+        "check '{id}': the criterion already holds on the pre-implementation tree; write a regression guard. It {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside",
         mutation::CANNOT_FAIL
     )
 }

@@ -53,6 +53,8 @@ mod output;
 mod regression;
 #[path = "workflow_live_v3_acceptance_repair.rs"]
 mod repair;
+#[cfg(test)]
+use repair::repair_author_scope;
 #[path = "workflow_live_v3_acceptance_result.rs"]
 mod result;
 use check_rec::check_record;
@@ -293,8 +295,6 @@ async fn evaluate(
     if !record.operational_errors.is_empty() {
         return Ok(());
     }
-    // ACC-A7: what the contract owes its PRD is authored and added to the
-    // frozen chain in this round, then run with every other check.
     if let Some(authored) = author_drift::heal_drift(&site, &contract).await? {
         let added = authored
             .repair

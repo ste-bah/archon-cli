@@ -2,6 +2,21 @@
 use anyhow::{Context, Result, anyhow};
 use std::{collections::HashSet, io::Write, path::Path};
 
+pub(crate) fn resume_author_scope(
+    project_root: &Path,
+    task_root: &Path,
+    prd_path: &Path,
+) -> Result<crate::command::workflow_task_set::reauthor::AuthorScope> {
+    Ok(
+        crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
+            project_root,
+            task_root,
+            prd_path,
+        )
+        .map_err(anyhow::Error::msg)?,
+    )
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(crate) struct Ledger {
     pub report_id: String,
@@ -137,12 +152,8 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
             (id.clone(), finding.to_string())
         })
         .collect::<std::collections::BTreeMap<_, _>>();
-    let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
-        project_root,
-        task_root,
-        prd_path,
-    )
-    .map_err(|error| anyhow::anyhow!(error))?;
+    let scope = resume_author_scope(project_root, task_root, prd_path)
+        .map_err(|error| anyhow::anyhow!(error))?;
     let probe =
         crate::command::workflow_task_set::executability::HostProbe::for_task_set_with_limits(
             project_root,

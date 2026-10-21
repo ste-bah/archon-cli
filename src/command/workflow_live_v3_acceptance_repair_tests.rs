@@ -8,6 +8,35 @@ use crate::command::workflow_task_set::republish::test_fixture::{
     FrozenSet, assert_only_named_entries_changed, frozen_set,
 };
 use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
+
+#[test]
+fn in_round_repair_scope_builder_carries_frozen_task_candidates() {
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
+        "AC-F-001", "run", false,
+    )]);
+    let candidate = set.project.path().join("src/declared.rs");
+    std::fs::create_dir_all(candidate.parent().unwrap()).unwrap();
+    std::fs::write(&candidate, "declared").unwrap();
+    std::fs::write(
+        set.tasks.join("TASK-SET-001.md"),
+        "# TASK-SET-001\n\n```yaml\ntask_id: TASK-SET-001\ntitle: Test task\ncomplexity: low\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [REQ-A]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- src/declared.rs\n",
+    )
+    .unwrap();
+    let mut frozen = set.contract().acceptance[0].clone();
+    frozen.covers = vec!["REQ-A".into()];
+    let scope = super::repair_author_scope(
+        set.project.path(),
+        &set.tasks,
+        set.project.path(),
+        &set.prd,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        crate::command::workflow_task_set::reauthor::author::candidate_files(&scope, &frozen),
+        "project root: src/declared.rs"
+    );
+}
 use archon_workflow::{WorkflowSpec, WorkflowV2HostCall, WorkflowV2HostMethod};
 
 pub(super) struct Run {

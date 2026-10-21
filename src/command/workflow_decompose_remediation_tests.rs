@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "workflow_decompose_remediation_read_tests.rs"]
 mod read_tests;
+#[path = "workflow_decompose_remediation_scope_tests.rs"]
+mod scope_tests;
 
 #[tokio::test]
 async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_finding_seed() {

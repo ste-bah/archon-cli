@@ -15,8 +15,10 @@ use archon_workflow::task_set_contract::{
 };
 
 use super::executability::ExecutabilityProbe;
-use super::live_root;
 use super::*;
+#[path = "workflow_acceptance_reauthor_scope.rs"]
+mod scope;
+pub(crate) use scope::AuthorScope;
 #[path = "workflow_acceptance_reauthor_parse.rs"]
 mod reply_parse;
 #[cfg(test)]
@@ -26,8 +28,7 @@ use reply_parse::candidate_entry_with_markers;
 #[path = "workflow_acceptance_reauthor_cache.rs"]
 pub(crate) mod cache;
 
-/// Consecutive author-then-judge attempts that repair no named check before
-/// the operation stops and fails with its report.
+/// Consecutive author-then-judge attempts that repair no named check.
 pub(crate) const REAUTHOR_ATTEMPTS: usize = 3;
 
 /// The exact-tool marker the subagent adapters honor (`archon-pipeline`
@@ -40,31 +41,6 @@ const AUTHOR_TOOLS: [&str; 3] = HOST_READ_ONLY_TOOLS;
 
 /// The two entry shapes the decomposition author is shown.
 const ENTRY_SHAPES: &str = r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#;
-
-/// Where the author reads.
-pub(crate) struct AuthorScope {
-    pub(crate) prd_path: PathBuf,
-    pub(crate) project_root: PathBuf,
-    pub(crate) repository_root: PathBuf,
-}
-
-impl AuthorScope {
-    /// The repository the task set was decomposed against (its
-    /// `repository.lock`), else the project root. A lock that cannot be
-    /// believed is an error ([`live_root::recorded_repository`]): the author
-    /// is never told, nor confined to, a guessed root.
-    pub(crate) fn for_task_set(
-        project_root: &Path,
-        tasks_root: &Path,
-        prd_path: &Path,
-    ) -> std::result::Result<Self, String> {
-        Ok(Self {
-            prd_path: prd_path.to_path_buf(),
-            project_root: project_root.to_path_buf(),
-            repository_root: live_root::recorded_repository(project_root, tasks_root)?,
-        })
-    }
-}
 
 impl AuthorScope {
     /// The paths outside the repository that the author prompt tells the
@@ -446,7 +422,7 @@ fn check_defects(
 }
 
 #[path = "workflow_acceptance_reauthor_author.rs"]
-mod author;
+pub(crate) mod author;
 #[path = "workflow_acceptance_reauthor_escalation.rs"]
 mod escalation;
 #[path = "workflow_acceptance_reauthor_stalled.rs"]
@@ -460,6 +436,9 @@ mod boundary_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_live_root_tests.rs"]
 mod live_root_tests;
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_prompt_tests.rs"]
+mod prompt_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_test_client.rs"]
 pub(crate) mod test_client;

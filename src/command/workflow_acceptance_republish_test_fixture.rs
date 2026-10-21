@@ -226,7 +226,16 @@ pub(crate) fn write_chain(
         })
         .collect::<Vec<_>>();
     for task in &frozen {
-        std::fs::write(tasks.join(&task.file_name), format!("# {}\n", task.task_id)).unwrap();
+        std::fs::write(
+            tasks.join(&task.file_name),
+            format!(
+                "# {}\n\n```yaml\ntask_id: {}\ntitle: Test task\ncomplexity: low\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [{}]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n",
+                task.task_id,
+                task.task_id,
+                task.implements.join(", "),
+            ),
+        )
+        .unwrap();
     }
     let skeleton = TaskSkeleton {
         schema_version: 1,

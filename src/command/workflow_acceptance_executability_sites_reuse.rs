@@ -3,17 +3,9 @@ use super::*;
 /// Git's tree object commits to every path, mode, and file blob the check
 /// can read inside its repository-relative bounded closure.
 fn repository_tree_digest(repository: &Path, commit: &str, path: &str) -> Option<String> {
-    let entries = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
-        .args(["ls-tree", "-r", "-t", "-z", commit, "--", path])
-        .output()
-        .ok()?;
-    if !entries.status.success() {
-        return None;
-    }
+    let entries = repository_tree_entries(repository, commit, path)?;
     let mut closure = Vec::from(path.as_bytes());
-    for entry in entries.stdout.split(|byte| *byte == 0) {
+    for entry in &entries {
         let Some(tab) = entry.iter().position(|byte| *byte == b'\t') else {
             continue;
         };
@@ -35,6 +27,46 @@ fn repository_tree_digest(repository: &Path, commit: &str, path: &str) -> Option
         closure.push(0);
     }
     Some(content_digest(&closure))
+}
+
+fn repository_tree_entries(repository: &Path, commit: &str, path: &str) -> Option<Vec<Vec<u8>>> {
+    let output = archon_shell::spawn::command("git")
+        .arg("-C")
+        .arg(repository)
+        .args(["ls-tree", "-r", "-t", "-z", commit, "--", path])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(
+        output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| entry.to_vec())
+            .collect(),
+    )
+}
+
+/// Whether `path` is a regular file in the exact committed tree a probe uses.
+pub(crate) fn repository_tree_contains(repository: &Path, commit: &str, path: &str) -> bool {
+    let Some(entries) = repository_tree_entries(repository, commit, path) else {
+        return false;
+    };
+    entries.iter().any(|entry| {
+        let Some(tab) = entry.iter().position(|byte| *byte == b'\t') else {
+            return false;
+        };
+        let Ok(found) = std::str::from_utf8(&entry[tab + 1..]) else {
+            return false;
+        };
+        let mode = entry[..tab]
+            .split(|byte| *byte == b' ')
+            .next()
+            .unwrap_or_default();
+        found == path && matches!(mode, b"100644" | b"100755")
+    })
 }
 
 /// The memo key of `reference` on `tree` with project data in `data`: the
