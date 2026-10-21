@@ -495,6 +495,6 @@ fn describe_status(status: Option<String>) -> String {
 #[path = "workflow_acceptance_executability_prove_tests.rs"]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_prove_alias_tests.rs"]
 mod alias_tests;

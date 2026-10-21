@@ -180,12 +180,11 @@ pub(crate) fn snapshot_parent(root: &SiteRoot, rel: &Path) -> std::io::Result<St
         let parent = rel.parent().unwrap_or_else(|| Path::new(""));
         let metadata = std::fs::metadata(root.path.join(parent))?;
         Ok(format!(
-            "{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}",
             metadata.file_attributes(),
             metadata.file_size(),
             metadata.creation_time(),
-            metadata.last_write_time(),
-            metadata.number_of_links()
+            metadata.last_write_time()
         ))
     }
 }
