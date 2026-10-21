@@ -1,0 +1,6 @@
+[{"id":"AC-X-001","criterion":"The selected behavior remains consistent.","check":{"kind":"command","command":"run the verification","cwd":"project_root"}}]
+
+```check
+```
+
+Return the single entry object.

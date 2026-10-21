@@ -224,6 +224,92 @@ fn live_fenced_replies_report_locations_inside_the_json_entry() {
 }
 
 #[test]
+fn reply_shape_diagnoses_are_independent_and_valid_entries_still_parse() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let contract = set.contract();
+    let frozen = &contract.acceptance[0];
+    let reply = include_str!("../../tests/fixtures/reply-parser/reply-three.txt");
+    let extraction = crate::command::workflow_task_set::acceptance_reply_blocks::extract_object_outcome_with_markers(reply, &[]);
+    let diagnoses = super::reply_parse::shape_diagnoses(reply, &[], &extraction);
+    for diagnosis in [
+        "return the entry object itself, not an array",
+        "return the entry only",
+        "the check fence is empty; put the script in it",
+    ] {
+        assert!(
+            diagnoses.iter().any(|item| item == diagnosis),
+            "missing {diagnosis:?}: {diagnoses:?}"
+        );
+    }
+    let legacy_result =
+        candidate_entry(reply, frozen).expect_err("the reply keeps the legacy parse result");
+    assert!(
+        !legacy_result.contains("line 1 column 1"),
+        "{legacy_result}"
+    );
+
+    let array_only = format!(
+        "[{valid}]",
+        valid = r#"{"id":"AC-X-001","check":{"kind":"command","command":"run another check","cwd":"project_root"}}"#
+    );
+    let extracted_array_entry =
+        crate::command::workflow_task_set::acceptance_reply_blocks::extract_object(&array_only);
+    assert_eq!(
+        extracted_array_entry,
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"run another check","cwd":"project_root"}}"#
+    );
+    let legacy_array_error = candidate_entry(&array_only, frozen)
+        .expect_err("the original document parser still handles a bare array as before");
+    assert!(
+        !legacy_array_error.contains("formatting problems"),
+        "{legacy_array_error}"
+    );
+
+    let two_entries = concat!(
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"first","cwd":"project_root"}}"#,
+        "\n",
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"second","cwd":"project_root"}}"#
+    );
+    assert!(
+        candidate_entry(two_entries, frozen)
+            .unwrap_err()
+            .contains("the reply holds 2 different entries; return exactly one")
+    );
+
+    let empty_check = concat!(
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"run","cwd":"project_root"}}"#,
+        "\n```check\n```"
+    );
+    assert_eq!(
+        candidate_entry(empty_check, frozen).unwrap_err(),
+        "the reply mixes an inline command with a check fence and must use one form"
+    );
+
+    let valid = r#"{"id":"AC-X-001","check":{"kind":"command","command":"run another check","cwd":"project_root"}}"#;
+    assert!(candidate_entry(valid, frozen).is_ok());
+    let fenced_with_prose_before = format!("A revised entry follows.\n```json\n{valid}\n```");
+    let parsed_before = candidate_entry(&fenced_with_prose_before, frozen)
+        .expect("prose before the JSON fence was accepted by the original extractor");
+    assert!(matches!(
+        &parsed_before.check,
+        AcceptanceCheck::Command { command, .. } if command == "run another check"
+    ));
+    let fenced_with_prose_after = format!("```json\n{valid}\n```\nThe entry is complete.");
+    let parsed_after = candidate_entry(&fenced_with_prose_after, frozen)
+        .expect("prose after the JSON fence was accepted by the original extractor");
+    assert!(matches!(
+        &parsed_after.check,
+        AcceptanceCheck::Command { command, .. } if command == "run another check"
+    ));
+    let valid_block = concat!(
+        "```json\n",
+        r#"{"id":"AC-X-001","check":{"kind":"command","cwd":"project_root","command_block":true}}"#,
+        "\n```\n```check\nrun another check\n```"
+    );
+    assert!(candidate_entry(valid_block, frozen).is_ok());
+}
+
+#[test]
 fn inline_command_and_check_fence_have_one_shared_refusal() {
     let set = frozen_set(&[("AC-F-001", "run", false)]);
     let contract = set.contract();
