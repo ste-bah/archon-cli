@@ -352,12 +352,47 @@ pub(crate) fn extract_object(content: &str) -> String {
 }
 
 pub(crate) fn extract_object_with_markers(content: &str, markers: &[String]) -> String {
+    match extract_object_outcome_with_markers(content, markers) {
+        ObjectExtraction::Entry(entry) | ObjectExtraction::ArrayWrappedEntry(entry) => entry,
+        ObjectExtraction::NoneFound | ObjectExtraction::SeveralDifferentEntries { .. } => {
+            String::new()
+        }
+    }
+}
+
+pub(crate) enum ObjectExtraction {
+    Entry(String),
+    NoneFound,
+    SeveralDifferentEntries { count: usize, array_wrapped: bool },
+    ArrayWrappedEntry(String),
+}
+
+pub(crate) fn extract_object_outcome_with_markers(
+    content: &str,
+    markers: &[String],
+) -> ObjectExtraction {
     let normalized = strip_reply_markers(content, markers);
     let content = normalized.as_str();
     let blocks = reply_blocks(content);
     if blocks.iter().any(|block| !block.closed) {
-        return String::new();
+        return ObjectExtraction::NoneFound;
     }
+    let array_wrapped = blocks
+        .iter()
+        .filter(|block| block.info == "json")
+        .any(|block| {
+            serde_json::from_str::<Value>(block.content.trim())
+                .ok()
+                .is_some_and(|value| value.is_array())
+        })
+        || blocks
+            .iter()
+            .find(|block| block.info == "check")
+            .and_then(|check| serde_json::from_str::<Value>(content[..check.start].trim()).ok())
+            .is_some_and(|value| value.is_array())
+        || serde_json::from_str::<Value>(content.trim())
+            .ok()
+            .is_some_and(|value| value.is_array());
     let json: Vec<String> = blocks
         .iter()
         .filter(|block| block.info == "json")
@@ -403,23 +438,48 @@ pub(crate) fn extract_object_with_markers(content: &str, markers: &[String]) -> 
         .collect();
     if parsed.iter().any(Result::is_err) {
         return if candidates.len() == 1 {
-            candidates[0].clone()
+            if array_wrapped {
+                ObjectExtraction::ArrayWrappedEntry(candidates[0].clone())
+            } else {
+                ObjectExtraction::Entry(candidates[0].clone())
+            }
         } else {
-            String::new()
+            ObjectExtraction::SeveralDifferentEntries {
+                count: candidates.len(),
+                array_wrapped,
+            }
         };
     }
     let parsed: Vec<Value> = parsed.into_iter().map(Result::unwrap).collect();
     if !parsed.is_empty() {
-        return if parsed
+        if parsed
             .first()
             .is_some_and(|first| parsed.iter().all(|value| value == first))
         {
-            candidates[0].clone()
+            if array_wrapped {
+                ObjectExtraction::ArrayWrappedEntry(candidates[0].clone())
+            } else {
+                ObjectExtraction::Entry(candidates[0].clone())
+            }
         } else {
-            String::new()
-        };
+            ObjectExtraction::SeveralDifferentEntries {
+                count: parsed
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, value)| !parsed[..*index].contains(value))
+                    .count(),
+                array_wrapped,
+            }
+        }
+    } else if let Some(entry) = candidates.first() {
+        if array_wrapped {
+            ObjectExtraction::ArrayWrappedEntry(entry.clone())
+        } else {
+            ObjectExtraction::Entry(entry.clone())
+        }
+    } else {
+        ObjectExtraction::NoneFound
     }
-    candidates.first().cloned().unwrap_or_default()
 }
 
 fn object_text(body: &str) -> String {

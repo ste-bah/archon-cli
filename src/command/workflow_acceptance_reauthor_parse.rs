@@ -58,6 +58,81 @@ fn format_parse_refusal(id: &str, diagnostic: &str, advice: &str) -> String {
     format!("the reply for check '{id}' is not one JSON entry ({diagnostic}){separator}{advice}")
 }
 
+pub(super) fn shape_diagnoses(
+    reply: &str,
+    markers: &[String],
+    extraction: &crate::command::workflow_task_set::acceptance_reply_blocks::ObjectExtraction,
+) -> Vec<String> {
+    use crate::command::workflow_task_set::acceptance_reply_blocks as blocks;
+    let source = blocks::strip_reply_markers(reply, markers);
+    let reply_blocks = blocks::reply_blocks(&source);
+    let mut diagnoses = Vec::new();
+    let wrapped_array = reply_blocks
+        .iter()
+        .filter(|block| block.info == "json")
+        .any(|block| {
+            serde_json::from_str::<serde_json::Value>(block.content.trim())
+                .ok()
+                .is_some_and(|value| value.is_array())
+        })
+        || reply_blocks
+            .iter()
+            .find(|block| block.info == "check")
+            .and_then(|check| {
+                serde_json::from_str::<serde_json::Value>(source[..check.start].trim()).ok()
+            })
+            .is_some_and(|value| value.is_array())
+        || serde_json::from_str::<serde_json::Value>(source.trim())
+            .ok()
+            .is_some_and(|value| value.is_array())
+        || matches!(
+            extraction,
+            blocks::ObjectExtraction::ArrayWrappedEntry(_)
+                | blocks::ObjectExtraction::SeveralDifferentEntries {
+                    array_wrapped: true,
+                    ..
+                }
+        );
+    if wrapped_array {
+        diagnoses.push("return the entry object itself, not an array".into());
+    }
+    if let blocks::ObjectExtraction::SeveralDifferentEntries { count, .. } = extraction {
+        diagnoses.push(format!(
+            "the reply holds {count} different entries; return exactly one"
+        ));
+    }
+    if reply_blocks
+        .iter()
+        .any(|block| block.info == "check" && block.content.trim().is_empty())
+    {
+        diagnoses.push("the check fence is empty; put the script in it".into());
+    }
+
+    let mut outside = source.as_bytes().to_vec();
+    for block in &reply_blocks {
+        outside[block.start..block.end].fill(b' ');
+    }
+    let outside = String::from_utf8(outside).expect("mask preserves UTF-8");
+    let trimmed = outside.trim();
+    let starts_entry = trimmed.find(['{', '[']);
+    let ends_entry = trimmed.rfind(['}', ']']);
+    let has_outside_text = match (starts_entry, ends_entry) {
+        (Some(start), Some(end)) => {
+            !trimmed[..start].trim().is_empty() || !trimmed[end + 1..].trim().is_empty()
+        }
+        _ => false,
+    } || reply_blocks
+        .last()
+        .is_some_and(|block| !source[block.end..].trim().is_empty());
+    if has_outside_text {
+        diagnoses.push("return the entry only".into());
+    }
+    if matches!(extraction, blocks::ObjectExtraction::NoneFound) {
+        diagnoses.push("no entry was found in the reply".into());
+    }
+    diagnoses
+}
+
 /// Parse one candidate while preserving the host-owned parts of its source entry.
 #[cfg(test)]
 pub(super) fn candidate_entry(
@@ -79,6 +154,20 @@ pub(super) fn candidate_entry_with_markers(
     let reply_blocks = blocks::reply_blocks_with_markers(reply, markers);
     let has_fenced_entry_and_check = reply_blocks.iter().any(|block| block.info == "json")
         && reply_blocks.iter().any(|block| block.info == "check");
+    let extraction = blocks::extract_object_outcome_with_markers(reply, markers);
+    let extracted = match &extraction {
+        blocks::ObjectExtraction::Entry(entry)
+        | blocks::ObjectExtraction::ArrayWrappedEntry(entry) => entry.clone(),
+        blocks::ObjectExtraction::NoneFound
+        | blocks::ObjectExtraction::SeveralDifferentEntries { .. } => {
+            let shape = shape_diagnoses(reply, markers, &extraction);
+            let details = shape.join(". ");
+            return Err(format!(
+                "the reply for check '{}' has formatting problems: {details}",
+                frozen.id
+            ));
+        }
+    };
     let document = if has_fenced_entry_and_check {
         let json_block = reply_blocks
             .iter()
@@ -100,7 +189,6 @@ pub(super) fn candidate_entry_with_markers(
     } else {
         crate::command::workflow_freeze_candidate::candidate_document(reply.trim().as_bytes())
     };
-    let extracted = blocks::extract_object_with_markers(reply, markers);
     if let Err(error) = serde_json::from_str::<serde_json::Value>(&extracted) {
         let has_check_fence = reply_blocks.iter().any(|block| block.info == "check");
         let entry_line = reply_blocks
