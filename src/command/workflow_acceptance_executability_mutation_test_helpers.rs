@@ -13,11 +13,11 @@ pub(crate) fn named_inputs(
 pub(crate) fn run_with_host_mutation(dir: &Path, script: &str) -> std::process::Output {
     use std::io::Write;
     use std::os::unix::fs::MetadataExt;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let (nonce, entries, live) = decode_test_plan(script);
     if nonce.is_empty() {
-        return Command::new(archon_shell::resolve_posix_shell())
+        return archon_shell::spawn::command(archon_shell::resolve_posix_shell())
             .arg("-s")
             .current_dir(dir)
             .stdin(Stdio::piped())
@@ -86,7 +86,7 @@ pub(crate) fn run_with_host_mutation(dir: &Path, script: &str) -> std::process::
             record.6 = Some(test_dir_state(record.1.parent().unwrap()));
         }
     }
-    let mut command = Command::new(archon_shell::resolve_posix_shell());
+    let mut command = archon_shell::spawn::command(archon_shell::resolve_posix_shell());
     let mut child = command
         .arg("-s")
         .current_dir(dir)
