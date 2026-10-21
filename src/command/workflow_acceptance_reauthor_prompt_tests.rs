@@ -336,6 +336,92 @@ fn absolute_repository_candidate_is_relative_and_absolute_outside_roots_is_dropp
     );
 }
 
+#[test]
+fn candidate_paths_drop_curdir_and_deduplicate_covering_tasks() {
+    use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+
+    let set = frozen_set(&[("AC-F-001", "run", false)]);
+    let candidate = set.project.path().join("src/x.rs");
+    std::fs::create_dir_all(candidate.parent().unwrap()).unwrap();
+    std::fs::write(candidate, "source").unwrap();
+    let mut scope = scope(&set);
+    scope.task_universe = WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: vec![],
+        tasks: vec![
+            WorkflowV2TaskUniverseTask {
+                implements: vec!["REQ-A".into()],
+                files_expected_to_change: vec!["./src/x.rs".into()],
+                ..Default::default()
+            },
+            WorkflowV2TaskUniverseTask {
+                implements: vec!["REQ-A".into()],
+                files_expected_to_change: vec!["src/x.rs".into()],
+                ..Default::default()
+            },
+        ],
+    };
+    let mut frozen = set.contract().acceptance[0].clone();
+    frozen.covers = vec!["REQ-A".into()];
+
+    assert_eq!(
+        super::author::candidate_files(&scope, &frozen),
+        "project root: src/x.rs"
+    );
+}
+
+#[test]
+fn nested_repository_candidate_uses_forward_slashes() {
+    use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+
+    let root = tempfile::tempdir().unwrap();
+    let repository = root.path().join("repository");
+    std::fs::create_dir_all(repository.join("a/b")).unwrap();
+    std::fs::write(repository.join("a/b/c.rs"), "source").unwrap();
+    let git = |args: &[&str]| {
+        let output = archon_shell::spawn::command("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "test@example.invalid"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["add", "."]);
+    git(&["commit", "-qm", "baseline"]);
+    let commit = git(&["rev-parse", "HEAD"]);
+
+    let set = frozen_set(&[("AC-F-001", "run", false)]);
+    let mut scope = scope(&set);
+    scope.repository_root = repository.clone();
+    scope.baseline =
+        Some(crate::command::workflow_task_set::executability::Baseline { commit, repository });
+    scope.task_universe = WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: vec![],
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            implements: vec!["REQ-A".into()],
+            files_expected_to_change: vec!["a/b/c.rs".into()],
+            ..Default::default()
+        }],
+    };
+    let mut frozen = set.contract().acceptance[0].clone();
+    frozen.covers = vec!["REQ-A".into()];
+
+    assert_eq!(
+        super::author::candidate_files(&scope, &frozen),
+        "repository root: a/b/c.rs"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn project_candidate_with_a_symlinked_directory_is_dropped() {

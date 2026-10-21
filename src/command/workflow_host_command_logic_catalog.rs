@@ -98,7 +98,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 41: restore passability finding selection while recognizing the
         // distinct baseline-pass lead; both can change freeze findings.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
-        sources_digest: "9f71cf0a08fb43c589907366749ec55e9148981c38d48af9060a0326b7b0313b",
+        sources_digest: "3530602d03898a22a0d6bc5a6ed6ce0fd83826a4ab4f09a1d9a73648a586f91b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -119,7 +119,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #366 #422 #386 #387 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
-        sources_digest: "9f71cf0a08fb43c589907366749ec55e9148981c38d48af9060a0326b7b0313b",
+        sources_digest: "3530602d03898a22a0d6bc5a6ed6ce0fd83826a4ab4f09a1d9a73648a586f91b",
         build_bound: false,
     },
     CapabilityLogic {

@@ -7,7 +7,10 @@ use archon_workflow::llm_client_port::{
     WorkflowAgentCall, WorkflowAgentSpec, WorkflowAgentToolAccess,
 };
 
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use super::*;
 pub(super) fn author_prompt(
@@ -158,12 +161,7 @@ pub(crate) fn candidate_files(scope: &AuthorScope, frozen: &AcceptanceCriterion)
                     let canonical_root = root.canonicalize().ok()?;
                     let canonical_candidate = canonical_candidate.as_ref()?;
                     let relative = canonical_candidate.strip_prefix(canonical_root).ok()?;
-                    let project_relative = declared_path
-                        .strip_prefix(root)
-                        .ok()
-                        .map(Path::to_path_buf)
-                        .unwrap_or_else(|| relative.to_path_buf());
-                    Some((label, root, relative.to_path_buf(), project_relative))
+                    Some((label, root, relative.to_path_buf()))
                 })
                 .collect::<Vec<_>>()
             } else {
@@ -172,32 +170,24 @@ pub(crate) fn candidate_files(scope: &AuthorScope, frozen: &AcceptanceCriterion)
                         "repository root",
                         &scope.repository_root,
                         declared_path.to_path_buf(),
-                        declared_path.to_path_buf(),
                     ),
                     (
                         "project root",
                         &scope.project_root,
                         declared_path.to_path_buf(),
-                        declared_path.to_path_buf(),
                     ),
                 ]
             };
-            for (label, root, relative, project_relative) in roots {
-                if relative.components().any(|part| {
-                    matches!(
-                        part,
-                        std::path::Component::ParentDir | std::path::Component::RootDir
-                    )
-                }) {
+            for (label, root, relative) in roots {
+                let Some((relative, relative_text)) = normalized_relative_path(&relative) else {
                     continue;
-                }
-                let full = root.join(&relative);
+                };
                 let inside_tree = if label == "repository root" {
                     scope.baseline.as_ref().is_some_and(|baseline| {
                         crate::command::workflow_task_set::executability::repository_tree_contains(
                             &baseline.repository,
                             &baseline.commit,
-                            &relative.to_string_lossy(),
+                            &relative_text,
                         )
                     })
                 } else {
@@ -217,12 +207,10 @@ pub(crate) fn candidate_files(scope: &AuthorScope, frozen: &AcceptanceCriterion)
                             Some(nested.as_path()),
                         )
                     });
-                    !excluded && project_candidate_is_copied_file(root, &project_relative)
+                    !excluded && project_candidate_is_copied_file(root, &relative)
                 };
                 if inside_tree {
-                    if let Ok(path) = full.strip_prefix(root) {
-                        paths.insert(format!("{label}: {}", path.display()));
-                    }
+                    paths.insert(format!("{label}: {relative_text}"));
                 }
             }
         }
@@ -232,6 +220,27 @@ pub(crate) fn candidate_files(scope: &AuthorScope, frozen: &AcceptanceCriterion)
     } else {
         paths.into_iter().collect::<Vec<_>>().join(", ")
     }
+}
+
+/// Drop harmless `.` components and reject any path that could escape or
+/// select a different root. Keep a platform path for filesystem access and
+/// its shared, forward-slashed spelling for Git and prompt text.
+fn normalized_relative_path(path: &Path) -> Option<(PathBuf, String)> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return None;
+    }
+    let text = archon_shell::paths::stored_text(&normalized);
+    Some((normalized, text))
 }
 
 /// The project input copier skips symlink entries. A declared path must walk
