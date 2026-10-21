@@ -17,8 +17,6 @@ struct Key {
     check: serde_json::Value,
     tree_identity: String,
     baseline_commit: Option<String>,
-    logic_version: u32,
-    logic_digest: String,
     judge_model: String,
     judge_provider: Option<String>,
     #[serde(default)]
@@ -81,10 +79,6 @@ fn key(
     let prd = scope.prd_path.canonicalize()?;
     let prd_bytes = std::fs::read(&prd)?;
     let proof_root = scope.repository_root.canonicalize()?;
-    let logic = crate::command::workflow_host_command_logic::CAPABILITY_LOGIC
-        .iter()
-        .find(|logic| logic.id == "freeze-acceptance")
-        .ok_or_else(|| anyhow!("freeze-acceptance logic is not catalogued"))?;
     Ok(Key {
         check_id: frozen.id.clone(),
         prd_path: prd.display().to_string(),
@@ -94,8 +88,6 @@ fn key(
         check: serde_json::to_value(&candidate.check)?,
         tree_identity: digest(proof_root.as_os_str().to_string_lossy().as_bytes()),
         baseline_commit: probe.baseline_commit(),
-        logic_version: logic.version,
-        logic_digest: logic.sources_digest.to_string(),
         judge_model: judge_model.to_string(),
         judge_provider: judge_provider.map(str::to_string),
         prompt_and_judge_source_digest: prompt_and_judge_source_digest(PROMPT_AND_JUDGE_SOURCES),
@@ -147,17 +139,15 @@ pub(crate) fn load(
             judge_provider,
             probe,
         )?;
-        let expected_digest = digest(&serde_json::to_vec(&expected)?);
-        if record.key != expected || record.key_digest != expected_digest {
+        // The filename and key_digest are based on the serialized key. Older
+        // records include ignored logic_version/logic_digest fields, so their
+        // digest differs even when every current key field still matches.
+        if record.key != expected {
             mismatch.get_or_insert(
                 if record.key.criterion != expected.criterion
                     || record.key.covers != expected.covers
                 {
                     "criterion or coverage changed"
-                } else if record.key.logic_version != expected.logic_version
-                    || record.key.logic_digest != expected.logic_digest
-                {
-                    "acceptance logic changed"
                 } else if record.key.judge_model != expected.judge_model
                     || record.key.judge_provider != expected.judge_provider
                 {
@@ -166,10 +156,10 @@ pub(crate) fn load(
                     != expected.prompt_and_judge_source_digest
                 {
                     "author prompt or judge instruction changed"
-                } else if record.key.tree_identity != expected.tree_identity
-                    || record.key.baseline_commit != expected.baseline_commit
-                {
+                } else if record.key.tree_identity != expected.tree_identity {
                     "proof tree changed"
+                } else if record.key.baseline_commit != expected.baseline_commit {
+                    "proof baseline changed"
                 } else {
                     "candidate or PRD identity changed"
                 },

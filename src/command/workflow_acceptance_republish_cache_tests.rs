@@ -227,7 +227,7 @@ async fn changed_project_data_can_make_a_reused_candidate_fail_the_proof_gate() 
 }
 
 #[tokio::test]
-async fn changed_criterion_logic_or_judge_ignores_a_saved_candidate() {
+async fn changed_criterion_prompt_instruction_or_judge_ignores_a_saved_candidate() {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
     let named = ids(&["AC-F-001"]);
     let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
@@ -251,6 +251,11 @@ async fn changed_criterion_logic_or_judge_ignores_a_saved_candidate() {
     .await;
     assert!(criterion_client.authored() > 0);
 
+    // Isolate the legacy-logic case from the earlier changed-criterion call,
+    // and write the record with the same probe used for the reuse check.
+    let proof = DataProbe::default();
+    crate::command::workflow_task_set::reauthor::cache::remove(&set.tasks).unwrap();
+    save_with_probe(&set, &contract, &scope, &saved, &proof);
     let path = std::fs::read_dir(set.tasks.join("acceptance-reauthor-candidates"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -258,20 +263,47 @@ async fn changed_criterion_logic_or_judge_ignores_a_saved_candidate() {
         .unwrap();
     let mut record: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    record["key"]["logic_version"] = serde_json::json!(0);
+    // A record written by the previous format carries the freeze logic stamp.
+    // Its old digest remains in both the file name and record, but current key
+    // identity is the remaining fields.
+    record["key"]["logic_version"] = serde_json::json!(39);
+    record["key"]["logic_digest"] = serde_json::json!("old-freeze-logic-digest");
+    let old_key_digest = archon_workflow::task_set_contract::content_digest(
+        &serde_json::to_vec(&record["key"]).unwrap(),
+    );
+    record["key_digest"] = serde_json::json!(old_key_digest);
     std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    let old_path = path.parent().unwrap().join(format!(
+        "{}.{}.legacy.json",
+        archon_workflow::task_set_contract::content_digest(b"AC-F-001"),
+        old_key_digest
+    ));
+    std::fs::rename(&path, old_path).unwrap();
     let logic_client = ScriptedAuthorJudge::new(|_, _| "not json".into(), |_, _| true);
+    let seeds = std::collections::BTreeMap::new();
     let _ = crate::command::workflow_task_set::reauthor::reauthor_with_cache(
         &logic_client,
         &contract,
         &named,
         &scope,
         super::super::test_fixture::FIXTURE_JUDGE_MODEL,
-        &set.gate(),
+        &crate::command::workflow_task_set::reauthor::ReauthorGate {
+            probe: &proof,
+            seeds: &seeds,
+        },
         Some(&set.tasks),
     )
     .await;
-    assert!(logic_client.authored() > 0);
+    assert_eq!(
+        logic_client.authored(),
+        0,
+        "logic 39 record is reused under current logic"
+    );
+    assert_eq!(
+        proof.calls.load(Ordering::SeqCst),
+        1,
+        "proof reruns on reuse"
+    );
 
     crate::command::workflow_task_set::reauthor::cache::remove(&set.tasks).unwrap();
     save(&set, &contract, &scope, &saved);
@@ -340,6 +372,41 @@ async fn changed_criterion_logic_or_judge_ignores_a_saved_candidate() {
     )
     .await;
     assert!(judge_client.authored() > 0);
+}
+
+#[tokio::test]
+async fn changed_candidate_check_text_discards_a_saved_candidate() {
+    let set = frozen_set(&[("AC-F-001", "false", false)]);
+    let named = ids(&["AC-F-001"]);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let contract = set.contract();
+    save(&set, &contract, &scope, &candidate(&contract.acceptance[0]));
+
+    let path = std::fs::read_dir(set.tasks.join("acceptance-reauthor-candidates"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .next()
+        .unwrap();
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    record["key"]["check"]["command"] = serde_json::json!("echo changed");
+    std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+
+    let client = ScriptedAuthorJudge::new(|_, _| "not json".into(), |_, _| true);
+    let _ = crate::command::workflow_task_set::reauthor::reauthor_with_cache(
+        &client,
+        &contract,
+        &named,
+        &scope,
+        super::super::test_fixture::FIXTURE_JUDGE_MODEL,
+        &set.gate(),
+        Some(&set.tasks),
+    )
+    .await;
+    assert!(
+        client.authored() > 0,
+        "changed check text invalidates reuse"
+    );
 }
 
 #[tokio::test]
