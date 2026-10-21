@@ -152,7 +152,11 @@ impl DirectSite {
         Ok((home, environment, withheld))
     }
 
-    fn command_site(&self, environment: BTreeMap<String, String>) -> CommandSite<'_> {
+    fn command_site(
+        &self,
+        environment: BTreeMap<String, String>,
+        mutation_root: Option<super::mutation_fd::SiteRoot>,
+    ) -> CommandSite<'_> {
         CommandSite {
             project: &self.project,
             repository: &self.repository,
@@ -163,6 +167,8 @@ impl DirectSite {
             scratch_bytes: u64::MAX,
             output_bytes: self.output_bytes,
             timeout_secs: self.timeout_secs,
+            mutation_plan: None,
+            mutation_root,
             redactor: None,
         }
     }
@@ -178,10 +184,26 @@ pub async fn run_check_direct(
     reference: &FrozenCommandRef,
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<CheckResult> {
+    run_check_direct_with_plan(site, contract, chain_digest, reference, None, cancel).await
+}
+
+pub async fn run_check_direct_with_plan(
+    site: &DirectSite,
+    contract: &AcceptanceContract,
+    chain_digest: &str,
+    reference: &FrozenCommandRef,
+    mutation_plan: Option<&super::process::MutationPlan>,
+    cancel: Arc<AtomicBool>,
+) -> WorkflowResult<CheckResult> {
     site.validate()?;
     let command = resolve_command(contract, chain_digest, reference)?;
     let (_home, environment, withheld) = site.prepare()?;
-    let at = site.command_site(environment);
+    let mutation_root = mutation_plan.and_then(|_| {
+        let root = site.project.parent().unwrap_or(&site.project);
+        super::mutation_fd::SiteRoot::capture(root).ok()
+    });
+    let mut at = site.command_site(environment, mutation_root);
+    at.mutation_plan = mutation_plan;
     let result =
         super::observe::execute_check_at(&at, contract, reference, &command, cancel).await?;
     Ok(with_withheld_note(result, &withheld))
@@ -238,7 +260,7 @@ pub async fn evaluate_floor_direct(
                 floor,
             )?;
             let (_home, environment, withheld) = site.prepare()?;
-            let at = site.command_site(environment);
+            let at = site.command_site(environment, None);
             let result = super::process::run_at(&at, acceptance_id, &generated, cancel).await?;
             Ok(with_withheld_note(result, &withheld))
         }

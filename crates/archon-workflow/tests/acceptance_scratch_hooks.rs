@@ -107,6 +107,7 @@ async fn each_result_is_told_as_it_finishes_and_a_spent_budget_defers_the_rest()
         })),
         on_check: Some(on_check),
         resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        mutation_plans: Default::default(),
     };
     let out = observe_commands_hooked(
         &policy,
@@ -151,6 +152,7 @@ async fn a_check_cut_by_the_budget_is_deferred_and_one_past_its_cap_timed_out() 
             })),
             on_check: Some(on_check),
             resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+            mutation_plans: Default::default(),
         };
         let out = observe_commands_hooked(
             &policy,

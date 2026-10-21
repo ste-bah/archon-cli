@@ -17,6 +17,8 @@ fn site(root: &Path, scratch: bool, timeout_secs: u64) -> CommandSite<'_> {
         scratch_bytes: u64::MAX,
         output_bytes: 4096,
         timeout_secs,
+        mutation_plan: None,
+        mutation_root: None,
         redactor: None,
     }
 }
@@ -279,6 +281,149 @@ async fn abort_before_first_scan_kills_an_original_group_descendant() {
     task.abort();
     let _ = task.await;
     assert_gone(pid, "abort before first scan").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mutation_restore_uses_the_captured_root_while_an_ancestor_swaps_to_a_decoy() {
+    let temp = tempfile::tempdir().unwrap();
+    let copy_root = temp.path().join("copy-root");
+    let decoy = temp.path().join("decoy");
+    std::fs::create_dir_all(copy_root.join("data")).unwrap();
+    std::fs::create_dir_all(&decoy).unwrap();
+    std::fs::write(copy_root.join("data/input"), "original").unwrap();
+    std::fs::write(decoy.join("data"), "decoy stays untouched").unwrap();
+    let target = copy_root.join("data/input");
+    let root = super::super::mutation_fd::SiteRoot::capture(&copy_root).unwrap();
+    let nonce = "0123456789abcdef0123456789abcdef";
+    let pid_path = temp.path().join("swapper-pid");
+    let q = |path: &Path| format!("'{}'", path.display().to_string().replace('\'', "'\\''"));
+    let text = format!(
+        "(i=0; while [ $i -lt 40 ]; do if [ -d {copy}/data ]; then mv {copy}/data {held} && ln -s {decoy} {copy}/data && sleep 0.01 && rm {copy}/data && mv {held} {copy}/data; fi; i=$((i + 1)); sleep 0.01; done) >/dev/null 2>&1 & echo $! > {pid}; sleep 1; wait $(cat {pid}); exit 0",
+        copy = q(&copy_root),
+        held = q(&temp.path().join("held-data")),
+        decoy = q(&decoy),
+        pid = q(&pid_path),
+    );
+    let mut site = site(temp.path(), false, 20);
+    site.project = &copy_root;
+    site.mutation_root = Some(root);
+    let plan = MutationPlan {
+        nonce: nonce.into(),
+        inputs: vec![MutationInputPlan {
+            named_path: "data/input".into(),
+            site_copy_alias: false,
+            move_path: PathBuf::from("data/input"),
+            aside_path: PathBuf::from("data/input.archon-mutated-0123456789ab"),
+        }],
+    };
+    site.mutation_plan = Some(&plan);
+    let result = run(&site, &text).await;
+    let pid: i32 = std::fs::read_to_string(pid_path)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    // The runner returns only after it kills and reaps the descendant group;
+    // the host restoration therefore cannot observe the symlink swap loop.
+    assert_ne!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "swapper survived teardown"
+    );
+    let states = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        states.contains(": 0:original-recreated"),
+        "wrong restoration state: {states}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(decoy.join("data")).unwrap(),
+        "decoy stays untouched"
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn transient_input_recreation_is_reported_as_original_recreated() {
+    let temp = tempfile::tempdir().unwrap();
+    let site_path = temp.path().join("site");
+    std::fs::create_dir_all(site_path.join("data")).unwrap();
+    std::fs::write(site_path.join("data/input"), "original").unwrap();
+    let root = super::super::mutation_fd::SiteRoot::capture(&site_path).unwrap();
+    let nonce = "0123456789abcdef0123456789abcdef";
+    let plan = MutationPlan {
+        nonce: nonce.into(),
+        inputs: vec![MutationInputPlan {
+            named_path: "data/input".into(),
+            site_copy_alias: false,
+            move_path: PathBuf::from("data/input"),
+            aside_path: PathBuf::from("data/input.archon-mutated-0123456789ab"),
+        }],
+    };
+    let mut site = site(&site_path, false, 20);
+    site.mutation_root = Some(root);
+    site.mutation_plan = Some(&plan);
+    let result = run(
+        &site,
+        "printf transient > data/input; cat data/input >/dev/null; rm data/input; exit 0",
+    )
+    .await;
+    let states = String::from_utf8_lossy(&result.stdout);
+    assert!(states.contains(": 0:original-recreated"), "{states}");
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains(&format!("archon-mutation-recreated-{nonce}: 0"))
+    );
+    assert_eq!(
+        std::fs::read_to_string(site_path.join("data/input")).unwrap(),
+        "original"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_replaced_site_root_restores_inside_the_held_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let site_path = temp.path().join("site");
+    let decoy = temp.path().join("decoy");
+    std::fs::create_dir_all(&site_path).unwrap();
+    std::fs::create_dir_all(&decoy).unwrap();
+    std::fs::write(site_path.join("input"), "original").unwrap();
+    std::fs::write(decoy.join("input"), "decoy").unwrap();
+    let root = super::super::mutation_fd::SiteRoot::capture(&site_path).unwrap();
+    let plan = MutationPlan {
+        nonce: "abcdef0123456789abcdef0123456789".into(),
+        inputs: vec![MutationInputPlan {
+            named_path: "input".into(),
+            site_copy_alias: false,
+            move_path: PathBuf::from("input"),
+            aside_path: PathBuf::from("input.archon-mutated-abcdef012345"),
+        }],
+    };
+    let mut site = site(&site_path, false, 20);
+    site.mutation_root = Some(root);
+    site.mutation_plan = Some(&plan);
+    let old = temp.path().join("old-site");
+    let text = format!(
+        "mv '{}' '{}'; ln -s '{}' '{}'",
+        site_path.display(),
+        old.display(),
+        decoy.display(),
+        site_path.display()
+    );
+    let result = run(&site, &text).await;
+    let states = String::from_utf8_lossy(&result.stdout);
+    assert!(states.contains(": 0:original-recreated"), "{states}");
+    assert_eq!(
+        std::fs::read_to_string(decoy.join("input")).unwrap(),
+        "decoy"
+    );
+    assert_eq!(
+        std::fs::read_to_string(old.join("input")).unwrap(),
+        "original"
+    );
+    assert!(!old.join("input.archon-mutated-abcdef012345").exists());
 }
 
 #[path = "acceptance_scratch_idle_tests.rs"]

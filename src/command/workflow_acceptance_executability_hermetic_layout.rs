@@ -21,6 +21,9 @@ pub struct CopyLayout {
 pub struct SiblingRevision {
     pub path: PathBuf,
     pub commit: Option<String>,
+    /// Canonical site target captured before the disposable copy is removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<PathBuf>,
 }
 
 /// One check result and the copy whose paths gave that result meaning.

@@ -398,7 +398,28 @@ pub(super) async fn cannot_fail_findings(
             }
         }
     }
-    findings.extend(prove::prove(probe, baseline, contract, digest, refs, &passing).await);
+    let copy_layouts = run
+        .results
+        .iter()
+        .filter_map(|(id, evidence)| {
+            evidence
+                .copy_layout
+                .as_ref()
+                .map(|layout| (id.clone(), layout.clone()))
+        })
+        .collect();
+    findings.extend(
+        prove::prove(
+            probe,
+            baseline,
+            contract,
+            digest,
+            refs,
+            &passing,
+            &copy_layouts,
+        )
+        .await,
+    );
     findings
 }
 

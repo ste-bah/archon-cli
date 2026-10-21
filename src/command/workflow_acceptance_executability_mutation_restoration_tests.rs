@@ -124,6 +124,8 @@ fn a_mutated_check_resolves_like_its_original_under_the_host_policy() {
     let wrapped = mutated(
         &contract,
         &inputs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
         &[Path::new("/live/repo")],
         &Markers::new(),
     );
@@ -132,23 +134,8 @@ fn a_mutated_check_resolves_like_its_original_under_the_host_policy() {
 
 /// Runs `script` with `sh` in `dir`: its result as the probe sees one.
 fn sh(dir: &Path, script: &str) -> CheckResult {
-    use std::io::Write;
-    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
-        .arg("-s")
-        .current_dir(dir)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(script.as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    CheckResult {
+    let out = super::super::test_helpers::run_with_host_mutation(dir, script);
+    let result = CheckResult {
         classification: None,
         acceptance_id: "AC".into(),
         exit_code: out.status.code(),
@@ -157,7 +144,8 @@ fn sh(dir: &Path, script: &str) -> CheckResult {
         stderr: out.stderr,
         operational_error: None,
         environment_note: None,
-    }
+    };
+    result
 }
 
 fn names_of(list: &[&str]) -> Vec<String> {
@@ -235,12 +223,11 @@ fn a_symlinked_parent_makes_the_wrapper_report_unsafe_to_restore() {
     );
 
     let names = names_of(&["data/state.txt"]);
-    assert_eq!(
+    assert!(
         markers
             .states(&result, &names)
             .get("data/state.txt")
-            .map(String::as_str),
-        Some("unsafe-to-restore")
+            .is_some_and(|state| state.starts_with("unsafe-to-restore"))
     );
     assert!(outside_aside.exists());
     assert!(!outside.path().join("state.txt").exists());
@@ -402,6 +389,33 @@ fn an_input_behind_a_symlink_is_never_moved() {
     );
     assert!(live.path().join("state.txt").exists());
     assert!(dir.path().join("link-file").exists());
+    let states = markers.move_states(&ran, &names);
+    assert_eq!(
+        states.get("ext/state.txt").map(String::as_str),
+        Some("refused: symlink component")
+    );
+    assert_eq!(
+        states.get("alias").map(String::as_str),
+        Some("refused: symlink component")
+    );
+}
+
+#[path = "workflow_acceptance_executability_mutation_alias_tests.rs"]
+mod alias_tests;
+
+#[test]
+fn an_absent_candidate_has_an_explicit_move_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let markers = Markers::new();
+    let names = names_of(&["missing/input.txt"]);
+    let ran = sh(dir.path(), &wrap("exit 1", &names, &[], &markers));
+    assert_eq!(
+        markers
+            .move_states(&ran, &names)
+            .get("missing/input.txt")
+            .map(String::as_str),
+        Some("absent at the selected root")
+    );
 }
 
 #[test]

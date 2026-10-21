@@ -9,6 +9,25 @@ use super::*;
 const OMIT: &[&str] = &[".git", "target", "node_modules"];
 
 impl super::ScratchRoots {
+    pub(super) fn command_environment(
+        &self,
+        policy: &super::ScratchPolicy,
+    ) -> BTreeMap<String, String> {
+        let mut env = self.environment(policy);
+        env.extend(self.host_environment.clone());
+        if let Ok(root) = std::fs::canonicalize(&self.root) {
+            env.insert(
+                "ARCHON_SCRATCH_SITE_ROOT".into(),
+                root.to_string_lossy().into_owned(),
+            );
+        }
+        env
+    }
+
+    pub(super) fn mutation_root(&self) -> &super::mutation_fd::SiteRoot {
+        &self.mutation_root
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }

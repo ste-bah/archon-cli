@@ -122,6 +122,7 @@ pub(super) async fn tree_results(
         known,
         cold,
         &BTreeMap::new(),
+        &BTreeMap::new(),
     )
     .await
 }
@@ -135,6 +136,7 @@ pub(super) async fn tree_results_with_save_predicates(
     known: Option<&[CheckEvidence]>,
     cold: bool,
     save_predicates: &BTreeMap<String, super::resume::SavePredicate>,
+    mutation_plans: &BTreeMap<String, archon_workflow::acceptance_scratch::MutationPlan>,
 ) -> TreeRun {
     let mut run = TreeRun::known(&[], "");
     run.results = (known.into_iter().flatten())
@@ -183,6 +185,7 @@ pub(super) async fn tree_results_with_save_predicates(
             &pending,
             cold,
             save_predicates,
+            mutation_plans,
         )
         .await
         {

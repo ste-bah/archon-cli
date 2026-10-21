@@ -11,6 +11,28 @@ use super::{Baseline, ExecutabilityProbe, HOST_UNPROVEN, HostProbe};
 const PROJECT: TrustedCwd = TrustedCwd::ProjectRoot;
 const REPO: TrustedCwd = TrustedCwd::RepoRoot;
 
+/// A repository alias in the project tree is linked to the copied repository,
+/// so a mutation through it must fail and restore only that copied input.
+#[tokio::test]
+async fn repository_copy_alias_input_is_moved_and_restored_without_touching_live_repository() {
+    let trees = trees(&[(
+        "AC-477-ALIAS",
+        "grep -q focused ../repo/tests/focused.rs",
+        PROJECT,
+    )]);
+    let live = trees.repo.join("tests/focused.rs");
+    let original = std::fs::read(&live).unwrap();
+    let copies = tempfile::tempdir().unwrap();
+    let probe = round_at(&trees, &trees.base, copies.path());
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    assert!(
+        findings.is_empty(),
+        "the check fails while the copied input is moved: {findings:?}"
+    );
+    assert_eq!(std::fs::read(&live).unwrap(), original);
+    trees.assert_live_untouched(copies.path());
+}
+
 /// The round's own site (live, no policy) held to `commit`.
 fn round_at(
     trees: &super::probe_tests::Trees,
@@ -110,7 +132,7 @@ async fn an_input_behind_a_tracked_symlink_never_proves_a_check() {
     assert!(
         findings
             .get("AC-4-001")
-            .is_some_and(|f| f.contains("the host could not move this input aside")),
+            .is_some_and(|f| f.contains("outside the copied check tree")),
         "{findings:?} {:?}",
         probe.take_diagnostics()
     );

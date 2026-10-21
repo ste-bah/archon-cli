@@ -8,6 +8,9 @@ use std::sync::{
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
+#[path = "acceptance_scratch_process_mutation.rs"]
+mod mutation;
+
 /// The operational error of a check stopped at its site's no-progress window.
 pub const CHECK_TIMED_OUT: &str =
     "native acceptance command timed out: no output or process-tree activity";
@@ -27,6 +30,23 @@ pub struct CheckResult {
     /// Classification of raw output, never recomputed from redacted evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::acceptance_check_crash::CheckClassification>,
+}
+
+/// One input the host will move for a mutation check. Both operation paths
+/// are relative to the captured site root; `named_path` is the check's name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MutationInputPlan {
+    pub named_path: String,
+    pub site_copy_alias: bool,
+    pub move_path: PathBuf,
+    pub aside_path: PathBuf,
+}
+
+/// Host-computed move and restore inputs for one mutation check.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MutationPlan {
+    pub nonce: String,
+    pub inputs: Vec<MutationInputPlan>,
 }
 /// The leader's handle; confinement owns the process tree separately.
 type RunChild = tokio::process::Child;
@@ -174,6 +194,10 @@ pub struct CommandSite<'a> {
     pub output_bytes: usize,
     /// No output or process-tree activity for this long stops the command.
     pub timeout_secs: u64,
+    /// The proof code computes this before the check is spawned.
+    pub mutation_plan: Option<&'a MutationPlan>,
+    /// Root identity captured when the scratch site was created.
+    pub mutation_root: Option<super::mutation_fd::SiteRoot>,
     /// Redacts allowlisted host values from captured output. A direct site
     /// redacts nothing: with no policy it binds no credential-shaped name
     /// (Issue 345), and under a configured policy it runs only the host's
@@ -230,6 +254,12 @@ pub async fn run_at(
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, None)?;
     }
+    let moved = site
+        .mutation_plan
+        .map(|plan| mutation::move_aside_plan(plan, site.mutation_root.as_ref()));
+    let parent_snapshots = site.mutation_plan.zip(moved.as_ref()).map(|(plan, moved)| {
+        mutation::snapshot_parent_states(plan, moved, site.mutation_root.as_ref())
+    });
     #[cfg(not(windows))]
     let child = spawn_confined(process, cwd)?;
     #[cfg(windows)]
@@ -367,10 +397,16 @@ pub async fn run_at(
     };
     // The tree is disarmed only once no member is left, never merely because
     // the leader exited.
-    match teardown {
-        Ok(()) => confinement.disarm(),
-        Err(evidence) => stall = Some(evidence),
-    }
+    let process_tree_gone = match teardown {
+        Ok(()) => {
+            confinement.disarm();
+            true
+        }
+        Err(evidence) => {
+            stall = Some(evidence);
+            false
+        }
+    };
     // A scratch is private to the observation: what still holds it after
     // the tree is gone may be a descendant nothing else names any more.
     if let Some(root) = site.audit_root
@@ -406,11 +442,29 @@ pub async fn run_at(
         operational_error: error,
         environment_note: None,
     };
+    if let (Some(plan), Some(moved)) = (site.mutation_plan, moved.as_ref()) {
+        mutation::record_move_outcomes(&mut result, plan, moved);
+    }
+    if process_tree_gone {
+        if let (Some(plan), Some(moved), Some(parent_snapshots), Some(root)) = (
+            site.mutation_plan,
+            moved.as_ref(),
+            parent_snapshots.as_ref(),
+            site.mutation_root.as_ref(),
+        ) {
+            mutation::restore_plan(&mut result, plan, moved, parent_snapshots, root);
+        }
+    } else {
+        if let Some((plan, moved)) = site.mutation_plan.zip(moved.as_ref()) {
+            mutation::mark_plan_unsafe(&mut result, plan, moved);
+        }
+    }
     result.classify_raw(&String::from_utf8_lossy(command.bytes()));
     result.stdout = site.redact(&result.stdout, pipes.0.1);
     result.stderr = site.redact(&result.stderr, pipes.1.1);
     Ok(result)
 }
+
 #[cfg(all(test, unix))]
 #[path = "acceptance_scratch_process_tests.rs"]
 mod tests;

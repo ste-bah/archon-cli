@@ -12,7 +12,7 @@ mod control;
 mod direct;
 pub use direct::{
     DIRECT_DEFAULT_OUTPUT_BYTES, DIRECT_DEFAULT_TIMEOUT_SECS, DirectSite, evaluate_floor_direct,
-    run_check_direct,
+    run_check_direct, run_check_direct_with_plan,
 };
 #[path = "acceptance_scratch_inputs.rs"]
 mod inputs;
@@ -56,6 +56,8 @@ pub use identity::{BuildIdentity, CheckEvidence};
 #[path = "acceptance_scratch_io.rs"]
 mod io;
 pub use io::inventory;
+#[path = "acceptance_scratch_mutation_fd.rs"]
+mod mutation_fd;
 #[path = "acceptance_scratch_observe.rs"]
 mod observe;
 #[path = "acceptance_scratch_process.rs"]
@@ -66,7 +68,7 @@ pub use control::{OBSERVATION_STALLED, observation_stall};
 pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
 pub(crate) use process::drain_counted;
-pub use process::{CHECK_TIMED_OUT, CheckResult};
+pub use process::{CHECK_TIMED_OUT, CheckResult, MutationInputPlan, MutationPlan};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -140,6 +142,7 @@ impl ScratchPolicy {
 
 pub struct ScratchRoots {
     root: PathBuf,
+    mutation_root: mutation_fd::SiteRoot,
     /// CARGO_TARGET_DIR: `root/target`, or the held build cache's.
     target: PathBuf,
     lease: Option<cache::Lease>,
@@ -232,6 +235,8 @@ impl ScratchRoots {
                 .join(format!("observation-{}", uuid::Uuid::new_v4())),
         };
         cache::create_slot(&root)?;
+        let mutation_root =
+            mutation_fd::SiteRoot::capture(&root).map_err(|e| WorkflowError::io(&root, e))?;
         let mut roots = Self {
             repository: root.join("repo"),
             project: root.join("project"),
@@ -240,6 +245,7 @@ impl ScratchRoots {
                 .map_or_else(|| root.join("target"), cache::Lease::target),
             lease,
             root,
+            mutation_root,
             live_repository,
             registered: false,
             cleaned: false,
@@ -431,11 +437,6 @@ impl ScratchRoots {
         site.extend(profile.iter().map(|(name, path)| (*name, path.as_path())));
         let policy = rule::CheckPolicy::configured(policy);
         rule::site_variables(&rule::host_environment(), &policy, &site)
-    }
-    pub(super) fn command_environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
-        let mut env = self.environment(policy);
-        env.extend(self.host_environment.clone());
-        env
     }
     pub(super) fn redact(&self, bytes: &[u8]) -> Vec<u8> {
         self.redact_output(bytes, false)

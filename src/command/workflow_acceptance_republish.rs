@@ -90,13 +90,17 @@ pub(crate) async fn reauthor_and_republish(
     )
     .await;
     let diagnostics = request.gate.probe.take_diagnostics();
-    // Context, not a new error: a typed stall (an unproven check, a re-author
-    // that stopped repairing) stays typed under it, so the freeze ends
-    // incomplete on it rather than failed (Issue 288).
-    let repaired = repaired.map_err(|error| match diagnostics.is_empty() {
-        true => error,
-        false => error.context(format!("executability probe: {}", diagnostics.join("; "))),
-    })?;
+    // Keep the typed stop reason as the error headline. Probe diagnostics are
+    // separate log lines so an unproven check still ends incomplete (Issue 288).
+    let repaired = match repaired {
+        Ok(repaired) => repaired,
+        Err(error) => {
+            for diagnostic in diagnostics {
+                eprintln!("{diagnostic}");
+            }
+            return Err(error);
+        }
+    };
     let still = non_accepted_ids(&repaired);
     if !still.is_empty() {
         return Err(anyhow!(

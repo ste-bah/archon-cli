@@ -1,6 +1,6 @@
 //! Issue 288: a re-authoring freeze that cannot finish ends incomplete and
 //! resumable, never failed -- a check the host could not prove, even with
-//! the probe's diagnostics attached, and a re-author that stopped repairing.
+//! the probe's diagnostics logged separately, and a re-author that stopped repairing.
 
 use super::super::test_fixture::frozen_set_proven as frozen_set;
 use super::super::*;
@@ -50,9 +50,8 @@ fn incomplete(error: anyhow::Error) -> String {
     incomplete.report()
 }
 
-/// `freeze-acceptance --reauthor`: an unproven check with the probe's
-/// diagnostics attached used to be re-wrapped as a plain error, so the CLI
-/// failed hard. It is incomplete and resumable, with the diagnostics kept.
+/// `freeze-acceptance --reauthor`: an unproven check keeps its typed stop
+/// reason while probe diagnostics are emitted as separate log lines.
 #[tokio::test]
 async fn an_unproven_republish_with_diagnostics_is_incomplete_not_failed() {
     let set = frozen_set(&[("AC-F-001", "test -f missing", false)]);
@@ -78,6 +77,7 @@ async fn an_unproven_republish_with_diagnostics_is_incomplete_not_failed() {
     )
     .await
     .expect_err("nothing unproven is published");
+    assert!(error.to_string().starts_with(HOST_UNPROVEN), "{error}");
     let report = incomplete(error);
     assert!(report.starts_with(FREEZE_INCOMPLETE_RESUMABLE), "{report}");
     assert!(report.contains(HOST_UNPROVEN), "{report}");
@@ -86,8 +86,8 @@ async fn an_unproven_republish_with_diagnostics_is_incomplete_not_failed() {
         "{report}"
     );
     assert!(
-        report.contains("scratch policy: capture failed"),
-        "the diagnostics are kept: {report}"
+        !report.contains("scratch policy: capture failed"),
+        "{report}"
     );
     assert!(
         report.contains("re-running the same freeze command"),

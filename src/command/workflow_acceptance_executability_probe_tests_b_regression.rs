@@ -23,6 +23,7 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
         &digest,
         &refs,
         &passing,
+        &BTreeMap::new(),
     )
     .await;
     assert!(
@@ -48,6 +49,7 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
         &rejected_digest,
         &[rejected_ref],
         &passing,
+        &BTreeMap::new(),
     )
     .await;
     assert!(rejected.contains_key("AC-3B-001"), "{rejected:?}");
@@ -64,6 +66,7 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
         &digest,
         &[stale_ref],
         &passing,
+        &BTreeMap::new(),
     )
     .await;
     assert!(stale.contains_key("AC-3B-001"), "{stale:?}");
@@ -86,6 +89,7 @@ async fn bound_proof(command: &str, id: &str) -> (BTreeMap<String, String>, Vec<
         &digest,
         &refs,
         &[id.to_string()],
+        &BTreeMap::new(),
     )
     .await;
     (findings, probe.take_diagnostics())
@@ -140,6 +144,7 @@ async fn an_honest_bound_check_that_leaves_the_moved_path_missing_is_accepted() 
         &digest,
         &refs,
         &["AC-3B-008".into()],
+        &BTreeMap::new(),
     )
     .await;
     assert!(findings.is_empty(), "{findings:?}");
@@ -211,6 +216,7 @@ async fn missing_judgments_do_not_exempt_vacuous_or_self_filled_checks() {
         &digest,
         &[],
         &passing,
+        &BTreeMap::new(),
     )
     .await;
     assert_eq!(findings.keys().cloned().collect::<Vec<_>>(), passing);

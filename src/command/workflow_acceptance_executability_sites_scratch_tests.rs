@@ -28,7 +28,14 @@ async fn unrestored_mutation_results_are_not_saved_or_memoized_across_same_key_r
         let markers = super::super::mutation::Markers::new();
         let names = vec!["data/state.txt".to_string()];
         let inputs = BTreeMap::from([("AC-M-001".to_string(), names.clone())]);
-        let contract = super::super::mutation::mutated(&original, &inputs, &[], &markers);
+        let contract = super::super::mutation::mutated(
+            &original,
+            &inputs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &markers,
+        );
         let digest = super::super::contract_digest(&contract).unwrap();
         let refs = super::super::refs_for(&contract, &digest, &trees.ids());
         let save_markers = markers.clone();
@@ -49,6 +56,20 @@ async fn unrestored_mutation_results_are_not_saved_or_memoized_across_same_key_r
         let key = reuse::memo_key(&probe, &baseline, &data, &contract, "AC-M-001").unwrap();
         memo().lock().unwrap().remove(&key);
 
+        let mutation_plan = archon_workflow::acceptance_scratch::MutationPlan {
+            nonce: markers.nonce().to_string(),
+            inputs: vec![archon_workflow::acceptance_scratch::MutationInputPlan {
+                named_path: names[0].clone(),
+                site_copy_alias: false,
+                move_path: PathBuf::from("project").join(&names[0]),
+                aside_path: PathBuf::from(format!(
+                    "project/{}.archon-mutated-{}",
+                    names[0],
+                    markers.nonce().get(..12).unwrap()
+                )),
+            }],
+        };
+        let mutation_plans = BTreeMap::from([("AC-M-001".to_string(), mutation_plan)]);
         let (first, second) = tokio::join!(
             run_at(
                 &probe,
@@ -57,7 +78,8 @@ async fn unrestored_mutation_results_are_not_saved_or_memoized_across_same_key_r
                 &digest,
                 &refs,
                 false,
-                &predicates
+                &predicates,
+                &mutation_plans
             ),
             run_at(
                 &probe,
@@ -66,7 +88,8 @@ async fn unrestored_mutation_results_are_not_saved_or_memoized_across_same_key_r
                 &digest,
                 &refs,
                 false,
-                &predicates
+                &predicates,
+                &mutation_plans
             ),
         );
         let store = probe.store().unwrap();
@@ -220,6 +243,7 @@ async fn normal_run_saves_and_reuses_evidence_with_an_existing_lock_path() {
         &digest,
         &refs,
         false,
+        &BTreeMap::new(),
         &BTreeMap::new(),
     )
     .await

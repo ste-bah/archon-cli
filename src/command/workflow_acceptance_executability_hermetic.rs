@@ -1,18 +1,8 @@
-//! A hermetic copy of one committed tree for a probe without scratch policy.
-//!
-//! The acceptance stage without `[workflow.acceptance_execution]` runs its
-//! checks in the live project and repository, so it builds a clone of the
-//! repository at the commit and a project copy matching scratch observation:
-//!
-//! - its tracked copy inside the clone, or
-//! - otherwise a copy beside the clone of regular project files, excluding
-//!   credentials, engine configuration, harness run state, git metadata,
-//!   `target`, and any nested repository.
-//!
-//! The copy is made off the async runtime. Project data is digested before
-//! and after copying; changes make the run unproven, and oversized copies are
-//! refused. Checks use the direct-site environment and a cached target under
-//! the copy parent. Stale copies are swept; removal failures are reported.
+//! Hermetic committed-tree copies for probes without a scratch policy.
+//! Repository and project inputs are copied off the async runtime and
+//! digested before and after copying; changes make the run unproven.
+//! Checks use the direct-site environment. Stale copies are swept and
+//! removal failures are reported.
 
 use std::path::{Path, PathBuf};
 
@@ -459,7 +449,16 @@ pub(super) async fn run_in_copy(
             }
             None => false,
         };
-        match run_check_direct(&site, contract, digest, reference, cancel.clone()).await {
+        match archon_workflow::acceptance_scratch::run_check_direct_with_plan(
+            &site,
+            contract,
+            digest,
+            reference,
+            hooks.mutation_plans.get(&reference.acceptance_id),
+            cancel.clone(),
+        )
+        .await
+        {
             Ok(mut result) => {
                 let stopped = cut && result.operational_error.as_deref() == Some(CHECK_TIMED_OUT);
                 if stopped {

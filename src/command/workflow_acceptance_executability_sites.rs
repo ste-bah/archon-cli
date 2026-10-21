@@ -98,6 +98,7 @@ pub(super) async fn run_at(
     refs: &[FrozenCommandRef],
     cold: bool,
     save_predicates: &BTreeMap<String, super::resume::SavePredicate>,
+    mutation_plans: &BTreeMap<String, archon_workflow::acceptance_scratch::MutationPlan>,
 ) -> Result<SiteRun, Unrun> {
     if let Site::Unavailable(reason) = &probe.site {
         return Err(Unrun(reason.clone()));
@@ -205,13 +206,14 @@ pub(super) async fn run_at(
         .collect();
     let written = Arc::new(Mutex::new(Vec::new()));
     let observed_layout = Arc::new(Mutex::new(None::<CopyLayout>));
-    let hooks = probe.observe_hooks_with_layout(
+    let mut hooks = probe.observe_hooks_with_layout(
         &pending_keys,
         store.as_ref(),
         &written,
         &observed_layout,
         save_predicates,
     );
+    hooks.mutation_plans = mutation_plans.clone();
     let ran = if pending.is_empty() {
         Ok(SiteRun {
             results: Vec::new(),

@@ -129,6 +129,10 @@ async fn a_repair_the_judge_never_accepts_fails_bounded_and_writes_nothing() {
         .await
         .expect_err("still refuted")
         .to_string();
+    assert!(
+        error.starts_with("acceptance contract not published:"),
+        "the stop reason is the error headline: {error}"
+    );
     assert!(error.contains("after 3 re-author attempt(s)"), "{error}");
     assert_eq!(set.chain_bytes(), before);
     assert_eq!(client.authored(), reauthor::REAUTHOR_ATTEMPTS);

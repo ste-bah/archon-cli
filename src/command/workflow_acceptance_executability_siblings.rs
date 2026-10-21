@@ -203,6 +203,7 @@ pub(super) fn copy_for_checks_with_check_map(
             .or_insert_with(|| super::SiblingRevision {
                 path: relative,
                 commit,
+                target: destination.canonicalize().ok(),
             });
     }
     let revisions = evidence;

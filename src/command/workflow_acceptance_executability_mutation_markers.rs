@@ -35,6 +35,10 @@ impl Markers {
         format!("archon-mutation-moved-{}: ", self.nonce)
     }
 
+    pub(crate) fn move_state_prefix(&self) -> String {
+        format!("archon-mutation-move-state-{}: ", self.nonce)
+    }
+
     pub(crate) fn generated_prefix(&self) -> String {
         format!("archon-mutation-generated-{}: ", self.nonce)
     }
@@ -43,6 +47,7 @@ impl Markers {
         format!("archon-mutation-recreated-{}: ", self.nonce)
     }
 
+    #[cfg(test)]
     pub(crate) fn restored(&self) -> String {
         format!("archon-mutation-restored-{}", self.nonce)
     }
@@ -64,6 +69,25 @@ impl Markers {
                     .parse::<usize>()
                     .ok()
                     .and_then(|i| inputs.get(i).cloned())
+            })
+            .collect()
+    }
+
+    pub(crate) fn move_states(
+        &self,
+        result: &CheckResult,
+        inputs: &[String],
+    ) -> BTreeMap<String, String> {
+        let prefix = self.move_state_prefix();
+        String::from_utf8_lossy(&result.stderr)
+            .lines()
+            .filter_map(|line| {
+                let rest = line.strip_prefix(&prefix)?;
+                let (index, state) = rest.split_once(':')?;
+                Some((
+                    inputs.get(index.parse::<usize>().ok()?)?.clone(),
+                    state.to_string(),
+                ))
             })
             .collect()
     }

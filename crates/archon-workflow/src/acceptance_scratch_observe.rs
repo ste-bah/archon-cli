@@ -211,6 +211,7 @@ pub async fn observe_commands_hooked(
                 &target,
                 timeout_secs,
                 hooks.resource_limits.clone(),
+                hooks.mutation_plans.get(&reference.acceptance_id),
             );
             let attempt =
                 execute_check_at(&site, contract, reference, &command, cancel.clone()).await;
@@ -386,6 +387,7 @@ fn check_site<'a>(
     target: &'a Path,
     timeout_secs: u64,
     resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    mutation_plan: Option<&'a super::process::MutationPlan>,
 ) -> super::process::CommandSite<'a> {
     super::process::CommandSite {
         project: roots.project(),
@@ -397,6 +399,8 @@ fn check_site<'a>(
         scratch_bytes: policy.scratch_bytes,
         output_bytes: policy.output_bytes,
         timeout_secs,
+        mutation_plan,
+        mutation_root: Some(roots.mutation_root().clone()),
         redactor: Some(roots),
     }
 }

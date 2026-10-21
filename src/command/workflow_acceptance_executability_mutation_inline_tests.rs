@@ -13,22 +13,10 @@ fn entry(command: &str) -> archon_workflow::task_set_contract::AcceptanceCriteri
 }
 
 fn run(dir: &Path, script: &str) -> i32 {
-    use std::io::Write;
-    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
-        .arg("-s")
-        .current_dir(dir)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
+    super::test_helpers::run_with_host_mutation(dir, script)
+        .status
+        .code()
         .unwrap()
-        .write_all(script.as_bytes())
-        .unwrap();
-    child.wait().unwrap().code().unwrap()
 }
 
 fn interpreter_on_path(dir: &Path, interpreter: &str) -> bool {

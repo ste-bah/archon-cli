@@ -13,7 +13,15 @@
 
 use std::path::{Path, PathBuf};
 
-use super::mutation::{input_discovery, mutated};
+#[path = "workflow_acceptance_executability_prove_plan.rs"]
+mod plan;
+
+#[path = "workflow_acceptance_executability_prove_diagnostics.rs"]
+mod diagnostics;
+pub(super) use diagnostics::{
+    baseline_pass_finding, describe_candidates, describe_candidates_with_run_state,
+};
+
 use super::*;
 
 /// Findings for every check of `passing` (which passed on `baseline`) that
@@ -26,6 +34,7 @@ pub(super) async fn prove(
     digest: &str,
     refs: &[FrozenCommandRef],
     passing: &[String],
+    copy_layouts: &BTreeMap<String, super::hermetic::CopyLayout>,
 ) -> BTreeMap<String, String> {
     let short: String = baseline.commit.chars().take(12).collect();
     let mut findings = BTreeMap::new();
@@ -54,7 +63,14 @@ pub(super) async fn prove(
         let discovery = (contract.acceptance.iter())
             .chain(&contract.supplementary)
             .find(|entry| &entry.id == id)
-            .map(|entry| input_discovery(entry, &probe.project, &baseline.repository))
+            .map(|entry| {
+                mutation::input_discovery_for_check(
+                    entry,
+                    &probe.project,
+                    &baseline.repository,
+                    copy_layouts.get(id),
+                )
+            })
             .unwrap_or_default();
         let names = discovery.eligible.clone();
         let baseline_finding = format!(
@@ -74,7 +90,38 @@ pub(super) async fn prove(
         // One fresh copy per mutated check; a retry meets the same mutation.
         let markers = probe.mutation_markers(baseline, contract, id);
         let inputs = BTreeMap::from([(id.clone(), names.clone())]);
-        let mutated = mutated(contract, &inputs, &live, &markers);
+        let move_paths = BTreeMap::from([(
+            id.clone(),
+            names
+                .iter()
+                .map(|name| {
+                    discovery
+                        .candidates
+                        .iter()
+                        .find(|candidate| &candidate.path == name)
+                        .and_then(|candidate| candidate.move_path.clone())
+                        .unwrap_or_else(|| name.clone())
+                })
+                .collect(),
+        )]);
+        let move_roots = BTreeMap::from([(
+            id.clone(),
+            names
+                .iter()
+                .map(|name| {
+                    discovery
+                        .candidates
+                        .iter()
+                        .find(|candidate| &candidate.path == name)
+                        .and_then(|candidate| candidate.move_root.clone())
+                })
+                .collect(),
+        )]);
+        let entry = entry.expect("input discovery came from an acceptance entry");
+        let move_plan = plan::plan(&names, &discovery, entry, &markers);
+        let mutation_plans = BTreeMap::from([(id.clone(), move_plan)]);
+        let mutated =
+            mutation::mutated(contract, &inputs, &move_paths, &move_roots, &live, &markers);
         let save_predicate_markers = markers.clone();
         let save_predicate_names = names.clone();
         let save_predicates = BTreeMap::from([(
@@ -104,6 +151,7 @@ pub(super) async fn prove(
             None,
             false,
             &save_predicates,
+            &mutation_plans,
         )
         .await;
         let result = run.results.get(id);
@@ -171,6 +219,7 @@ pub(super) async fn prove(
                 &recreated,
                 &moved,
                 &original_recreated,
+                &markers.move_states(&result.result, &names),
                 true,
             )
         );
@@ -207,7 +256,26 @@ pub(super) async fn prove(
             .collect();
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
-        let crashed = !super::crash_findings(&mutated, [&result.result]).is_empty()
+        // The executor classified the generated mutation wrapper, whose
+        // shell text is not the author's original inline program. Reclassify
+        // the captured stderr against the original command before deciding
+        // whether a failed mutation was an assertion or the check's own crash.
+        let mut raw_mutation_result = result.result.clone();
+        raw_mutation_result.classification = None;
+        let protocol = [
+            markers.moved_prefix(),
+            markers.move_state_prefix(),
+            markers.generated_prefix(),
+            markers.recreated_prefix(),
+            format!("archon-mutation-guard-{}:", markers.nonce()),
+        ];
+        raw_mutation_result.stderr = String::from_utf8_lossy(&raw_mutation_result.stderr)
+            .lines()
+            .filter(|line| !protocol.iter().any(|prefix| line.starts_with(prefix)))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes();
+        let crashed = !super::crash_findings(contract, [&raw_mutation_result]).is_empty()
             || super::silent::silent_failure_off_thread(&mutated, result, &at)
                 .await
                 .is_some();
@@ -250,59 +318,6 @@ pub(super) async fn prove(
         }
     }
     findings
-}
-
-fn baseline_pass_finding(id: &str, short: &str) -> String {
-    format!(
-        "check '{id}': it {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside",
-        mutation::CANNOT_FAIL
-    )
-}
-
-fn describe_candidates(candidates: &[mutation::CandidateDiagnostic]) -> String {
-    describe_candidates_with_run_state(
-        candidates,
-        &BTreeSet::new(),
-        &[],
-        &BTreeSet::new(),
-        &BTreeSet::new(),
-        false,
-    )
-}
-
-fn describe_candidates_with_run_state(
-    candidates: &[mutation::CandidateDiagnostic],
-    generated: &BTreeSet<String>,
-    recreated: &[String],
-    moved: &BTreeSet<String>,
-    original_recreated: &BTreeSet<String>,
-    run_observed: bool,
-) -> String {
-    if candidates.is_empty() {
-        return "none discovered".into();
-    }
-    let mut grouped = BTreeMap::<&str, Vec<&str>>::new();
-    for candidate in candidates {
-        let was_moved =
-            moved.contains(&candidate.path) || original_recreated.contains(&candidate.path);
-        let reason = if was_moved
-            && (recreated.contains(&candidate.path) || generated.contains(&candidate.path))
-        {
-            mutation::ExclusionReason::CheckRecreatedPathObserved.label()
-        } else if run_observed && candidate.exclusion.is_none() && !was_moved {
-            "the host could not move this input aside"
-        } else {
-            candidate
-                .exclusion
-                .map_or("eligible movable input", mutation::ExclusionReason::label)
-        };
-        grouped.entry(reason).or_default().push(&candidate.path);
-    }
-    grouped
-        .into_iter()
-        .map(|(reason, paths)| format!("{reason}: {}", paths.join(", ")))
-        .collect::<Vec<_>>()
-        .join("; ")
 }
 
 enum MutationFinding {
@@ -401,7 +416,9 @@ pub(super) fn input_states(
 ) -> std::collections::BTreeMap<String, String> {
     let mut states = markers.states(result, inputs);
     for path in markers.moved(result, inputs) {
-        states.entry(path).or_insert_with(|| "aside-missing".into());
+        states
+            .entry(path)
+            .or_insert_with(|| "aside-missing: no restoration state was recorded".into());
     }
     for input in inputs {
         states
@@ -477,3 +494,7 @@ fn describe_status(status: Option<String>) -> String {
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_prove_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_prove_alias_tests.rs"]
+mod alias_tests;

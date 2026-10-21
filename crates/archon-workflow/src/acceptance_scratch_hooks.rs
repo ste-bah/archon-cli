@@ -2,6 +2,8 @@
 //! each check may run, and where each finished check's result goes while
 //! the observation is still running.
 use super::process::CheckResult;
+use super::process::MutationPlan;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// The operational error of a check the observation did not start, or
@@ -41,6 +43,8 @@ pub struct ObserveHooks {
     pub on_check: Option<CheckHook>,
     /// Resolved run configuration, applied by archon at every spawned check.
     pub resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    /// Plans computed by the proof before any mutation check is spawned.
+    pub mutation_plans: BTreeMap<String, MutationPlan>,
 }
 
 impl ObserveHooks {
@@ -52,6 +56,7 @@ impl ObserveHooks {
             allowance: None,
             on_check: None,
             resource_limits,
+            mutation_plans: BTreeMap::new(),
         }
     }
 

@@ -64,3 +64,63 @@ fn repository_root_can_name_an_existing_focused_test_as_a_mutation_input() {
         ["tests/focused.rs"]
     );
 }
+
+#[test]
+fn a_sibling_alias_resolving_inside_the_repository_is_movable_from_its_copy() {
+    let parent = tempfile::tempdir().unwrap();
+    let project = parent.path().join("project");
+    let repository = parent.path().join("repository");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(repository.join("tests")).unwrap();
+    std::fs::write(repository.join("tests/focused.rs"), "focused").unwrap();
+    let site = tempfile::tempdir().unwrap();
+    let copied_repository = site.path().join("repository");
+    std::fs::create_dir_all(copied_repository.join("tests")).unwrap();
+    std::fs::write(copied_repository.join("tests/focused.rs"), "focused").unwrap();
+    std::os::unix::fs::symlink(
+        copied_repository.join("tests"),
+        site.path().join("repository-alias"),
+    )
+    .unwrap();
+    let layout = super::super::hermetic::CopyLayout {
+        root: site.path().to_path_buf(),
+        repository: copied_repository.clone(),
+        project: site.path().join("project"),
+        siblings: Vec::new(),
+        check_siblings: std::collections::BTreeMap::from([(
+            "AC-TEST-001".into(),
+            vec![super::super::hermetic::SiblingRevision {
+                path: "repository-alias".into(),
+                commit: None,
+                target: Some(copied_repository.join("tests")),
+            }],
+        )]),
+    };
+    let result = input_discovery_for_check(
+        &entry(
+            "grep -q focused ../repository/tests/focused.rs",
+            "project_root",
+        ),
+        &project,
+        &repository,
+        Some(&layout),
+    );
+    assert_eq!(result.eligible, ["../repository/tests/focused.rs"]);
+    assert_eq!(
+        result.candidates[0].move_path.as_deref(),
+        Some(copied_repository.join("tests/focused.rs").to_str().unwrap())
+    );
+    assert_eq!(
+        result.candidates[0].move_root.as_deref(),
+        Some(copied_repository.to_str().unwrap())
+    );
+    assert_eq!(
+        result.candidates[0].exclusion,
+        Some(ExclusionReason::RepositoryCopyAlias)
+    );
+    assert!(
+        ExclusionReason::RepositoryCopyAlias
+            .label()
+            .contains("resolves inside the copied repository")
+    );
+}

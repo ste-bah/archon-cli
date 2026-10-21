@@ -6,23 +6,8 @@ fn names_of(list: &[&str]) -> Vec<String> {
 }
 
 fn sh(dir: &Path, script: &str) -> CheckResult {
-    use std::io::Write;
-    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
-        .arg("-s")
-        .current_dir(dir)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(script.as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    CheckResult {
+    let out = super::test_helpers::run_with_host_mutation(dir, script);
+    let result = CheckResult {
         classification: None,
         acceptance_id: "AC".into(),
         exit_code: out.status.code(),
@@ -31,7 +16,8 @@ fn sh(dir: &Path, script: &str) -> CheckResult {
         stderr: out.stderr,
         operational_error: None,
         environment_note: None,
-    }
+    };
+    result
 }
 
 #[test]
@@ -147,6 +133,18 @@ fn a_recreated_input_read_and_deleted_by_the_check_is_marked_recreated() {
     let markers = Markers::new();
     let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &markers));
     assert_eq!(recreated.exit_code, Some(0));
+    assert_eq!(
+        markers
+            .states(&recreated, &names)
+            .get("data/state.txt")
+            .map(String::as_str),
+        Some("original-recreated")
+    );
+    assert!(
+        !crate::command::workflow_task_set::executability::prove::all_moved_inputs_restored(
+            &recreated, &markers, &names
+        )
+    );
     assert_eq!(
         markers.recreated(&recreated, &names),
         std::collections::BTreeSet::from(["data/state.txt".to_string()]),
