@@ -41,7 +41,7 @@
 //! published.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -235,7 +235,14 @@ use sites::git_head;
 mod hermetic;
 pub(crate) use hermetic::CheckEvidence;
 #[path = "workflow_acceptance_executability_mutation.rs"]
-mod mutation;
+pub(crate) mod mutation;
+pub(crate) fn named_inputs(
+    entry: &AcceptanceCriterion,
+    project: &Path,
+    repository: &Path,
+) -> Vec<String> {
+    mutation::input_discovery_for_check(entry, project, repository, None).eligible
+}
 #[path = "workflow_acceptance_executability_probe.rs"]
 mod probe;
 #[path = "workflow_acceptance_executability_prove.rs"]

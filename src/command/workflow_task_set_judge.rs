@@ -1,7 +1,7 @@
 //! Batched acceptance judging and policy provenance helpers.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::WorkflowLlmClient;
@@ -12,6 +12,8 @@ use archon_workflow::task_set_contract::{
 };
 
 use crate::command::workflow_gate::{GateFinding, GateId};
+
+const NAMED_FILES_INSTRUCTION: &str = "When named_files are given, judge the check against what those files actually assert; a counterexample that claims a named file asserts less than it does is invalid. The statement that tests may be absent or cover less than the criterion applies only to behaviour not covered by the given file contents.";
 
 #[derive(Debug, serde::Deserialize)]
 struct BatchedJudgeResponse {
@@ -26,7 +28,42 @@ struct JudgeResponse {
     reason: String,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct JudgeRoots {
+    pub project: Option<PathBuf>,
+    pub repository: Option<PathBuf>,
+    pub task_root: Option<PathBuf>,
+    pub repository_commit: Option<String>,
+}
+
 pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<String> {
+    batched_judge_prompt_with_roots(contract, &JudgeRoots::default())
+}
+
+pub(super) fn batched_judge_prompt_with_roots(
+    contract: &AcceptanceContract,
+    roots: &JudgeRoots,
+) -> Result<String> {
+    let mut resolved_roots = roots.clone();
+    if resolved_roots.repository_commit.is_none() {
+        if let Some(repository) = resolved_roots
+            .repository
+            .as_deref()
+            .and_then(|path| path.canonicalize().ok())
+        {
+            let output = archon_shell::spawn::command("git")
+                .arg("-C")
+                .arg(repository)
+                .args(["rev-parse", "HEAD"])
+                .output();
+            resolved_roots.repository_commit = output.ok().and_then(|output| {
+                output
+                    .status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            });
+        }
+    }
     let checks = contract
         .acceptance
         .iter()
@@ -43,13 +80,155 @@ pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<Stri
             if !criterion.covers.is_empty() {
                 check["covers"] = serde_json::json!(criterion.covers);
             }
+            let files = named_files(criterion, &resolved_roots);
+            if !files.is_empty() {
+                check["named_files"] = serde_json::json!(files);
+            }
             check
         })
         .collect::<Vec<_>>();
     Ok(format!(
-        "Adversarially judge every acceptance check below. The toolchain is fixed: the shell, the operating system, environment variables, PATH, and every executable that the repository does not itself build are out of bounds, and a counterexample that stubs, wraps, replaces or shadows any executable, or edits PATH, is invalid and must not refute a check. Everything the implementation produces may vary: the repository's own source and the program it builds from that source, and every file, directory and data artifact under the project root, including any data root the check names. The implementation is fallible, not adversarial: it may be missing, partial, wrong, stale, empty, malformed or hand-placed, its tests may be absent or cover less than the criterion, and its output may be an error message; it does not write source, tests or data whose purpose is to satisfy this check while the criterion is false. A counterexample that needs such deliberate gaming, a program that answers true for the check's sake or a test written to pass trivially, is invalid and must not refute a check: under it no check could ever pass. For each id, try to construct such an in-bounds state where the check passes while the criterion is false. Return JSON only as {{\"decisions\":[{{\"id\":\"...\",\"verdict\":\"accepted|refuted\",\"counterexample\":\"...\",\"reason\":\"...\"}}]}} with exactly one decision for every input id and no extra ids. counterexample and reason must each be a non-empty sentence, even when the verdict is accepted: say what the closest passing-but-false state would be, or that none is constructible. Every string must be a single line with newlines escaped as \\n; emit the JSON document alone. Checks: {}",
+        "Adversarially judge every acceptance check below. The toolchain is fixed: the shell, the operating system, environment variables, PATH, and every executable that the repository does not itself build are out of bounds, and a counterexample that stubs, wraps, replaces or shadows any executable, or edits PATH, is invalid and must not refute a check. Everything the implementation produces may vary: the repository's own source and the program it builds from that source, and every file, directory and data artifact under the project root, including any data root the check names. The implementation is fallible, not adversarial: it may be missing, partial, wrong, stale, empty, malformed or hand-placed, its tests may be absent or cover less than the criterion, and its output may be an error message; it does not write source, tests or data whose purpose is to satisfy this check while the criterion is false. {} A counterexample that needs such deliberate gaming, a program that answers true for the check's sake or a test written to pass trivially, is invalid and must not refute a check: under it no check could ever pass. For each id, try to construct such an in-bounds state where the check passes while the criterion is false. Return JSON only as {{\"decisions\":[{{\"id\":\"...\",\"verdict\":\"accepted|refuted\",\"counterexample\":\"...\",\"reason\":\"...\"}}]}} with exactly one decision for every input id and no extra ids. counterexample and reason must each be a non-empty sentence, even when the verdict is accepted: say what the closest passing-but-false state would be, or that none is constructible. Every string must be a single line with newlines escaped as \\n; emit the JSON document alone. Checks: {}",
+        NAMED_FILES_INSTRUCTION,
         serde_json::to_string(&checks)?
     ))
+}
+
+fn named_files(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+) -> Vec<serde_json::Value> {
+    let root = match &criterion.check {
+        archon_workflow::task_set_contract::AcceptanceCheck::Command {
+            cwd: archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
+            ..
+        } => roots.repository.as_deref(),
+        _ => roots.project.as_deref(),
+    };
+    let Some(root) = root.and_then(|path| path.canonicalize().ok()) else {
+        return Vec::new();
+    };
+    let project = roots
+        .project
+        .as_deref()
+        .and_then(|path| path.canonicalize().ok())
+        .unwrap_or_else(|| root.clone());
+    let repository = roots
+        .repository
+        .as_deref()
+        .and_then(|path| path.canonicalize().ok())
+        .unwrap_or_else(|| root.clone());
+    let task_root = roots
+        .task_root
+        .as_deref()
+        .and_then(|path| path.canonicalize().ok());
+    let project_input_excludes = task_root.as_deref().and_then(|task_root| {
+        match crate::command::acceptance_scratch_policy::capture(&project, task_root) {
+            Ok(Some(binding)) => Some(binding.policy.project_input_excludes),
+            Ok(None) => Some(Vec::new()),
+            Err(_) => None,
+        }
+    });
+    let task_root_relative = task_root
+        .as_deref()
+        .and_then(|task_root| task_root.strip_prefix(&project).ok());
+    let nested_repository =
+        archon_workflow::acceptance_scratch::nested_repository(&project, &repository);
+    let mut inputs = crate::command::workflow_task_set::executability::named_inputs(
+        criterion,
+        &project,
+        &repository,
+    );
+    inputs.sort();
+    inputs.dedup();
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    inputs
+        .into_iter()
+        .filter_map(|relative| {
+            let path = Path::new(&relative);
+            if path.is_absolute() {
+                return None;
+            }
+            let absolute = root.join(path);
+            let canonical = absolute.canonicalize().ok()?;
+            if !canonical.starts_with(&root) || !canonical.is_file() {
+                return None;
+            }
+            if matches!(
+                criterion.check,
+                archon_workflow::task_set_contract::AcceptanceCheck::Command {
+                    cwd: archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
+                    ..
+                }
+            ) {
+                let commit = roots.repository_commit.as_deref()?;
+                if !crate::command::workflow_task_set::executability::repository_tree_contains(
+                    &repository,
+                    commit,
+                    &archon_shell::paths::stored_text(path),
+                ) {
+                    return None;
+                }
+            } else {
+                let relative = absolute.strip_prefix(&project).ok()?;
+                if project_input_excludes.as_ref().is_none_or(|excludes| {
+                    archon_workflow::acceptance_scratch::acceptance_input_excluded(
+                        relative,
+                        excludes,
+                        task_root_relative,
+                    )
+                }) || nested_repository.as_ref().is_some_and(|nested| {
+                    archon_workflow::acceptance_scratch::nested_repository_skipped(
+                        relative,
+                        Some(nested),
+                    )
+                }) || relative
+                    .components()
+                    .any(|component| component.as_os_str() == ".git")
+                    || !project_file_is_copied(&project, relative)
+                {
+                    return None;
+                }
+            }
+            let bytes = std::fs::read(&canonical).ok()?;
+            let take = bytes.len().min(remaining);
+            let truncated = take < bytes.len();
+            let shown = &bytes[..take];
+            remaining -= take;
+            let mut content = archon_observability::redaction::redact_secret_values(
+                &String::from_utf8_lossy(shown),
+            );
+            if truncated {
+                content.push_str("\n[truncated at the existing judged-source byte limit]");
+            }
+            Some(serde_json::json!({
+                "path": path.to_string_lossy(),
+                "content": content,
+            }))
+        })
+        .collect()
+}
+
+fn project_file_is_copied(project_root: &Path, relative: &Path) -> bool {
+    let mut current = project_root.to_path_buf();
+    let mut components = relative.components().peekable();
+    while let Some(std::path::Component::Normal(name)) = components.next() {
+        current.push(name);
+        let Ok(metadata) = current.symlink_metadata() else {
+            return false;
+        };
+        if metadata.file_type().is_symlink() {
+            return false;
+        }
+        if components.peek().is_some() {
+            if !metadata.is_dir() {
+                return false;
+            }
+        } else if !metadata.is_file() {
+            return false;
+        }
+    }
+    !relative.as_os_str().is_empty()
 }
 
 #[path = "workflow_task_set_judge_partial.rs"]
@@ -200,6 +379,17 @@ pub(super) async fn judge_contract_resumable(
     expected: &BTreeSet<String>,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<AcceptanceContract> {
+    judge_contract_resumable_with_roots(client, contract, expected, partial, &JudgeRoots::default())
+        .await
+}
+
+pub(super) async fn judge_contract_resumable_with_roots(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    expected: &BTreeSet<String>,
+    partial: Option<&PartialReply<'_>>,
+    roots: &JudgeRoots,
+) -> Result<AcceptanceContract> {
     judge_batch(
         client,
         contract,
@@ -223,6 +413,7 @@ pub(super) async fn judge_contract_resumable(
             }
         },
         partial,
+        roots,
     )
     .await
 }
@@ -234,19 +425,45 @@ pub(super) async fn judge_contract_subset_resumable(
     subset: AcceptanceContract,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<AcceptanceContract> {
-    judge_batch(client, subset, "sonnet", require_judged_prose, partial).await
+    judge_batch(
+        client,
+        subset,
+        "sonnet",
+        require_judged_prose,
+        partial,
+        &JudgeRoots::default(),
+    )
+    .await
+}
+
+pub(super) async fn judge_contract_subset_resumable_with_roots(
+    client: &dyn WorkflowLlmClient,
+    subset: AcceptanceContract,
+    partial: Option<&PartialReply<'_>>,
+    roots: &JudgeRoots,
+) -> Result<AcceptanceContract> {
+    judge_batch(
+        client,
+        subset,
+        "sonnet",
+        require_judged_prose,
+        partial,
+        roots,
+    )
+    .await
 }
 
 /// Judge a subset of a contract's checks — the ones being re-authored — in
 /// one batch. The subset is not a contract on its own (it may hold no
 /// acceptance entry at all), so only each judged entry's recorded fields are
 /// required, exactly as the full-contract structure check requires them.
-pub(super) async fn judge_entries(
+pub(super) async fn judge_entries_with_roots(
     client: &dyn WorkflowLlmClient,
     subset: AcceptanceContract,
     model: &str,
+    roots: &JudgeRoots,
 ) -> Result<AcceptanceContract> {
-    judge_batch(client, subset, model, require_judged_prose, None).await
+    judge_batch(client, subset, model, require_judged_prose, None, roots).await
 }
 
 /// Every judged entry of `attempt` carries its counterexample and reason.
@@ -273,8 +490,9 @@ async fn judge_batch(
     model: &str,
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
     partial: Option<&PartialReply<'_>>,
+    roots: &JudgeRoots,
 ) -> Result<AcceptanceContract> {
-    let task = batched_judge_prompt(&contract)?;
+    let task = batched_judge_prompt_with_roots(&contract, roots)?;
     judge_prompted(client, contract, &task, model, validate, partial).await
 }
 

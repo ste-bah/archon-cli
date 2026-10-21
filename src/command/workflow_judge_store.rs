@@ -10,11 +10,7 @@
 //! reply that passed validation is saved; an unreadable or mismatched file
 //! is ignored.
 
-#[cfg(test)]
-use super::judge::judge_contract_resumable;
-use super::judge::{
-    PartialReply, batched_judge_prompt, judge_contract_subset_resumable, require_judged_prose,
-};
+use super::judge::{PartialReply, require_judged_prose};
 use super::*;
 use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeProgress};
 
@@ -30,19 +26,32 @@ struct Saved {
 pub(super) struct JudgeStore {
     dir: PathBuf,
     progress: Arc<FreezeProgress>,
+    roots: super::judge::JudgeRoots,
 }
 
 impl JudgeStore {
     /// The project's freeze cache (`FREEZE_CACHE_DIR`), outside every
     /// probed input and the call's staging directory, counted in `progress`.
-    pub(super) fn for_project(project_root: &Path, progress: Arc<FreezeProgress>) -> Self {
+    pub(super) fn for_project(
+        project_root: &Path,
+        progress: Arc<FreezeProgress>,
+        roots: super::judge::JudgeRoots,
+    ) -> Self {
         let dir = project_root.join(FREEZE_CACHE_DIR).join("judge");
-        Self { dir, progress }
+        Self {
+            dir,
+            progress,
+            roots,
+        }
     }
 
     #[cfg(test)]
     pub(super) fn at_with_progress(dir: PathBuf, progress: Arc<FreezeProgress>) -> Self {
-        Self { dir, progress }
+        Self {
+            dir,
+            progress,
+            roots: Default::default(),
+        }
     }
 
     #[cfg(test)]
@@ -50,6 +59,7 @@ impl JudgeStore {
         Self {
             dir,
             progress: Arc::default(),
+            roots: Default::default(),
         }
     }
 
@@ -59,9 +69,18 @@ impl JudgeStore {
         subset: &AcceptanceContract,
         expected: &BTreeSet<String>,
     ) -> Result<String> {
+        Self::key_with_roots(client, subset, expected, &Default::default())
+    }
+
+    fn key_with_roots(
+        client: &dyn WorkflowLlmClient,
+        subset: &AcceptanceContract,
+        expected: &BTreeSet<String>,
+        roots: &super::judge::JudgeRoots,
+    ) -> Result<String> {
         let input = serde_json::json!([
             "acceptance-judge-batch-v1",
-            batched_judge_prompt(subset)?,
+            super::judge::batched_judge_prompt_with_roots(subset, roots)?,
             expected,
             client.resolve_model_alias("sonnet"),
             client.provider_id(),
@@ -116,7 +135,7 @@ impl JudgeStore {
         subset: AcceptanceContract,
         expected: &BTreeSet<String>,
     ) -> Result<AcceptanceContract> {
-        let key = Self::key(client, &subset, expected)?;
+        let key = Self::key_with_roots(client, &subset, expected, &self.roots)?;
         // Issue 260: a partial reply an earlier attempt saved is continued,
         // and the chunks it holds count as progress again, so the count the
         // executor reads never goes back.
@@ -133,7 +152,14 @@ impl JudgeStore {
             self.progress.reused(true);
             return Ok(judged);
         }
-        let judged = judge_contract_resumable(client, subset, expected, Some(&partial)).await?;
+        let judged = super::judge::judge_contract_resumable_with_roots(
+            client,
+            subset,
+            expected,
+            Some(&partial),
+            &self.roots,
+        )
+        .await?;
         if self.save(&key, &judged) {
             // Never destroy the continuation before the verdict is on disk.
             partial.completed();
@@ -149,7 +175,7 @@ impl JudgeStore {
         subset: AcceptanceContract,
         expected: &BTreeSet<String>,
     ) -> Result<AcceptanceContract> {
-        let key = Self::key(client, &subset, expected)?;
+        let key = Self::key_with_roots(client, &subset, expected, &self.roots)?;
         let partial = PartialReply::new(&self.dir, &key, &self.progress);
         let saved = self.load(&key, &subset).filter(|judged| {
             require_judged_prose(judged).is_ok()
@@ -170,7 +196,13 @@ impl JudgeStore {
             self.progress.reused(true);
             return Ok(judged);
         }
-        let judged = judge_contract_subset_resumable(client, subset, Some(&partial)).await?;
+        let judged = super::judge::judge_contract_subset_resumable_with_roots(
+            client,
+            subset,
+            Some(&partial),
+            &self.roots,
+        )
+        .await?;
         if self.save(&key, &judged) {
             partial.completed();
             self.progress.saved(true);

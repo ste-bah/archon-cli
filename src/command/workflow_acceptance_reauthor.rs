@@ -295,7 +295,21 @@ pub(crate) async fn reauthor_with_cache(
                 .partition(|candidate| acceptance_ids.contains(&candidate.id));
             subset.acceptance = acceptance;
             subset.supplementary = supplementary;
-            let judged = judge::judge_entries(client, subset, judge_model).await?;
+            let judged = judge::judge_entries_with_roots(
+                client,
+                subset,
+                judge_model,
+                &judge::JudgeRoots {
+                    project: Some(scope.project_root.clone()),
+                    repository: Some(scope.repository_root.clone()),
+                    task_root: Some(scope.task_root.clone()),
+                    repository_commit: scope
+                        .baseline
+                        .as_ref()
+                        .map(|baseline| baseline.commit.clone()),
+                },
+            )
+            .await?;
             for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
                 if candidate.judgment.verdict == JudgeDecision::Accepted {
                     accepted.insert(candidate.id.clone());

@@ -266,9 +266,21 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         &original,
     )?;
 
-    let judged = resume
-        .persist
-        .then(|| judge_store::JudgeStore::for_project(project_root, resume.progress.clone()));
+    let repository_root =
+        live_root::freeze_repository(project_root, tasks_root, None).map_err(anyhow::Error::msg)?;
+    let judge_roots = judge::JudgeRoots {
+        project: Some(project_root.to_path_buf()),
+        repository: Some(repository_root),
+        task_root: Some(tasks_root.to_path_buf()),
+        repository_commit: None,
+    };
+    let judged = resume.persist.then(|| {
+        judge_store::JudgeStore::for_project(
+            project_root,
+            resume.progress.clone(),
+            judge_roots.clone(),
+        )
+    });
     contract = incremental::judge(
         project_root,
         tasks_root,
@@ -276,6 +288,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         contract,
         &expected,
         judged.as_ref(),
+        &judge_roots,
     )
     .await
     .map_err(|error| resumable(error, resume))?;

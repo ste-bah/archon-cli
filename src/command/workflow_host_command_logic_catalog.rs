@@ -70,7 +70,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 41: passability finding selection and baseline-pass recognition
         // change the findings returned by a freeze gate.
         // Re-pinned only (verdict rules unchanged): #483
-        version: 41,
+        // 42: batch judging includes bounded contents of existing named check inputs, preventing refutations that contradict their assertions.
+        version: 42,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -99,7 +100,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 41: restore passability finding selection while recognizing the
         // distinct baseline-pass lead; both can change freeze findings.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
-        sources_digest: "cede806a8ef692af003a0408dc29fcb165b42b3a63a1f1149e1f23d852c7916c",
+        sources_digest: "07deb88492d54a662637c2d0c51f2b6141fd76afc9ad01fb41446d3cb496aa35",
         build_bound: false,
     },
     CapabilityLogic {
@@ -121,7 +122,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): #483
-        sources_digest: "cede806a8ef692af003a0408dc29fcb165b42b3a63a1f1149e1f23d852c7916c",
+        sources_digest: "07deb88492d54a662637c2d0c51f2b6141fd76afc9ad01fb41446d3cb496aa35",
         build_bound: false,
     },
     CapabilityLogic {
@@ -175,7 +176,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
-        sources_digest: "89f09f50fdad9704332fe4c2f668fe04c0487cedde9ec6335249983a22eb414f",
+        sources_digest: "d88b2ce176c5fe02a34b401907e34ffad989847044cc8183fc1962744247602b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -218,7 +219,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
-        sources_digest: "89f09f50fdad9704332fe4c2f668fe04c0487cedde9ec6335249983a22eb414f",
+        sources_digest: "d88b2ce176c5fe02a34b401907e34ffad989847044cc8183fc1962744247602b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -263,7 +264,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
-        sources_digest: "e8f6a2412af8ece820b622efcc09fed54d90b03d649f45b3a84f00b6dbf39ba3",
+        sources_digest: "b16533e7d6209d5560996cf30704829ab23afba38c13d056805760d8dd446070",
         build_bound: true,
     },
     CapabilityLogic {
@@ -283,7 +284,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
-        sources_digest: "e8f6a2412af8ece820b622efcc09fed54d90b03d649f45b3a84f00b6dbf39ba3",
+        sources_digest: "b16533e7d6209d5560996cf30704829ab23afba38c13d056805760d8dd446070",
         build_bound: true,
     },
 ];

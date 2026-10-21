@@ -149,6 +149,7 @@ pub(super) async fn judge(
     mut contract: AcceptanceContract,
     expected: &BTreeSet<String>,
     store: Option<&super::judge_store::JudgeStore>,
+    roots: &super::judge::JudgeRoots,
 ) -> Result<AcceptanceContract> {
     let tasks_root = tasks
         .canonicalize()
@@ -206,7 +207,10 @@ pub(super) async fn judge(
         judged_ids.extend(subset_ids.iter().cloned());
         let judged = match store {
             Some(store) => store.judge_subset(client, subset, &subset_ids).await?,
-            None => judge::judge_contract_subset_resumable(client, subset, None).await?,
+            None => {
+                judge::judge_contract_subset_resumable_with_roots(client, subset, None, roots)
+                    .await?
+            }
         };
         merge_judgments(&mut contract, &judged);
     }
