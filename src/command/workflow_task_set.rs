@@ -271,6 +271,8 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
     let judge_roots = judge::JudgeRoots {
         project: Some(project_root.to_path_buf()),
         repository: Some(repository_root),
+        task_root: Some(tasks_root.to_path_buf()),
+        repository_commit: None,
     };
     let judged = resume.persist.then(|| {
         judge_store::JudgeStore::for_project(

@@ -6,6 +6,34 @@ use archon_workflow::task_set_contract::{
     JudgeVerdict, PrdIdentity, TrustedCwd,
 };
 
+fn command_check(command: &str, cwd: TrustedCwd) -> AcceptanceContract {
+    let mut subject = contract();
+    subject.acceptance[0].check = AcceptanceCheck::Command {
+        command: command.into(),
+        cwd,
+    };
+    subject
+}
+
+fn git(root: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?}: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn prompt_json(prompt: &str) -> serde_json::Value {
+    serde_json::from_str(prompt.split_once("Checks: ").unwrap().1).unwrap()
+}
+
 fn contract() -> AcceptanceContract {
     AcceptanceContract {
         schema_version: 1,
@@ -122,6 +150,8 @@ fn named_existing_file_content_is_shown_and_judge_rule_is_updated() {
     let roots = JudgeRoots {
         project: Some(root.path().to_path_buf()),
         repository: None,
+        task_root: Some(root.path().to_path_buf()),
+        repository_commit: None,
     };
     let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
     assert!(prompt.contains("\"named_files\":[{\"content\":\"asserts every component against its expected value\\n\",\"path\":\"data/input\"}]"), "{prompt}");
@@ -143,6 +173,8 @@ fn checks_without_files_keep_their_entry_shape_and_retain_existing_prompt_bytes(
         &JudgeRoots {
             project: Some(root.path().to_path_buf()),
             repository: None,
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
         },
     )
     .unwrap();
@@ -167,6 +199,8 @@ fn outside_and_missing_named_paths_are_omitted() {
         &JudgeRoots {
             project: Some(root.path().to_path_buf()),
             repository: None,
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
         },
     )
     .unwrap();
@@ -193,9 +227,94 @@ fn named_file_content_is_truncated_at_existing_judged_source_limit() {
         &JudgeRoots {
             project: Some(root.path().to_path_buf()),
             repository: None,
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
         },
     )
     .unwrap();
     assert!(prompt.contains("[truncated at the existing judged-source byte limit]"));
     assert!(!prompt.contains(&"x".repeat(limit + 1)));
+}
+
+#[test]
+fn untracked_repository_file_is_not_named_to_the_judge() {
+    let root = tempfile::tempdir().unwrap();
+    git(root.path(), &["init", "-q"]);
+    git(root.path(), &["config", "user.email", "judge@example.test"]);
+    git(root.path(), &["config", "user.name", "Judge Test"]);
+    std::fs::write(root.path().join("tracked"), "safe").unwrap();
+    git(root.path(), &["add", "tracked"]);
+    git(root.path(), &["commit", "-qm", "initial"]);
+    std::fs::write(root.path().join("untracked"), "sensitive content").unwrap();
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation untracked", TrustedCwd::RepoRoot),
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: Some(root.path().to_path_buf()),
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        prompt_json(&prompt)[0].get("named_files").is_none(),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn tracked_repository_file_is_named_to_the_judge() {
+    let root = tempfile::tempdir().unwrap();
+    git(root.path(), &["init", "-q"]);
+    git(root.path(), &["config", "user.email", "judge@example.test"]);
+    git(root.path(), &["config", "user.name", "Judge Test"]);
+    std::fs::write(root.path().join("tracked"), "tracked assertion").unwrap();
+    git(root.path(), &["add", "tracked"]);
+    git(root.path(), &["commit", "-qm", "initial"]);
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation tracked", TrustedCwd::RepoRoot),
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: Some(root.path().to_path_buf()),
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert!(prompt.contains("tracked assertion"), "{prompt}");
+}
+
+#[test]
+fn project_copy_exclusions_are_omitted_and_named_content_is_redacted() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("credentials")).unwrap();
+    std::fs::write(root.path().join("credentials/input"), "password=abc123").unwrap();
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation credentials/input", TrustedCwd::ProjectRoot),
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: None,
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        prompt_json(&prompt)[0].get("named_files").is_none(),
+        "{prompt}"
+    );
+
+    std::fs::write(root.path().join("data-input"), "password=abc123").unwrap();
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation data-input", TrustedCwd::ProjectRoot),
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: None,
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert!(prompt.contains("REDACTED"), "{prompt}");
+    assert!(!prompt.contains("password=abc123"), "{prompt}");
 }

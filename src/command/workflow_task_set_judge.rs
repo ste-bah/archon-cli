@@ -32,6 +32,8 @@ struct JudgeResponse {
 pub(super) struct JudgeRoots {
     pub project: Option<PathBuf>,
     pub repository: Option<PathBuf>,
+    pub task_root: Option<PathBuf>,
+    pub repository_commit: Option<String>,
 }
 
 pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<String> {
@@ -42,6 +44,26 @@ pub(super) fn batched_judge_prompt_with_roots(
     contract: &AcceptanceContract,
     roots: &JudgeRoots,
 ) -> Result<String> {
+    let mut resolved_roots = roots.clone();
+    if resolved_roots.repository_commit.is_none() {
+        if let Some(repository) = resolved_roots
+            .repository
+            .as_deref()
+            .and_then(|path| path.canonicalize().ok())
+        {
+            let output = archon_shell::spawn::command("git")
+                .arg("-C")
+                .arg(repository)
+                .args(["rev-parse", "HEAD"])
+                .output();
+            resolved_roots.repository_commit = output.ok().and_then(|output| {
+                output
+                    .status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            });
+        }
+    }
     let checks = contract
         .acceptance
         .iter()
@@ -58,7 +80,7 @@ pub(super) fn batched_judge_prompt_with_roots(
             if !criterion.covers.is_empty() {
                 check["covers"] = serde_json::json!(criterion.covers);
             }
-            let files = named_files(criterion, roots);
+            let files = named_files(criterion, &resolved_roots);
             if !files.is_empty() {
                 check["named_files"] = serde_json::json!(files);
             }
@@ -86,10 +108,36 @@ fn named_files(
     let Some(root) = root.and_then(|path| path.canonicalize().ok()) else {
         return Vec::new();
     };
-    let project = roots.project.as_deref().unwrap_or(&root);
-    let repository = roots.repository.as_deref().unwrap_or(&root);
+    let project = roots
+        .project
+        .as_deref()
+        .and_then(|path| path.canonicalize().ok())
+        .unwrap_or_else(|| root.clone());
+    let repository = roots
+        .repository
+        .as_deref()
+        .and_then(|path| path.canonicalize().ok())
+        .unwrap_or_else(|| root.clone());
+    let task_root = roots
+        .task_root
+        .as_deref()
+        .and_then(|path| path.canonicalize().ok());
+    let project_input_excludes = task_root.as_deref().and_then(|task_root| {
+        match crate::command::acceptance_scratch_policy::capture(&project, task_root) {
+            Ok(Some(binding)) => Some(binding.policy.project_input_excludes),
+            Ok(None) => Some(Vec::new()),
+            Err(_) => None,
+        }
+    });
+    let task_root_relative = task_root
+        .as_deref()
+        .and_then(|task_root| task_root.strip_prefix(&project).ok());
+    let nested_repository =
+        archon_workflow::acceptance_scratch::nested_repository(&project, &repository);
     let mut inputs = crate::command::workflow_task_set::executability::named_inputs(
-        criterion, project, repository,
+        criterion,
+        &project,
+        &repository,
     );
     inputs.sort();
     inputs.dedup();
@@ -106,12 +154,50 @@ fn named_files(
             if !canonical.starts_with(&root) || !canonical.is_file() {
                 return None;
             }
+            if matches!(
+                criterion.check,
+                archon_workflow::task_set_contract::AcceptanceCheck::Command {
+                    cwd: archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
+                    ..
+                }
+            ) {
+                let commit = roots.repository_commit.as_deref()?;
+                if !crate::command::workflow_task_set::executability::repository_tree_contains(
+                    &repository,
+                    commit,
+                    &archon_shell::paths::stored_text(path),
+                ) {
+                    return None;
+                }
+            } else {
+                let relative = absolute.strip_prefix(&project).ok()?;
+                if project_input_excludes.as_ref().is_none_or(|excludes| {
+                    archon_workflow::acceptance_scratch::acceptance_input_excluded(
+                        relative,
+                        excludes,
+                        task_root_relative,
+                    )
+                }) || nested_repository.as_ref().is_some_and(|nested| {
+                    archon_workflow::acceptance_scratch::nested_repository_skipped(
+                        relative,
+                        Some(nested),
+                    )
+                }) || relative
+                    .components()
+                    .any(|component| component.as_os_str() == ".git")
+                    || !project_file_is_copied(&project, relative)
+                {
+                    return None;
+                }
+            }
             let bytes = std::fs::read(&canonical).ok()?;
             let take = bytes.len().min(remaining);
             let truncated = take < bytes.len();
             let shown = &bytes[..take];
             remaining -= take;
-            let mut content = String::from_utf8_lossy(shown).into_owned();
+            let mut content = archon_observability::redaction::redact_secret_values(
+                &String::from_utf8_lossy(shown),
+            );
             if truncated {
                 content.push_str("\n[truncated at the existing judged-source byte limit]");
             }
@@ -121,6 +207,28 @@ fn named_files(
             }))
         })
         .collect()
+}
+
+fn project_file_is_copied(project_root: &Path, relative: &Path) -> bool {
+    let mut current = project_root.to_path_buf();
+    let mut components = relative.components().peekable();
+    while let Some(std::path::Component::Normal(name)) = components.next() {
+        current.push(name);
+        let Ok(metadata) = current.symlink_metadata() else {
+            return false;
+        };
+        if metadata.file_type().is_symlink() {
+            return false;
+        }
+        if components.peek().is_some() {
+            if !metadata.is_dir() {
+                return false;
+            }
+        } else if !metadata.is_file() {
+            return false;
+        }
+    }
+    !relative.as_os_str().is_empty()
 }
 
 #[path = "workflow_task_set_judge_partial.rs"]

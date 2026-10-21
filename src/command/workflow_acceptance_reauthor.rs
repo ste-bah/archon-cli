@@ -302,6 +302,11 @@ pub(crate) async fn reauthor_with_cache(
                 &judge::JudgeRoots {
                     project: Some(scope.project_root.clone()),
                     repository: Some(scope.repository_root.clone()),
+                    task_root: Some(scope.task_root.clone()),
+                    repository_commit: scope
+                        .baseline
+                        .as_ref()
+                        .map(|baseline| baseline.commit.clone()),
                 },
             )
             .await?;

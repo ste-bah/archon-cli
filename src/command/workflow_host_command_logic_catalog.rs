@@ -99,7 +99,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 41: restore passability finding selection while recognizing the
         // distinct baseline-pass lead; both can change freeze findings.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
-        sources_digest: "4a5240b6a81d313767c1df127b0bc17807791b701f9670bbed02c76b3aee5226",
+        sources_digest: "07deb88492d54a662637c2d0c51f2b6141fd76afc9ad01fb41446d3cb496aa35",
         build_bound: false,
     },
     CapabilityLogic {
@@ -120,7 +120,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #417 #439 #425 #438 #424 #369 #383 #366 #422 #386 #387 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
-        sources_digest: "4a5240b6a81d313767c1df127b0bc17807791b701f9670bbed02c76b3aee5226",
+        sources_digest: "07deb88492d54a662637c2d0c51f2b6141fd76afc9ad01fb41446d3cb496aa35",
         build_bound: false,
     },
     CapabilityLogic {
@@ -174,7 +174,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
-        sources_digest: "08f4d645605eef33b507044d8ea43507460121b3617016a1e361011b846cea03",
+        sources_digest: "d88b2ce176c5fe02a34b401907e34ffad989847044cc8183fc1962744247602b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -217,7 +217,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
-        sources_digest: "08f4d645605eef33b507044d8ea43507460121b3617016a1e361011b846cea03",
+        sources_digest: "d88b2ce176c5fe02a34b401907e34ffad989847044cc8183fc1962744247602b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -261,7 +261,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #417 #434 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
-        sources_digest: "fb2da8601e5ca4c0abc1c0d80cd09f8ac6b9ff66d9dcb877d33567712606f1dc",
+        sources_digest: "b16533e7d6209d5560996cf30704829ab23afba38c13d056805760d8dd446070",
         build_bound: true,
     },
     CapabilityLogic {
@@ -280,7 +280,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #366 #434 #417 #439 #425 #438 #386 #387 #424 #369 #383 #442 #443 #441 #447 #440 #420 #446 #374 #340 #457 #448 #219 #464 #467 #466 #468 #469 #471 #472
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
-        sources_digest: "fb2da8601e5ca4c0abc1c0d80cd09f8ac6b9ff66d9dcb877d33567712606f1dc",
+        sources_digest: "b16533e7d6209d5560996cf30704829ab23afba38c13d056805760d8dd446070",
         build_bound: true,
     },
 ];
