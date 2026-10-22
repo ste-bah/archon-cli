@@ -82,7 +82,7 @@ pub(super) fn named_files(
                     content.push_str("\n[truncated at the existing judged-source byte limit]");
                 }
                 return Some(
-                    serde_json::json!({"path": archon_shell::paths::stored_text(path), "content": content}),
+                    serde_json::json!({"path": archon_shell::paths::stored_text(&path), "content": content}),
                 );
             } else {
                 let canonical = absolute.canonicalize().ok()?;
@@ -121,7 +121,7 @@ pub(super) fn named_files(
                 content.push_str("\n[truncated at the existing judged-source byte limit]");
             }
             Some(serde_json::json!({
-                "path": archon_shell::paths::stored_text(path),
+                "path": archon_shell::paths::stored_text(&path),
                 "content": content,
             }))
         })
