@@ -32,7 +32,7 @@ fn named_file_judge_rules_cover_asserting_regression_guards() {
     for rule in [
         "A check that runs an existing test or implementation whose given file contents (named_files) assert the criterion is a valid regression guard.",
         "A check that names its deciding file by a literal path relative to its working directory and whose named_files assert the criterion is a valid regression guard.",
-        "For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail on its own assertion.",
+        "For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail on its own assertion; failing when a named file is moved aside is that proof and is never a counterexample.",
         "Duplicated or relocated implementation elsewhere is not an in-bounds counterexample for a guard whose named test asserts the criterion.",
         "A counterexample against such a guard must show that the named file's assertions pass while the criterion is false.",
         "When a check names a path outside the given named_files, content not given must not be assumed weaker or stronger than the criterion needs; judge only what is given and the command text.",
