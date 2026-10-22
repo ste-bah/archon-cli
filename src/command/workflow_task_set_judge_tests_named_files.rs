@@ -27,6 +27,19 @@ fn named_existing_file_content_is_shown_and_judge_rule_is_updated() {
 }
 
 #[test]
+fn named_file_judge_rules_cover_asserting_regression_guards() {
+    let prompt = batched_judge_prompt(&contract()).unwrap();
+    for rule in [
+        "A check that runs an existing test or implementation whose given file contents (named_files) assert the criterion is a valid regression guard.",
+        "Failing when a named file is moved aside is the intended proof of that guard and is never a counterexample.",
+        "Duplicated or relocated implementation elsewhere is not an in-bounds counterexample for a guard whose named test asserts the criterion.",
+        "A counterexample against such a guard must show that the named file's assertions pass while the criterion is false.",
+    ] {
+        assert!(prompt.contains(rule), "missing: {rule}\n{prompt}");
+    }
+}
+
+#[test]
 fn named_source_budget_is_shared_across_the_batch() {
     let root = tempfile::tempdir().unwrap();
     let size = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES * 3 / 4;
