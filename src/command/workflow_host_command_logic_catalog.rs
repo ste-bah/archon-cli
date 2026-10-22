@@ -76,7 +76,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 44: #487 partial judge replies retain valid decisions and ask only
         // for missing checks, which can change the acceptance verdict set.
         // 45: #488 named-file assertions make their regression guards valid; move-aside and duplicate-implementation states cannot refute them. #489 separator trimming preserves the actual sibling path for setup classification.
-        version: 45,
+        // 46: #491 acceptance reauthor verification accepts an intact predecessor skeleton as pending after a normal acceptance publish.
+        version: 46,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -107,7 +108,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // Re-pinned for #487: acceptance judge source changed with version 44.
-        sources_digest: "b19571f12604a25ed68fe84aa333cb64e6518c670838f1ff6d73487821fac105",
+        sources_digest: "8b3a4fbcb982bb4f7bdf0542ef8ac0394b6df62f3e0b8669e8a517b2bcbbd7b0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -131,7 +132,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // #487 re-pin only: the judge's partial-decision handling is not used by skeleton freeze.
-        sources_digest: "b19571f12604a25ed68fe84aa333cb64e6518c670838f1ff6d73487821fac105",
+        sources_digest: "8b3a4fbcb982bb4f7bdf0542ef8ac0394b6df62f3e0b8669e8a517b2bcbbd7b0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -164,7 +165,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 21: reported claims are excluded and short negated path subjects are read as absence claims.
         // 22: declared write paths that match Files Forbidden to Change are rejected by the body scope gate using the shared matcher and refutation wording.
         // 23: #464 body and set gates normalize absolute declared paths against the task set's recorded repository root, changing collision findings when project and repository roots differ.
-        version: 23,
+        // 24: #491 body lint treats an intact skeleton from an older acceptance as draft input.
+        version: 24,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -186,7 +188,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
-        sources_digest: "ee44ab11416574a5f7dabaaba5b0fde4a6b5db1b0ab538847aceff0e8060e5e2",
+        sources_digest: "dca2d3a1fda366759b65cba00f05bd650a599975b889a5b68b43d3afa0046d63",
         build_bound: false,
     },
     CapabilityLogic {
@@ -210,7 +212,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: reported claims are excluded and short negated path subjects are read as absence claims.
         // 18: declared write paths that match Files Forbidden to Change are rejected by scope declarations using the shared matcher and refutation wording.
         // 19: #464 absolute declared paths use the task set's recorded repository root, matching the body gate when project and repository roots differ.
-        version: 19,
+        // 20: #491 an intact skeleton from an older acceptance is draft input
+        // until the skeleton phase freezes it; lints no longer refuse it as partial.
+        version: 20,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -230,7 +234,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "ee44ab11416574a5f7dabaaba5b0fde4a6b5db1b0ab538847aceff0e8060e5e2",
+        sources_digest: "dca2d3a1fda366759b65cba00f05bd650a599975b889a5b68b43d3afa0046d63",
         build_bound: false,
     },
     CapabilityLogic {
@@ -264,7 +268,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // build target during frozen acceptance reverify.
         // 13: #489 scanned sibling paths drop argument/list separators, so an
         // existing sibling is no longer reported missing; this can change verdicts.
-        version: 13,
+        version: 14,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -281,14 +285,16 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
-        sources_digest: "f3188f06df5c370fbb5a5a10570e7572a7507fca5cd937636afe7c903d463a15",
+        // 14: #491 an intact skeleton from an older acceptance no longer makes acceptance verification fail.
+        sources_digest: "a5e8f65a3d49f611ca62d4da1e403106e60869a96ee3e99c33afd45cf4002709",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
-        version: 4,
+        // 5: #491 a skeleton bound to the prior acceptance is pending and skipped by the frozen snapshot.
+        version: 5,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -303,7 +309,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
-        sources_digest: "f3188f06df5c370fbb5a5a10570e7572a7507fca5cd937636afe7c903d463a15",
+        sources_digest: "a5e8f65a3d49f611ca62d4da1e403106e60869a96ee3e99c33afd45cf4002709",
         build_bound: true,
     },
 ];

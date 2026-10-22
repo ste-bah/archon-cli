@@ -84,8 +84,6 @@ pub(crate) fn recover_deferred_launch_snapshot(
 
 #[path = "workflow_decompose_frozen_chain_override.rs"]
 mod freeze_override;
-#[path = "workflow_decompose_frozen_chain_pending.rs"]
-mod pending;
 #[cfg(test)]
 use freeze_override::{freeze_outcome_decision, freeze_record_status_allows_override};
 #[path = "workflow_decompose_frozen_chain_launch.rs"]
@@ -200,12 +198,7 @@ fn frozen_chain_snapshot_with_recovery(
     })
 }
 
-/// Run `read` holding the publish lock of the chain under `task_root`
-/// (Issue 294), so a publisher never interleaves with it. `recover` settles
-/// a publish a crash interrupted first (Issue 271), under the exclusive
-/// lock. A read-only caller holds an existing lock file shared, creates and
-/// settles nothing, and refuses a pending journal. An absent task root has
-/// no set to lock.
+/// Read under the chain lock; recovery callers settle interrupted publishes first.
 pub(crate) fn with_chain_read<T>(
     project_root: &Path,
     task_root: &Path,
@@ -233,7 +226,6 @@ pub(crate) fn with_chain_read<T>(
     read()
 }
 
-/// The snapshot, read inside [`with_chain_read`].
 pub(crate) fn snapshot_locked(
     project_root: &Path,
     prd_path: &Path,
@@ -262,11 +254,18 @@ pub(crate) fn snapshot_locked(
     verify_acceptance(project_root, prd_path, task_root, &pin)?;
     snapshot.acceptance = true;
     if !skeleton_lock.exists() {
+        let skeleton_file = task_root.join(TASK_SKELETON_FILE).exists();
+        if pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some() {
+            return Err(anyhow!(
+                "partial skeleton freeze beside {}: file={skeleton_file}, lock=false, pin=true; restore a matching frozen triple or re-run `workflow freeze-skeleton`",
+                task_root.display()
+            ));
+        }
         return Ok(snapshot);
     }
     // An acceptance published before the skeleton phase leaves the old
     // skeleton pending. Its lock must still authenticate its exact bytes.
-    if pending::intact_stale_skeleton(task_root, &pin)? {
+    if super::workflow_skeleton_pending::is_pending(task_root, &pin)? {
         return Ok(snapshot);
     }
     let skeleton = validate_full_chain(task_root, &pin).map_err(|error| {

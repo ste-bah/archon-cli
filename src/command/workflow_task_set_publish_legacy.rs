@@ -389,10 +389,13 @@ pub(crate) fn verify_chain(pin_path: &Path, tasks_root: &Path) -> std::result::R
         .collect();
     archon_workflow::task_set_contract::validate_acceptance_bundle(tasks_root, Some(&pin), &ids)
         .map_err(|error| error.to_string())?;
-    if skeleton_lock.exists() {
+    if skeleton_lock.exists()
+        && !crate::command::workflow_skeleton_pending::is_pending(tasks_root, &pin)
+            .map_err(|error| error.to_string())?
+    {
         archon_workflow::task_skeleton::validate_full_chain(tasks_root, &pin)
             .map_err(|error| error.to_string())?;
-    } else if pin.skeleton_digest.is_some() {
+    } else if pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some() {
         return Err(format!(
             "pin records a skeleton but {TASK_SKELETON_LOCK_FILE} is absent"
         ));

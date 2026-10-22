@@ -30,7 +30,7 @@ async fn a_freeze_acceptance_bump_resumes_a_frozen_accepted_contract_by_verify_o
     let current = crate::command::workflow_host_command_logic::versions()["freeze-acceptance"];
     assert!(
         output.contains(&format!(
-            "frozen_chain_override acceptance=verify reason=judged attempt acceptance-judged accepted with 0 findings, published, matches disk; this build's logic would not replay it (logicVersion recorded={} current={current}",
+            "frozen_chain_override acceptance=verify reason=judged attempt acceptance-judged gate logic changed; re-run the phase under current logic (logicVersion recorded={} current={current}",
             current - 1
         )),
         "{output}"

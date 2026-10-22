@@ -1,7 +1,7 @@
 //! Exact-one TASK-file linting against portable freezes and the host pin.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use archon_workflow::obligation_ids::acceptance_ids;
 use archon_workflow::task_set_contract::{
@@ -14,6 +14,9 @@ use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUnive
 use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_contracts};
 
 use archon_workflow::defect::{DefectStage, DeterministicDefect, ValidationDefect};
+#[path = "support.rs"]
+mod support;
+use support::{absolute, read_json, shown};
 
 /// Identities for the blockers, keyed by blocker text in report order.
 type Identities = BTreeMap<String, VecDeque<DeterministicDefect>>;
@@ -235,11 +238,62 @@ pub(super) fn inspect_raw(
         let skeleton_present = skeleton_path.exists();
         let lock_present = lock_path.exists();
         let skeleton_pin_present = pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some();
-        match (skeleton_present, lock_present, skeleton_pin_present) {
-            (false, false, false) => report.push_str(
+        let pending = match crate::command::workflow_skeleton_pending::is_pending(tasks_root, &pin)
+        {
+            Ok(pending) => pending,
+            Err(error) => {
+                block(
+                    &mut blockers,
+                    &mut deterministic,
+                    format!(
+                        "invalid frozen skeleton under {}: {error}",
+                        shown(&skeleton_path)
+                    ),
+                    DeterministicDefect::new("invalid_skeleton_chain", &id, "skeleton"),
+                );
+                return finish(report, blockers, inherited_blockers, deterministic);
+            }
+        };
+        match (pending, skeleton_present, lock_present, skeleton_pin_present) {
+            (true, true, true, false) => {
+                let mut draft = match super::task_set::read_draft_skeleton(&skeleton_path) {
+                    Ok(draft) => draft,
+                    Err(error) => {
+                        block(
+                            &mut blockers,
+                            &mut deterministic,
+                            error.to_string(),
+                            DeterministicDefect::new("invalid_skeleton", &id, "skeleton"),
+                        );
+                        return finish(report, blockers, inherited_blockers, deterministic);
+                    }
+                };
+                draft.acceptance_digest = pin.acceptance_digest.clone();
+                if let Err(error) = archon_workflow::task_skeleton::validate_skeleton(
+                    &draft,
+                    &pin.acceptance_digest,
+                ) {
+                    block(
+                        &mut blockers,
+                        &mut deterministic,
+                        error.to_string(),
+                        DeterministicDefect::new("invalid_skeleton", &id, "skeleton"),
+                    );
+                    return finish(report, blockers, inherited_blockers, deterministic);
+                }
+                blockers.extend(archon_workflow::task_skeleton::validate_skeleton_set(&draft, &expected_ids)
+                    .into_iter()
+                    .map(|finding| {
+                        let text = format!("{}: {}", finding.field, finding.message);
+                        deterministic.entry(text.clone()).or_default().push_back(finding.identity);
+                        text
+                    }));
+                report.push_str("\n## frozen skeleton\n  stale intact skeleton is linted as an unfrozen draft; skeleton equality is NOT frozen until `workflow freeze-skeleton` publishes its lock and pin\n");
+            }
+            (false, false, false, false) => report.push_str(
                 "\n## frozen skeleton\n  Step-1 compatibility mode: no skeleton file, lock, or pin exists; frozen-field equality is NOT ANALYSED\n",
             ),
-            (true, true, true) => match validate_full_chain(tasks_root, &pin) {
+            (false, true, true, true) => match validate_full_chain(tasks_root, &pin) {
                 Ok(skeleton) => {
                     if let Some(stamp) = &pin.skeleton_gate {
                         append_predecessor_finding(
@@ -417,25 +471,6 @@ fn append_predecessor_finding(
     block(blockers, identities, text, defect);
 }
 
-fn read_json<T: for<'de> serde::Deserialize<'de>>(
-    path: &Path,
-    label: &str,
-    freeze: &str,
-) -> Result<T, String> {
-    let bytes = std::fs::read(path).map_err(|error| {
-        format!(
-            "required {label} {} could not be read: {error}; run workflow {freeze}",
-            shown(path)
-        )
-    })?;
-    serde_json::from_slice(&bytes).map_err(|error| {
-        format!(
-            "{label} {} is malformed: {error}; re-run workflow {freeze}",
-            shown(path)
-        )
-    })
-}
-
 fn finish(
     mut report: String,
     blockers: Vec<String>,
@@ -457,17 +492,4 @@ fn finish(
         inherited_blockers,
         deterministic,
     }
-}
-
-fn absolute(cwd: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    }
-}
-
-/// A path as the lint report stores it: `/`-separated (Issue 438).
-fn shown(path: &Path) -> String {
-    archon_shell::paths::stored_text(path)
 }

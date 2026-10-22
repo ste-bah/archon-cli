@@ -211,7 +211,11 @@ pub(super) fn verify_with(
             unnamed.join(", ")
         ));
     }
-    let skeleton = match (
+    let pending_skeleton = crate::command::workflow_skeleton_pending::is_pending(tasks_root, &pin)?;
+    let skeleton = if pending_skeleton {
+        None
+    } else {
+        match (
         tasks_root.join(TASK_SKELETON_FILE).exists(),
         tasks_root.join(TASK_SKELETON_LOCK_FILE).exists(),
         pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some(),
@@ -227,6 +231,7 @@ pub(super) fn verify_with(
                 "partial skeleton freeze beside {}: file={file}, lock={lock}, pin={pinned}; run workflow freeze-skeleton first",
                 tasks_root.display()
             ));
+        }
         }
     };
     if let Some(skeleton) = &skeleton {

@@ -415,6 +415,7 @@ pub(crate) mod workflow_json_parse_diagnostic;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_provider_route;
 pub(crate) mod workflow_read_scope;
+pub(crate) mod workflow_skeleton_pending;
 pub(crate) mod workflow_task_root_reclaim;
 pub(crate) mod workflow_task_set;
 pub(crate) mod workflow_task_set_candidate;

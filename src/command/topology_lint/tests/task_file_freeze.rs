@@ -102,6 +102,9 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
     task_path
 }
 
+#[path = "task_file_pending.rs"]
+mod pending_tests;
+
 #[test]
 fn task_file_lint_uses_runtime_parser_and_frozen_structural_equality() {
     let temp = tempfile::tempdir().unwrap();

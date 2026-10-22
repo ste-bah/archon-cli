@@ -14,9 +14,11 @@ use super::{
 };
 
 #[test]
-fn frozen_override_requires_stale_logic_and_a_clean_landing() {
+fn frozen_override_rechecks_stale_logic_even_when_old_findings_are_open() {
     let versions = super::super::workflow_host_command_logic::versions();
+    let digests = super::super::workflow_host_command_logic::digests();
     let version = versions["freeze-acceptance"];
+    let digest = digests["freeze-acceptance"].0.as_str();
     let catalog =
         super::super::workflow_host_command_catalog::fixed_decomposition_catalog("fixture")
             .unwrap();
@@ -35,21 +37,30 @@ fn frozen_override_requires_stale_logic_and_a_clean_landing() {
     let repinned = decide(serde_json::json!({
         "gateEnvelope": {"policy_findings": []},
         "logicVersion": version,
-        "logicDigest": "an-earlier-pin",
+        "logicDigest": digest,
     }));
     assert!(!repinned.verify, "{}", repinned.reason);
     assert!(repinned.reason.contains("replays under this build's logic"));
     let stale = decide(serde_json::json!({
         "gateEnvelope": {"policy_findings": []},
         "logicVersion": version.saturating_sub(1),
+        "logicDigest": "old-digest",
     }));
     assert!(stale.verify, "{}", stale.reason);
     let open = decide(serde_json::json!({
         "gateEnvelope": {"policy_findings": [{"text": "repair remains open"}]},
         "logicVersion": version.saturating_sub(1),
+        "logicDigest": "old-digest",
     }));
-    assert!(!open.verify);
-    assert!(open.reason.contains("1 open finding(s)"));
+    assert!(open.verify);
+    assert!(open.reason.contains("gate logic changed"));
+    let current_open = decide(serde_json::json!({
+        "gateEnvelope": {"policy_findings": [{"text": "repair remains open"}]},
+        "logicVersion": version,
+        "logicDigest": digest,
+    }));
+    assert!(!current_open.verify);
+    assert!(current_open.reason.contains("1 open finding(s)"));
     assert!(!decide(serde_json::json!({"logicVersion": version.saturating_sub(1)})).verify);
     assert!(!super::freeze_record_status_allows_override(
         archon_workflow::WorkflowV2Status::NeedsReview,

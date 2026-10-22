@@ -267,7 +267,7 @@ async fn pin_rewritten_by_the_skeleton_freeze_still_verifies_both_phases() {
     let (project, _store, run_id, _) = chained_run(1, None).await;
     let output = dry_run(&project, &run_id).await;
     assert!(
-        output.contains("frozen_chain_override acceptance=verify reason=judged attempt acceptance-judged accepted with 0 findings"),
+        output.contains("frozen_chain_override acceptance=verify reason=judged attempt acceptance-judged gate logic changed; re-run the phase under current logic"),
         "{output}"
     );
     assert!(

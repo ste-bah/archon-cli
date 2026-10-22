@@ -233,3 +233,29 @@ fn a_sibling_root_named_target_is_copied() {
     assert!(!copied_target.join("target").exists());
     copy.remove().unwrap();
 }
+
+#[test]
+#[ignore = "run against the external project contract with ARCHON_REAL_ACCEPTANCE_CONTRACT"]
+fn current_sibling_gate_accepts_the_two_real_checks_after_copying_their_inputs() {
+    let source = std::path::PathBuf::from(
+        std::env::var_os("ARCHON_REAL_ACCEPTANCE_CONTRACT")
+            .expect("set ARCHON_REAL_ACCEPTANCE_CONTRACT to the read-only task contract"),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project-1");
+    let repository_sibling = root.path().join("archon-cli");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&repository_sibling).unwrap();
+    std::fs::copy(source, project.join("acceptance-contract.json")).unwrap();
+    std::fs::write(repository_sibling.join("Cargo.toml"), "[workspace]\n").unwrap();
+    let contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(project.join("acceptance-contract.json")).unwrap())
+            .unwrap();
+    let ids = BTreeSet::from(["SUP-REQ-AHDM-032".to_string(), "SUP-REQ-DL-055".to_string()]);
+    let findings =
+        super::super::siblings::missing_for_checks(&project, &repository_sibling, &contract, &ids);
+    assert!(
+        findings.is_empty(),
+        "current sibling gate findings: {findings:?}"
+    );
+}

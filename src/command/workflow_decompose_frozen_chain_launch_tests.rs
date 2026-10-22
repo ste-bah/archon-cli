@@ -88,6 +88,10 @@ fn frozen_with_prd(command: Option<fn(&Path) -> String>, prd_contents: &str) -> 
 /// An earlier run of this project that froze the live contract with a
 /// freeze-acceptance judged by logic `version`.
 fn recorded_freeze(fixture: &Fixture, version: u32) {
+    let logic_digest = crate::command::workflow_host_command_logic::digests()
+        .remove(FREEZE_ACCEPTANCE)
+        .unwrap()
+        .0;
     let run = fixture
         .store
         .create_run(archon_workflow::WorkflowSpec {
@@ -129,7 +133,8 @@ fn recorded_freeze(fixture: &Fixture, version: u32) {
                 "entries": [{"relative_path": ACCEPTANCE_CONTRACT_FILE, "destination_path": path,
                     "byte_len": bytes.len(), "blake3": content_digest(&bytes)}]},
             "postcondition": {"satisfied": true, "summary": "fixture"},
-            "logicVersion": version
+            "logicVersion": version,
+            "logicDigest": if version == current() { logic_digest } else { "old-logic-digest".into() }
         }}
     }))
     .unwrap();

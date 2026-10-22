@@ -30,6 +30,112 @@ fn accept_all(command: &'static str) -> ScriptedAuthorJudge {
     ScriptedAuthorJudge::new(move |entry, _| command_entry(entry, command), |_, _| true)
 }
 
+async fn leave_prior_skeleton_pending(set: &FrozenSet) {
+    use archon_workflow::task_set_contract::AcceptanceCheck;
+    let contract_path = set.tasks.join(ACCEPTANCE_CONTRACT_FILE);
+    let mut contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(&contract_path).unwrap()).unwrap();
+    let cwd = match &contract.acceptance[0].check {
+        AcceptanceCheck::Command { cwd, .. } => *cwd,
+        AcceptanceCheck::Floor { .. } => panic!("fixture check is a command"),
+    };
+    contract.acceptance[0].check = AcceptanceCheck::Command {
+        command: "jq -e '.a == true' out.json && true".into(),
+        cwd,
+    };
+    let contract_bytes = serde_json::to_vec_pretty(&contract).unwrap();
+    std::fs::write(&contract_path, &contract_bytes).unwrap();
+    crate::command::workflow_task_set::freeze_acceptance(
+        set.project.path(),
+        &set.tasks,
+        &set.prd,
+        std::sync::Arc::new(ScriptedAuthorJudge::new(
+            |entry, _| serde_json::to_string(entry).unwrap(),
+            |_, _| true,
+        )),
+    )
+    .await
+    .expect("the normal whole-set acceptance publish leaves the old skeleton pending");
+    let pin = set.pin();
+    assert!(pin.skeleton_digest.is_none());
+    assert!(pin.skeleton_gate.is_none());
+    assert!(set.tasks.join(TASK_SKELETON_FILE).is_file());
+    assert!(set.tasks.join(TASK_SKELETON_LOCK_FILE).is_file());
+    let launch = crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+        set.project.path(),
+        &set.prd,
+        &set.tasks,
+    )
+    .expect("launch treats the prior skeleton as pending");
+    assert!(launch.acceptance);
+    assert!(!launch.skeleton);
+    let pin_path =
+        crate::command::workflow_task_set::acceptance_pin_path(set.project.path(), &set.tasks);
+    crate::command::workflow_task_set::publish::verify_recovered_chain(&pin_path, &set.tasks)
+        .expect("legacy chain verification accepts the same pending state");
+}
+
+#[tokio::test]
+async fn reauthor_accepts_pending_prior_skeleton_then_the_skeleton_phase_refreezes_it() {
+    let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", true)]);
+    leave_prior_skeleton_pending(&set).await;
+    let stale_pin = set.pin();
+    assert!(crate::command::workflow_skeleton_pending::is_pending(&set.tasks, &stale_pin).unwrap());
+    let named = ids(&["AC-F-001"]);
+    let client = accept_all("jq -e '.a == true' out.json");
+    reauthor_and_republish(&client, request(&set, &named), &scope(&set))
+        .await
+        .expect("per-check repair accepts the intact prior skeleton as pending");
+    let pending_pin = set.pin();
+    assert!(
+        crate::command::workflow_skeleton_pending::is_pending(&set.tasks, &pending_pin).unwrap()
+    );
+    let pin_path =
+        crate::command::workflow_task_set::acceptance_pin_path(set.project.path(), &set.tasks);
+    crate::command::workflow_task_set::publish::verify_recovered_chain(&pin_path, &set.tasks)
+        .expect("legacy chain verification accepts the republished pending state");
+    crate::command::workflow_task_set::freeze_skeleton(set.project.path(), &set.tasks, &set.prd)
+        .expect("the ordinary skeleton phase re-freezes the pending skeleton");
+    let frozen_pin = set.pin();
+    assert!(
+        !crate::command::workflow_skeleton_pending::is_pending(&set.tasks, &frozen_pin).unwrap()
+    );
+    validate_full_chain(&set.tasks, &frozen_pin).expect("the full chain is frozen again");
+}
+
+#[tokio::test]
+async fn a_pending_skeleton_that_does_not_match_its_lock_stays_refused() {
+    let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", true)]);
+    leave_prior_skeleton_pending(&set).await;
+    std::fs::write(set.tasks.join(TASK_SKELETON_FILE), b"tampered skeleton").unwrap();
+
+    let launch = crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+        set.project.path(),
+        &set.prd,
+        &set.tasks,
+    )
+    .err()
+    .expect("launch refuses skeleton bytes that do not match their lock")
+    .to_string();
+    assert!(launch.contains("does not verify"), "{launch}");
+
+    let pin_path =
+        crate::command::workflow_task_set::acceptance_pin_path(set.project.path(), &set.tasks);
+    let legacy =
+        crate::command::workflow_task_set::publish::verify_recovered_chain(&pin_path, &set.tasks)
+            .expect_err("legacy verification refuses the mismatched skeleton");
+    assert!(legacy.contains("does not verify"), "{legacy}");
+
+    let named = ids(&["AC-F-001"]);
+    let client = accept_all("jq -e '.a == true' out.json");
+    let reauthor = reauthor_and_republish(&client, request(&set, &named), &scope(&set))
+        .await
+        .err()
+        .expect("per-check repair refuses the mismatched skeleton")
+        .to_string();
+    assert!(reauthor.contains("does not verify"), "{reauthor}");
+}
+
 #[tokio::test]
 async fn an_enforce_frozen_chain_republishes_under_enforce() {
     let set = frozen_set_in(

@@ -93,14 +93,16 @@ pub(super) fn inspect(
             skeleton_lock_path.exists(),
             pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some(),
         ];
-        match skeleton_state {
-            [false, false, false] => {
+        let pending_skeleton =
+            crate::command::workflow_skeleton_pending::is_pending(tasks_root, &pin)?;
+        match (pending_skeleton, skeleton_state) {
+            (false, [false, false, false]) => {
                 report.push_str(
                     "  acceptance freeze is complete; task skeleton has not been authored, so skeleton equality is NOT ANALYSED\n",
                 );
                 skeleton_from_tasks(&tasks, pin.acceptance_digest)
             }
-            [true, false, false] => {
+            (false, [true, false, false]) => {
                 let draft = read_draft_skeleton(&skeleton_path)?;
                 validate_skeleton(&draft, &pin.acceptance_digest)
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -121,7 +123,7 @@ pub(super) fn inspect(
                 );
                 draft
             }
-            [true, true, true] => {
+            (false, [true, true, true]) => {
                 let frozen = validate_full_chain(tasks_root, &pin)
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 if let Some(stamp) = &pin.skeleton_gate {
@@ -153,7 +155,35 @@ pub(super) fn inspect(
                 }
                 frozen
             }
-            _ => {
+            (true, [true, true, false]) => {
+                let mut draft = read_draft_skeleton(&skeleton_path)?;
+                draft.acceptance_digest = pin.acceptance_digest.clone();
+                validate_skeleton(&draft, &pin.acceptance_digest)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                blockers.extend(
+                    validate_skeleton_set(&draft, &expected_obligations)
+                        .into_iter()
+                        .map(|finding| {
+                            let text = format!("{}: {}", finding.field, finding.message);
+                            deterministic
+                                .entry(text.clone())
+                                .or_default()
+                                .push_back(finding.identity);
+                            text
+                        }),
+                );
+                report.push_str(
+                    "  intact skeleton from the prior acceptance is linted as an unfrozen draft; the current acceptance still needs `workflow freeze-skeleton`\n",
+                );
+                draft
+            }
+            (true, _) => {
+                return Err(anyhow::anyhow!(
+                    "pending skeleton predicate disagreed with its artifact state beside {}",
+                    tasks_root.display()
+                ));
+            }
+            (false, _) => {
                 return Err(anyhow::anyhow!(
                     "partial skeleton freeze beside {}: file={}, lock={}, pin={}; restore a matching frozen triple, keep only an unlocked draft file, or re-run `workflow freeze-skeleton`",
                     tasks_root.display(),
@@ -292,7 +322,7 @@ fn validate_acceptance_phase(
     Ok((validated, obligations))
 }
 
-fn read_draft_skeleton(path: &Path) -> Result<TaskSkeleton> {
+pub(super) fn read_draft_skeleton(path: &Path) -> Result<TaskSkeleton> {
     serde_json::from_slice(
         &std::fs::read(path).with_context(|| format!("reading draft skeleton {}", path.display()))?,
     )

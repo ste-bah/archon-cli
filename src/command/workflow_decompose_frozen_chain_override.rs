@@ -172,7 +172,10 @@ pub(super) fn freeze_override_decision(
             later.call.id
         )));
     }
-    if !freeze_record_status_allows_override(record.status, record.invalidated_by.is_some()) {
+    let recorded_logic_holds = recorded_gate_logic_holds(record, catalog)?;
+    if !freeze_record_status_allows_override(record.status, record.invalidated_by.is_some())
+        && recorded_logic_holds
+    {
         return Ok(OverrideDecision::keep(format!(
             "judged attempt {id} status={} invalidated={}",
             status_text(record.status),
@@ -330,59 +333,74 @@ pub(super) fn freeze_outcome_decision(
         .get("gateEnvelope")
         .and_then(|envelope| envelope.get("policy_findings"))
         .and_then(serde_json::Value::as_array);
-    match findings {
-        None => {
-            return Ok(OverrideDecision::keep(format!(
-                "judged attempt {id} gate envelope carries no policy_findings"
-            )));
-        }
-        Some(findings) if !findings.is_empty() => {
-            return Ok(OverrideDecision::keep(format!(
-                "judged attempt {id} has {} open finding(s)",
-                findings.len()
-            )));
-        }
-        Some(_) => {}
-    }
+    let Some(findings) = findings else {
+        return Ok(OverrideDecision::keep(format!(
+            "judged attempt {id} gate envelope carries no policy_findings"
+        )));
+    };
     use super::super::workflow_host_command_logic as logic;
     let capability = capability_of(record).unwrap_or_default();
     let (versions, digests) = (logic::versions(), logic::digests());
-    let holds = super::super::workflow_host_command_exec::identity::recorded_logic_holds(
-        catalog,
-        &versions,
-        &digests,
-        logic::THIS_BUILD,
-        record,
-    )?;
     let current = versions
         .get(capability)
         .copied()
         .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic version"))?;
-    let stamp = |key: &str| {
-        outcome
-            .get(key)
-            .map_or_else(|| "none".to_string(), |value| value.to_string())
-    };
+    let current_digest = digests
+        .get(capability)
+        .map(|(digest, _)| digest.as_str())
+        .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic digest"))?;
+    let recorded_digest = outcome
+        .get(logic::LOGIC_DIGEST_STAMP)
+        .and_then(serde_json::Value::as_str);
+    let holds = recorded_gate_logic_holds(record, catalog)?;
     let logic_text = format!(
-        "logicVersion recorded={} current={current} build_bound={}",
-        stamp(logic::LOGIC_VERSION_STAMP),
-        digests.get(capability).is_some_and(|(_, bound)| *bound)
+        "logicVersion recorded={} current={current} logicDigest recorded={} current={current_digest}",
+        outcome
+            .get(logic::LOGIC_VERSION_STAMP)
+            .map_or_else(|| "none".to_string(), ToString::to_string),
+        recorded_digest.unwrap_or("none"),
     );
-    Ok(if holds {
-        OverrideDecision {
-            logic_holds: Some(true),
-            ..OverrideDecision::keep(format!(
-                "judged attempt {id} replays under this build's logic ({logic_text})"
-            ))
-        }
-    } else {
-        OverrideDecision::verify(
+    if !holds {
+        return Ok(OverrideDecision::verify(
             format!(
-                "judged attempt {id} accepted with 0 findings, published, matches disk; this build's logic would not replay it ({logic_text})"
+                "judged attempt {id} gate logic changed; re-run the phase under current logic ({logic_text})"
             ),
-            holds,
-        )
+            false,
+        ));
+    }
+    if !findings.is_empty() {
+        return Ok(OverrideDecision::keep(format!(
+            "judged attempt {id} has {} open finding(s)",
+            findings.len()
+        )));
+    }
+    Ok(OverrideDecision {
+        logic_holds: Some(true),
+        ..OverrideDecision::keep(format!(
+            "judged attempt {id} replays under this build's logic ({logic_text})"
+        ))
     })
+}
+
+fn recorded_gate_logic_holds(
+    record: &WorkflowV2CallRecord,
+    catalog: &archon_workflow::CommandCapabilityCatalog,
+) -> Result<bool> {
+    use super::super::workflow_host_command_logic as logic;
+    let capability = capability_of(record).unwrap_or_default();
+    let (versions, digests) = (logic::versions(), logic::digests());
+    if !digests.contains_key(capability) {
+        return Ok(false);
+    }
+    let executor_matches =
+        super::super::workflow_host_command_exec::identity::recorded_logic_holds(
+            catalog,
+            &versions,
+            &digests,
+            logic::THIS_BUILD,
+            record,
+        )?;
+    Ok(executor_matches)
 }
 
 fn status_text(status: WorkflowV2Status) -> String {
