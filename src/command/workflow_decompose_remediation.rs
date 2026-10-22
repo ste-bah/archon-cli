@@ -23,6 +23,15 @@ pub(crate) struct Ledger {
     pub subjects: Vec<String>,
 }
 
+/// One resume can heal stale consumed subjects alongside the newest pending
+/// report. Only `pending` is eligible for finish-time consumption.
+#[derive(Debug, Clone)]
+pub(crate) struct ResumePlan {
+    pub ledger: Ledger,
+    pub consumed: Vec<Ledger>,
+    pub pending: Option<Ledger>,
+}
+
 pub(crate) fn deduplicate_subjects(subjects: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut seen = HashSet::new();
     subjects
@@ -60,118 +69,9 @@ pub(crate) fn is_consumed(run_dir: &Path, report_id: &str) -> Result<bool> {
         .any(|row| row["report_id"].as_str() == Some(report_id)))
 }
 
-/// A consumed ledger is reusable only while the live pin still proves the
-/// ledger's check repairs. A whole-set publication can reset republish
-/// lineage; in that case the records cannot distinguish a repaired entry
-/// from an older version, so resume sends the named entries through the
-/// ordinary judge-and-host-proof republish path again.
-fn consumed_ledger_findings(
-    project_root: &Path,
-    task_root: &Path,
-    ledger: &Ledger,
-) -> Result<std::collections::BTreeMap<String, String>> {
-    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project_root, task_root);
-    let pin = std::fs::read(&pin_path).ok().and_then(|bytes| {
-        serde_json::from_slice::<archon_workflow::task_set_contract::AcceptancePin>(&bytes).ok()
-    });
-    let contract_path =
-        task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-    let contract_bytes = std::fs::read(&contract_path)?;
-    let current_digest = archon_workflow::task_set_contract::content_digest(&contract_bytes);
-    let current: archon_workflow::task_set_contract::AcceptanceContract =
-        serde_json::from_slice(&contract_bytes)?;
-    let Some(pin) = pin else {
-        return Ok(ledger.subjects.iter().map(|id| (
-            id.clone(), format!("consumed reverify ledger {} names this check, but current pin {} is missing or unreadable; the current repaired bytes cannot be proven from pin lineage or filed chain history, so the check is being re-authored", ledger.report_id, pin_path.display())
-        )).collect());
-    };
-    let history = archon_workflow::task_set_lineage::ChainHistory::for_pin(&pin_path);
-    let mut findings = std::collections::BTreeMap::new();
-    let lineage_ends_at_pin = pin
-        .lineage
-        .last()
-        .is_some_and(|link| link.to == pin.identity());
-    for id in &ledger.subjects {
-        let current_entry = current
-            .acceptance
-            .iter()
-            .chain(&current.supplementary)
-            .find(|entry| &entry.id == id);
-        let mut proof = None;
-        let mut proves_current_repair = false;
-        if lineage_ends_at_pin {
-            for transition in pin
-                .lineage
-                .iter()
-                .filter(|link| link.reauthored_ids.contains(id))
-            {
-                let before = history
-                    .get(&transition.from.acceptance_digest)
-                    .ok()
-                    .flatten()
-                    .and_then(|bytes| {
-                        serde_json::from_slice::<
-                            archon_workflow::task_set_contract::AcceptanceContract,
-                        >(&bytes)
-                        .ok()
-                    });
-                let after = if transition.to.acceptance_digest == current_digest {
-                    Some(current.clone())
-                } else {
-                    history
-                        .get(&transition.to.acceptance_digest)
-                        .ok()
-                        .flatten()
-                        .and_then(|bytes| {
-                            serde_json::from_slice::<
-                                archon_workflow::task_set_contract::AcceptanceContract,
-                            >(&bytes)
-                            .ok()
-                        })
-                };
-                let before_entry = before.as_ref().and_then(|contract| {
-                    contract
-                        .acceptance
-                        .iter()
-                        .chain(&contract.supplementary)
-                        .find(|entry| &entry.id == id)
-                });
-                let after_entry = after.as_ref().and_then(|contract| {
-                    contract
-                        .acceptance
-                        .iter()
-                        .chain(&contract.supplementary)
-                        .find(|entry| &entry.id == id)
-                });
-                if before_entry
-                    .zip(after_entry)
-                    .is_some_and(|(before, after)| before != after)
-                    && current_entry == before_entry
-                {
-                    proof = Some(format!(
-                        "current entry {id} matches the replaced version in transition {} -> {}, while the filed successor records different bytes",
-                        transition.from.acceptance_digest, transition.to.acceptance_digest
-                    ));
-                    break;
-                }
-                if pin.acceptance_digest == current_digest
-                    && before_entry
-                        .zip(after_entry)
-                        .is_some_and(|(before, after)| before != after)
-                    && current_entry == after_entry
-                {
-                    proves_current_repair = true;
-                }
-            }
-        }
-        if let Some(evidence) = proof {
-            findings.insert(id.clone(), format!("consumed reverify ledger {} and pin lineage prove a reverted entry: {evidence}; re-authoring it through judge and host proof", ledger.report_id));
-        } else if !proves_current_repair {
-            findings.insert(id.clone(), format!("consumed reverify ledger {} names this check, but current contract digest {current_digest} has no matching republish lineage proving the repaired entry; the available pin/history evidence is insufficient to establish its bytes, so re-authoring it through judge and host proof", ledger.report_id));
-        }
-    }
-    Ok(findings)
-}
+#[path = "workflow_decompose_remediation_lineage.rs"]
+mod lineage;
+use lineage::consumed_ledger_findings;
 
 fn validate_subjects(
     run_dir: &Path,
@@ -214,6 +114,7 @@ pub(crate) fn force_subjects(
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn reauthor_check_subjects_on_resume(
     (project_root, prd_path, task_root, run_dir): (&Path, &Path, &Path, &Path),
     ledger: Option<&Ledger>,
@@ -305,10 +206,13 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
     Ok(())
 }
 
+#[path = "workflow_decompose_remediation_reauthor.rs"]
+mod reauthor;
+use reauthor::reauthor_resume_plan;
 pub(crate) async fn prepare_resume_checks(
     (project_root, prd_path, task_root, run_dir): (&Path, &Path, &Path, &Path),
     target_root: Option<&Path>,
-    ledger: Option<&Ledger>,
+    plan: Option<&ResumePlan>,
     client: &dyn archon_workflow::WorkflowLlmClient,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<()> {
@@ -318,13 +222,17 @@ pub(crate) async fn prepare_resume_checks(
         target_root,
         run_dir,
     )?;
-    reauthor_check_subjects_on_resume(
-        (project_root, prd_path, task_root, run_dir),
-        ledger,
-        client,
-        cargo_limits,
-    )
-    .await
+    if let Some(plan) = plan {
+        reauthor_resume_plan(
+            (project_root, prd_path, task_root, run_dir),
+            plan,
+            client,
+            cargo_limits,
+        )
+        .await
+    } else {
+        Ok(())
+    }
 }
 
 fn advance_forced_author_ordinals(
@@ -370,35 +278,61 @@ pub(crate) fn prepare(
     runtime: &archon_workflow::FixedRunIdentityV1,
     criteria: &std::collections::BTreeMap<String, String>,
     requirement_texts: &std::collections::BTreeMap<String, String>,
-) -> Result<Option<Ledger>> {
+) -> Result<Option<ResumePlan>> {
     let latest = crate::command::workflow_decompose_latest_report::latest_report(store, run_id)?;
-    let ledger = match latest.as_ref() {
-        Some(latest) => read(run_dir, &latest.id)?,
-        None => None,
-    };
-    if let Some(latest) = latest
-        && latest.outcome == "needs_remediation"
-        && ledger
-            .as_ref()
-            .is_none_or(|ledger| ledger.report_id != latest.id)
-    {
-        return Err(anyhow!(
-            "latest reverify report {} needs remediation but its matching ledger is missing",
-            latest.id
-        ));
-    }
-    if let Some(ledger) = ledger.as_ref() {
-        if is_consumed(run_dir, &ledger.report_id)?
-            && consumed_ledger_findings(
-                Path::new(&runtime.project_root_identity),
-                Path::new(&runtime.task_root_identity),
-                ledger,
-            )?
-            .is_empty()
-        {
-            arguments["forceBodySubjects"] = serde_json::json!([]);
-            return Ok(None);
+    let consumed_path = run_dir.join("decomposition/reverify/consumed.jsonl");
+    let consumed_ids = match std::fs::read_to_string(&consumed_path) {
+        Ok(text) => text
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|row| row["report_id"].as_str().map(str::to_string))
+            .collect::<std::collections::BTreeSet<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", consumed_path.display()));
         }
+    };
+    let mut consumed = Vec::new();
+    let mut selected = Vec::new();
+    for report_id in &consumed_ids {
+        let ledger = read(run_dir, report_id)?.ok_or_else(|| {
+            anyhow!(
+                "consumed reverify report {} has no remediation ledger",
+                report_id
+            )
+        })?;
+        let findings = consumed_ledger_findings(
+            Path::new(&runtime.project_root_identity),
+            Path::new(&runtime.task_root_identity),
+            &ledger,
+        )?;
+        if !findings.is_empty() {
+            selected.extend(findings.keys().cloned());
+            consumed.push(ledger);
+        }
+    }
+    let mut pending = None;
+    if let Some(latest) = latest.filter(|latest| latest.outcome == "needs_remediation") {
+        if !consumed_ids.contains(&latest.id) {
+            let ledger = read(run_dir, &latest.id)?.ok_or_else(|| anyhow!("latest reverify report {} needs remediation but its matching ledger is missing", latest.id))?;
+            selected.extend(ledger.subjects.iter().cloned());
+            pending = Some(ledger);
+        }
+    }
+    selected = deduplicate_subjects(selected);
+    if selected.is_empty() {
+        arguments["forceBodySubjects"] = serde_json::json!([]);
+        return Ok(None);
+    }
+    let ledger = Ledger {
+        report_id: pending
+            .as_ref()
+            .map(|l| l.report_id.clone())
+            .or_else(|| consumed.first().map(|l| l.report_id.clone()))
+            .unwrap_or_default(),
+        subjects: selected,
+    };
+    {
         let skeleton: archon_workflow::task_skeleton::TaskSkeleton =
             serde_json::from_slice(&std::fs::read(
                 Path::new(&runtime.task_root_identity)
@@ -420,8 +354,8 @@ pub(crate) fn prepare(
             .chain(&contract.supplementary)
             .map(|entry| entry.id.clone())
             .collect::<std::collections::BTreeSet<_>>();
-        validate_subjects(run_dir, ledger, &task_ids, &check_ids)?;
-        force_subjects(arguments, Some(ledger), &task_ids);
+        validate_subjects(run_dir, &ledger, &task_ids, &check_ids)?;
+        force_subjects(arguments, Some(&ledger), &task_ids);
         let missing_phase_seed = arguments
             .get("phaseSeed")
             .is_none_or(serde_json::Value::is_null);
@@ -434,7 +368,7 @@ pub(crate) fn prepare(
                     criteria,
                     requirement_texts,
                     &arguments["frozenChain"],
-                    Some(ledger),
+                    Some(&ledger),
                 )
             })
             .transpose()?
@@ -445,11 +379,13 @@ pub(crate) fn prepare(
                 crate::command::workflow_decompose_seed::seeded_arguments(arguments, Some(&seed));
             arguments["frozenChain"] = frozen_chain;
         }
-        advance_forced_author_ordinals(run_dir, arguments, ledger)?;
-    } else {
-        force_subjects(arguments, None, &Default::default());
+        advance_forced_author_ordinals(run_dir, arguments, &ledger)?;
     }
-    Ok(ledger)
+    Ok(Some(ResumePlan {
+        ledger,
+        consumed,
+        pending,
+    }))
 }
 
 pub(crate) fn append_consumed(run_dir: &Path, ledger: &Ledger) -> Result<()> {
@@ -475,11 +411,13 @@ pub(crate) fn append_consumed(run_dir: &Path, ledger: &Ledger) -> Result<()> {
 
 pub(crate) fn finish_resume(
     run_dir: &Path,
-    ledger: Option<Ledger>,
+    plan: Option<ResumePlan>,
     result: String,
 ) -> Result<String> {
-    if let Some(ledger) = ledger {
-        append_consumed(run_dir, &ledger)?;
+    if let Some(plan) = plan {
+        if let Some(pending) = plan.pending {
+            append_consumed(run_dir, &pending)?;
+        }
     }
     Ok(result)
 }
@@ -487,10 +425,10 @@ pub(crate) fn finish_resume(
 pub(crate) fn finish_resume_for_store(
     store: &archon_workflow::WorkflowStore,
     run_id: &str,
-    ledger: Option<Ledger>,
+    plan: Option<ResumePlan>,
     result: String,
 ) -> Result<String> {
-    finish_resume(&store.run_dir(run_id), ledger, result)
+    finish_resume(&store.run_dir(run_id), plan, result)
 }
 
 #[cfg(test)]

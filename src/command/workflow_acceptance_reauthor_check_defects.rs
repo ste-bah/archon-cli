@@ -2,6 +2,21 @@
 
 use super::*;
 
+fn lexical_normalize(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
 /// A candidate with a host-verifiable defect never reaches the judge.
 pub(super) fn check_defects(
     working: &AcceptanceContract,
@@ -27,9 +42,10 @@ pub(super) fn check_defects(
             })
         {
             let target = selected.join(&named.path);
-            let Ok(target) = archon_shell::paths::canonicalize(&target) else {
-                continue;
-            };
+            let lexical_target = selected_canonical
+                .as_ref()
+                .map(|root| lexical_normalize(&root.join(&named.path)));
+            let canonical_target = archon_shell::paths::canonicalize(&target).ok();
             let project_root = archon_shell::paths::canonicalize(&scope.project_root).ok();
             let repository_root = archon_shell::paths::canonicalize(&scope.repository_root).ok();
             let other_root = [
@@ -39,7 +55,13 @@ pub(super) fn check_defects(
             .into_iter()
             .find(|(root, _)| {
                 root.is_some_and(|root| {
-                    Some(root) != selected_canonical.as_ref() && target.starts_with(root)
+                    Some(root) != selected_canonical.as_ref()
+                        && (canonical_target
+                            .as_ref()
+                            .is_some_and(|target| target.starts_with(root))
+                            || lexical_target
+                                .as_ref()
+                                .is_some_and(|target| target.starts_with(root)))
                 })
             });
             if let Some((_, label)) = other_root {

@@ -229,9 +229,9 @@ fn refresh_acceptance_carried_entries(
         ..
     }) = seed.subjects.get_mut("acceptance")
     {
-        // A reply remains an overlay unless the run's later reverify lineage
-        // names that subject as repaired and the current contract supplies its
-        // committed bytes. Unrelated whole-set freezes do not supersede replies.
+        // A reply remains an overlay unless a consumed or latest pending
+        // reverify lineage names that subject as repaired and the current
+        // contract supplies its committed bytes.
         let mut published = std::collections::BTreeMap::<
             String,
             Vec<(chrono::DateTime<chrono::FixedOffset>, serde_json::Value)>,
@@ -319,7 +319,8 @@ fn reverify_report_publications(
             return Err(error).with_context(|| format!("reading {}", events_path.display()));
         }
     };
-    let mut latest = None;
+    let mut reports = std::collections::BTreeMap::new();
+    let mut latest_report_id = None;
     for line in events.lines() {
         let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -334,32 +335,58 @@ fn reverify_report_publications(
                 continue;
             };
             if let Ok(at) = chrono::DateTime::parse_from_rfc3339(timestamp) {
-                latest = Some((report_id.to_string(), at));
+                reports.insert(report_id.to_string(), at);
+                latest_report_id = Some(report_id.to_string());
             }
         }
     }
-    let Some((report_id, at)) = latest else {
-        return Ok(Vec::new());
-    };
-    let report_path = run_root
-        .join("decomposition/reverify")
-        .join(format!("remediation-{report_id}.json"));
-    let bytes = match std::fs::read(&report_path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+    let consumed_path = run_root.join("decomposition/reverify/consumed.jsonl");
+    let consumed = match std::fs::read_to_string(&consumed_path) {
+        Ok(consumed) => consumed
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|row| row["report_id"].as_str().map(str::to_string))
+            .collect::<std::collections::BTreeSet<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
         Err(error) => {
-            return Err(error).with_context(|| format!("reading {}", report_path.display()));
+            return Err(error).with_context(|| format!("reading {}", consumed_path.display()));
         }
     };
-    let report: serde_json::Value = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parsing {}", report_path.display()))?;
-    Ok(report["subjects"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .map(|id| (id.to_string(), at))
-        .collect())
+    let selected = reports
+        .keys()
+        .filter(|report_id| {
+            consumed.contains(*report_id) || Some(report_id.as_str()) == latest_report_id.as_deref()
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut publications = Vec::new();
+    for report_id in selected {
+        let at = reports[&report_id];
+        let report_path = run_root
+            .join("decomposition/reverify")
+            .join(format!("remediation-{report_id}.json"));
+        let bytes = match std::fs::read(&report_path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading {}", report_path.display()));
+            }
+        };
+        let report: serde_json::Value = serde_json::from_slice(&bytes)
+            .with_context(|| format!("parsing {}", report_path.display()))?;
+        publications.extend(
+            report["subjects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .map(|id| (id.to_string(), at)),
+        );
+    }
+    Ok(publications)
 }
 
 #[cfg(test)]

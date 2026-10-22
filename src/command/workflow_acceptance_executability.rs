@@ -197,6 +197,8 @@ pub(crate) struct HostProbe {
     reuse_audit: Mutex<BTreeMap<String, ReuseAudit>>,
     /// The tree the checks being repaired ran on, and how each fared there.
     failed_tree: Mutex<Option<baseline::FailedTree>>,
+    #[cfg(test)]
+    injected_prove_run: Mutex<Option<(repairs::TreeRun, mutation::Markers)>>,
     /// Where the probe's own hermetic copies are made.
     copy_parent: PathBuf,
     /// Reuse a verdict already observed at the same commit in this process:

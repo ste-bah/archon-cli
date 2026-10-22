@@ -78,6 +78,64 @@ fn baseline_passing_check_with_only_unattributed_reappearing_path_is_rejected() 
     assert!(!finding.contains("accepted as a regression guard"));
 }
 
+#[tokio::test]
+async fn prove_routes_a_passing_unknown_writer_reappearance_to_an_author_finding() {
+    let trees = super::super::probe_tests::trees(&[(
+        "AC-UNKNOWN-WRITER",
+        "test -f data/state.txt",
+        archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    )]);
+    let contract = trees.contract();
+    let probe = super::super::HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let digest = super::super::contract_digest(&contract).unwrap();
+    let ids = std::collections::BTreeSet::from(["AC-UNKNOWN-WRITER".to_string()]);
+    let refs = super::super::refs_for(&contract, &digest, &ids);
+    assert_eq!(refs.len(), 1, "accepted command reference is present");
+    let baseline = super::Baseline {
+        commit: trees.base.clone(),
+        repository: trees.repo.clone(),
+    };
+    let markers = super::mutation::Markers::new();
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        classification: None,
+        acceptance_id: "AC-UNKNOWN-WRITER".into(),
+        exit_code: Some(0),
+        quota_walk_count: 0,
+        stdout: format!(
+            "archon-mutation-state-{}: 0:original-recreated\narchon-mutation-status-{}: nonce:1:0:none\n",
+            markers.nonce(), markers.nonce()
+        )
+        .into_bytes(),
+        stderr: format!("{}0\n", markers.moved_prefix()).into_bytes(),
+        operational_error: None,
+        environment_note: None,
+    };
+    let evidence = super::hermetic::CheckEvidence {
+        result,
+        copy_layout: None,
+    };
+    let observed = super::repairs::TreeRun::known(&[evidence], "already observed");
+    assert!(observed.results.contains_key("AC-UNKNOWN-WRITER"));
+    probe.inject_prove_run(observed, markers);
+    let findings = super::prove(
+        &probe,
+        &baseline,
+        &contract,
+        &digest,
+        &refs,
+        &["AC-UNKNOWN-WRITER".into()],
+        &std::collections::BTreeMap::new(),
+    )
+    .await;
+    assert!(
+        findings
+            .get("AC-UNKNOWN-WRITER")
+            .is_some_and(|finding| finding.contains("writer is unknown")),
+        "{findings:?}; unproven={:?}",
+        super::super::ExecutabilityProbe::take_unproven(&probe)
+    );
+}
+
 #[test]
 fn undiscovered_input_finding_uses_only_generic_path_repair_text() {
     let finding = baseline_pass_finding_without_discovered_input("check-id", "0123456789ab");

@@ -54,6 +54,26 @@ fn a_parent_path_into_the_other_root_is_an_author_finding_before_judging() {
 }
 
 #[test]
+fn a_missing_parent_path_into_the_other_root_is_still_refused() {
+    let set = frozen_set(&[("AC-F-MISSING-ROOT", "test -f feature.txt", false)]);
+    let project = set.project.path().join("project");
+    let repo = set.project.path().join("repo");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&repo).unwrap();
+    let mut scope = scope(&set);
+    scope.project_root = project;
+    scope.repository_root = repo;
+    let mut candidate = set.contract().acceptance[0].clone();
+    candidate.check = AcceptanceCheck::Command {
+        command: "test -f ../repo/missing/Cargo.toml".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let finding = check_defects::check_defects(&set.contract(), candidate, &scope).unwrap_err();
+    assert!(finding.contains("../repo/missing/Cargo.toml"), "{finding}");
+    assert!(finding.contains("outside the selected root"), "{finding}");
+}
+
+#[test]
 fn an_existing_external_sibling_alias_is_not_a_cross_root_refusal() {
     let set = frozen_set(&[("AC-F-ALIAS", "test -f feature.txt", false)]);
     let alias = set.project.path().parent().unwrap().join("alias");

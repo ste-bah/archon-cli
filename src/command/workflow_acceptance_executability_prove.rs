@@ -106,7 +106,14 @@ pub(super) async fn prove(
             continue;
         }
         // One fresh copy per mutated check; a retry meets the same mutation.
-        let markers = probe.mutation_markers(baseline, contract, id);
+        #[cfg(test)]
+        let injected = probe.take_prove_run();
+        #[cfg(not(test))]
+        let injected: Option<(super::repairs::TreeRun, mutation::Markers)> = None;
+        let markers = injected
+            .as_ref()
+            .map(|(_, markers)| markers.clone())
+            .unwrap_or_else(|| probe.mutation_markers(baseline, contract, id));
         let inputs = BTreeMap::from([(id.clone(), names.clone())]);
         let move_paths = BTreeMap::from([(
             id.clone(),
@@ -160,18 +167,23 @@ pub(super) async fn prove(
         };
         let ids = BTreeSet::from([id.clone()]);
         let refs = super::refs_for(&mutated, &digest, &ids);
-        let run = super::repairs::tree_results_with_save_predicates(
-            probe,
-            baseline,
-            &mutated,
-            &digest,
-            &refs,
-            None,
-            false,
-            &save_predicates,
-            &mutation_plans,
-        )
-        .await;
+        let run = match injected {
+            Some((run, _)) => run,
+            None => {
+                super::repairs::tree_results_with_save_predicates(
+                    probe,
+                    baseline,
+                    &mutated,
+                    &digest,
+                    &refs,
+                    None,
+                    false,
+                    &save_predicates,
+                    &mutation_plans,
+                )
+                .await
+            }
+        };
         let result = run.results.get(id);
         if result.is_none() {
             probe.unproven(
@@ -320,7 +332,7 @@ pub(super) async fn prove(
                 );
             } else if bound_accepted && !crashed {
                 let move_states = markers.move_states(&result.result, &names);
-                let output = bounded_output_excerpt(&result.result);
+                let output = output_evidence(&result.result);
                 let basis = format!(
                     "accepted on the stored judge verdict because the check passed on the pre-implementation tree at {short}; mutation proof: inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
                     result.result.exit_code
@@ -348,7 +360,7 @@ pub(super) async fn prove(
             );
         } else {
             let move_states = markers.move_states(&result.result, &names);
-            let output = bounded_output_excerpt(&result.result);
+            let output = output_evidence(&result.result);
             let basis = format!(
                 "the check passed on the pre-implementation tree at {short} and failed on its own assertion with inputs moved; inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
                 result.result.exit_code
@@ -363,25 +375,12 @@ pub(super) async fn prove(
     findings
 }
 
-fn bounded_output_excerpt(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
-    const LIMIT: usize = 1024;
-    fn bounded(bytes: &[u8], limit: usize) -> (String, bool) {
-        let end = bytes.len().min(limit);
-        let mut end = end;
-        while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
-            end -= 1;
-        }
-        (
-            String::from_utf8_lossy(&bytes[..end]).into_owned(),
-            bytes.len() > end,
-        )
-    }
-    let (stdout, out_truncated) = bounded(&result.stdout, LIMIT / 2);
-    let (stderr, err_truncated) = bounded(&result.stderr, LIMIT / 2);
-    let mut excerpt = format!("stdout: {stdout}\nstderr: {stderr}");
-    if out_truncated || err_truncated {
-        excerpt.push_str("…[truncated]");
-    }
+fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
+    let excerpt = format!(
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
     // Capture already redacts host values; the excerpt is persisted in proof
     // records and reports, so secret-shaped values are redacted again here.
     archon_observability::redaction::redact_secret_values(&excerpt)

@@ -385,6 +385,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
                     report.id
                 )
             })?
+            .ledger
             .subjects
             .join(",");
         output.push_str(&format!("reverify_remediation_plan: reauthor_subjects={} rerun_set_gates=task-set-lint,requirements-trace\n", subjects));

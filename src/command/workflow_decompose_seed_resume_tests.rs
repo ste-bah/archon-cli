@@ -13,7 +13,7 @@ fn entry(id: &str, command: &str) -> serde_json::Value {
         "check": {"kind":"command", "command":command, "cwd":"project_root"},
         "covers": [],
         "gap_permitted": false,
-        "judgment": {"verdict":"accepted", "counterexample":"false case", "reason":"checked"}
+        "judgment": {"verdict":"accepted", "counterexample":"false case", "reason":"checked", "host_call_id":"fixture"}
     })
 }
 
@@ -23,11 +23,11 @@ fn live_shaped_candidate_filters_only_five_later_republished_replies() {
     // entries/supplementary; each committed receipt is associated with its
     // candidate by call id and committed_at.
     let repaired = [
-        "AC-DL-005",
-        "SUP-REQ-BT-003",
-        "SUP-REQ-DL-071",
-        "SUP-REQ-DL-095",
-        "SUP-REQ-DL-110",
+        "CHK-002",
+        "CHK-009",
+        "CHK-010",
+        "CHK-011",
+        "CHK-012",
     ];
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("decomposition/reverify")).unwrap();
@@ -208,4 +208,140 @@ fn acceptance_seed_refreshes_old_carried_entries_but_keeps_reauthored_reply_over
         seed.acceptance_refreshed_from_contract_digest.as_deref(),
         Some(digest.as_str())
     );
+}
+
+#[test]
+fn consumed_and_latest_pending_reports_filter_all_twelve_stale_replies() {
+    let repaired_7126 = [
+        "CHK-002",
+        "CHK-009",
+        "CHK-010",
+        "CHK-011",
+        "CHK-012",
+    ];
+    let pending_7281 = [
+        "CHK-001",
+        "CHK-003",
+        "CHK-004",
+        "CHK-005",
+        "CHK-006",
+        "CHK-007",
+        "CHK-008",
+    ];
+    let ids = repaired_7126
+        .into_iter()
+        .chain(pending_7281)
+        .collect::<Vec<_>>();
+    let temp = tempfile::tempdir().unwrap();
+    let reverify = temp.path().join("decomposition/reverify");
+    std::fs::create_dir_all(&reverify).unwrap();
+    std::fs::write(temp.path().join("events.jsonl"), concat!(
+        "{\"ts\":\"2026-10-22T01:39:00Z\",\"kind\":\"decomposition_reverified\",\"detail\":{\"outcome\":\"needs_remediation\",\"report_id\":\"reverify-7126-report\"}}\n",
+        "{\"ts\":\"2026-10-22T01:42:00Z\",\"kind\":\"decomposition_reverified\",\"detail\":{\"outcome\":\"needs_remediation\",\"report_id\":\"reverify-7281-report\"}}\n"
+    )).unwrap();
+    std::fs::write(
+        reverify.join("consumed.jsonl"),
+        "{\"report_id\":\"reverify-7126-report\"}\n",
+    )
+    .unwrap();
+    for (report_id, subjects) in [
+        ("reverify-7126-report", &repaired_7126[..]),
+        ("reverify-7281-report", &pending_7281[..]),
+    ] {
+        std::fs::write(
+            reverify.join(format!("remediation-{report_id}.json")),
+            serde_json::to_vec(&json!({"subjects":subjects})).unwrap(),
+        )
+        .unwrap();
+    }
+    let contract = json!({
+        "schema_version": 1, "prd":{"path":"PRD.md","digest":"prd"},
+        "gap_policy":{"permitted_acceptance_ids":[],"forbidden_phrases":[],"required_fields":[]},
+        "acceptance":ids.iter().map(|id| entry(id, "repaired check")).collect::<Vec<_>>(), "supplementary":[]
+    });
+    std::fs::write(
+        temp.path()
+            .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        serde_json::to_vec(&contract).unwrap(),
+    )
+    .unwrap();
+    let replies = ids.iter().map(|id| crate::command::workflow_decompose_seed::ReplySeed {
+        call_id: format!("acceptance-author-{id}-1"), id: id.to_string(),
+        text: json!({"id":id,"criterion":format!("criterion for {id}"),"check":{"kind":"command","command":"stale check"}}).to_string(),
+        criterion: Some(format!("criterion for {id}")),
+    }).collect::<Vec<_>>();
+    let records = ids
+        .iter()
+        .map(|id| {
+            archon_workflow::WorkflowV2CallRecord::new(
+                "run",
+                archon_workflow::WorkflowV2HostCall {
+                    id: format!("acceptance-author-{id}-1"),
+                    method: archon_workflow::WorkflowV2HostMethod::Agent,
+                    write_mode: None,
+                    options: Default::default(),
+                },
+                1,
+                "author".into(),
+                archon_workflow::WorkflowV2Result::accepted("reply"),
+                Vec::new(),
+            )
+        })
+        .collect::<Vec<_>>();
+    // Call timestamps are seeded before both report events.
+    let records = records
+        .into_iter()
+        .map(|mut record| {
+            record.started_at = "2026-10-21T16:00:00Z".into();
+            record
+        })
+        .collect::<Vec<_>>();
+    let mut seed = PhaseSeed {
+        schema_version: 1,
+        transition_index: 0,
+        runtime: archon_workflow::FixedRunIdentityV1 {
+            template_version: "t".into(),
+            starting_binary_revision: "b".into(),
+            script_digest: "s".into(),
+            catalog_digest: "c".into(),
+            project_root_identity: "p".into(),
+            prd_identity: "prd".into(),
+            task_root_identity: "tasks".into(),
+        },
+        derived_at: "now".into(),
+        author_ordinals: BTreeMap::new(),
+        pause_ordinals: BTreeMap::new(),
+        subjects: BTreeMap::from([(
+            "acceptance".into(),
+            SubjectSeed::Entries {
+                gates: Vec::new(),
+                candidate: None,
+                replies,
+                unreadable_replies: BTreeMap::new(),
+                carried_entries: ids
+                    .iter()
+                    .map(|id| entry(id, "stale carried check"))
+                    .collect(),
+                refuted_ids: Vec::new(),
+                invalid: BTreeMap::new(),
+                carried: 12,
+            },
+        )]),
+        acceptance_refreshed_from_contract_digest: None,
+        resume_frozen_chain: None,
+        pause_generation_floor: 0,
+        history_attempts: BTreeMap::new(),
+        event_id: None,
+    };
+    refresh_acceptance_carried_entries(temp.path(), temp.path(), &mut seed, &records).unwrap();
+    let Some(SubjectSeed::Entries {
+        replies,
+        carried_entries,
+        ..
+    }) = seed.subjects.get("acceptance")
+    else {
+        panic!("acceptance entries")
+    };
+    assert!(replies.is_empty(), "all twelve stale replies are filtered");
+    assert_eq!(carried_entries.len(), 12);
 }

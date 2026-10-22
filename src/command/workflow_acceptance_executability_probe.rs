@@ -5,6 +5,22 @@ use super::*;
 use crate::command::workflow_task_set::live_root;
 
 impl HostProbe {
+    #[cfg(test)]
+    pub(super) fn inject_prove_run(&self, run: repairs::TreeRun, markers: mutation::Markers) {
+        *self
+            .injected_prove_run
+            .lock()
+            .expect("injected prove run lock") = Some((run, markers));
+    }
+
+    #[cfg(test)]
+    pub(super) fn take_prove_run(&self) -> Option<(repairs::TreeRun, mutation::Markers)> {
+        self.injected_prove_run
+            .lock()
+            .expect("injected prove run lock")
+            .take()
+    }
+
     pub(crate) fn take_regression_guards(&self) -> BTreeMap<String, String> {
         std::mem::take(
             &mut *self

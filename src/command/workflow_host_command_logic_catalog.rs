@@ -116,7 +116,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // Re-pinned for #487: acceptance judge source changed with version 44.
-        sources_digest: "6d5043fb42ec94f00de0b42233fedd4cf761124c5e809da6ce1d1f5a0af7baac",
+        // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
+        sources_digest: "6b0fa0b952faed2dc2fd7b3a9adf2af4b7188955ac2eb8dfa98d1385f4bd2eb2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -142,7 +143,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #487 re-pin only: the judge's partial-decision handling is not used by skeleton freeze.
         // #493 re-pin only: shared freeze sources changed; these acceptance
         // mutation and publication rules do not change skeleton verdicts.
-        sources_digest: "6d5043fb42ec94f00de0b42233fedd4cf761124c5e809da6ce1d1f5a0af7baac",
+        // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
+        sources_digest: "6b0fa0b952faed2dc2fd7b3a9adf2af4b7188955ac2eb8dfa98d1385f4bd2eb2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -296,7 +298,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
         // 14: #491 an intact skeleton from an older acceptance no longer makes acceptance verification fail.
-        sources_digest: "c4217aafb3b7e30755920a4511fd1aa0fd42773f73cfbd704dcbf30563f4b5c0",
+        // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
+        sources_digest: "dad66ba7c355f4562b04aeedcd172a89a1ebfe1f8cc4c7436ec443598b248163",
         build_bound: true,
     },
     CapabilityLogic {
@@ -319,7 +322,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
-        sources_digest: "c4217aafb3b7e30755920a4511fd1aa0fd42773f73cfbd704dcbf30563f4b5c0",
+        // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
+        sources_digest: "dad66ba7c355f4562b04aeedcd172a89a1ebfe1f8cc4c7436ec443598b248163",
         build_bound: true,
     },
 ];

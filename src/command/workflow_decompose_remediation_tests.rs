@@ -62,6 +62,9 @@ async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_find
     assert!(client.prompts.lock().unwrap()[0].contains(finding));
 }
 
+#[path = "workflow_decompose_remediation_resume_plan_tests.rs"]
+mod resume_plan_tests;
+
 #[test]
 fn completed_run_with_ledger_builds_seed_and_other_cases_do_not() {
     let temp = tempfile::tempdir().unwrap();
@@ -357,7 +360,7 @@ fn paused_finding_report_prepares_resume_seed_and_rejects_unknown_consumed_subje
     )
     .unwrap();
 
-    assert_eq!(prepared.unwrap().subjects, vec!["TASK-A-001"]);
+    assert_eq!(prepared.unwrap().ledger.subjects, vec!["TASK-A-001"]);
     assert_eq!(
         arguments["forceBodySubjects"],
         serde_json::json!(["TASK-A-001"])

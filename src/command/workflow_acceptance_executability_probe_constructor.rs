@@ -24,6 +24,8 @@ impl HostProbe {
             baseline_failures: Mutex::new(BTreeMap::new()),
             reuse_audit: Mutex::new(BTreeMap::new()),
             failed_tree: Mutex::new(None),
+            #[cfg(test)]
+            injected_prove_run: Mutex::new(None),
             copy_parent: std::env::temp_dir(),
             memo: false,
             resume: crate::command::workflow_freeze_budget::FreezeResume::none(),
