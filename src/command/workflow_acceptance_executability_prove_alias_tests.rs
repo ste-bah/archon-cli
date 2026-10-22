@@ -1,14 +1,44 @@
 use super::*;
 
 #[test]
-fn repository_alias_diagnostic_keeps_the_named_path_and_site_copy_note() {
-    let diagnostics = describe_candidates(&[super::mutation::CandidateDiagnostic {
-        path: "../repository/tests/focused.rs".into(),
-        move_path: Some("/site/repository/tests/focused.rs".into()),
-        move_root: Some("/site/repository".into()),
-        exclusion: Some(super::mutation::ExclusionReason::RepositoryCopyAlias),
-    }]);
-    assert!(diagnostics.contains("../repository/tests/focused.rs"));
+fn setup_file_that_was_not_moved_has_no_site_copy_note() {
+    let candidate = super::mutation::CandidateDiagnostic {
+        path: "../project/setup.toml".into(),
+        move_path: Some("/site/project/setup.toml".into()),
+        move_root: Some("/site/project".into()),
+        exclusion: None,
+    };
+    let diagnostics = describe_candidates_with_run_state(
+        &[candidate],
+        &std::collections::BTreeSet::new(),
+        &[],
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeMap::new(),
+        true,
+    );
+    assert!(diagnostics.contains("../project/setup.toml"));
+    assert!(!diagnostics.contains("moved in the site copy"));
+}
+
+#[test]
+fn repository_alias_diagnostic_keeps_the_named_path_and_site_copy_note_when_moved() {
+    let path = "../repository/tests/focused.rs";
+    let diagnostics = describe_candidates_with_run_state(
+        &[super::mutation::CandidateDiagnostic {
+            path: path.into(),
+            move_path: Some("/site/repository/tests/focused.rs".into()),
+            move_root: Some("/site/repository".into()),
+            exclusion: Some(super::mutation::ExclusionReason::RepositoryCopyAlias),
+        }],
+        &std::collections::BTreeSet::new(),
+        &[],
+        &std::collections::BTreeSet::from([path.to_string()]),
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeMap::new(),
+        true,
+    );
+    assert!(diagnostics.contains(path));
     assert!(diagnostics.contains("moved in the site copy"));
 }
 

@@ -72,7 +72,7 @@ pub(crate) fn describe_candidates_with_run_state(
                 .exclusion
                 .map_or("eligible movable input", mutation::ExclusionReason::label)
         };
-        let path = if candidate.move_path.is_some() {
+        let path = if was_moved {
             format!("{} (moved in the site copy)", candidate.path)
         } else {
             candidate.path.clone()

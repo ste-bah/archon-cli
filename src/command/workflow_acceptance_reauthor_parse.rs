@@ -148,6 +148,35 @@ pub(super) fn candidate_entry_with_markers(
     markers: &[String],
 ) -> std::result::Result<AcceptanceCriterion, String> {
     use crate::command::workflow_task_set::acceptance_reply_blocks as blocks;
+    if blocks::unclosed_block_refusal_with_markers(reply, markers).is_some() {
+        return candidate_entry_with_markers_inner(reply, frozen, markers);
+    }
+    let array_wrapped = matches!(
+        blocks::extract_object_outcome_with_markers(reply, markers),
+        blocks::ObjectExtraction::ArrayWrappedEntry(_)
+    );
+    let result = candidate_entry_with_markers_inner(reply, frozen, markers);
+    match result {
+        Err(refusal) if array_wrapped => {
+            const ARRAY_SHAPE: &str = "return the entry object itself, not an array";
+            if refusal.starts_with("the reply is not an entry with id '") {
+                Err(ARRAY_SHAPE.into())
+            } else if refusal.starts_with(ARRAY_SHAPE) {
+                Err(refusal)
+            } else {
+                Err(format!("{ARRAY_SHAPE}; {refusal}"))
+            }
+        }
+        result => result,
+    }
+}
+
+fn candidate_entry_with_markers_inner(
+    reply: &str,
+    frozen: &AcceptanceCriterion,
+    markers: &[String],
+) -> std::result::Result<AcceptanceCriterion, String> {
+    use crate::command::workflow_task_set::acceptance_reply_blocks as blocks;
     if let Some(refusal) = blocks::unclosed_block_refusal_with_markers(reply, markers) {
         return Err(refusal);
     }
