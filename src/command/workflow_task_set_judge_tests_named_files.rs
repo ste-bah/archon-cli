@@ -41,8 +41,19 @@ fn named_file_judge_rules_cover_asserting_regression_guards() {
     }
     let rules = NAMED_FILES_INSTRUCTION.to_ascii_lowercase();
     for forbidden in [
-        "cargo", "rustc", "cargo.toml", "npm", "pnpm", "yarn", "pytest", "python",
-        "gradle", "mvn", "anthropic", "claude", "openai",
+        "cargo",
+        "rustc",
+        "cargo.toml",
+        "npm",
+        "pnpm",
+        "yarn",
+        "pytest",
+        "python",
+        "gradle",
+        "mvn",
+        "anthropic",
+        "claude",
+        "openai",
     ] {
         assert!(!rules.contains(forbidden), "found {forbidden:?} in {rules}");
     }

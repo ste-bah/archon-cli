@@ -463,6 +463,10 @@ mod tests;
 mod walk_tests;
 
 #[cfg(test)]
+#[path = "workflow_read_guard_run_store_walk_extra_tests.rs"]
+mod walk_extra_tests;
+
+#[cfg(test)]
 #[path = "workflow_read_guard_run_store_root_tests.rs"]
 mod root_tests;
 

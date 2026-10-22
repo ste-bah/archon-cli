@@ -75,7 +75,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // without creating a conflicting build target, changing scratch verdicts.
         // 44: #487 partial judge replies retain valid decisions and ask only
         // for missing checks, which can change the acceptance verdict set.
-        // 45: #488 named-file assertions make their regression guards valid; move-aside and duplicate-implementation states cannot refute them.
+        // 45: #488 named-file assertions make their regression guards valid; move-aside and duplicate-implementation states cannot refute them. #489 separator trimming preserves the actual sibling path for setup classification.
         version: 45,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -107,7 +107,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // Re-pinned for #487: acceptance judge source changed with version 44.
-        sources_digest: "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
+        sources_digest: "b19571f12604a25ed68fe84aa333cb64e6518c670838f1ff6d73487821fac105",
         build_bound: false,
     },
     CapabilityLogic {
@@ -131,7 +131,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // #487 re-pin only: the judge's partial-decision handling is not used by skeleton freeze.
-        sources_digest: "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
+        sources_digest: "b19571f12604a25ed68fe84aa333cb64e6518c670838f1ff6d73487821fac105",
         build_bound: false,
     },
     CapabilityLogic {
@@ -186,7 +186,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
-        sources_digest: "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
+        sources_digest: "ee44ab11416574a5f7dabaaba5b0fde4a6b5db1b0ab538847aceff0e8060e5e2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -230,7 +230,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
+        sources_digest: "ee44ab11416574a5f7dabaaba5b0fde4a6b5db1b0ab538847aceff0e8060e5e2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -262,7 +262,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 11: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 12: #486 scratch sibling aliases no longer manufacture a conflicting
         // build target during frozen acceptance reverify.
-        version: 12,
+        // 13: #489 scanned sibling paths drop argument/list separators, so an
+        // existing sibling is no longer reported missing; this can change verdicts.
+        version: 13,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -278,7 +280,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
-        sources_digest: "158cbcf0c1d38d3aa55e6368d09bbeee0fa22597d09e7b17bc7f8ea1805a7c56",
+        sources_digest: "435f97ae025d1830acd30e2a5b7492b2eab2f413482ff6d22ae138f96331a9a7",
         build_bound: true,
     },
     CapabilityLogic {
@@ -299,7 +301,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
-        sources_digest: "158cbcf0c1d38d3aa55e6368d09bbeee0fa22597d09e7b17bc7f8ea1805a7c56",
+        sources_digest: "435f97ae025d1830acd30e2a5b7492b2eab2f413482ff6d22ae138f96331a9a7",
         build_bound: true,
     },
 ];

@@ -124,13 +124,7 @@ async fn bounded_glob(
     pattern: &str,
     ctx: &ToolContext,
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
-    bounded_glob_with_state_roots(
-        base,
-        pattern,
-        ctx,
-        harness_state_roots(&ctx.working_dir),
-    )
-    .await
+    bounded_glob_with_state_roots(base, pattern, ctx, harness_state_roots(&ctx.working_dir)).await
 }
 
 #[cfg(test)]
@@ -149,16 +143,21 @@ async fn bounded_glob_with_state_roots(
     ctx: &ToolContext,
     state_roots: Vec<std::path::PathBuf>,
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let comparison_base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    let state_roots = state_roots
+        .into_iter()
+        .map(|root| root.canonicalize().unwrap_or(root))
+        .collect::<Vec<_>>();
     let full = base.join(pattern);
     let pattern_path = std::path::Path::new(pattern);
     let targeted_roots = state_roots
         .iter()
-        .map(|root| root_targeted_by_pattern(base, pattern_path, root))
+        .map(|root| root_targeted_by_pattern(&comparison_base, pattern_path, root))
         .collect::<Vec<_>>();
     let matcher = glob::Pattern::new(&full.to_string_lossy())
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     let fs = ctx.fs();
-    let (global_ignores, _) = ignore::gitignore::GitignoreBuilder::new(base).build_global();
+    let (global_ignores, _) = ignore::gitignore::GitignoreBuilder::new(&base).build_global();
     let inherited_ignores = ancestor_ignores(base, ctx).await;
     let mut pending = vec![(base.to_path_buf(), inherited_ignores)];
     let mut seen = std::collections::BTreeSet::new();
@@ -206,9 +205,7 @@ async fn bounded_glob_with_state_roots(
                 && state_roots
                     .iter()
                     .zip(&targeted_roots)
-                    .any(|(root, targeted)| {
-                        !targeted && archon_shell::paths::path_starts_with(&path, root)
-                    })
+                    .any(|(root, targeted)| !targeted && path_starts_with_canonical(&path, root))
                 && !ctx
                     .run_store
                     .as_ref()
@@ -226,8 +223,8 @@ async fn bounded_glob_with_state_roots(
                     .zip(&targeted_roots)
                     .any(|(root, targeted)| {
                         *targeted
-                            && (archon_shell::paths::path_starts_with(root, &path)
-                                || archon_shell::paths::path_starts_with(&path, root))
+                            && (path_starts_with_canonical(root, &path)
+                                || path_starts_with_canonical(&path, root))
                     });
             if !leads_to_owned_tree
                 && !leads_to_targeted_root
@@ -362,6 +359,12 @@ async fn repository_exclude_path(
         git_dir
     };
     Some(common_dir.join("info/exclude"))
+}
+
+fn path_starts_with_canonical(path: &std::path::Path, root: &std::path::Path) -> bool {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    archon_shell::paths::path_starts_with(&path, &root)
 }
 
 fn root_targeted_by_pattern(

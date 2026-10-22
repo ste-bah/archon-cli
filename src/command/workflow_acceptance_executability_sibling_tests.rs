@@ -98,6 +98,29 @@ fn a_missing_sibling_is_an_author_finding_with_path_and_check_id() {
 }
 
 #[test]
+fn quoted_comma_separated_manifest_argument_resolves_existing_sibling() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    let sibling_manifest = root.path().join("archon-cli/Cargo.toml");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(sibling_manifest.parent().unwrap()).unwrap();
+    std::fs::write(&sibling_manifest, "[package]\nname = \"archon-cli\"\n").unwrap();
+    let command =
+        "python3 -c 'run([\"cargo\", \"--manifest-path\", \"../archon-cli/Cargo.toml\", \"-p\"])'";
+    let contract: AcceptanceContract = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "prd": {"path":"p.md", "digest":"d"},
+        "gap_policy": {"permitted_acceptance_ids":[], "forbidden_phrases":[], "required_fields":[]},
+        "acceptance": [{"id":"AC-489", "criterion":"uses sibling manifest", "check":{"kind":"command", "command":command, "cwd":"project_root"}, "judgment":{"verdict":"accepted", "counterexample":"", "reason":"", "host_call_id":"test"}}],
+        "supplementary": []
+    })).unwrap();
+    let ids = BTreeSet::from(["AC-489".to_string()]);
+    assert!(
+        super::super::siblings::missing_for_checks(&project, &project, &contract, &ids,).is_empty()
+    );
+    assert!(sibling_manifest.is_file());
+}
+
+#[test]
 fn copied_root_names_follow_the_check_working_directory_and_existing_entries() {
     // EXPECTED before running: repository-root-relative sibling inputs that
     // really exist appear in the copied tree; absent sibling names do not.
