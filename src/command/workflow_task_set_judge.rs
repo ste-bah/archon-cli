@@ -15,8 +15,14 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 
 #[path = "workflow_task_set_judge_named_files.rs"]
 mod named_files;
+#[cfg(test)]
 use named_files::named_files;
 pub(super) use named_files::named_files_digest;
+use named_files::named_files_with_budget;
+
+#[path = "workflow_task_set_judge_rounds.rs"]
+mod rounds;
+use rounds::judge_prompted_with_roots;
 
 #[path = "workflow_task_set_judge_incomplete.rs"]
 mod incomplete;
@@ -75,6 +81,8 @@ pub(super) fn batched_judge_prompt_with_roots(
             });
         }
     }
+    let mut named_file_bytes_remaining =
+        archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     let checks = contract
         .acceptance
         .iter()
@@ -91,7 +99,11 @@ pub(super) fn batched_judge_prompt_with_roots(
             if !criterion.covers.is_empty() {
                 check["covers"] = serde_json::json!(criterion.covers);
             }
-            let files = named_files(criterion, &resolved_roots);
+            let files = named_files_with_budget(
+                criterion,
+                &resolved_roots,
+                &mut named_file_bytes_remaining,
+            );
             if !files.is_empty() {
                 check["named_files"] = serde_json::json!(files);
             }
@@ -117,7 +129,10 @@ pub(super) fn reply_is_complete(outcome: &WorkflowAgentOutcome) -> bool {
     matches!(ending(outcome), Ending::Complete)
 }
 
-pub(super) fn apply_judgments(contract: &mut AcceptanceContract, content: &str) -> Result<()> {
+pub(super) fn apply_judgments(
+    contract: &mut AcceptanceContract,
+    content: &str,
+) -> Result<BTreeSet<String>> {
     // The judge is a model too, and models package documents in prose and code
     // fences. The host decides what counts as the reply here exactly as it does
     // for an authored candidate, so one provider's habits cannot fail a freeze
@@ -147,9 +162,9 @@ pub(super) fn apply_judgments(contract: &mut AcceptanceContract, content: &str) 
         }
     }
     let actual: BTreeSet<_> = by_id.keys().cloned().collect();
-    if actual != expected {
+    let extra = actual.difference(&expected).cloned().collect::<Vec<_>>();
+    if !extra.is_empty() {
         let missing = expected.difference(&actual).cloned().collect::<Vec<_>>();
-        let extra = actual.difference(&expected).cloned().collect::<Vec<_>>();
         return Err(anyhow!(
             "acceptance judge decision ids do not match the contract: missing={missing:?}, extra={extra:?}; retry the full batch"
         ));
@@ -159,13 +174,15 @@ pub(super) fn apply_judgments(contract: &mut AcceptanceContract, content: &str) 
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
-        let decision = by_id.remove(&criterion.id).expect("exact id set checked");
+        let Some(decision) = by_id.remove(&criterion.id) else {
+            continue;
+        };
         criterion.judgment.verdict = decision.verdict;
         criterion.judgment.counterexample = decision.counterexample;
         criterion.judgment.reason = decision.reason;
         criterion.judgment.host_call_id = format!("acceptance-judge-batch:{}", criterion.id);
     }
-    Ok(())
+    Ok(expected.difference(&actual).cloned().collect())
 }
 
 pub(super) fn gate_stamp(mode: FreezeGateMode, findings: &[GateFinding]) -> FreezeGateStamp {
@@ -369,7 +386,7 @@ async fn judge_batch(
     roots: &JudgeRoots,
 ) -> Result<AcceptanceContract> {
     let task = batched_judge_prompt_with_roots(&contract, roots)?;
-    judge_prompted(client, contract, &task, model, validate, partial).await
+    judge_prompted_with_roots(client, contract, &task, model, validate, partial, roots).await
 }
 
 /// Ask `task` of the judge about exactly the entries of `contract`, and
@@ -384,88 +401,32 @@ pub(super) async fn judge_prompted(
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<AcceptanceContract> {
-    let mut messages = vec![serde_json::json!({"role":"user","content":task})];
-    let mut seen = BTreeSet::new();
-    let mut no_progress = 0usize;
-    let mut attempts = 0usize;
-    let mut last: String;
-    loop {
-        attempts += 1;
-        let content = match complete_reply(client, &messages, model, partial).await? {
-            Ok(content) => content,
-            Err(unusable) => {
-                last = unusable.clone();
-                let class = judge_error_class(&unusable);
-                if seen.insert(class) {
-                    no_progress = 0;
-                } else {
-                    no_progress += 1;
-                }
-                if no_progress >= JUDGE_NO_PROGRESS_WINDOW {
-                    break;
-                }
-                // `complete_reply` returns this path only when there is no
-                // complete reply to quote (for example, a truncation before
-                // JSON starts). Ask afresh; parsed rejections below preserve
-                // the actual assistant reply and exact validation error.
-                messages = vec![serde_json::json!({"role":"user","content":task})];
-                continue;
-            }
-        };
-        // A batch that parses but leaves a verdict field empty is the same kind
-        // of slip as one that will not parse, so it is re-asked rather than
-        // ending the freeze: the judged shape is what makes a batch usable.
-        let mut attempt = contract.clone();
-        let judged = apply_judgments(&mut attempt, &content).and_then(|()| validate(&attempt));
-        // An unusable reply is spent with its credit. A usable reply keeps
-        // its continuation until JudgeStore durably saves the verdicts.
-        if judged.is_err()
-            && let Some(partial) = partial
-        {
-            partial.spent();
-        }
-        match judged {
-            Ok(()) => {
-                for entry in attempt
-                    .acceptance
-                    .iter_mut()
-                    .chain(&mut attempt.supplementary)
-                {
-                    entry.judgment.sampling = Some(serde_json::json!({
-                        "temperature": 0.0, "model": client.resolve_model_alias(model),
-                        "provider": client.provider_id(),
-                    }));
-                }
-                return Ok(attempt);
-            }
-            Err(error) => {
-                last = format!("{error:#}");
-                let class = judge_error_class(&last);
-                if seen.insert(class) {
-                    no_progress = 0;
-                } else {
-                    no_progress += 1;
-                }
-                if no_progress >= JUDGE_NO_PROGRESS_WINDOW {
-                    break;
-                }
-                let said = if content.trim().is_empty() {
-                    "(an empty reply)"
-                } else {
-                    &content
-                };
-                messages = vec![
-                    serde_json::json!({"role":"user","content":task}),
-                    serde_json::json!({"role":"assistant","content":said}),
-                    serde_json::json!({"role":"user","content":format!("Your reply was rejected: {last}\nReply again with the complete JSON document required by the first message.")}),
-                ];
-            }
-        }
-    }
-    Err(JudgeIncomplete(format!(
-        "{attempts} replies; the last {JUDGE_NO_PROGRESS_WINDOW} gave no new first-error class or usable verdict; the last: {last}"
-    ))
-    .into())
+    judge_prompted_with_roots(
+        client,
+        contract,
+        task,
+        model,
+        validate,
+        partial,
+        &JudgeRoots::default(),
+    )
+    .await
+}
+
+fn subset_with_ids(contract: &AcceptanceContract, ids: &BTreeSet<String>) -> AcceptanceContract {
+    let mut subset = contract.clone();
+    subset.acceptance.retain(|entry| ids.contains(&entry.id));
+    subset.supplementary.retain(|entry| ids.contains(&entry.id));
+    subset
+}
+
+fn subset_without_ids(contract: &AcceptanceContract, ids: &BTreeSet<String>) -> AcceptanceContract {
+    let mut subset = contract.clone();
+    subset.acceptance.retain(|entry| !ids.contains(&entry.id));
+    subset
+        .supplementary
+        .retain(|entry| !ids.contains(&entry.id));
+    subset
 }
 
 #[cfg(test)]

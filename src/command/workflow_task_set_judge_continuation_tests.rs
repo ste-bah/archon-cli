@@ -147,6 +147,86 @@ async fn a_truncated_reply_is_continued_and_the_whole_reply_is_judged() {
 }
 
 #[tokio::test]
+async fn a_partial_batch_keeps_valid_decisions_and_reasks_only_missing_ids() {
+    let first = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"criterion can make it pass"}]}"#;
+    let second = r#"{"decisions":[{"id":"AC-X-002","verdict":"refuted","counterexample":"setup violates a rule","reason":"the output names the rule"}]}"#;
+    let client = Scripted::new(vec![
+        Ok((first, Some("end_turn"))),
+        Ok((second, Some("end_turn"))),
+    ]);
+    let mut subject = contract();
+    let mut other = subject.acceptance[0].clone();
+    other.id = "AC-X-002".into();
+    other.judgment.verdict = JudgeDecision::Refuted;
+    subject.acceptance.push(other);
+
+    let judged = judge_prompted(
+        &client,
+        subject,
+        "initial prompt",
+        "judge-model",
+        require_judged_prose,
+        None,
+    )
+    .await
+    .expect("the missing decision completes the batch");
+
+    assert_eq!(
+        judged.acceptance[0].judgment.verdict,
+        JudgeDecision::Accepted
+    );
+    assert_eq!(
+        judged.acceptance[0].judgment.reason,
+        "criterion can make it pass"
+    );
+    assert_eq!(
+        judged.acceptance[1].judgment.verdict,
+        JudgeDecision::Refuted
+    );
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2);
+    let retry = calls[1][0]["content"].as_str().unwrap();
+    assert!(retry.contains("AC-X-002"), "{retry}");
+    assert!(!retry.contains("AC-X-001"), "{retry}");
+}
+
+#[tokio::test]
+async fn a_partial_full_contract_batch_merges_decisions_before_final_validation() {
+    let first = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"criterion can make it pass"}]}"#;
+    let second = r#"{"decisions":[{"id":"AC-X-002","verdict":"refuted","counterexample":"setup violates a rule","reason":"the output names the rule"}]}"#;
+    let client = Scripted::new(vec![
+        Ok((first, Some("end_turn"))),
+        Ok((second, Some("end_turn"))),
+    ]);
+    let mut subject = contract();
+    let mut other = subject.acceptance[0].clone();
+    other.id = "AC-X-002".into();
+    other.judgment.verdict = JudgeDecision::Accepted;
+    subject.acceptance.push(other);
+    let expected = BTreeSet::from(["AC-X-001".to_string(), "AC-X-002".to_string()]);
+
+    let judged = judge_contract_resumable_with_roots(
+        &client,
+        subject,
+        &expected,
+        None,
+        &JudgeRoots::default(),
+    )
+    .await
+    .expect("the merged contract satisfies full-structure validation");
+
+    assert_eq!(
+        judged.acceptance[0].judgment.verdict,
+        JudgeDecision::Accepted
+    );
+    assert_eq!(
+        judged.acceptance[1].judgment.verdict,
+        JudgeDecision::Refuted
+    );
+    assert_eq!(client.calls().len(), 2);
+}
+
+#[tokio::test]
 async fn a_continuation_that_adds_nothing_is_incomplete_never_a_verdict() {
     let client = Scripted::new(vec![
         Ok((HEAD, Some("max_tokens"))),
@@ -208,7 +288,7 @@ async fn replies_that_never_parse_end_incomplete_after_the_no_progress_bound() {
 }
 
 #[tokio::test]
-async fn a_rejected_judgment_is_reasked_with_the_reply_and_exact_error() {
+async fn a_missing_judgment_is_reasked_with_a_fresh_prompt() {
     let client = Scripted::new(vec![
         Ok((r#"{"decisions":[]}"#, Some("end_turn"))),
         Ok((ACCEPTED, Some("end_turn"))),
@@ -218,15 +298,10 @@ async fn a_rejected_judgment_is_reasked_with_the_reply_and_exact_error() {
         .expect("the repaired reply is usable");
     let calls = client.calls();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[1][0], calls[0][0]);
-    assert_eq!(calls[1][1]["role"], "assistant");
-    assert_eq!(calls[1][1]["content"], r#"{"decisions":[]}"#);
-    assert_eq!(calls[1][2]["role"], "user");
-    let rejected = calls[1][2]["content"].as_str().unwrap();
-    assert_eq!(
-        rejected,
-        "Your reply was rejected: acceptance judge decision ids do not match the contract: missing=[\"AC-X-001\"], extra=[]; retry the full batch\nReply again with the complete JSON document required by the first message."
-    );
+    assert_eq!(calls[1].len(), 1);
+    let retry = calls[1][0]["content"].as_str().unwrap();
+    assert!(retry.contains("AC-X-001"), "{retry}");
+    assert!(!retry.contains("Your reply was rejected"), "{retry}");
 }
 
 /// Round 2 (P1): a truncated reply that already holds a complete document is

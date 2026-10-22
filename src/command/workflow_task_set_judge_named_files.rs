@@ -5,6 +5,18 @@ pub(super) fn named_files(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
 ) -> Vec<serde_json::Value> {
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    named_files_with_budget(criterion, roots, &mut remaining)
+}
+
+/// Resolve the named source for one check while spending a shared prompt-batch
+/// budget. Callers rendering a batch pass the same `remaining` value to each
+/// check in prompt order.
+pub(super) fn named_files_with_budget(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+    remaining: &mut usize,
+) -> Vec<serde_json::Value> {
     let root = match &criterion.check {
         archon_workflow::task_set_contract::AcceptanceCheck::Command {
             cwd: archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
@@ -49,7 +61,6 @@ pub(super) fn named_files(
     );
     inputs.sort();
     inputs.dedup();
-    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     inputs
         .into_iter()
         .filter_map(|relative| {
@@ -70,11 +81,11 @@ pub(super) fn named_files(
                     return None;
                 };
                 let bytes = content_bytes;
-                let take = bytes.len().min(remaining);
+                let take = bytes.len().min(*remaining);
                 let take = utf8_prefix_len(&bytes, take);
                 let truncated = take < bytes.len();
                 let shown = &bytes[..take];
-                remaining -= take;
+                *remaining -= take;
                 let mut content = archon_observability::redaction::redact_secret_values(
                     &String::from_utf8_lossy(shown),
                 );
@@ -109,11 +120,11 @@ pub(super) fn named_files(
             }
             let canonical = absolute.canonicalize().ok()?;
             let bytes = std::fs::read(&canonical).ok()?;
-            let take = bytes.len().min(remaining);
+            let take = bytes.len().min(*remaining);
             let take = utf8_prefix_len(&bytes, take);
             let truncated = take < bytes.len();
             let shown = &bytes[..take];
-            remaining -= take;
+            *remaining -= take;
             let mut content = archon_observability::redaction::redact_secret_values(
                 &String::from_utf8_lossy(shown),
             );

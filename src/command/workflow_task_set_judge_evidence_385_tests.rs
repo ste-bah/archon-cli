@@ -1,35 +1,20 @@
 use super::*;
 
 #[tokio::test]
-async fn evidence_385_missing_decision_is_reasked_with_the_rejected_reply_and_error() {
+async fn evidence_385_missing_decision_is_reasked_with_a_fresh_prompt() {
     let rejected = r#"{"decisions":[]}"#;
     let client = Scripted::new(vec![
         Ok((rejected, Some("end_turn"))),
         Ok((ACCEPTED, Some("end_turn"))),
     ]);
-    let before = format!(
-        "calls={}, rejected_reply={rejected:?}",
-        client.calls().len()
-    );
     judge_contract(&client, contract(), &expected())
         .await
         .expect("the corrected judgment is accepted");
     let calls = client.calls();
     let retry = &calls[1];
-    let after = format!(
-        "calls={}, assistant_reply={:?}, retry_error={:?}",
-        calls.len(),
-        retry[1]["content"],
-        retry[2]["content"]
-    );
-    println!("EVIDENCE #385 judge-missing-decision BEFORE: {before} AFTER: {after}");
-    assert_eq!(retry[1]["content"], rejected);
-    assert!(
-        retry[2]["content"]
-            .as_str()
-            .unwrap()
-            .contains("missing=[\"AC-X-001\"]")
-    );
+    assert_eq!(calls.len(), 2);
+    assert_eq!(retry.len(), 1);
+    assert!(retry[0]["content"].as_str().unwrap().contains("AC-X-001"));
 }
 
 #[tokio::test]
@@ -89,14 +74,11 @@ async fn evidence_385_output_limited_reply_is_reasked_as_a_fresh_judgment() {
 }
 
 #[test]
-fn an_incremental_subset_with_a_missing_supplementary_id_is_rejected() {
+fn an_incremental_subset_reports_a_missing_supplementary_id() {
     let mut subset = supplementary_subset();
-    let error = apply_judgments(&mut subset, r#"{"decisions":[]}"#).unwrap_err();
+    let missing = apply_judgments(&mut subset, r#"{"decisions":[]}"#).unwrap();
 
-    assert!(
-        format!("{error:#}").contains("missing=[\"SUP-1\"]"),
-        "{error:#}"
-    );
+    assert_eq!(missing, BTreeSet::from(["SUP-1".to_string()]));
 }
 
 #[test]

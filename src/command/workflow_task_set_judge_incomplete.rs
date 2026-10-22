@@ -5,6 +5,8 @@ pub(super) fn judge_error_class(error: &str) -> &'static str {
         "duplicate_decision"
     } else if error.contains("decision ids do not match") {
         "decision_ids"
+    } else if error.contains("left decisions missing") {
+        "missing_decisions"
     } else if error.contains("left 'counterexample' empty") {
         "empty_counterexample"
     } else if error.contains("left 'reason' empty") {

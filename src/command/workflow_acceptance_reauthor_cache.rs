@@ -59,6 +59,10 @@ pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
         include_bytes!("workflow_task_set_judge.rs"),
     ),
     (
+        "workflow_task_set_judge_rounds.rs",
+        include_bytes!("workflow_task_set_judge_rounds.rs"),
+    ),
+    (
         "workflow_task_set_judge_named_files.rs",
         include_bytes!("workflow_task_set_judge_named_files.rs"),
     ),

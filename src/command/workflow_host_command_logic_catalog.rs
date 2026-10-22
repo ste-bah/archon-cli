@@ -73,7 +73,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 42: batch judging includes bounded contents of existing named check inputs, preventing refutations that contradict their assertions.
         // 43: #486 nested repository sibling aliases reuse the repository copy
         // without creating a conflicting build target, changing scratch verdicts.
-        version: 43,
+        // 44: #487 partial judge replies retain valid decisions and ask only
+        // for missing checks, which can change the acceptance verdict set.
+        version: 44,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -103,7 +105,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // distinct baseline-pass lead; both can change freeze findings.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
-        sources_digest: "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
+        // Re-pinned for #487: acceptance judge source changed with version 44.
+        sources_digest: "2fa9e3183d8106606c6bb91886a33c91f25e53e068b74350daf28de31389b65f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -126,7 +129,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): #483
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
-        sources_digest: "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
+        // #487 re-pin only: the judge's partial-decision handling is not used by skeleton freeze.
+        sources_digest: "2fa9e3183d8106606c6bb91886a33c91f25e53e068b74350daf28de31389b65f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -180,7 +184,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
-        sources_digest: "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+        // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
+        sources_digest: "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
         build_bound: false,
     },
     CapabilityLogic {
@@ -223,7 +228,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
-        sources_digest: "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+        // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
+        sources_digest: "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
         build_bound: false,
     },
     CapabilityLogic {
@@ -270,7 +276,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
-        sources_digest: "130ec020e9bbb185304a34d052932d974d27a75a936861cdb35656768afa9a84",
+        // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
+        sources_digest: "158cbcf0c1d38d3aa55e6368d09bbeee0fa22597d09e7b17bc7f8ea1805a7c56",
         build_bound: true,
     },
     CapabilityLogic {
@@ -290,7 +297,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
-        sources_digest: "130ec020e9bbb185304a34d052932d974d27a75a936861cdb35656768afa9a84",
+        // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
+        sources_digest: "158cbcf0c1d38d3aa55e6368d09bbeee0fa22597d09e7b17bc7f8ea1805a7c56",
         build_bound: true,
     },
 ];
