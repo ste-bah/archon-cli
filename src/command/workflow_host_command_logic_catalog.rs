@@ -106,7 +106,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // Re-pinned for #487: acceptance judge source changed with version 44.
-        sources_digest: "2fa9e3183d8106606c6bb91886a33c91f25e53e068b74350daf28de31389b65f",
+        sources_digest: "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -130,7 +130,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // #487 re-pin only: the judge's partial-decision handling is not used by skeleton freeze.
-        sources_digest: "2fa9e3183d8106606c6bb91886a33c91f25e53e068b74350daf28de31389b65f",
+        sources_digest: "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
         build_bound: false,
     },
     CapabilityLogic {
