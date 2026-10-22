@@ -160,11 +160,11 @@ pub(super) async fn setup_path_failure_off_thread(
     contract: &AcceptanceContract,
     result: &CheckResult,
     at: &Context,
-) -> Option<String> {
+) -> Result<Option<String>, String> {
     let (contract, result, at) = (contract.clone(), result.clone(), at.clone());
     tokio::task::spawn_blocking(move || setup_path_failure(&contract, &result, &at))
         .await
-        .unwrap_or_else(|error| Some(format!("deciding its setup-path verdict failed: {error}")))
+        .map_err(|error| format!("deciding its setup-path verdict failed: {error}"))
 }
 
 fn setup_path_failure(

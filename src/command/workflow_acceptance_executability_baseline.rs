@@ -381,6 +381,25 @@ pub(super) async fn cannot_fail_findings(
             // It ran to an end on the base: any earlier stall was not its own.
             silent::ran(probe, &baseline.commit, contract, id);
             let at = silent::baseline_context(probe, contract, result.copy_layout.as_ref());
+            // A failed required path outside this disposable tree is a
+            // defect in this check's setup, even when the command exited
+            // normally. Route that one check to its author; treating it as
+            // host-unproven would stop a whole re-author batch and discard
+            // unrelated checks that already proved themselves.
+            match silent::setup_path_failure_off_thread(contract, result, &at).await {
+                Ok(Some(finding)) => {
+                    findings.insert(id.clone(), format!("check '{id}': {finding}"));
+                    continue;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    probe.unproven(
+                        id,
+                        format!("it ran on the pre-implementation tree at {short}, but the host could not decide whether its setup path was missing ({error})"),
+                    );
+                    continue;
+                }
+            }
             if let Some(why) = silent::silent_failure_off_thread(contract, result, &at).await {
                 // Issue 328: failing without a verdict proves nothing; failing
                 // so again on the same base goes to the author.

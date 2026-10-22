@@ -69,16 +69,34 @@ fn recreated_input_with_operational_failure_is_host_unproven() {
         &evidence,
         &markers,
         &inputs,
-        None,
+        Some("it names `../project/Cargo.toml`, which is absent from the probe copy".into()),
         "check 'AC-1': it passed",
     )
-    .expect("operational failure remains host-unproven");
+    .expect("operational failure remains host-unproven even with a setup-path finding");
     let MutationFinding::HostUnproven(host) = finding else {
         panic!("host failure with a recreated input must remain host-unproven");
     };
     assert!(host.contains("data/state.txt=original-recreated"));
     assert!(host.contains("data/other.txt=restored"));
     assert!(host.contains("the host could not complete the run"));
+}
+
+#[test]
+fn a_setup_path_failure_after_environment_repair_is_an_author_finding() {
+    let (result, markers, inputs) = run_real_wrapper("test -f data/state.txt");
+    let finding = mutation_host_or_author_finding(
+        &result,
+        &markers,
+        &inputs,
+        Some("it names ../archon-cli/Cargo.toml, absent from the probe copy".into()),
+        "check 'AC-1': it passed",
+    )
+    .expect("identified setup failure goes to the check author");
+    let MutationFinding::AuthorFinding(author) = finding else {
+        panic!("setup path failure must not become a host error");
+    };
+    assert!(author.contains("../archon-cli/Cargo.toml"), "{author}");
+    assert!(author.contains("after the host repaired its environment"));
 }
 
 fn run_real_wrapper(command: &str) -> (CheckEvidence, super::mutation::Markers, Vec<String>) {

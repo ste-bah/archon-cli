@@ -209,7 +209,16 @@ pub(super) async fn prove(
             Some(result) if result.operational_error.is_none() => {
                 let at =
                     super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
-                super::silent::setup_path_failure_off_thread(&mutated, result, &at).await
+                match super::silent::setup_path_failure_off_thread(&mutated, result, &at).await {
+                    Ok(finding) => finding,
+                    Err(error) => {
+                        probe.unproven(
+                            id,
+                            format!("the mutation run completed, but the host could not decide whether its setup path was missing ({error})"),
+                        );
+                        continue;
+                    }
+                }
             }
             _ => None,
         };

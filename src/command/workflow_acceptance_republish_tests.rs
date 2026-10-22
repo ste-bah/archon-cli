@@ -1,5 +1,7 @@
 //! Per-check repair: only named entries change, the chain republishes whole.
 
+use std::collections::BTreeMap;
+
 use super::test_fixture::{
     FrozenSet, assert_only_named_entries_changed, assert_skeleton_only_rebound,
     frozen_set_proven as frozen_set,
@@ -76,6 +78,77 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
         vec![archon_core::agents::harness::ACCEPTANCE_REAUTHOR_AGENT.to_string()],
         "the CLI re-author launches a key the agent registry resolves in every project"
     );
+}
+
+#[tokio::test]
+async fn setup_path_finding_retries_one_check_and_republishes_its_siblings() {
+    let mut set = frozen_set(&[
+        ("AC-F-101", "true", false),
+        ("AC-F-102", "true", false),
+        ("AC-F-103", "true", false),
+    ]);
+    for name in ["a", "b", "c"] {
+        let path = set.project.path().join(format!("data/{name}.txt"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "ready").unwrap();
+    }
+    crate::command::workflow_task_set::passability_tests_support::commit_project(
+        set.project.path(),
+    );
+    set.probe = HostProbe::at(
+        set.project.path().to_path_buf(),
+        set.project.path().to_path_buf(),
+        None,
+    )
+    .with_baseline(
+        super::super::executability::Baseline::head_of(set.project.path())
+            .expect("the fixture has a pre-implementation tree"),
+    );
+
+    let client = ScriptedAuthorJudge::new(
+        |entry, attempt| {
+            let id = entry["id"].as_str().unwrap();
+            let command = match (id, attempt) {
+                ("AC-F-101", _) => "test -f data/a.txt",
+                ("AC-F-102", 1) => "cd ../missing-project && test -f data/b.txt",
+                ("AC-F-102", _) => "test -f data/b.txt",
+                ("AC-F-103", _) => "test -f data/c.txt",
+                _ => unreachable!(),
+            };
+            command_entry(entry, command)
+        },
+        |_, _| true,
+    );
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
+    let named = ids(&["AC-F-101", "AC-F-102", "AC-F-103"]);
+    let result = reauthor_and_republish(&client, request(&set, &named), &scope)
+        .await
+        .expect("the setup-path finding returns to the author and siblings publish");
+
+    let contract = set.contract();
+    let commands = contract
+        .acceptance
+        .iter()
+        .map(|entry| {
+            let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+                &entry.check
+            else {
+                panic!("fixture entries are command checks")
+            };
+            (entry.id.as_str(), command.as_str())
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(commands["AC-F-101"], "test -f data/a.txt");
+    assert_eq!(commands["AC-F-102"], "test -f data/b.txt");
+    assert_eq!(commands["AC-F-103"], "test -f data/c.txt");
+    assert_eq!(client.authored(), 4, "only B is authored again");
+    let prompts = client.prompts.lock().unwrap();
+    assert_eq!(prompts.len(), 4);
+    assert!(prompts[3].contains("AC-F-102"));
+    assert!(prompts[3].contains("../missing-project"), "{}", prompts[3]);
+    assert!(result.acceptance_digest.len() > 0);
+    validate_full_chain(&set.tasks, &set.pin()).expect("republished chain verifies");
 }
 
 #[tokio::test]

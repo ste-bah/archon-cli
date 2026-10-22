@@ -12,8 +12,18 @@ pub(in crate::command::workflow_task_set::executability) fn mutation_host_or_aut
     setup_failure: Option<String>,
     passed_there: &str,
 ) -> Option<MutationFinding> {
-    if let Some(reason) = mutation_host_failure(result, markers, inputs, setup_failure) {
+    // The caller supplies `setup_failure` only after the setup-path
+    // classifier matched a path in the check text to output reporting that
+    // exact path missing from the disposable copy. Still check host-side
+    // execution and mutation integrity first: an operational error, guard,
+    // signal, or failed restoration must never be attributed to the author.
+    if let Some(reason) = mutation_host_failure(result, markers, inputs) {
         return Some(MutationFinding::HostUnproven(reason));
+    }
+    if let Some(reason) = setup_failure {
+        return Some(MutationFinding::AuthorFinding(format!(
+            "{passed_there}; the check stopped at a setup failure after the host repaired its environment: {reason}; choose a path available in the selected root and make the check fail on its own assertion"
+        )));
     }
     let recreated = recreated_inputs(&result.result, markers, inputs);
     (!recreated.is_empty())
@@ -37,7 +47,6 @@ fn mutation_host_failure(
     result: &CheckEvidence,
     markers: &mutation::Markers,
     inputs: &[String],
-    setup_failure: Option<String>,
 ) -> Option<String> {
     let states = input_states(&result.result, markers, inputs);
     let status = describe_status(markers.status(&result.result));
@@ -56,10 +65,6 @@ fn mutation_host_failure(
         Some("the mutation's live-root guard stopped it".to_string())
     } else if let Some(signal) = markers.observed_signal(&result.result) {
         Some(format!("the check wrapper observed signal {signal}"))
-    } else if let Some(reason) = setup_failure {
-        Some(format!(
-            "the mutation run stopped at a setup failure: {reason}"
-        ))
     } else {
         let moved = markers.moved(&result.result, inputs);
         let states = markers.states(&result.result, inputs);

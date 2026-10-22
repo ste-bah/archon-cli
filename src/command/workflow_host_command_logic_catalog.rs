@@ -77,7 +77,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // for missing checks, which can change the acceptance verdict set.
         // 45: #488 named-file assertions make their regression guards valid; move-aside and duplicate-implementation states cannot refute them. #489 separator trimming preserves the actual sibling path for setup classification.
         // 46: #491 acceptance reauthor verification accepts an intact predecessor skeleton as pending after a normal acceptance publish.
-        version: 46,
+        // 47: #495 rejects cross-root parent paths before judging and routes
+        // setup failures per check after environment repair.
+        version: 47,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -108,7 +110,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // Re-pinned for #487: acceptance judge source changed with version 44.
-        sources_digest: "8b3a4fbcb982bb4f7bdf0542ef8ac0394b6df62f3e0b8669e8a517b2bcbbd7b0",
+        // #495 re-pin: host-side setup-classifier failures are kept operational.
+        sources_digest: "4419f2afc841d52b499d196545218969164732130f5e8fb92167b1b83ffa0542",
         build_bound: false,
     },
     CapabilityLogic {
@@ -132,7 +135,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // #487 re-pin only: the judge's partial-decision handling is not used by skeleton freeze.
-        sources_digest: "8b3a4fbcb982bb4f7bdf0542ef8ac0394b6df62f3e0b8669e8a517b2bcbbd7b0",
+        // #495 re-pin only: host-side setup-classifier failures are operational.
+        sources_digest: "4419f2afc841d52b499d196545218969164732130f5e8fb92167b1b83ffa0542",
         build_bound: false,
     },
     CapabilityLogic {
@@ -286,7 +290,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
         // 14: #491 an intact skeleton from an older acceptance no longer makes acceptance verification fail.
-        sources_digest: "a5e8f65a3d49f611ca62d4da1e403106e60869a96ee3e99c33afd45cf4002709",
+        // #495 re-pin only: verifier source closure includes the narrowed setup-path helper.
+        sources_digest: "f532242f97fa1806f5b758f3c8259ba026a34aa1ba0c491723a5bb6e2c9fe671",
         build_bound: true,
     },
     CapabilityLogic {
@@ -309,7 +314,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
-        sources_digest: "a5e8f65a3d49f611ca62d4da1e403106e60869a96ee3e99c33afd45cf4002709",
+        // #495 re-pin only: verifier source closure includes the narrowed setup-path helper.
+        sources_digest: "f532242f97fa1806f5b758f3c8259ba026a34aa1ba0c491723a5bb6e2c9fe671",
         build_bound: true,
     },
 ];
