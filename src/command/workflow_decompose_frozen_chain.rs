@@ -84,6 +84,8 @@ pub(crate) fn recover_deferred_launch_snapshot(
 
 #[path = "workflow_decompose_frozen_chain_override.rs"]
 mod freeze_override;
+#[path = "workflow_decompose_frozen_chain_pending.rs"]
+mod pending;
 #[cfg(test)]
 use freeze_override::{freeze_outcome_decision, freeze_record_status_allows_override};
 #[path = "workflow_decompose_frozen_chain_launch.rs"]
@@ -260,6 +262,11 @@ pub(crate) fn snapshot_locked(
     verify_acceptance(project_root, prd_path, task_root, &pin)?;
     snapshot.acceptance = true;
     if !skeleton_lock.exists() {
+        return Ok(snapshot);
+    }
+    // An acceptance published before the skeleton phase leaves the old
+    // skeleton pending. Its lock must still authenticate its exact bytes.
+    if pending::intact_stale_skeleton(task_root, &pin)? {
         return Ok(snapshot);
     }
     let skeleton = validate_full_chain(task_root, &pin).map_err(|error| {

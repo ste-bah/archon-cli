@@ -310,6 +310,50 @@ fn a_frozen_skeleton_reports_its_subjects_and_the_bodies_present() {
 }
 
 #[test]
+fn a_newer_acceptance_freeze_leaves_an_intact_skeleton_pending_for_resume() {
+    let mut fixture = project();
+    freeze_acceptance(&mut fixture);
+    freeze_skeleton(&fixture);
+
+    // The acceptance phase publishes its new pin before the skeleton phase
+    // rebinds the skeleton to that acceptance digest.
+    let mut prd = std::fs::read(&fixture.prd).unwrap();
+    prd.extend_from_slice(b"\n<!-- newer acceptance freeze -->\n");
+    std::fs::write(&fixture.prd, prd).unwrap();
+    freeze_acceptance(&mut fixture);
+    let pending = snapshot(&fixture).expect("the intact stale skeleton is pending");
+    assert!(pending.acceptance);
+    assert!(!pending.skeleton);
+    assert!(pending.subjects.is_empty());
+
+    // Replaying the normal skeleton freeze writes fresh gate provenance and
+    // restores the ordinary complete-chain snapshot.
+    freeze_skeleton(&fixture);
+    let complete = snapshot(&fixture).expect("the normally frozen chain verifies");
+    assert!(complete.acceptance && complete.skeleton);
+    assert_eq!(complete.subjects, subjects(&["TASK-X-010", "TASK-X-020"]));
+}
+
+#[test]
+fn a_tampered_pending_skeleton_is_still_refused() {
+    let mut fixture = project();
+    freeze_acceptance(&mut fixture);
+    freeze_skeleton(&fixture);
+    let mut prd = std::fs::read(&fixture.prd).unwrap();
+    prd.extend_from_slice(b"\n<!-- newer acceptance freeze -->\n");
+    std::fs::write(&fixture.prd, prd).unwrap();
+    freeze_acceptance(&mut fixture);
+
+    let skeleton_path = fixture.tasks.join(TASK_SKELETON_FILE);
+    let mut bytes = std::fs::read(&skeleton_path).unwrap();
+    bytes.extend_from_slice(b" ");
+    std::fs::write(&skeleton_path, bytes).unwrap();
+
+    let error = snapshot(&fixture).expect_err("a skeleton that misses its lock is tampered");
+    assert!(error.to_string().contains("does not verify"), "{error:#}");
+}
+
+#[test]
 fn a_lock_that_does_not_verify_is_an_error_never_a_silent_false() {
     // Acceptance contract edited after its lock.
     let mut fixture = project();

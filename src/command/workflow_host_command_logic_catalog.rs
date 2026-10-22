@@ -280,7 +280,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
-        sources_digest: "435f97ae025d1830acd30e2a5b7492b2eab2f413482ff6d22ae138f96331a9a7",
+        // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
+        sources_digest: "f3188f06df5c370fbb5a5a10570e7572a7507fca5cd937636afe7c903d463a15",
         build_bound: true,
     },
     CapabilityLogic {
@@ -301,7 +302,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
-        sources_digest: "435f97ae025d1830acd30e2a5b7492b2eab2f413482ff6d22ae138f96331a9a7",
+        // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
+        sources_digest: "f3188f06df5c370fbb5a5a10570e7572a7507fca5cd937636afe7c903d463a15",
         build_bound: true,
     },
 ];
