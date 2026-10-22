@@ -24,6 +24,8 @@ mod reply_parse;
 #[cfg(test)]
 use reply_parse::candidate_entry;
 use reply_parse::candidate_entry_with_markers;
+#[path = "workflow_acceptance_reauthor_check_defects.rs"]
+mod check_defects;
 
 #[path = "workflow_acceptance_reauthor_cache.rs"]
 pub(crate) mod cache;
@@ -275,7 +277,7 @@ pub(crate) async fn reauthor_with_cache(
             let reply = author_entry(client, scope, frozen, notes, attempt).await?;
             match candidate_entry_with_markers(&reply, frozen, &reply_leaked_markers)
                 .and_then(|candidate| author::live_root_refusal(candidate, &refused))
-                .and_then(|candidate| check_defects(&working, candidate))
+                .and_then(|candidate| check_defects::check_defects(&working, candidate, scope))
             {
                 Ok(candidate) => authored.push(candidate),
                 Err(reason) => notes.push(reason),
@@ -412,27 +414,6 @@ pub(crate) async fn reauthor_with_cache(
         pending: pending.into_iter().collect(),
     }
     .into())
-}
-
-/// A candidate whose check carries a host-verifiable defect never reaches
-/// the judge: the defect goes back to the author as the finding it is.
-fn check_defects(
-    working: &AcceptanceContract,
-    candidate: AcceptanceCriterion,
-) -> std::result::Result<AcceptanceCriterion, String> {
-    let mut probe = working.clone();
-    *entry_mut(&mut probe, &candidate.id).expect("named id") = candidate.clone();
-    let prefix = format!("{}.check", candidate.id);
-    let defects = acceptance_policy_findings(&probe)
-        .into_iter()
-        .filter(|finding| finding.field == prefix)
-        .map(|finding| finding.message)
-        .collect::<Vec<_>>();
-    if defects.is_empty() {
-        Ok(candidate)
-    } else {
-        Err(defects.join("; "))
-    }
 }
 
 #[path = "workflow_acceptance_reauthor_author.rs"]

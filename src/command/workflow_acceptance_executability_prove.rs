@@ -211,7 +211,16 @@ pub(super) async fn prove(
             Some(result) if result.operational_error.is_none() => {
                 let at =
                     super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
-                super::silent::setup_path_failure_off_thread(&mutated, result, &at).await
+                match super::silent::setup_path_failure_off_thread(&mutated, result, &at).await {
+                    Ok(finding) => finding,
+                    Err(error) => {
+                        probe.unproven(
+                            id,
+                            format!("the mutation run completed, but the host could not decide whether its setup path was missing ({error})"),
+                        );
+                        continue;
+                    }
+                }
             }
             _ => None,
         };
@@ -255,6 +264,10 @@ pub(super) async fn prove(
                         "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail"
                     ),
                 );
+                continue;
+            }
+            Some(MutationFinding::AuthorFinding(finding)) => {
+                findings.insert(id.clone(), finding);
                 continue;
             }
             None => {}
@@ -369,7 +382,9 @@ fn bounded_output_excerpt(result: &archon_workflow::acceptance_scratch::CheckRes
     if out_truncated || err_truncated {
         excerpt.push_str("…[truncated]");
     }
-    excerpt
+    // Capture already redacts host values; the excerpt is persisted in proof
+    // records and reports, so secret-shaped values are redacted again here.
+    archon_observability::redaction::redact_secret_values(&excerpt)
 }
 
 #[cfg(test)]

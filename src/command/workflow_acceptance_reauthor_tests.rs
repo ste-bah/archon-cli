@@ -28,6 +28,46 @@ fn baseline_finding(id: &str, candidates: &str) -> String {
     )
 }
 
+#[test]
+fn a_parent_path_into_the_other_root_is_an_author_finding_before_judging() {
+    let set = frozen_set(&[("AC-F-ROOT", "test -f feature.txt", false)]);
+    let project = set.project.path().join("project");
+    let repo = set.project.path().join("repo");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::write(
+        repo.join("Cargo.toml"),
+        "[package]\nname='fixture'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    let mut scope = scope(&set);
+    scope.project_root = project;
+    scope.repository_root = repo;
+    let mut candidate = set.contract().acceptance[0].clone();
+    candidate.check = AcceptanceCheck::Command {
+        command: "cargo metadata --manifest-path ../repo/Cargo.toml".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let finding = check_defects::check_defects(&set.contract(), candidate, &scope).unwrap_err();
+    assert!(finding.contains("../repo/Cargo.toml"), "{finding}");
+    assert!(finding.contains("Choose the root"), "{finding}");
+}
+
+#[test]
+fn an_existing_external_sibling_alias_is_not_a_cross_root_refusal() {
+    let set = frozen_set(&[("AC-F-ALIAS", "test -f feature.txt", false)]);
+    let alias = set.project.path().parent().unwrap().join("alias");
+    std::fs::create_dir_all(&alias).unwrap();
+    std::fs::write(alias.join("feature.txt"), "present").unwrap();
+    let candidate = AcceptanceCheck::Command {
+        command: "test -f ../alias/feature.txt".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let mut entry = set.contract().acceptance[0].clone();
+    entry.check = candidate;
+    assert!(check_defects::check_defects(&set.contract(), entry, &scope(&set)).is_ok());
+}
+
 #[tokio::test]
 async fn a_refuted_check_is_reauthored_and_rejudged_and_nothing_else_changes() {
     let set = frozen_set(&[
