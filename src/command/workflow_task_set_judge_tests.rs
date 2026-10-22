@@ -284,6 +284,8 @@ fn tracked_repository_file_is_named_to_the_judge() {
     assert!(prompt.contains("tracked assertion"), "{prompt}");
 }
 
+// Creating a symlink needs extra privileges on Windows; the rule is host-independent.
+#[cfg(unix)]
 #[test]
 fn repository_named_file_uses_committed_blob_and_skips_committed_symlink() {
     let root = tempfile::tempdir().unwrap();
@@ -292,7 +294,6 @@ fn repository_named_file_uses_committed_blob_and_skips_committed_symlink() {
     git(root.path(), &["config", "user.name", "Judge Test"]);
     std::fs::write(root.path().join("tracked"), "committed assertion").unwrap();
     std::fs::write(root.path().join("ignored-target"), "ignored secret").unwrap();
-    #[cfg(unix)]
     std::os::unix::fs::symlink("ignored-target", root.path().join("link")).unwrap();
     git(root.path(), &["add", "tracked", "link"]);
     git(root.path(), &["commit", "-qm", "initial"]);
