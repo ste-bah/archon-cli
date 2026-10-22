@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "acceptance_scratch_siblings_target_tests.rs"]
+mod target_tests;
+
 fn run_git(path: &Path, args: &[&str]) {
     let output = std::process::Command::new("git")
         .arg("-C")

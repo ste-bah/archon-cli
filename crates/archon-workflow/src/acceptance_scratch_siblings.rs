@@ -100,7 +100,13 @@ pub(super) fn copy_external(
                         destination.display()
                     )));
                 }
-                if !already_points_to_target {
+                // A previously materialized sibling alias can make this
+                // nested destination resolve to the repository copy itself.
+                // In that case the alias already works; creating its parent
+                // would manufacture repository/target before the build link
+                // guard gets to validate it.
+                let destination_is_target = resolves_to_same_path(&destination, &target);
+                if !already_points_to_target && !destination_is_target {
                     if let Some(parent) = destination.parent() {
                         std::fs::create_dir_all(parent)
                             .map_err(|error| WorkflowError::io(parent, error))?;
@@ -192,6 +198,26 @@ pub(super) fn copy_external(
         }
     }
     Ok(evidence)
+}
+
+fn resolves_to_same_path(left: &Path, right: &Path) -> bool {
+    fn resolve_missing_tail(path: &Path) -> Option<PathBuf> {
+        let mut ancestor = path;
+        let mut tail = Vec::new();
+        while std::fs::symlink_metadata(ancestor).is_err() {
+            tail.push(ancestor.file_name()?.to_os_string());
+            ancestor = ancestor.parent()?;
+        }
+        let mut resolved = std::fs::canonicalize(ancestor).ok()?;
+        for component in tail.iter().rev() {
+            resolved.push(component);
+        }
+        Some(resolved)
+    }
+
+    resolve_missing_tail(left)
+        .zip(resolve_missing_tail(right))
+        .is_some_and(|(left, right)| left == right)
 }
 
 fn link_repository_copy(target: &Path, destination: &Path) -> WorkflowResult<()> {

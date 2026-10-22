@@ -71,7 +71,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // change the findings returned by a freeze gate.
         // Re-pinned only (verdict rules unchanged): #483
         // 42: batch judging includes bounded contents of existing named check inputs, preventing refutations that contradict their assertions.
-        version: 42,
+        // 43: #486 nested repository sibling aliases reuse the repository copy
+        // without creating a conflicting build target, changing scratch verdicts.
+        version: 43,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -101,7 +103,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // distinct baseline-pass lead; both can change freeze findings.
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
-        sources_digest: "24e5fe1387181fa37de0194c23e124ef5bcb6cb4bf854442904233dd48140b0d",
+        sources_digest: "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -124,7 +126,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476 #477 #479 #480
         // Re-pinned only (verdict rules unchanged): #483
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
-        sources_digest: "24e5fe1387181fa37de0194c23e124ef5bcb6cb4bf854442904233dd48140b0d",
+        sources_digest: "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -251,7 +253,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 10: a legacy guardian request without resource_limits is rejected,
         // instead of silently running with default limits.
         // 11: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
-        version: 11,
+        // 12: #486 scratch sibling aliases no longer manufacture a conflicting
+        // build target during frozen acceptance reverify.
+        version: 12,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -266,7 +270,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
-        sources_digest: "40022bf3a874ebbf7e064809699d10471239d39faf62eb158865e4f7f2317f54",
+        sources_digest: "130ec020e9bbb185304a34d052932d974d27a75a936861cdb35656768afa9a84",
         build_bound: true,
     },
     CapabilityLogic {
@@ -286,7 +290,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #475 re-pin only: freeze source closure shares the moved strike helpers.
         // Re-pinned only (verdict rules unchanged): #476 #477 #480
         // Re-pinned only (verdict rules unchanged): #483
-        sources_digest: "40022bf3a874ebbf7e064809699d10471239d39faf62eb158865e4f7f2317f54",
+        sources_digest: "130ec020e9bbb185304a34d052932d974d27a75a936861cdb35656768afa9a84",
         build_bound: true,
     },
 ];
