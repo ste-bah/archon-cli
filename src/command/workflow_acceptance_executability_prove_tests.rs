@@ -55,21 +55,27 @@ fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
             exclusion: None,
         }],
         &std::collections::BTreeSet::new(),
-        &recreated,
+        &[],
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::from(recreated.clone()),
         &std::collections::BTreeMap::new(),
         true,
     );
-    assert!(
-        diagnostics
-            .contains("the check recreated this path while running (observed): output/state.txt")
-    );
+    assert!(diagnostics.contains("present again after mutation; writer unknown: output/state.txt"));
     assert!(
         super::mutation::ExclusionReason::CheckRecreatedPathObserved
             .label()
-            .contains("the check recreated this path while running (observed)")
+            .contains("the check recreated a moved input while it ran")
     );
+}
+
+#[test]
+fn baseline_passing_check_with_only_unattributed_reappearing_path_is_rejected() {
+    let finding =
+        super::unattributed_recreation_finding(&baseline_pass_finding("AC-X", "0123456789ab"));
+    assert!(finding.contains("writer is unknown"));
+    assert!(finding.contains("does not prove that the check depends on the moved input"));
+    assert!(!finding.contains("accepted as a regression guard"));
 }
 
 #[test]
@@ -119,7 +125,7 @@ fn each_move_state_has_a_distinct_candidate_diagnostic() {
             },
         ],
         &std::collections::BTreeSet::from([move_failed.clone(), recreated.clone()]),
-        &[recreated.clone()],
+        &[],
         &std::collections::BTreeSet::from([recreated.clone()]),
         &std::collections::BTreeSet::from([recreated.clone()]),
         &std::collections::BTreeMap::from([
@@ -133,7 +139,9 @@ fn each_move_state_has_a_distinct_candidate_diagnostic() {
     assert!(diagnostics.contains(&format!("absent at the selected root: {absent}")));
     assert!(diagnostics.contains(&format!("refused: symlink component: {symlink}")));
     assert!(diagnostics.contains(&format!("move failed: permission denied: {move_failed}")));
-    assert!(diagnostics.contains(&format!("{observed_recreation}: {recreated}")));
-    assert_eq!(diagnostics.matches(observed_recreation).count(), 1);
+    assert!(diagnostics.contains(&format!(
+        "present again after mutation; writer unknown: {recreated}"
+    )));
+    assert_eq!(diagnostics.matches(observed_recreation).count(), 0);
     assert!(!diagnostics.contains(&format!("{observed_recreation}: {move_failed}")));
 }

@@ -20,7 +20,7 @@ use super::workflow_host_command_catalog::{
 };
 use super::workflow_host_command_decision::{
     candidate_findings_prevent_publication, candidate_refusal_envelope,
-    candidate_refused_before_staging, unpublished,
+    candidate_refused_before_staging, stale_acceptance_contract, unpublished,
 };
 use super::workflow_host_command_postcondition::{
     evaluate_postcondition, fixed_subject_is_terminal,

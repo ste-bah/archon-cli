@@ -307,7 +307,7 @@ impl FixedHostCommandExecutor {
                 &context.project_root,
                 &context.task_root,
             );
-            let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
+            let committed = store.with_run_lock(&run_id, |locked| {
                 // A sibling stopped by a pause reports "paused", not "cancelled".
                 crate::command::workflow_host_command_operational::require_run_owned_locked_authorized(
                     locked,
@@ -321,8 +321,14 @@ impl FixedHostCommandExecutor {
                 })?;
                 let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
                     .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-                let receipt = publish_audited(audited, &destinations, &pin, &context.task_root)
-                    .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+                let receipt = match publish_audited(audited, &destinations, &pin, &context.task_root) {
+                    Ok(receipt) => receipt,
+                    Err(error)
+                        if error
+                            .downcast_ref::<super::super::workflow_task_set::StaleAcceptanceContract>()
+                            .is_some() => return Ok(None),
+                    Err(error) => return Err(WorkflowError::StageFailed(error.to_string())),
+                };
                 if let Some(envelope) = destinations.get(ENVELOPE_FILE) {
                     owner_only(envelope)?;
                 }
@@ -342,8 +348,17 @@ impl FixedHostCommandExecutor {
                 }
                 let (subjects, postcondition) =
                     evaluate_postcondition(&context, &command.command_id)?;
-                Ok((receipt, subjects, postcondition))
+                Ok(Some((receipt, subjects, postcondition)))
             })?;
+            let Some((receipt, subjects, postcondition)) = committed else {
+                return Ok(stale_acceptance_contract(
+                    observed.exit_code,
+                    stdout,
+                    stderr,
+                    (observed.stdout_bytes, observed.stderr_bytes),
+                    envelope,
+                ));
+            };
             // Through the anchor, after the lock: a failure is recorded.
             finish::remove_published(&staging, &receipt, &pause, &secrets);
             let (stdout, stdout_bytes) =

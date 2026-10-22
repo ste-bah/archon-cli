@@ -323,6 +323,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         crate::command::workflow_decompose_seed::resume_script_arguments(
             &store,
             run_id,
+            &task_root,
             &current_identity,
             (&criteria, &prd_requirement_texts),
             resume_chain.argument,

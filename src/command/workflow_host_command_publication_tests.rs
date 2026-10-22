@@ -45,7 +45,148 @@ fn manifest(call_id: &str, entries: &[(&str, &[u8])]) -> PreparedPublicationV1 {
                 blake3: digest(bytes),
             })
             .collect(),
+        expected_acceptance_contract: None,
     }
+}
+
+fn acceptance_manifest(
+    call_id: &str,
+    expected_contract: Option<Option<String>>,
+    bytes: &[u8],
+) -> PreparedPublicationV1 {
+    let mut prepared = manifest(call_id, &[("acceptance-contract.json", bytes)]);
+    prepared.command_id = "freeze-acceptance".into();
+    prepared.expected_acceptance_contract =
+        expected_contract.map(|digest| archon_workflow::v2::ExpectedAcceptanceContract {
+            exists: digest.is_some(),
+            digest,
+        });
+    prepared
+}
+
+fn audited_acceptance(
+    root: &std::path::Path,
+    call_id: &str,
+    expected_contract: Option<Option<String>>,
+    bytes: &[u8],
+) -> (
+    super::workflow_host_command_publish::AuditedPublication,
+    PathBuf,
+    PathBuf,
+) {
+    let staging = prepare_staging(root, call_id).unwrap();
+    std::fs::write(staging.root.join("acceptance-contract.json"), bytes).unwrap();
+    let command = resolved(&staging.root, &["acceptance-contract.json"]);
+    let mut command = command;
+    command.command_id = "freeze-acceptance".into();
+    let audited = audit_prepared_publication(
+        &staging,
+        &acceptance_manifest(call_id, expected_contract, bytes),
+        &command,
+        LiveMutationSentinels::capture(&[]).unwrap(),
+    )
+    .unwrap();
+    let tasks = root.join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let destination = tasks.join("acceptance-contract.json");
+    let pin = crate::command::workflow_task_set::acceptance_pin_path(root, &tasks);
+    (audited, destination, pin)
+}
+
+#[test]
+fn staged_acceptance_commit_with_unchanged_contract_succeeds() {
+    let temp = tempfile::tempdir().unwrap();
+    let prior = b"current";
+    let candidate = b"frozen";
+    let tasks = temp.path().join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::write(tasks.join("acceptance-contract.json"), prior).unwrap();
+    let (audited, destination, pin) = audited_acceptance(
+        temp.path(),
+        "unchanged",
+        Some(Some(digest(prior))),
+        candidate,
+    );
+    let receipt = publish_audited(
+        audited,
+        &BTreeMap::from([("acceptance-contract.json".into(), destination.clone())]),
+        &pin,
+        &tasks,
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(destination).unwrap(), candidate);
+    assert_eq!(receipt.entries[0].blake3, digest(candidate));
+}
+
+#[test]
+fn staged_acceptance_with_a_changed_contract_returns_stale_and_can_be_reprepared() {
+    let temp = tempfile::tempdir().unwrap();
+    let prior = b"prepared from this";
+    let concurrent = b"new live contract";
+    let candidate = b"stale freeze";
+    let tasks = temp.path().join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let destination = tasks.join("acceptance-contract.json");
+    std::fs::write(&destination, prior).unwrap();
+    let (stale, _, pin) =
+        audited_acceptance(temp.path(), "stale", Some(Some(digest(prior))), candidate);
+    std::fs::write(&destination, concurrent).unwrap();
+    let error = publish_audited(
+        stale,
+        &BTreeMap::from([("acceptance-contract.json".into(), destination.clone())]),
+        &pin,
+        &tasks,
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<crate::command::workflow_task_set::StaleAcceptanceContract>()
+            .is_some(),
+        "{error:#}"
+    );
+    assert_eq!(std::fs::read(&destination).unwrap(), concurrent);
+
+    let (refreshed, _, pin) = audited_acceptance(
+        temp.path(),
+        "refreshed",
+        Some(Some(digest(concurrent))),
+        b"freeze from refreshed contract",
+    );
+    publish_audited(
+        refreshed,
+        &BTreeMap::from([("acceptance-contract.json".into(), destination.clone())]),
+        &pin,
+        &tasks,
+    )
+    .expect("a re-prepared freeze commits against the current contract");
+    assert_eq!(
+        std::fs::read(destination).unwrap(),
+        b"freeze from refreshed contract"
+    );
+}
+
+#[test]
+fn first_staged_acceptance_commit_accepts_recorded_contract_absence() {
+    let temp = tempfile::tempdir().unwrap();
+    let candidate = b"first frozen contract";
+    let manifest = acceptance_manifest("round-trip", Some(None), candidate);
+    let decoded: PreparedPublicationV1 =
+        serde_json::from_slice(&serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert_eq!(
+        decoded.expected_acceptance_contract,
+        manifest.expected_acceptance_contract
+    );
+    let (audited, destination, pin) =
+        audited_acceptance(temp.path(), "first", Some(None), candidate);
+    let tasks = temp.path().join("tasks");
+    publish_audited(
+        audited,
+        &BTreeMap::from([("acceptance-contract.json".into(), destination.clone())]),
+        &pin,
+        &tasks,
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(destination).unwrap(), candidate);
 }
 
 #[test]

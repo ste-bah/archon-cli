@@ -11,7 +11,8 @@ impl PreparedAcceptanceFreeze {
     ) {
         let publication_identity = self.publication_identity();
         let evaluation = crate::command::workflow_gate::GateEvaluation::new("", self.findings)
-            .with_publication_identity(publication_identity);
+            .with_publication_identity(publication_identity)
+            .with_expected_acceptance_contract_digest(self.live_contract_digest.clone());
         // A check the judge did not accept is never staged for publication,
         // in any gate mode: it can never run. The envelope alone carries the
         // judge's findings back to the author, whose bounded retry loop

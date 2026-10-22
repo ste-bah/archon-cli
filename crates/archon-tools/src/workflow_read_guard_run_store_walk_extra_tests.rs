@@ -319,7 +319,10 @@ async fn glob_rooted_inside_a_run_store_lists_that_run() {
     assert!(!result.is_error, "{}", result.content);
 
     assert!(
-        result.content.replace('\\', "/").contains("artifacts/report.json"),
+        result
+            .content
+            .replace('\\', "/")
+            .contains("artifacts/report.json"),
         "a search rooted inside one run must still list its contents: {}",
         result.content
     );

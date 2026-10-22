@@ -18,6 +18,27 @@ mod scope_tests;
 mod test_client;
 use test_client::JudgeClient;
 
+fn publish_observed(
+    prepared: PreparedAcceptanceFreeze,
+    project: &Path,
+) -> Result<FreezeAcceptanceResult> {
+    let findings = prepared.findings.clone();
+    let identity = prepared.publication_identity();
+    let mut disposition = crate::command::workflow_gate::run_sync_gate(
+        project,
+        GateMode::Observe,
+        GateId::FreezeAcceptance,
+        || {
+            Ok(
+                crate::command::workflow_gate::GateEvaluation::new("", findings)
+                    .with_publication_identity(identity),
+            )
+        },
+    )?;
+    let permit = disposition.take_publication_permit().unwrap();
+    publish_acceptance_freeze(prepared, permit)
+}
+
 fn seed(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf, Vec<u8>) {
     let tasks = temp.path().join("tasks/PRD-X");
     std::fs::create_dir_all(&tasks).unwrap();
@@ -182,6 +203,12 @@ async fn accepted_judgment_publishes_contract_lock_and_pin_together() {
         serde_json::from_slice(&std::fs::read(acceptance_pin_path(temp.path(), &tasks)).unwrap())
             .unwrap();
     assert_eq!(pin.acceptance_digest, result.acceptance_digest);
+    assert_eq!(result.candidate_digest, content_digest(&original));
+    assert_eq!(result.live_contract_digest, Some(content_digest(&original)));
+    assert_eq!(
+        result.acceptance_digest,
+        content_digest(&std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap())
+    );
     assert!(result.freeze_event_id.starts_with("acceptance-freeze-"));
     let frozen = std::fs::read_to_string(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
     assert!(
@@ -198,6 +225,118 @@ async fn accepted_judgment_publishes_contract_lock_and_pin_together() {
             .map(|field| (*field).to_string())
             .collect::<Vec<_>>()
     );
+}
+
+#[tokio::test]
+async fn whole_set_freeze_prepares_from_the_current_contract_bytes() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, prd, _) = seed(&temp);
+    let contract_path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
+    let mut candidate: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&contract_path).unwrap()).unwrap();
+    let repaired_command = "jq -e '.valid == true and .repaired == true' out.json";
+    candidate["acceptance"][0]["check"]["command"] = repaired_command.into();
+    let current = serde_json::to_vec_pretty(&candidate).unwrap();
+    std::fs::write(&contract_path, &current).unwrap();
+    std::fs::write(
+        temp.path().join("out.json"),
+        r#"{"valid":true,"repaired":true}"#,
+    )
+    .unwrap();
+    crate::command::workflow_task_set::passability_tests_support::commit_project(temp.path());
+
+    let prepared = prepare_acceptance_freeze(
+        temp.path(),
+        &tasks,
+        &prd,
+        archon_core::config::GateMode::Observe,
+        Arc::new(JudgeClient {
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"the false state is rejected","reason":"the command checks both fields"}]}"#.into()),
+        }),
+    )
+    .await
+    .unwrap();
+    let prepared_contract = prepared.contract().unwrap();
+    let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &prepared_contract.acceptance[0].check
+    else {
+        panic!("the current entry remains a command check");
+    };
+    assert_eq!(command, repaired_command);
+    assert_eq!(prepared.candidate_digest, content_digest(&current));
+    assert_eq!(
+        prepared.live_contract_digest,
+        Some(content_digest(&current))
+    );
+}
+
+#[tokio::test]
+async fn a_first_whole_set_draft_publishes_when_no_contract_exists() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, prd, candidate) = seed(&temp);
+    std::fs::remove_file(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
+    std::fs::write(temp.path().join("out.json"), r#"{"valid":true}"#).unwrap();
+    crate::command::workflow_task_set::passability_tests_support::commit_project(temp.path());
+    let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
+        temp.path(), &tasks, &prd, GateMode::Observe, candidate.clone(),
+        Arc::new(JudgeClient { result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()) }),
+    ).await.unwrap();
+    assert_eq!(prepared.live_contract_digest, None);
+    assert_eq!(prepared.result.candidate_digest, content_digest(&candidate));
+    let result = publish_observed(prepared, temp.path()).unwrap();
+    assert_eq!(result.live_contract_digest, None);
+    assert_eq!(
+        result.acceptance_digest,
+        content_digest(&std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap())
+    );
+}
+
+#[tokio::test]
+async fn contract_changed_after_prepare_rebuilds_without_overwriting_the_new_contract() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, prd, original) = seed(&temp);
+    std::fs::write(temp.path().join("out.json"), r#"{"valid":true}"#).unwrap();
+    crate::command::workflow_task_set::passability_tests_support::commit_project(temp.path());
+    let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
+        temp.path(), &tasks, &prd, GateMode::Observe, original.clone(),
+        Arc::new(JudgeClient { result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()) }),
+    ).await.unwrap();
+    let mut newer_value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    newer_value["acceptance"][0]["check"]["command"] =
+        "jq -e '.valid == true and .repaired == true' out.json".into();
+    let newer = serde_json::to_vec_pretty(&newer_value).unwrap();
+    std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), &newer).unwrap();
+    let error =
+        publish_observed(prepared, temp.path()).expect_err("stale prepared snapshot retries");
+    assert!(
+        error.downcast_ref::<StaleAcceptanceContract>().is_some(),
+        "{error:#}"
+    );
+    assert_eq!(
+        std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
+        newer,
+        "the stale prepared candidate did not overwrite the new contract"
+    );
+    std::fs::write(
+        temp.path().join("out.json"),
+        r#"{"valid":true,"repaired":true}"#,
+    )
+    .unwrap();
+    crate::command::workflow_task_set::passability_tests_support::commit_project(temp.path());
+    let rebuilt = crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &prd,
+        GateMode::Observe,
+        newer.clone(),
+        Arc::new(JudgeClient {
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"false is rejected","reason":"checks validity and repair"}]}"#.into()),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(rebuilt.live_contract_digest, Some(content_digest(&newer)));
+    publish_observed(rebuilt, temp.path()).expect("the rebuilt snapshot publishes");
 }
 
 #[tokio::test]
@@ -295,94 +434,8 @@ impl WorkflowLlmClient for FinishReasonJudge {
 #[path = "workflow_task_set_truncation_tests.rs"]
 mod truncation_tests;
 
-#[tokio::test]
-async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
-    use archon_workflow::task_set_contract::{AcceptanceLock, FreezeGateMode, TASK_SKELETON_FILE};
-
-    let temp = tempfile::tempdir().unwrap();
-    let (tasks, prd, _) = seed(&temp);
-    std::fs::write(&prd, "## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-X-001 | A commandless floor with required_true_fields. |\n").unwrap();
-    let draft = std::fs::read_to_string(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
-    let weak = draft.replace("jq -e '.valid == true' out.json", "true");
-    std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), weak).unwrap();
-    let prepared = prepare_acceptance_freeze(
-        temp.path(),
-        &tasks,
-        &prd,
-        archon_core::config::GateMode::Observe,
-        Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"accepted for shadow measurement"}]}"#.into()),
-        }),
-    )
-    .await
-    .unwrap();
-    // Three findings, not one: the floor defect, the contradiction of a
-    // judge returning `accepted` for the very criterion the policy layer
-    // reports (a verdict cannot outrank a defect the host checked itself),
-    // and the host's own: the probe runs no check carrying a policy defect,
-    // so it is unproven on the pre-implementation tree.
-    assert_eq!(prepared.findings.len(), 3, "{:?}", prepared.findings);
-    assert!(
-        (prepared.findings.iter()).any(|finding| finding.remediation_scope
-            == archon_workflow::RemediationScope::Operational
-            && finding.text.contains(super::executability::HOST_UNPROVEN)),
-        "{:?}",
-        prepared.findings
-    );
-    assert!(
-        prepared.findings.iter().any(|finding| finding
-            .text
-            .contains("contradicts a finding the host verified")),
-        "the judge/policy disagreement must itself be a finding: {:?}",
-        prepared.findings
-    );
-    let findings = prepared.findings.clone();
-    let publication_identity = prepared.publication_identity();
-    let mut disposition = crate::command::workflow_gate::run_sync_gate(
-        temp.path(),
-        archon_core::config::GateMode::Observe,
-        crate::command::workflow_gate::GateId::FreezeAcceptance,
-        || {
-            Ok(
-                crate::command::workflow_gate::GateEvaluation::new("", findings)
-                    .with_publication_identity(publication_identity),
-            )
-        },
-    )
-    .unwrap();
-    let permit = disposition.take_publication_permit().unwrap();
-    publish_acceptance_freeze(prepared, permit).unwrap();
-    let lock: AcceptanceLock =
-        serde_json::from_slice(&std::fs::read(tasks.join(ACCEPTANCE_LOCK_FILE)).unwrap()).unwrap();
-    assert_eq!(lock.gate.mode, FreezeGateMode::Observe);
-    // Three: the floor defect, the judge contradicting it, and the host's
-    // unproven check, each stamped on the lock.
-    assert_eq!(lock.gate.finding_count, 3);
-    assert!(!lock.gate.findings_digest.is_empty());
-
-    std::fs::write(
-        tasks.join(TASK_SKELETON_FILE),
-        r#"{"schema_version":1,"acceptance_digest":"draft","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010-body.md","depends_on":[],"blocks":[],"implements":["AC-X-001"],"deliverable_contracts":[]}]}"#,
-    )
-    .unwrap();
-    let prepared = prepare_skeleton_freeze(
-        temp.path(),
-        &tasks,
-        &prd,
-        archon_core::config::GateMode::Enforce,
-    )
-    .unwrap();
-    let finding = prepared
-        .findings
-        .iter()
-        .find(|finding| finding.text.contains("predecessor acceptance freeze"))
-        .expect("predecessor finding");
-    assert!(
-        finding.text.contains("re-freeze under enforce"),
-        "{}",
-        finding.text
-    );
-}
+#[path = "workflow_task_set_policy_tests.rs"]
+mod policy_tests;
 
 #[path = "workflow_task_set_review_tests.rs"]
 mod review_tests;
@@ -390,57 +443,8 @@ mod review_tests;
 #[path = "workflow_task_set_republish_tests.rs"]
 mod republish_tests;
 
-#[tokio::test]
-async fn acceptance_candidate_prepares_exact_staged_bytes_without_reading_or_writing_live_contract()
-{
-    let temp = tempfile::tempdir().unwrap();
-    let (tasks, prd, candidate) = seed(&temp);
-    std::fs::write(
-        tasks.join(ACCEPTANCE_CONTRACT_FILE),
-        b"malformed live sentinel",
-    )
-    .unwrap();
-    let response = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"rejects"}]}"#;
-
-    let prepared = prepare_acceptance_freeze_from_candidate(
-        temp.path(),
-        &tasks,
-        &prd,
-        archon_core::config::GateMode::Observe,
-        candidate,
-        Arc::new(JudgeClient {
-            result: Ok(response.into()),
-        }),
-    )
-    .await
-    .unwrap();
-    let (evaluation, outputs) = prepared.into_staged_parts();
-
-    assert_eq!(
-        std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
-        b"malformed live sentinel"
-    );
-    assert!(!tasks.join(ACCEPTANCE_LOCK_FILE).exists());
-    assert!(!acceptance_pin_path(temp.path(), &tasks).exists());
-    assert!(evaluation.findings.is_empty());
-    assert_eq!(
-        outputs
-            .iter()
-            .map(|(path, _)| path.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "acceptance-contract.json",
-            "acceptance-contract.lock",
-            "acceptance-pin.json"
-        ]
-    );
-    let contract: archon_workflow::task_set_contract::AcceptanceContract =
-        serde_json::from_slice(&outputs[0].1).unwrap();
-    assert_eq!(
-        contract.acceptance[0].judgment.verdict,
-        archon_workflow::task_set_contract::JudgeDecision::Accepted
-    );
-}
+#[path = "workflow_task_set_candidate_tests.rs"]
+mod candidate_tests;
 
 #[path = "workflow_acceptance_preflight_tests.rs"]
 mod acceptance_preflight_tests;

@@ -34,6 +34,7 @@ mod host_owned;
 use host_owned::HostOwned;
 #[path = "workflow_decompose_seed_record.rs"]
 pub(super) mod record;
+pub(crate) use record::reply_entry;
 
 /// The acceptance gate. Its stdin is the candidate the script assembled.
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
@@ -198,13 +199,10 @@ fn ordered(records: &[WorkflowV2CallRecord]) -> Result<Vec<&WorkflowV2CallRecord
 }
 
 #[cfg(test)]
-pub(crate) fn derive(
-    records: &[WorkflowV2CallRecord],
-    pause_ids: &[String],
-    criteria: &BTreeMap<String, String>,
-) -> Result<Derived> {
-    derive_with_reply_markers(records, pause_ids, criteria, &BTreeMap::new(), &[])
-}
+#[path = "workflow_decompose_seed_derive_test_helpers.rs"]
+mod test_helpers;
+#[cfg(test)]
+pub(crate) use test_helpers::derive;
 
 pub(crate) fn derive_with_reply_markers(
     records: &[WorkflowV2CallRecord],

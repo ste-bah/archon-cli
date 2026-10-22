@@ -1,6 +1,8 @@
 //! Resume-time seed inputs the live resume and its dry run share, so the dry
 //! run plans the same calls the resume would.
 
+use anyhow::Context;
+
 use super::*;
 
 /// The host-owned acceptance criteria the launch arguments carry.
@@ -153,6 +155,7 @@ pub(crate) fn resume_script_seed(
 pub(crate) fn resume_script_arguments(
     store: &WorkflowStore,
     run_id: &str,
+    task_root: &Path,
     runtime: &FixedRunIdentityV1,
     (criteria, requirement_texts): (&BTreeMap<String, String>, &BTreeMap<String, String>),
     resume_frozen_chain: serde_json::Value,
@@ -160,7 +163,7 @@ pub(crate) fn resume_script_arguments(
     (expected_arguments, prd_text): (&serde_json::Value, &str),
     read_only: bool,
 ) -> Result<(serde_json::Value, ScriptSeed)> {
-    let script_seed = resume_script_seed(
+    let mut script_seed = resume_script_seed(
         store,
         run_id,
         runtime,
@@ -170,6 +173,17 @@ pub(crate) fn resume_script_arguments(
         seed,
         read_only,
     )?;
+    if let Some(seed) = script_seed.seed.as_mut() {
+        let records = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"))
+            .load_call_records()?;
+        if let Some(digest) =
+            refresh_acceptance_carried_entries(task_root, &store.run_dir(run_id), seed, &records)?
+        {
+            script_seed
+                .line
+                .push_str(&format!(" acceptance_refreshed_from_contract={digest}"));
+        }
+    }
     let mut seeded = seeded_arguments(expected_arguments, script_seed.seed.as_ref());
     seeded["frozenChain"] = resume_frozen_chain;
     let arguments = crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
@@ -179,6 +193,178 @@ pub(crate) fn resume_script_arguments(
     capture::record(&arguments);
     Ok((arguments, script_seed))
 }
+
+/// Refresh the acceptance entries in the seed handed to a resumed script.
+/// Replies remain a later overlay in the script, preserving newly authored
+/// entries while removing stale carried bytes from the candidate base.
+fn refresh_acceptance_carried_entries(
+    task_root: &Path,
+    run_root: &Path,
+    seed: &mut PhaseSeed,
+    records: &[archon_workflow::WorkflowV2CallRecord],
+) -> Result<Option<String>> {
+    use archon_workflow::task_set_contract::{
+        ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, content_digest,
+    };
+    let path = task_root.join(ACCEPTANCE_CONTRACT_FILE);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+    };
+    let digest = content_digest(&bytes);
+    let contract: AcceptanceContract =
+        serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
+    let live = contract
+        .acceptance
+        .iter()
+        .chain(&contract.supplementary)
+        .map(|entry| (entry.id.clone(), serde_json::to_value(entry)))
+        .map(|(id, entry)| entry.map(|entry| (id, entry)))
+        .collect::<std::result::Result<std::collections::BTreeMap<_, _>, _>>()?;
+    if let Some(SubjectSeed::Entries {
+        carried_entries,
+        replies,
+        invalid,
+        ..
+    }) = seed.subjects.get_mut("acceptance")
+    {
+        // A reply remains an overlay unless the run's later reverify lineage
+        // names that subject as repaired and the current contract supplies its
+        // committed bytes. Unrelated whole-set freezes do not supersede replies.
+        let mut published = std::collections::BTreeMap::<
+            String,
+            Vec<(chrono::DateTime<chrono::FixedOffset>, serde_json::Value)>,
+        >::new();
+        // Per-check re-publishes have no whole-candidate stdin record. Their
+        // durable evidence is the reverify report filed in the run ledger and
+        // the matching completion event. Whole-set freezes are not evidence of
+        // a per-check repair: their candidate normally repeats every unchanged
+        // carried entry. Attribute the report only to its named subjects.
+        for (id, at) in reverify_report_publications(run_root)? {
+            if let Some(entry) = live.get(&id) {
+                published.entry(id).or_default().push((at, entry.clone()));
+            }
+        }
+        replies.retain(|reply| {
+            let Some(current) = live.get(&reply.id) else {
+                return true;
+            };
+            if crate::command::workflow_decompose_seed::reply_entry(&reply.text, &reply.id)
+                .is_none()
+            {
+                return true;
+            }
+            let reply_at = records
+                .iter()
+                .find(|record| record.call.id == reply.call_id)
+                .and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.started_at).ok());
+            let Some(reply_at) = reply_at else {
+                return true;
+            };
+            !reply_was_published_after(published.get(&reply.id), reply_at, current)
+        });
+        let mut refreshed = Vec::with_capacity(carried_entries.len());
+        for old in carried_entries.drain(..) {
+            let id = old
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if let Some(current) = live.get(id) {
+                refreshed.push(current.clone());
+            } else if !id.is_empty() {
+                // Existing seed rules route invalid carried entries back to
+                // authoring; preserving the id here records why it was dropped.
+                invalid
+                    .entry(id.to_string())
+                    .or_default()
+                    .push("carried acceptance entry is no longer in the published contract".into());
+            }
+        }
+        *carried_entries = refreshed;
+    }
+    seed.acceptance_refreshed_from_contract_digest = Some(digest.clone());
+    Ok(Some(digest))
+}
+
+/// Replies and published entries may carry host-owned judgment metadata.
+/// Compare only the authored fields to recognize the bytes a publication
+/// committed, even when the reply itself is byte-identical to those fields.
+fn same_authored_entry(published: &serde_json::Value, current: &serde_json::Value) -> bool {
+    ["criterion", "check", "covers", "gap_permitted"]
+        .iter()
+        .all(|field| published.get(field) == current.get(field))
+}
+
+fn reply_was_published_after(
+    publications: Option<&Vec<(chrono::DateTime<chrono::FixedOffset>, serde_json::Value)>>,
+    reply_at: chrono::DateTime<chrono::FixedOffset>,
+    current: &serde_json::Value,
+) -> bool {
+    publications.is_some_and(|versions| {
+        versions
+            .iter()
+            .any(|(at, entry)| *at > reply_at && same_authored_entry(entry, current))
+    })
+}
+
+fn reverify_report_publications(
+    run_root: &Path,
+) -> Result<Vec<(String, chrono::DateTime<chrono::FixedOffset>)>> {
+    let events_path = run_root.join("events.jsonl");
+    let events = match std::fs::read_to_string(&events_path) {
+        Ok(events) => events,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", events_path.display()));
+        }
+    };
+    let mut latest = None;
+    for line in events.lines() {
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if event["kind"] == "decomposition_reverified"
+            && event["detail"]["outcome"] == "needs_remediation"
+        {
+            let Some(report_id) = event["detail"]["report_id"].as_str() else {
+                continue;
+            };
+            let Some(timestamp) = event["ts"].as_str() else {
+                continue;
+            };
+            if let Ok(at) = chrono::DateTime::parse_from_rfc3339(timestamp) {
+                latest = Some((report_id.to_string(), at));
+            }
+        }
+    }
+    let Some((report_id, at)) = latest else {
+        return Ok(Vec::new());
+    };
+    let report_path = run_root
+        .join("decomposition/reverify")
+        .join(format!("remediation-{report_id}.json"));
+    let bytes = match std::fs::read(&report_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", report_path.display()));
+        }
+    };
+    let report: serde_json::Value = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parsing {}", report_path.display()))?;
+    Ok(report["subjects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(|id| (id.to_string(), at))
+        .collect())
+}
+
+#[cfg(test)]
+#[path = "workflow_decompose_seed_resume_tests.rs"]
+mod tests;
 
 /// The script arguments the last resume on this thread built (tests).
 #[cfg(test)]

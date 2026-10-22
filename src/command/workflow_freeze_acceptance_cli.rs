@@ -61,45 +61,65 @@ pub(super) async fn freeze_acceptance(
     let tasks_root = required_path(cwd, tasks, "--tasks")?;
     let prd_path = required_path(cwd, prd, "--prd")?;
     let scope = author_scope(cwd, &tasks_root, &prd_path)?;
-    let client = client(config, env_vars, cwd, "workflow-freeze-acceptance", &scope).await?;
-    let prepared =
-        crate::command::workflow_task_set::prepare_acceptance_freeze_reauthoring_with_limits(
-            cwd,
-            &tasks_root,
-            &prd_path,
-            config.workflow.gate_mode,
-            client,
-            &scope,
-            config.tools.cargo.to_limits(),
-        )
-        .await
-        .map_err(exit_if_incomplete)?;
-    let findings = prepared.findings.clone();
-    let publication_identity = prepared.publication_identity();
-    let mut disposition = crate::command::workflow_gate::run_sync_gate(
-        cwd,
-        config.workflow.gate_mode,
-        crate::command::workflow_gate::GateId::FreezeAcceptance,
-        || {
-            Ok(
-                crate::command::workflow_gate::GateEvaluation::new("", findings)
-                    .with_publication_identity(publication_identity),
+    loop {
+        let client = client(config, env_vars, cwd, "workflow-freeze-acceptance", &scope).await?;
+        let prepared =
+            crate::command::workflow_task_set::prepare_acceptance_freeze_reauthoring_with_limits(
+                cwd,
+                &tasks_root,
+                &prd_path,
+                config.workflow.gate_mode,
+                client,
+                &scope,
+                config.tools.cargo.to_limits(),
             )
-        },
-    )?;
-    for diagnostic in disposition.diagnostics() {
-        eprintln!("{diagnostic}");
+            .await
+            .map_err(exit_if_incomplete)?;
+        let findings = prepared.findings.clone();
+        let publication_identity = prepared.publication_identity();
+        let mut disposition = crate::command::workflow_gate::run_sync_gate(
+            cwd,
+            config.workflow.gate_mode,
+            crate::command::workflow_gate::GateId::FreezeAcceptance,
+            || {
+                Ok(
+                    crate::command::workflow_gate::GateEvaluation::new("", findings)
+                        .with_publication_identity(publication_identity),
+                )
+            },
+        )?;
+        for diagnostic in disposition.diagnostics() {
+            eprintln!("{diagnostic}");
+        }
+        disposition.require_allowed()?;
+        let permit = disposition
+            .take_publication_permit()
+            .ok_or_else(|| anyhow!("acceptance freeze received no publication permit"))?;
+        let result = match crate::command::workflow_task_set::publish_acceptance_freeze(
+            prepared, permit,
+        ) {
+            Ok(result) => result,
+            Err(error)
+                if error
+                    .downcast_ref::<crate::command::workflow_task_set::StaleAcceptanceContract>()
+                    .is_some() =>
+            {
+                eprintln!(
+                    "acceptance contract changed during freeze preparation; rebuilding from the current published contract"
+                );
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        println!(
+            "acceptance contract frozen: candidate_digest={} live_contract_digest={} destination_digest={} event={}",
+            result.candidate_digest,
+            result.live_contract_digest.as_deref().unwrap_or("absent"),
+            result.acceptance_digest,
+            result.freeze_event_id
+        );
+        return Ok(());
     }
-    disposition.require_allowed()?;
-    let permit = disposition
-        .take_publication_permit()
-        .ok_or_else(|| anyhow!("acceptance freeze received no publication permit"))?;
-    let result = crate::command::workflow_task_set::publish_acceptance_freeze(prepared, permit)?;
-    println!(
-        "acceptance contract frozen: digest={} event={}",
-        result.acceptance_digest, result.freeze_event_id
-    );
-    Ok(())
 }
 
 pub(super) async fn reauthor_acceptance(

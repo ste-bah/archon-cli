@@ -1,6 +1,10 @@
 //! Acceptance chain publication, including a recovery re-freeze receipt.
 use super::*;
 
+#[derive(Debug, thiserror::Error)]
+#[error("acceptance contract changed while freeze-acceptance was being prepared")]
+pub(crate) struct StaleAcceptanceContract;
+
 #[cfg(test)]
 pub(crate) fn publish_acceptance_files(
     tasks_root: &Path,
@@ -9,6 +13,9 @@ pub(crate) fn publish_acceptance_files(
     lock: &AcceptanceLock,
     pin: &AcceptancePin,
 ) -> Result<()> {
+    let source_digest = std::fs::read(tasks_root.join(ACCEPTANCE_CONTRACT_FILE))
+        .ok()
+        .map(|bytes| content_digest(&bytes));
     publish_acceptance_files_with_recovery(
         tasks_root,
         project_root,
@@ -16,6 +23,7 @@ pub(crate) fn publish_acceptance_files(
         lock,
         pin,
         None,
+        source_digest.as_deref(),
     )
 }
 
@@ -26,12 +34,13 @@ pub(crate) fn publish_acceptance_files_with_recovery(
     lock: &AcceptanceLock,
     pin: &AcceptancePin,
     recovery: Option<&super::super::recovery_lineage::Publication>,
+    source_contract_digest: Option<&str>,
 ) -> Result<()> {
     let pin_path = super::super::acceptance_pin_path(project_root, tasks_root);
     if let Some(parent) = pin_path.parent() {
         create_dir_all_durably(parent)?;
     }
-    let _lock = ChainLock::acquire(&pin_path, tasks_root)?;
+    let _lock = ChainLock::acquire_waiting(&pin_path, tasks_root)?;
     // PLAN-11: the sources each check runs are pinned with the chain.
     let sidecar = super::super::check_sources::frozen_sidecar(
         project_root,
@@ -53,7 +62,10 @@ pub(crate) fn publish_acceptance_files_with_recovery(
         sidecar,
         (pin_path.clone(), serde_json::to_vec_pretty(&pin)?),
     ];
-    let mut expected = Vec::new();
+    let mut expected = vec![(
+        tasks_root.join(ACCEPTANCE_CONTRACT_FILE),
+        source_contract_digest.map(str::to_string),
+    )];
     if let Some(recovery) = recovery {
         files.extend(recovery.files.clone());
         expected.push(recovery.expected.clone());

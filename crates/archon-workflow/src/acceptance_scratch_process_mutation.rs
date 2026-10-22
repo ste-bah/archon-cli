@@ -46,6 +46,37 @@ pub(super) fn record_move_outcomes(
     }
 }
 
+/// Observe a moved input after the check's process tree exited and before
+/// restoration. This narrow absence-to-presence window is the evidence used
+/// for a check-attributed recreation marker.
+pub(super) fn record_check_recreated(
+    result: &mut CheckResult,
+    plan: &MutationPlan,
+    moved: &[mutation_fd::MoveOutcome],
+    root: &mutation_fd::SiteRoot,
+) {
+    for (index, (input, outcome)) in plan.inputs.iter().zip(moved).enumerate() {
+        if *outcome == mutation_fd::MoveOutcome::Moved {
+            match mutation_fd::site_entry_exists(root, &input.move_path) {
+                Ok(true) => result.stderr.extend_from_slice(
+                    format!("archon-mutation-check-recreated-{}: {index}\n", plan.nonce).as_bytes(),
+                ),
+                Ok(false) => {}
+                Err(error) => {
+                    let note = format!(
+                        "could not observe whether check recreated {}: {error}",
+                        input.move_path.display()
+                    );
+                    result.operational_error = Some(match result.operational_error.take() {
+                        Some(previous) => format!("{previous}; {note}"),
+                        None => note,
+                    });
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn snapshot_parent_states(
     plan: &MutationPlan,
     moved: &[mutation_fd::MoveOutcome],

@@ -106,6 +106,37 @@ pub(crate) fn unpublished(
     }
 }
 
+/// A staged acceptance commit whose source contract changed after preparation
+/// is a completed, actionable result: the acceptance author loop refreshes and
+/// re-runs the freeze from the current contract.
+pub(crate) fn stale_acceptance_contract(
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    byte_counts: (u64, u64),
+    mut envelope: GateEnvelopeV1,
+) -> HostCommandResult {
+    envelope.policy_findings.push(archon_workflow::GatePolicyFinding {
+        deterministic_defect: Some(archon_workflow::defect::DeterministicDefect::new(
+            "stale_acceptance_contract",
+            "acceptance",
+            "host",
+        )),
+        text: "the acceptance contract changed after this freeze was prepared; refresh the current contract and re-run the acceptance freeze".into(),
+        subject: "acceptance".into(),
+        source_path: None,
+        remediation_scope: RemediationScope::CandidateArtifact,
+    });
+    unpublished(
+        exit_code,
+        stdout,
+        stderr,
+        byte_counts,
+        envelope,
+        "stale acceptance preparation; acceptance freeze must be re-run",
+    )
+}
+
 /// The envelope the host writes when it refuses a candidate before any command
 /// ran.
 ///
@@ -192,6 +223,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn stale_acceptance_is_a_typed_retryable_outcome_not_a_host_error() {
+        let outcome = stale_acceptance_contract(
+            Some(0),
+            String::new(),
+            String::new(),
+            (0, 0),
+            policy_finding(RemediationScope::CandidateArtifact),
+        );
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(outcome.publication_receipt.is_none());
+        assert!(!outcome.postcondition.unwrap().satisfied);
+        let finding = &outcome.gate_envelope.unwrap().policy_findings[1];
+        assert_eq!(
+            finding.remediation_scope,
+            RemediationScope::CandidateArtifact
+        );
+        assert_eq!(
+            finding.deterministic_defect.as_ref().unwrap().code,
+            "stale_acceptance_contract"
+        );
+    }
+
     /// Enforce must refuse to publish an acceptance policy finding whatever
     /// scope it carries. Publishing stamps the lock `enforce` with a non-zero
     /// finding count, which `validate_gate_stamp` then rejects forever - so the
@@ -236,6 +290,7 @@ mod tests {
                     blake3: "d".into(),
                 })
                 .collect(),
+            expected_acceptance_contract: None,
         }
     }
 

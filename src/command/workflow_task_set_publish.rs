@@ -161,6 +161,7 @@ pub(super) fn publish_skeleton_files(
 
 #[path = "workflow_task_set_publish_acceptance.rs"]
 mod acceptance;
+pub(crate) use acceptance::StaleAcceptanceContract;
 #[cfg(test)]
 pub(super) use acceptance::publish_acceptance_files;
 pub(super) use acceptance::publish_acceptance_files_with_recovery;
@@ -369,14 +370,36 @@ pub(crate) fn begin_publish(
     crash_point("staged");
     // Last look before the first rename: every target must still hold the
     // bytes the caller verified, or another writer got there first.
-    let changed = expected_prior
-        .iter()
-        .filter(|(path, digest)| {
-            std::fs::read(path).ok().map(|bytes| content_digest(&bytes)) != *digest
-        })
-        .map(|(path, _)| path.display().to_string())
-        .collect::<Vec<_>>();
+    let mut changed = Vec::new();
+    for (path, expected) in expected_prior {
+        let actual = match std::fs::read(path) {
+            Ok(bytes) => Some(content_digest(&bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                let error = anyhow!(error).context(format!(
+                    "reading expected prior publication target {}",
+                    path.display()
+                ));
+                return Err(abandon(&paths, &created, error));
+            }
+        };
+        if actual != *expected {
+            changed.push(path.display().to_string());
+        }
+    }
     if !changed.is_empty() {
+        if remedy == "workflow freeze-acceptance"
+            && expected_prior.iter().any(|(path, _)| {
+                path.file_name().is_some_and(|name| {
+                    name == archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE
+                }) && changed
+                    .iter()
+                    .any(|changed| changed == &path.display().to_string())
+            })
+        {
+            let error = anyhow::Error::new(StaleAcceptanceContract);
+            return Err(abandon(&paths, &created, error));
+        }
         let error = anyhow!(
             "the frozen chain changed since it was verified ({}); nothing was written — re-run against the current chain",
             changed.join(", ")

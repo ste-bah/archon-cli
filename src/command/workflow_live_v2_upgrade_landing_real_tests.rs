@@ -117,6 +117,7 @@ impl crate::command::workflow_host_command_exec::HostCommandProcessAdapter for R
             call_id,
             command_id: request.command_id,
             entries,
+            expected_acceptance_contract: None,
         };
         let stdout = serde_json::to_vec(&manifest)?;
         let stdout_bytes = stdout.len() as u64;

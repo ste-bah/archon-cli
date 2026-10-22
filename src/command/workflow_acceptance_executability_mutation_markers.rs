@@ -107,7 +107,7 @@ impl Markers {
     }
 
     pub(crate) fn recreated(&self, result: &CheckResult, inputs: &[String]) -> BTreeSet<String> {
-        let prefix = self.recreated_prefix();
+        let prefix = format!("archon-mutation-check-recreated-{}: ", self.nonce);
         String::from_utf8_lossy(&result.stderr)
             .lines()
             .filter_map(|line| line.strip_prefix(prefix.as_str()))

@@ -147,7 +147,7 @@ fn a_recreated_input_read_and_deleted_by_the_check_is_marked_recreated() {
     );
     assert_eq!(
         markers.recreated(&recreated, &names),
-        std::collections::BTreeSet::from(["data/state.txt".to_string()]),
+        std::collections::BTreeSet::new(),
         "{}",
         String::from_utf8_lossy(&recreated.stderr)
     );
@@ -194,7 +194,7 @@ fn recreating_reading_and_deleting_an_input_cannot_hide_behind_restored_parent_m
     assert_eq!(parent_mtime_before, parent_mtime_after);
     assert_eq!(
         markers.recreated(&recreated, &names),
-        std::collections::BTreeSet::from(["data/state.txt".to_string()]),
+        std::collections::BTreeSet::new(),
         "{}",
         String::from_utf8_lossy(&recreated.stderr)
     );

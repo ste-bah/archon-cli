@@ -73,6 +73,7 @@ pub(crate) struct GateEvaluation {
     pub(crate) findings: Vec<GateFinding>,
     operational_error: Option<String>,
     publication_identity: Option<String>,
+    expected_acceptance_contract: Option<archon_workflow::v2::ExpectedAcceptanceContract>,
 }
 
 impl GateEvaluation {
@@ -82,6 +83,7 @@ impl GateEvaluation {
             findings,
             operational_error: None,
             publication_identity: None,
+            expected_acceptance_contract: None,
         }
     }
 
@@ -97,6 +99,23 @@ impl GateEvaluation {
     pub(crate) fn with_publication_identity(mut self, identity: impl Into<String>) -> Self {
         self.publication_identity = Some(identity.into());
         self
+    }
+
+    pub(crate) fn with_expected_acceptance_contract_digest(
+        mut self,
+        digest: Option<String>,
+    ) -> Self {
+        self.expected_acceptance_contract = Some(archon_workflow::v2::ExpectedAcceptanceContract {
+            exists: digest.is_some(),
+            digest,
+        });
+        self
+    }
+
+    pub(crate) fn expected_acceptance_contract(
+        &self,
+    ) -> Option<archon_workflow::v2::ExpectedAcceptanceContract> {
+        self.expected_acceptance_contract.clone()
     }
 
     pub(crate) fn into_envelope(self) -> Result<archon_workflow::GateEnvelopeV1> {

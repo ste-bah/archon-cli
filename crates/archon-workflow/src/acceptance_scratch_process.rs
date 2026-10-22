@@ -446,6 +446,13 @@ pub async fn run_at(
         mutation::record_move_outcomes(&mut result, plan, moved);
     }
     if process_tree_gone {
+        if let (Some(plan), Some(moved), Some(root)) = (
+            site.mutation_plan,
+            moved.as_ref(),
+            site.mutation_root.as_ref(),
+        ) {
+            mutation::record_check_recreated(&mut result, plan, moved, root);
+        }
         if let (Some(plan), Some(moved), Some(parent_snapshots), Some(root)) = (
             site.mutation_plan,
             moved.as_ref(),

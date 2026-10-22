@@ -222,6 +222,7 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
             call_id,
             command_id: request.command_id,
             entries,
+            expected_acceptance_contract: None,
         })
         .unwrap();
         let stderr = format!("warning: key {secret} in use").into_bytes();
@@ -472,20 +473,8 @@ async fn round2_residual_typed_field_is_sealed_fail_closed() {
     }
 }
 
-#[tokio::test]
-async fn ascii_json_output_is_redacted_at_the_host_result_boundary() {
-    for secret in [
-        "credential-é-canary",
-        "credential-\u{007f}-canary",
-        "credential-中-canary",
-        "credential-😀-canary",
-    ] {
-        let ran = run_secret(Child::JsonOutput, secret).await;
-        let result = ran.result.unwrap();
-        assert_eq!(result.stdout, "\"[REDACTED]\"");
-        assert_eq!(result.stderr, "\"[REDACTED]\"");
-    }
-}
+#[path = "workflow_host_envelope_seal_ascii_tests.rs"]
+mod ascii_tests;
 
 #[path = "workflow_host_envelope_r2_tests.rs"]
 mod r2_tests;

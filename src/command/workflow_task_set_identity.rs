@@ -8,6 +8,7 @@ impl PreparedAcceptanceFreeze {
             self.tasks_root.to_string_lossy().as_bytes().to_vec(),
             self.project_root.to_string_lossy().as_bytes().to_vec(),
             self.contract_bytes.clone(),
+            self.candidate_digest.as_bytes().to_vec(),
             serde_json::to_vec(&self.lock).expect("acceptance lock serializes"),
             serde_json::to_vec(&self.pin).expect("acceptance pin serializes"),
         ];

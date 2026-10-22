@@ -22,6 +22,36 @@ fn setup_file_that_was_not_moved_has_no_site_copy_note() {
 }
 
 #[test]
+fn reappearing_input_does_not_preempt_the_mutated_assertion_verdict() {
+    let inputs = vec![
+        "data/asserted.txt".to_string(),
+        "data/reappeared.txt".to_string(),
+        "data/third.txt".to_string(),
+    ];
+    let (evidence, markers, names) = run_real_wrapper_with_inputs(
+        "printf recreated > data/reappeared.txt; test -f data/asserted.txt && test -f data/third.txt",
+        inputs,
+    );
+    assert_eq!(markers.moved(&evidence.result, &names).len(), 3);
+    assert_eq!(evidence.result.exit_code, Some(1));
+    assert!(
+        markers
+            .recreated(&evidence.result, &names)
+            .contains("data/reappeared.txt")
+    );
+    assert!(
+        mutation_host_or_author_finding(
+            &evidence,
+            &markers,
+            &names,
+            None,
+            "check 'AC-1': it passed",
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn repository_alias_diagnostic_keeps_the_named_path_and_site_copy_note_when_moved() {
     let path = "../repository/tests/focused.rs";
     let diagnostics = describe_candidates_with_run_state(
@@ -73,9 +103,7 @@ fn recreated_input_with_operational_failure_is_host_unproven() {
         "check 'AC-1': it passed",
     )
     .expect("operational failure remains host-unproven");
-    let MutationFinding::HostUnproven(host) = finding else {
-        panic!("host failure with a recreated input must remain host-unproven");
-    };
+    let MutationFinding::HostUnproven(host) = finding;
     assert!(host.contains("data/state.txt=original-recreated"));
     assert!(host.contains("data/other.txt=restored"));
     assert!(host.contains("the host could not complete the run"));
@@ -117,30 +145,32 @@ fn run_real_wrapper_with_inputs(
 }
 
 #[test]
-fn real_wrapper_recreation_routes_to_author_with_named_path() {
+fn real_wrapper_recreation_is_attributed_to_the_mutated_check() {
     let (result, markers, inputs) = run_real_wrapper("printf recreated > data/state.txt; exit 0");
-
-    let Some(MutationFinding::AuthorFinding(finding)) = mutation_host_or_author_finding(
-        &result,
-        &markers,
-        &inputs,
-        None,
-        "check 'AC-1': it passed",
-    ) else {
-        panic!("real wrapper recreation must route to an author finding");
-    };
+    let recreated = markers.recreated(&result.result, &inputs);
+    assert!(recreated.contains("data/state.txt"));
     assert!(
-        finding.contains("it recreated data/state.txt while running"),
-        "finding={finding}; states={:?}; markers={:?}; stderr={}",
-        markers.states(&result.result, &inputs),
-        markers.recreated(&result.result, &inputs),
-        String::from_utf8_lossy(&result.result.stderr),
+        author_recreated_finding(
+            "check 'AC-1': it passed",
+            &recreated.iter().cloned().collect::<Vec<_>>(),
+        )
+        .contains("it recreated data/state.txt while running")
+    );
+    assert!(
+        mutation_host_or_author_finding(
+            &result,
+            &markers,
+            &inputs,
+            None,
+            "check 'AC-1': it passed"
+        )
+        .is_none()
     );
     assert!(!markers.restored_all(&result.result));
 }
 
 #[test]
-fn real_wrapper_transient_recreation_routes_to_author_with_all_recreated_paths() {
+fn a_transient_path_is_not_attributed_when_absent_after_the_check_exits() {
     let (result, markers, inputs) = run_real_wrapper_with_inputs(
         "printf recreated > data/state.txt; rm data/state.txt; exit 0",
         vec![
@@ -149,33 +179,16 @@ fn real_wrapper_transient_recreation_routes_to_author_with_all_recreated_paths()
         ],
     );
 
-    let Some(MutationFinding::AuthorFinding(finding)) = mutation_host_or_author_finding(
-        &result,
-        &markers,
-        &inputs,
-        None,
-        "check 'AC-1': it passed",
-    ) else {
-        panic!("transient recreation must route to an author finding");
-    };
+    assert!(markers.recreated(&result.result, &inputs).is_empty());
     assert!(
-        finding.contains("it recreated data/state.txt while running"),
-        "finding={finding}; states={:?}; markers={:?}; stderr={}",
-        markers.states(&result.result, &inputs),
-        markers.recreated(&result.result, &inputs),
-        String::from_utf8_lossy(&result.result.stderr),
-    );
-    assert!(!finding.contains("other/untouched.txt"));
-    assert_eq!(markers.recreated(&result.result, &inputs).len(), 1);
-    assert!(
-        markers
-            .recreated(&result.result, &inputs)
-            .contains("data/state.txt")
-    );
-    assert!(
-        !markers
-            .recreated(&result.result, &inputs)
-            .contains("other/untouched.txt")
+        mutation_host_or_author_finding(
+            &result,
+            &markers,
+            &inputs,
+            None,
+            "check 'AC-1': it passed"
+        )
+        .is_none()
     );
 }
 
@@ -208,9 +221,7 @@ fn real_wrapper_observed_signal_is_host_unproven() {
         "check 'AC-1': it passed",
     )
     .expect("observed signal must remain a host failure");
-    let MutationFinding::HostUnproven(host) = finding else {
-        panic!("observed signal must route to host-unproven");
-    };
+    let MutationFinding::HostUnproven(host) = finding;
     assert!(host.contains("wrapper observed signal TERM"));
 }
 
@@ -226,9 +237,7 @@ fn real_wrapper_missing_aside_is_host_unproven_with_input_state() {
         "check 'AC-1': it passed",
     )
     .expect("missing aside must remain host-unproven");
-    let MutationFinding::HostUnproven(host) = finding else {
-        panic!("missing aside must route to host-unproven");
-    };
+    let MutationFinding::HostUnproven(host) = finding;
     assert!(host.contains("data/state.txt=aside-missing"));
 }
 
@@ -363,11 +372,7 @@ fn unrelated_sibling_touch_keeps_the_parent_metadata_signal_on_legacy_path() {
     let names = vec!["data/state.txt".to_string()];
     let states = markers.states(&result, &names);
 
-    assert!(
-        markers
-            .recreated(&result, &names)
-            .contains("data/state.txt")
-    );
+    assert!(markers.recreated(&result, &names).is_empty());
     assert_eq!(
         states.get("data/state.txt").map(String::as_str),
         Some("original-recreated")

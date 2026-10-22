@@ -238,6 +238,7 @@ impl super::workflow_host_command_exec::HostCommandProcessAdapter for PreparedBo
             call_id,
             command_id: request.command_id.clone(),
             entries,
+            expected_acceptance_contract: None,
         };
         let stdout = serde_json::to_vec(&manifest).unwrap();
         if self.overflow_stdout {

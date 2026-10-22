@@ -25,12 +25,14 @@ pub(super) use diagnostics::{
 
 #[path = "workflow_acceptance_executability_prove_helpers.rs"]
 mod helpers;
+pub(super) use helpers::author_recreated_finding;
+#[cfg(test)]
+pub(super) use helpers::operational_error_diagnostics;
+pub(super) use helpers::unattributed_recreation_finding;
 pub(super) use helpers::{
     MutationFinding, all_moved_inputs_restored, describe_states, describe_status, input_states,
     mutation_host_or_author_finding, recreated_inputs, recreated_paths,
 };
-#[cfg(test)]
-pub(super) use helpers::{author_recreated_finding, operational_error_diagnostics};
 
 use super::*;
 
@@ -255,21 +257,12 @@ pub(super) async fn prove(
                 );
                 continue;
             }
-            Some(MutationFinding::AuthorFinding(finding)) => {
-                findings.insert(id.clone(), finding);
-                continue;
-            }
             None => {}
         }
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
         let moved_all = markers.moved(result, &names);
-        let moved: Vec<String> = moved_all
-            .iter()
-            .cloned()
-            .into_iter()
-            .filter(|path| !generated.contains(path) && !recreated.contains(path))
-            .collect();
+        let moved: Vec<String> = moved_all.iter().cloned().collect();
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
         // The executor classified the generated mutation wrapper, whose
@@ -283,6 +276,7 @@ pub(super) async fn prove(
             markers.move_state_prefix(),
             markers.generated_prefix(),
             markers.recreated_prefix(),
+            format!("archon-mutation-check-recreated-{}: ", markers.nonce()),
             format!("archon-mutation-guard-{}:", markers.nonce()),
         ];
         raw_mutation_result.stderr = String::from_utf8_lossy(&raw_mutation_result.stderr)
@@ -301,9 +295,22 @@ pub(super) async fn prove(
                 format!("{baseline_finding}; no movable input exists under the selected root"),
             );
         } else if super::baseline::passed(result) {
-            if bound_accepted && recreated.is_empty() && !crashed {
+            if !recreated.is_empty() {
+                findings.insert(
+                    id.clone(),
+                    author_recreated_finding(&baseline_finding, &recreated),
+                );
+            } else if !original_recreated.is_empty() {
+                findings.insert(
+                    id.clone(),
+                    unattributed_recreation_finding(&baseline_finding),
+                );
+            } else if bound_accepted && !crashed {
+                let move_states = markers.move_states(&result.result, &names);
+                let output = bounded_output_excerpt(&result.result);
                 let basis = format!(
-                    "accepted on the stored judge verdict because the check passed on the pre-implementation tree at {short} and the moved text-derived paths did not make it fail"
+                    "accepted on the stored judge verdict because the check passed on the pre-implementation tree at {short}; mutation proof: inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
+                    result.result.exit_code
                 );
                 probe.note_regression_guard(id, basis.clone());
                 probe.note(format!(
@@ -327,13 +334,42 @@ pub(super) async fn prove(
                 ),
             );
         } else {
+            let move_states = markers.move_states(&result.result, &names);
+            let output = bounded_output_excerpt(&result.result);
+            let basis = format!(
+                "the check passed on the pre-implementation tree at {short} and failed on its own assertion with inputs moved; inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
+                result.result.exit_code
+            );
+            probe.note_regression_guard(id, basis.clone());
             probe.note(format!(
-                "check '{id}': its criterion already holds on the pre-implementation tree at {short} (it passed there); kept as a regression guard, proven able to fail: it fails when {} is moved aside",
+                "check '{id}': its criterion already holds on the pre-implementation tree at {short} (it passed there); kept as a regression guard, proven able to fail: it fails when {} is moved aside; {basis}",
                 moved.join(", ")
             ));
         }
     }
     findings
+}
+
+fn bounded_output_excerpt(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
+    const LIMIT: usize = 1024;
+    fn bounded(bytes: &[u8], limit: usize) -> (String, bool) {
+        let end = bytes.len().min(limit);
+        let mut end = end;
+        while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
+            end -= 1;
+        }
+        (
+            String::from_utf8_lossy(&bytes[..end]).into_owned(),
+            bytes.len() > end,
+        )
+    }
+    let (stdout, out_truncated) = bounded(&result.stdout, LIMIT / 2);
+    let (stderr, err_truncated) = bounded(&result.stderr, LIMIT / 2);
+    let mut excerpt = format!("stdout: {stdout}\nstderr: {stderr}");
+    if out_truncated || err_truncated {
+        excerpt.push_str("…[truncated]");
+    }
+    excerpt
 }
 
 #[cfg(test)]

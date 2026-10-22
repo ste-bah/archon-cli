@@ -230,6 +230,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
         crate::command::workflow_decompose_seed::resume_script_arguments(
             &store,
             run_id,
+            &task_root,
             &current_identity,
             (&criteria, &requirement_texts),
             resume_frozen_chain,

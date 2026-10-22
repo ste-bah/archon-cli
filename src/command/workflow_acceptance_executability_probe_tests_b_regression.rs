@@ -105,7 +105,7 @@ async fn a_bound_check_that_recreates_reads_and_deletes_the_input_is_a_finding()
     assert!(
         findings
             .get("AC-3B-006")
-            .is_some_and(|finding| finding.contains("recreated data/state.txt")),
+            .is_some_and(|finding| finding.contains("writer is unknown")),
         "create-read-delete must invalidate the stored verdict: {findings:?}; {diagnostics:?}"
     );
     assert!(

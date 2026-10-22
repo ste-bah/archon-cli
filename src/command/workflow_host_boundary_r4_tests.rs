@@ -56,6 +56,7 @@ impl HostCommandProcessAdapter for EvidenceProcess {
             call_id,
             command_id: request.command_id,
             entries,
+            expected_acceptance_contract: None,
         })
         .unwrap();
         Ok(SupervisedProcessOutput {

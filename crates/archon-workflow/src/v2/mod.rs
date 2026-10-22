@@ -149,9 +149,9 @@ pub use project_artifacts::{
     project_artifact_write_admitted,
 };
 pub use publication::{
-    PREPARED_PUBLICATION_SCHEMA_VERSION, PUBLICATION_RECEIPT_SCHEMA_VERSION,
-    PreparedPublicationEntry, PreparedPublicationV1, PublicationReceiptV1,
-    PublishedArtifactReceipt,
+    ExpectedAcceptanceContract, PREPARED_PUBLICATION_SCHEMA_VERSION,
+    PUBLICATION_RECEIPT_SCHEMA_VERSION, PreparedPublicationEntry, PreparedPublicationV1,
+    PublicationReceiptV1, PublishedArtifactReceipt,
 };
 pub use report::{
     WorkflowV2FinalReport, WorkflowV2FinalReportBuilder, WorkflowV2FinalReportError,

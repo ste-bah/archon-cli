@@ -17,7 +17,9 @@ use archon_workflow::{FixedRunIdentityV1, WorkflowStore, WorkflowV2ResultStore};
 use serde::{Deserialize, Serialize};
 
 use crate::command::workflow_decompose_transitions::{self as transitions, RuntimeTransitions};
-pub(crate) use derive::SubjectSeed;
+#[cfg(test)]
+pub(crate) use derive::ReplySeed;
+pub(crate) use derive::{SubjectSeed, reply_entry};
 
 pub(crate) const SEEDS_DIR: &str = "decomposition/phase-seeds";
 pub(crate) const SEED_SCHEMA_VERSION: u32 = 1;
@@ -46,6 +48,10 @@ pub(crate) struct PhaseSeed {
     /// The highest pause ordinal each pause subject took.
     pub(crate) pause_ordinals: BTreeMap<String, u64>,
     pub(crate) subjects: BTreeMap<String, SubjectSeed>,
+    /// Published acceptance contract used to refresh carried acceptance
+    /// entries for the script handoff (when one existed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) acceptance_refreshed_from_contract_digest: Option<String>,
     /// Frozen artifacts verified from the live task root for this runtime.
     /// This is separate from launch-bound arguments so resumed runs preserve
     /// their original identity while replaying the same resume decision.
@@ -206,6 +212,7 @@ fn derive_seed(
         author_ordinals: derived.author_ordinals,
         pause_ordinals: derived.pause_ordinals,
         subjects: derived.subjects,
+        acceptance_refreshed_from_contract_digest: None,
         resume_frozen_chain: resume_frozen_chain.cloned(),
         event_id: None,
     })

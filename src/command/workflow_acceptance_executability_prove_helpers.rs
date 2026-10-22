@@ -2,7 +2,6 @@ use super::*;
 
 pub(in crate::command::workflow_task_set::executability) enum MutationFinding {
     HostUnproven(String),
-    AuthorFinding(String),
 }
 
 pub(in crate::command::workflow_task_set::executability) fn mutation_host_or_author_finding(
@@ -10,14 +9,23 @@ pub(in crate::command::workflow_task_set::executability) fn mutation_host_or_aut
     markers: &mutation::Markers,
     inputs: &[String],
     setup_failure: Option<String>,
-    passed_there: &str,
+    _passed_there: &str,
 ) -> Option<MutationFinding> {
     if let Some(reason) = mutation_host_failure(result, markers, inputs, setup_failure) {
         return Some(MutationFinding::HostUnproven(reason));
     }
-    let recreated = recreated_inputs(&result.result, markers, inputs);
-    (!recreated.is_empty())
-        .then(|| MutationFinding::AuthorFinding(author_recreated_finding(passed_there, &recreated)))
+    // Restoration can establish that a moved path was present again, but
+    // cannot attribute the writer. A check's own assertion failure is still
+    // valid mutation evidence even if another path reappeared in the copy.
+    None
+}
+
+pub(in crate::command::workflow_task_set::executability) fn unattributed_recreation_finding(
+    baseline: &str,
+) -> String {
+    format!(
+        "{baseline}; the check passed, but a moved path was present again after mutation and its writer is unknown, so this run does not prove that the check depends on the moved input"
+    )
 }
 
 pub(in crate::command::workflow_task_set::executability) fn recreated_inputs(
@@ -25,12 +33,7 @@ pub(in crate::command::workflow_task_set::executability) fn recreated_inputs(
     markers: &mutation::Markers,
     inputs: &[String],
 ) -> Vec<String> {
-    recreated_paths(&input_states(result, markers, inputs))
-        .into_iter()
-        .chain(markers.recreated(result, inputs))
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect()
+    markers.recreated(result, inputs).into_iter().collect()
 }
 
 fn mutation_host_failure(

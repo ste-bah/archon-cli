@@ -104,6 +104,7 @@ pub(super) fn finish_acceptance(
     contract: &AcceptanceContract,
     probed: Vec<GateFinding>,
     baseline_commit: Option<String>,
+    candidate_digest: String,
 ) -> Result<PreparedAcceptanceFreeze> {
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let mut findings = acceptance_findings(prd_path, prd_text, &contract_path, contract);
@@ -142,8 +143,12 @@ pub(super) fn finish_acceptance(
         result: FreezeAcceptanceResult {
             acceptance_digest: pin.acceptance_digest.clone(),
             freeze_event_id: pin.freeze_event_id.clone(),
+            candidate_digest: candidate_digest.clone(),
+            live_contract_digest: None,
         },
         contract_bytes,
+        candidate_digest,
+        live_contract_digest: None,
         recovery: None,
         lock,
         pin,
@@ -321,7 +326,9 @@ pub(crate) fn prepare_from_judged(
 ) -> Result<PreparedAcceptanceFreeze> {
     let (prd, _, _) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd).context("PRD is not UTF-8")?;
-    finish_acceptance(
+    let live_bytes = std::fs::read(tasks_root.join(ACCEPTANCE_CONTRACT_FILE))?;
+    let candidate_digest = content_digest(&live_bytes);
+    let mut prepared = finish_acceptance(
         project_root,
         tasks_root,
         prd_path,
@@ -330,7 +337,11 @@ pub(crate) fn prepare_from_judged(
         contract,
         Vec::new(),
         baseline_commit,
-    )
+        candidate_digest.clone(),
+    )?;
+    prepared.live_contract_digest = Some(candidate_digest.clone());
+    prepared.result.live_contract_digest = Some(candidate_digest);
+    Ok(prepared)
 }
 
 /// Prepare a whole-set freeze, returning every check the judge did not accept

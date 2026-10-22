@@ -6,7 +6,7 @@ use super::super::seed_unmapped as unmapped;
 
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
 
-pub(super) fn acceptance_candidate(record: &WorkflowV2CallRecord) -> Option<&str> {
+pub(crate) fn acceptance_candidate(record: &WorkflowV2CallRecord) -> Option<&str> {
     let request = record.call.options.host_command.as_ref()?;
     (request.command_id == ACCEPTANCE_GATE
         && record
@@ -62,7 +62,7 @@ use crate::command::workflow_task_set::acceptance_reply_blocks::{
 };
 
 /// The entry `id` a reply holds, as the script's `unwrapEntry` reads it.
-pub(super) fn reply_entry(text: &str, id: &str) -> Option<Value> {
+pub(crate) fn reply_entry(text: &str, id: &str) -> Option<Value> {
     let parsed: Value = serde_json::from_str(text).ok()?;
     if parsed["id"] == id {
         return Some(parsed);
@@ -113,7 +113,7 @@ pub(super) fn entry_refusals(id: &str, entry: &Value) -> Result<Vec<String>> {
 }
 
 /// The entries of a recorded acceptance candidate, in its own order.
-pub(super) fn candidate_entries(stdin: &str, gate: &str) -> Result<Vec<(String, Value, bool)>> {
+pub(crate) fn candidate_entries(stdin: &str, gate: &str) -> Result<Vec<(String, Value, bool)>> {
     let field = format!("v2/results/{gate}.call.options.host_command.stdin");
     let document: Value =
         serde_json::from_str(stdin).map_err(|e| unmapped(&field, &e.to_string()))?;

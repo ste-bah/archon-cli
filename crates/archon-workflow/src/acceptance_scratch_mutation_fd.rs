@@ -1,6 +1,10 @@
 //! Race-resistant host-side movement of mutation inputs.
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(windows)]
+#[path = "acceptance_scratch_mutation_fd_windows.rs"]
+mod windows;
+
 #[derive(Clone, Debug)]
 pub(crate) struct SiteRoot {
     #[cfg(windows)]
@@ -44,13 +48,43 @@ impl SiteRoot {
     #[cfg(windows)]
     pub(crate) fn capture(path: &Path) -> std::io::Result<Self> {
         let path = path.canonicalize()?;
-        let directory = open_windows_root(&path)?;
-        let identity = windows_file_identity(&directory)?;
+        let directory = windows::open_windows_root(&path)?;
+        let identity = windows::windows_file_identity(&directory)?;
         Ok(Self {
             path,
             directory: std::sync::Arc::new(directory),
             identity,
         })
+    }
+}
+
+pub(crate) fn site_entry_exists(root: &SiteRoot, rel: &Path) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let root_fd = open_verified_root(root)?;
+        let (parent, leaf) = split_rel(rel)?;
+        let parent = match walk_parent(&root_fd, &parent, false) {
+            Ok(parent) => parent,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        return entry_exists(parent.as_raw_fd(), &c_name(&leaf)?);
+    }
+    #[cfg(windows)]
+    {
+        if !windows::valid_relative(rel) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "unsafe relative path",
+            ));
+        }
+        windows::windows_components_are_safe(root, rel, false)?;
+        match std::fs::symlink_metadata(root.path.join(rel)) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -176,7 +210,7 @@ pub(crate) fn snapshot_parent(root: &SiteRoot, rel: &Path) -> std::io::Result<St
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        windows_components_are_safe(root, rel, false)?;
+        windows::windows_components_are_safe(root, rel, false)?;
         let parent = rel.parent().unwrap_or_else(|| Path::new(""));
         let metadata = std::fs::metadata(root.path.join(parent))?;
         Ok(format!(
@@ -311,21 +345,21 @@ fn entry_exists(parent: libc::c_int, name: &std::ffi::CString) -> std::io::Resul
 
 #[cfg(windows)]
 pub(crate) fn move_aside(root: &SiteRoot, rel: &Path, aside_rel: &Path) -> MoveOutcome {
-    if !valid_relative(rel) || !valid_relative(aside_rel) {
+    if !windows::valid_relative(rel) || !windows::valid_relative(aside_rel) {
         return MoveOutcome::Failed("unsafe relative path".into());
     }
     // This runs before the check starts, so its reparse points cannot race validation.
-    if let Err(error) = windows_components_are_safe(root, rel, false) {
+    if let Err(error) = windows::windows_components_are_safe(root, rel, false) {
         return MoveOutcome::Failed(error.to_string());
     }
     let source = root.path.join(rel);
     match std::fs::symlink_metadata(&source) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => MoveOutcome::Absent,
         Err(error) => MoveOutcome::Failed(error.to_string()),
-        Ok(meta) if is_unsafe_windows_component(&meta) => MoveOutcome::SymlinkComponent,
+        Ok(meta) if windows::is_unsafe_windows_component(&meta) => MoveOutcome::SymlinkComponent,
         Ok(_) => {
             let aside = root.path.join(aside_rel);
-            if let Err(error) = ensure_windows_parent(root, aside_rel) {
+            if let Err(error) = windows::ensure_windows_parent(root, aside_rel) {
                 return MoveOutcome::Failed(error.to_string());
             }
             match std::fs::rename(source, aside) {
@@ -339,18 +373,18 @@ pub(crate) fn move_aside(root: &SiteRoot, rel: &Path, aside_rel: &Path) -> MoveO
 #[cfg(windows)]
 pub(crate) fn restore(root: &SiteRoot, aside_rel: &Path, rel: &Path) -> RestoreOutcome {
     // Restore runs after the job object confirms the check has no live processes.
-    if !valid_relative(rel) || !valid_relative(aside_rel) {
+    if !windows::valid_relative(rel) || !windows::valid_relative(aside_rel) {
         return RestoreOutcome::UnsafeToRestore("unsafe relative path".into());
     }
-    if let Err(error) = windows_components_are_safe(root, rel, false)
-        .and_then(|()| windows_components_are_safe(root, aside_rel, false))
+    if let Err(error) = windows::windows_components_are_safe(root, rel, false)
+        .and_then(|()| windows::windows_components_are_safe(root, aside_rel, false))
     {
         return RestoreOutcome::UnsafeToRestore(error.to_string());
     }
     let target = root.path.join(rel);
     let aside = root.path.join(aside_rel);
     match std::fs::symlink_metadata(&target) {
-        Ok(meta) if is_unsafe_windows_component(&meta) => {
+        Ok(meta) if windows::is_unsafe_windows_component(&meta) => {
             return RestoreOutcome::UnsafeToRestore("unsafe target component".into());
         }
         Ok(_) => return RestoreOutcome::OriginalRecreated,
@@ -362,7 +396,7 @@ pub(crate) fn restore(root: &SiteRoot, aside_rel: &Path, rel: &Path) -> RestoreO
             return RestoreOutcome::AsideMissing;
         }
         Err(error) => return RestoreOutcome::UnsafeToRestore(error.to_string()),
-        Ok(meta) if is_unsafe_windows_component(&meta) => {
+        Ok(meta) if windows::is_unsafe_windows_component(&meta) => {
             return RestoreOutcome::UnsafeToRestore("unsafe aside component".into());
         }
         Ok(_) => {}
@@ -371,124 +405,6 @@ pub(crate) fn restore(root: &SiteRoot, aside_rel: &Path, rel: &Path) -> RestoreO
         Ok(()) => RestoreOutcome::Restored,
         Err(error) => RestoreOutcome::UnsafeToRestore(error.to_string()),
     }
-}
-
-#[cfg(windows)]
-fn valid_relative(path: &Path) -> bool {
-    !path.is_absolute()
-        && path
-            .components()
-            .all(|part| matches!(part, Component::Normal(_)))
-}
-
-#[cfg(windows)]
-fn is_unsafe_windows_component(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_type().is_symlink()
-        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(windows)]
-fn windows_components_are_safe(
-    root: &SiteRoot,
-    relative: &Path,
-    include_leaf: bool,
-) -> std::io::Result<()> {
-    verify_windows_root(root)?;
-    let components = relative.components().collect::<Vec<_>>();
-    let count = components.len().saturating_sub(usize::from(!include_leaf));
-    let mut current = root.path.clone();
-    for component in components.into_iter().take(count) {
-        let Component::Normal(part) = component else {
-            return Err(std::io::Error::other("unsafe path component"));
-        };
-        current.push(part);
-        let metadata = std::fs::symlink_metadata(&current)?;
-        if is_unsafe_windows_component(&metadata) || !metadata.is_dir() {
-            return Err(std::io::Error::other("unsafe path component"));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn ensure_windows_parent(root: &SiteRoot, relative: &Path) -> std::io::Result<()> {
-    verify_windows_root(root)?;
-    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
-    let mut current = root.path.clone();
-    for component in parent.components() {
-        let Component::Normal(part) = component else {
-            return Err(std::io::Error::other("unsafe path component"));
-        };
-        current.push(part);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if is_unsafe_windows_component(&metadata) || !metadata.is_dir() => {
-                return Err(std::io::Error::other("unsafe path component"));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                std::fs::create_dir(&current)?;
-                let metadata = std::fs::symlink_metadata(&current)?;
-                if is_unsafe_windows_component(&metadata) || !metadata.is_dir() {
-                    return Err(std::io::Error::other("unsafe path component"));
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn open_windows_root(path: &Path) -> std::io::Result<std::fs::File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    };
-    let mut options = std::fs::OpenOptions::new();
-    options
-        .read(true)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
-    options.open(path)
-}
-
-#[cfg(windows)]
-fn windows_file_identity(file: &std::fs::File) -> std::io::Result<(u32, u32, u32)> {
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
-    };
-    let mut info = unsafe { std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>() };
-    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok((
-        info.dwVolumeSerialNumber,
-        info.nFileIndexHigh,
-        info.nFileIndexLow,
-    ))
-}
-
-#[cfg(windows)]
-fn verify_windows_root(root: &SiteRoot) -> std::io::Result<()> {
-    let current = open_windows_root(&root.path)?;
-    if windows_file_identity(&root.directory)? != root.identity
-        || windows_file_identity(&current)? != root.identity
-    {
-        return Err(std::io::Error::other(
-            "captured mutation root identity changed",
-        ));
-    }
-    let root_meta = std::fs::symlink_metadata(&root.path)?;
-    if is_unsafe_windows_component(&root_meta)
-        || !root_meta.is_dir()
-        || root.path.canonicalize()? != root.path
-    {
-        return Err(std::io::Error::other("unsafe mutation root"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

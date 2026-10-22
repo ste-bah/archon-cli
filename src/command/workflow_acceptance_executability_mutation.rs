@@ -104,9 +104,7 @@ impl ExclusionReason {
             Self::CheckWritesPathInText => {
                 "a command in the check writes this path (seen in the check text), so it is not a pre-existing input"
             }
-            Self::CheckRecreatedPathObserved => {
-                "the check recreated this path while running (observed)"
-            }
+            Self::CheckRecreatedPathObserved => "the check recreated a moved input while it ran",
             Self::OutsideCopiedTree => "outside the copied check tree",
             Self::CheckMechanics => "check mechanics or command output",
         }

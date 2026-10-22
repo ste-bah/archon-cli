@@ -102,6 +102,13 @@ pub(crate) fn run_with_host_mutation(dir: &Path, script: &str) -> std::process::
         .write_all(script.as_bytes())
         .unwrap();
     let mut output = child.wait_with_output().unwrap();
+    for (index, target, _, _, _, state, _) in &records {
+        if state.starts_with("moved") && std::fs::symlink_metadata(target).is_ok() {
+            output.stderr.extend_from_slice(
+                format!("archon-mutation-check-recreated-{nonce}: {index}\n").as_bytes(),
+            );
+        }
+    }
     for index in &moved_markers {
         output
             .stderr

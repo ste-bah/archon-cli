@@ -345,7 +345,7 @@ async fn mutation_restore_uses_the_captured_root_while_an_ancestor_swaps_to_a_de
 
 #[cfg(unix)]
 #[tokio::test]
-async fn transient_input_recreation_is_reported_as_original_recreated() {
+async fn a_path_removed_before_the_check_exits_has_unknown_writer_attribution() {
     let temp = tempfile::tempdir().unwrap();
     let site_path = temp.path().join("site");
     std::fs::create_dir_all(site_path.join("data")).unwrap();
@@ -372,12 +372,45 @@ async fn transient_input_recreation_is_reported_as_original_recreated() {
     let states = String::from_utf8_lossy(&result.stdout);
     assert!(states.contains(": 0:original-recreated"), "{states}");
     assert!(
-        String::from_utf8_lossy(&result.stderr)
-            .contains(&format!("archon-mutation-recreated-{nonce}: 0"))
+        !String::from_utf8_lossy(&result.stderr)
+            .contains(&format!("archon-mutation-check-recreated-{nonce}: 0"))
     );
     assert_eq!(
         std::fs::read_to_string(site_path.join("data/input")).unwrap(),
         "original"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_path_present_after_the_check_exits_is_attributed_to_its_run_window() {
+    let temp = tempfile::tempdir().unwrap();
+    let site_path = temp.path().join("site");
+    std::fs::create_dir_all(site_path.join("data")).unwrap();
+    std::fs::write(site_path.join("data/input"), "original").unwrap();
+    let root = super::super::mutation_fd::SiteRoot::capture(&site_path).unwrap();
+    let nonce = "fedcba9876543210fedcba9876543210";
+    let plan = MutationPlan {
+        nonce: nonce.into(),
+        inputs: vec![MutationInputPlan {
+            named_path: "data/input".into(),
+            site_copy_alias: false,
+            move_path: PathBuf::from("data/input"),
+            aside_path: PathBuf::from("data/input.archon-mutated-fedcba987654"),
+        }],
+    };
+    let mut site = site(&site_path, false, 20);
+    site.mutation_root = Some(root);
+    site.mutation_plan = Some(&plan);
+    let result = run(&site, "printf rewritten > data/input; exit 1").await;
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains(&format!("archon-mutation-check-recreated-{nonce}: 0"))
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains(": 0:original-recreated"));
+    assert_eq!(
+        std::fs::read_to_string(site_path.join("data/input")).unwrap(),
+        "rewritten"
     );
 }
 

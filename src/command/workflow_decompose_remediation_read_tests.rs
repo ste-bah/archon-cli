@@ -51,7 +51,7 @@ fn generated_ledger_subjects_keep_first_seen_order() {
 }
 
 #[tokio::test]
-async fn consumed_ledger_does_not_reauthor_checks_on_resume() {
+async fn consumed_ledger_without_current_lineage_proof_reauthors_checks_on_resume() {
     let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
         "AC-F-001",
         "jq -e '.a == true' out.json",
@@ -63,6 +63,13 @@ async fn consumed_ledger_does_not_reauthor_checks_on_resume() {
         subjects: vec!["AC-F-001".into()],
     };
     append_consumed(run_dir.path(), &ledger).unwrap();
+    let reports = run_dir.path().join("decomposition/reverify/reports");
+    std::fs::create_dir_all(&reports).unwrap();
+    std::fs::write(
+        reports.join("report-consumed.json"),
+        serde_json::json!({"checks": [{"check_id": "AC-F-001", "findings": []}]}).to_string(),
+    )
+    .unwrap();
     let client = crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
         |entry, _| {
             crate::command::workflow_task_set::reauthor::test_client::command_entry(
@@ -81,5 +88,9 @@ async fn consumed_ledger_does_not_reauthor_checks_on_resume() {
     )
     .await
     .unwrap();
-    assert_eq!(client.authored(), 0);
+    assert_eq!(client.authored(), 1);
+    assert!(
+        client.prompts.lock().unwrap()[0]
+            .contains("available pin/history evidence is insufficient")
+    );
 }

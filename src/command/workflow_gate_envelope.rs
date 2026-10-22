@@ -57,6 +57,7 @@ pub(crate) fn stage_gate_evaluation(
         }
     }
 
+    let expected_acceptance_contract = evaluation.expected_acceptance_contract();
     let envelope = evaluation.into_envelope()?;
     let envelope_bytes = serde_json::to_vec_pretty(&envelope)?;
     let mut staged = Vec::with_capacity(outputs.len() + 1);
@@ -88,6 +89,7 @@ pub(crate) fn stage_gate_evaluation(
         call_id: call_id.to_string(),
         command_id: command_id.to_string(),
         entries,
+        expected_acceptance_contract,
     })
 }
 

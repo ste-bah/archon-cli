@@ -164,6 +164,53 @@ pub(crate) fn scratch_left(scratch: &Path) -> Vec<std::ffi::OsString> {
 const PROJECT: TrustedCwd = TrustedCwd::ProjectRoot;
 const REPO: TrustedCwd = TrustedCwd::RepoRoot;
 
+/// The complete can-fail path accepts a read-only assertion when moving its
+/// three named inputs makes the check fail on its own assertion.
+#[tokio::test]
+async fn a_mutated_read_only_check_is_accepted_as_a_regression_guard() {
+    let trees = trees(&[(
+        "AC-P-009",
+        "test -f data/state.txt && test -f data/other.txt && test -f data/third.txt",
+        PROJECT,
+    )]);
+    for name in ["other.txt", "third.txt"] {
+        std::fs::write(trees.set.project.path().join("data").join(name), "ready").unwrap();
+    }
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    let guards = probe.take_regression_guards();
+    assert!(findings.is_empty(), "{findings:?}");
+    let evidence = &guards["AC-P-009"];
+    assert!(
+        evidence.contains("failed on its own assertion"),
+        "{evidence}"
+    );
+    assert!(evidence.contains("data/state.txt"), "{evidence}");
+    assert!(evidence.contains("data/other.txt"), "{evidence}");
+    assert!(evidence.contains("data/third.txt"), "{evidence}");
+    assert!(evidence.contains("mutated_exit_code=Some(1)"), "{evidence}");
+    assert!(evidence.contains("output_excerpt="), "{evidence}");
+}
+
+#[tokio::test]
+async fn a_host_policy_rejected_check_is_not_misreported_as_a_recreation_finding() {
+    let trees = trees(&[(
+        "AC-P-010",
+        "printf rebuilt > data/state.txt; exit 0",
+        PROJECT,
+    )]);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    let unproven = probe.take_unproven();
+    assert!(!findings.contains_key("AC-P-010"), "{findings:?}");
+    assert!(
+        unproven
+            .get("AC-P-010")
+            .is_some_and(|reason| reason.contains("host policy defect")),
+        "{unproven:?}"
+    );
+}
+
 /// The operator's layout with no scratch policy: the freeze probe runs every
 /// check in its own copy of the base tree and of the project's data, and
 /// proves each can fail.

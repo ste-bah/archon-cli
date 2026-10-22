@@ -78,6 +78,7 @@ pub(crate) struct AuditedPublication {
     command_id: String,
     entries: Vec<AuditedEntry>,
     sentinels: LiveMutationSentinels,
+    expected_acceptance_contract: Option<archon_workflow::v2::ExpectedAcceptanceContract>,
 }
 
 /// The call's staging directory, created empty under an anchor verified at
@@ -203,6 +204,7 @@ pub(crate) fn audit_prepared_publication(
         command_id: prepared.command_id.clone(),
         entries,
         sentinels,
+        expected_acceptance_contract: prepared.expected_acceptance_contract.clone(),
     })
 }
 
@@ -220,6 +222,20 @@ pub(crate) fn publish_audited(
     let _chain_lock =
         super::workflow_task_set::ChainLock::acquire_waiting(journal_pin, tasks_root)?;
     audited.sentinels.verify()?;
+    if let Some(expected) = &audited.expected_acceptance_contract {
+        let contract_path =
+            tasks_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+        let actual = match std::fs::read(&contract_path) {
+            Ok(bytes) => Some(content_digest(&bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        if actual.is_some() != expected.exists || actual != expected.digest {
+            return Err(anyhow::Error::new(
+                super::workflow_task_set::StaleAcceptanceContract,
+            ));
+        }
+    }
     let expected = audited
         .entries
         .iter()

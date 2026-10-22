@@ -50,6 +50,8 @@ use judge::{gate_stamp, predecessor_findings};
 pub(crate) struct FreezeAcceptanceResult {
     pub(crate) acceptance_digest: String,
     pub(crate) freeze_event_id: String,
+    pub(crate) candidate_digest: String,
+    pub(crate) live_contract_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +65,8 @@ pub(crate) struct PreparedAcceptanceFreeze {
     tasks_root: PathBuf,
     project_root: PathBuf,
     contract_bytes: Vec<u8>,
+    candidate_digest: String,
+    live_contract_digest: Option<String>,
     lock: AcceptanceLock,
     pin: AcceptancePin,
     recovery: Option<recovery_lineage::Publication>,
@@ -252,7 +256,13 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
     resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<PreparedAcceptanceFreeze> {
     let freeze_mode = freeze_mode(mode)?;
+    let live_contract_digest = match std::fs::read(tasks_root.join(ACCEPTANCE_CONTRACT_FILE)) {
+        Ok(bytes) => Some(content_digest(&bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
     let original = candidate;
+    let candidate_digest = content_digest(&original);
     let (prd, prd_digest, exact_criteria) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd.clone()).context("PRD is not UTF-8")?;
     let expected: BTreeSet<_> = exact_criteria.keys().cloned().collect();
@@ -319,7 +329,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
     )
     .await
     .map_err(|error| resumable(error, resume))?;
-    findings::finish_acceptance(
+    let mut prepared = findings::finish_acceptance(
         project_root,
         tasks_root,
         prd_path,
@@ -328,7 +338,11 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         &contract,
         probed,
         baseline_commit,
-    )
+        candidate_digest,
+    )?;
+    prepared.live_contract_digest = live_contract_digest;
+    prepared.result.live_contract_digest = prepared.live_contract_digest.clone();
+    Ok(prepared)
 }
 
 pub(crate) fn publish_acceptance_freeze(
@@ -358,6 +372,7 @@ pub(crate) fn publish_acceptance_freeze(
         &prepared.lock,
         &prepared.pin,
         prepared.recovery.as_ref(),
+        prepared.live_contract_digest.as_deref(),
     )?;
     Ok(prepared.result)
 }
@@ -408,10 +423,10 @@ pub(crate) use findings::{
 #[cfg(test)]
 use publish::cleanup_committed_backups;
 pub(crate) use publish::{
-    ChainLock, ChainRead, UnsettledPublish, begin_publish, create_dir_all_durably,
-    lock_and_recover, pause_if_unsettled, publish_files_atomically, recover_interrupted_publish,
-    register_publish_settle, sync_file, sync_parent, validate_destination,
-    validate_existing_parents, write_durably,
+    ChainLock, ChainRead, StaleAcceptanceContract, UnsettledPublish, begin_publish,
+    create_dir_all_durably, lock_and_recover, pause_if_unsettled, publish_files_atomically,
+    recover_interrupted_publish, register_publish_settle, sync_file, sync_parent,
+    validate_destination, validate_existing_parents, write_durably,
 };
 use publish::{publish_acceptance_files_with_recovery, publish_skeleton_files};
 

@@ -6,11 +6,23 @@ pub const PREPARED_PUBLICATION_SCHEMA_VERSION: u32 = 1;
 pub const PUBLICATION_RECEIPT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExpectedAcceptanceContract {
+    pub exists: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreparedPublicationV1 {
     pub schema_version: u32,
     pub call_id: String,
     pub command_id: String,
     pub entries: Vec<PreparedPublicationEntry>,
+    /// Acceptance contract state observed when a staged freeze was prepared.
+    /// The outer option distinguishes non-acceptance publications from a
+    /// freeze prepared while the contract was absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_acceptance_contract: Option<ExpectedAcceptanceContract>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
