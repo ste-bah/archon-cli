@@ -1848,26 +1848,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.69.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "271383c67ccabffb7381723dea0672a673f292304fcb45c01cc648c7a8d58088"
-dependencies = [
- "bitflags 2.11.1",
- "cexpr",
- "clang-sys",
- "itertools 0.12.1",
- "lazy_static",
- "lazycell",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 1.1.0",
- "shlex",
- "syn",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
@@ -2670,9 +2650,8 @@ dependencies = [
 
 [[package]]
 name = "cozo-ce"
-version = "0.7.13-alpha.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d1d489096728a25da7368b559ac00d793e253d40fc7c0fb8907c3af098facc5"
+version = "0.7.13-alpha.3.rocksdb-0-42"
+source = "git+https://github.com/ste-bah/cozo?rev=d19c0658c989a0fda8f7ccae04ec041a3e6731bb#d19c0658c989a0fda8f7ccae04ec041a3e6731bb"
 dependencies = [
  "aho-corasick",
  "approx",
@@ -5703,12 +5682,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8518,11 +8491,11 @@ dependencies = [
 
 [[package]]
 name = "rust-librocksdb-sys"
-version = "0.30.0+9.8.4"
+version = "0.38.0+10.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a81bce962dd4113eae8a848ecb3598f25122cc6be675f815b71a4a2d0a523b85"
+checksum = "455560a01423fff351732e26cb436b4ab43805642e0783d7db2c12d372849cf7"
 dependencies = [
- "bindgen 0.69.5",
+ "bindgen 0.72.1",
  "bzip2-sys",
  "cc",
  "glob",
@@ -8534,9 +8507,9 @@ dependencies = [
 
 [[package]]
 name = "rust-rocksdb"
-version = "0.34.0"
+version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16af4eac13d9b0025c84b4912cda7b5fa59f16c513a1b6ba65ae16cfb9ab10e3"
+checksum = "41be0c32ea0155c97e2d19c2276739a2ec17606d0b89485ca5124c4b14e2a38f"
 dependencies = [
  "libc",
  "rust-librocksdb-sys",

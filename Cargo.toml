@@ -158,7 +158,7 @@ globset = "0.4"
 ndarray = "0.16"
 rayon = "1"
 hnsw_rs = "0.3.4"
-rust-rocksdb = { version = "0.34.0", default-features = false }
+rust-rocksdb = { version = "0.42.0", default-features = false }
 # TASK-AGS-OBS-901 (Stage 10): promoted from archon-tui/Cargo.toml direct pins
 # so archon-observability (new owning crate for ChannelMetrics) and archon-tui
 # stay version-aligned per the OBS-900 dependency-discipline rule. Values match
@@ -333,3 +333,11 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = 0
+
+# #485: cozo-ce 0.7.13-alpha.3 pins rust-rocksdb ^0.34 (RocksDB 9.8.4), whose
+# bundled C++ does not build on current GCC/libstdc++. This fork of cozo-ce
+# moves it to rust-rocksdb 0.42 (RocksDB 10.4.2). rust-librocksdb-sys has
+# `links = "rocksdb"`, so archon-docs and cozo-ce must use the same version.
+# Branch: https://github.com/ste-bah/cozo/tree/rocksdb-0.42
+[patch.crates-io]
+cozo-ce = { git = "https://github.com/ste-bah/cozo", rev = "d19c0658c989a0fda8f7ccae04ec041a3e6731bb" }
