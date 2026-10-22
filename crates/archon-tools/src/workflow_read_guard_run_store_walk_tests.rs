@@ -441,6 +441,102 @@ async fn glob_targets_a_nested_state_root_when_its_path_is_explicit() {
 }
 
 #[tokio::test]
+async fn glob_from_archon_directory_skips_workflow_run_stores() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let archon = project.join(".archon");
+    let state_root = archon.join("workflows");
+    std::fs::create_dir_all(&archon).unwrap();
+    std::fs::write(archon.join("settings.json"), "{}").unwrap();
+    for run in ["run-0", "run-1"] {
+        let file = state_root.join(run).join("results/match.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "{}").unwrap();
+    }
+    let ctx = ToolContext {
+        working_dir: project.clone(),
+        ..ToolContext::default()
+    };
+
+    let result = GlobTool
+        .execute(
+            json!({"path": archon, "pattern": "**/*.json"}),
+            &ctx,
+        )
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+
+    assert!(result.content.contains("settings.json"), "{}", result.content);
+    assert!(
+        !result.content.contains("workflows"),
+        "workflow run stores must be pruned from a search rooted at .archon: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn glob_from_project_directory_skips_workflow_run_stores() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let state_root = project.join(".archon/workflows");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/main.rs"), "fn main() {}").unwrap();
+    for run in ["run-0", "run-1"] {
+        let file = state_root.join(run).join("results/match.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "{}").unwrap();
+    }
+    let ctx = ToolContext {
+        working_dir: project.clone(),
+        ..ToolContext::default()
+    };
+
+    let result = GlobTool
+        .execute(json!({"path": project, "pattern": "**/*"}), &ctx)
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+
+    assert!(result.content.contains("main.rs"), "{}", result.content);
+    assert!(
+        !result.content.contains("workflows"),
+        "workflow run stores must be pruned from a project search: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn glob_rooted_inside_a_run_store_lists_that_run() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let state_root = project.join(".archon/workflows");
+    let own_run = state_root.join("run-1");
+    let own_file = own_run.join("artifacts/report.json");
+    let other_file = state_root.join("run-0/artifacts/old.json");
+    std::fs::create_dir_all(own_file.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(other_file.parent().unwrap()).unwrap();
+    std::fs::write(&own_file, "{}").unwrap();
+    std::fs::write(&other_file, "{}").unwrap();
+    let ctx = ToolContext {
+        working_dir: project,
+        ..ToolContext::default()
+    };
+
+    let result = GlobTool
+        .execute(
+            json!({"path": own_run, "pattern": "**/*.json"}),
+            &ctx,
+        )
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+
+    assert!(
+        result.content.contains("artifacts/report.json"),
+        "a search rooted inside one run must still list its contents: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
 async fn glob_honors_gitignore_directories() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("project");

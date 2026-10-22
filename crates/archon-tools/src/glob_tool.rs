@@ -124,7 +124,13 @@ async fn bounded_glob(
     pattern: &str,
     ctx: &ToolContext,
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
-    bounded_glob_with_state_roots(base, pattern, ctx, harness_state_roots(base)).await
+    bounded_glob_with_state_roots(
+        base,
+        pattern,
+        ctx,
+        harness_state_roots(&ctx.working_dir),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -365,6 +371,12 @@ fn root_targeted_by_pattern(
 ) -> bool {
     use std::path::Component;
 
+    // A search rooted inside a state store is itself an explicit request to
+    // inspect that subtree, even if the pattern does not repeat the root path.
+    if archon_shell::paths::path_starts_with(base, root) {
+        return true;
+    }
+
     let root_components = match archon_shell::paths::path_strip_prefix(root, base) {
         Some(relative) => relative
             .components()
@@ -438,13 +450,13 @@ fn is_literal_component(component: &std::ffi::OsStr) -> bool {
 /// Storage roots from the same path definitions used by their owners. These
 /// can be nested under a project when the operator configures cache storage
 /// there, so pruning only hidden directory names is not enough.
-fn harness_state_roots(base: &std::path::Path) -> Vec<std::path::PathBuf> {
+fn harness_state_roots(project_root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut roots = Vec::new();
     if let Some(root) = crate::agent_records::sessions_root() {
         roots.push(root);
     }
     // WorkflowStore's project-local path, as used by workflow host setup.
-    roots.push(base.join(".archon/workflows"));
+    roots.push(project_root.join(".archon/workflows"));
     roots.push(crate::worktree_manager::WorktreeManager::worktrees_dir());
     roots.push(crate::worktree_manager::WorktreeManager::build_cache_root());
     roots.push(crate::cache_paths::cargo_fallback_root());
