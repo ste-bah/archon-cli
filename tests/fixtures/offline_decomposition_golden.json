@@ -533,8 +533,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
-            "logicVersion": 43,
+            "logicDigest": "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
+            "logicVersion": 44,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -800,8 +800,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
-            "logicVersion": 43,
+            "logicDigest": "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
+            "logicVersion": 44,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1043,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
+            "logicDigest": "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
             "logicVersion": 4,
             "postcondition": {
               "satisfied": true,
@@ -1281,7 +1281,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+            "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
             "logicVersion": 23,
             "postcondition": {
               "satisfied": true,
@@ -1401,7 +1401,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+            "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
             "logicVersion": 23,
             "postcondition": {
               "satisfied": true,
@@ -1621,7 +1621,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+            "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
             "logicVersion": 19,
             "postcondition": {
               "satisfied": true,
@@ -1707,8 +1707,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
-                  "logicVersion": 43,
+                  "logicDigest": "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
+                  "logicVersion": 44,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1770,8 +1770,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
-                      "logicVersion": 43,
+                      "logicDigest": "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
+                      "logicVersion": 44,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1853,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
+                  "logicDigest": "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
                   "logicVersion": 4,
                   "postcondition": {
                     "satisfied": true,
@@ -1914,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "1385dc9e50160d60e286e4d9c3bc29e97cc2ceb96221afeced4599d240bc6bdd",
+                      "logicDigest": "266cb725cc62e206be3a6796cb58d9d6cf5161738ee736d454ca5c670ef6e1f0",
                       "logicVersion": 4,
                       "postcondition": {
                         "satisfied": true,
@@ -2015,7 +2015,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+                  "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
                   "logicVersion": 23,
                   "postcondition": {
                     "satisfied": true,
@@ -2065,7 +2065,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+                      "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
                       "logicVersion": 23,
                       "postcondition": {
                         "satisfied": true,
@@ -2147,7 +2147,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+                  "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
                   "logicVersion": 23,
                   "postcondition": {
                     "satisfied": true,
@@ -2197,7 +2197,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+                      "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
                       "logicVersion": 23,
                       "postcondition": {
                         "satisfied": true,
@@ -2279,7 +2279,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+                  "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
                   "logicVersion": 19,
                   "postcondition": {
                     "satisfied": true,
@@ -2324,7 +2324,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "52171640a9bd1bbbbf5d11eeaba5788eda1e39f27bcbfa60231f40f511baa936",
+                      "logicDigest": "7e6699529cca8792f5885bad898edcc5a476f3f5b9b0b9222e2465205b5e0239",
                       "logicVersion": 19,
                       "postcondition": {
                         "satisfied": true,
