@@ -22,13 +22,7 @@ fn live_shaped_candidate_filters_only_five_later_republished_replies() {
     // A real freeze candidate has complete authored entry records under
     // entries/supplementary; each committed receipt is associated with its
     // candidate by call id and committed_at.
-    let repaired = [
-        "CHK-002",
-        "CHK-009",
-        "CHK-010",
-        "CHK-011",
-        "CHK-012",
-    ];
+    let repaired = ["CHK-002", "CHK-009", "CHK-010", "CHK-011", "CHK-012"];
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("decomposition/reverify")).unwrap();
     std::fs::write(
@@ -212,25 +206,13 @@ fn acceptance_seed_refreshes_old_carried_entries_but_keeps_reauthored_reply_over
 
 #[test]
 fn consumed_and_latest_pending_reports_filter_all_twelve_stale_replies() {
-    let repaired_7126 = [
-        "CHK-002",
-        "CHK-009",
-        "CHK-010",
-        "CHK-011",
-        "CHK-012",
+    let repaired_consumed = ["CHK-002", "CHK-009", "CHK-010", "CHK-011", "CHK-012"];
+    let pending_latest = [
+        "CHK-001", "CHK-003", "CHK-004", "CHK-005", "CHK-006", "CHK-007", "CHK-008",
     ];
-    let pending_7281 = [
-        "CHK-001",
-        "CHK-003",
-        "CHK-004",
-        "CHK-005",
-        "CHK-006",
-        "CHK-007",
-        "CHK-008",
-    ];
-    let ids = repaired_7126
+    let ids = repaired_consumed
         .into_iter()
-        .chain(pending_7281)
+        .chain(pending_latest)
         .collect::<Vec<_>>();
     let temp = tempfile::tempdir().unwrap();
     let reverify = temp.path().join("decomposition/reverify");
@@ -245,8 +227,8 @@ fn consumed_and_latest_pending_reports_filter_all_twelve_stale_replies() {
     )
     .unwrap();
     for (report_id, subjects) in [
-        ("reverify-7126-report", &repaired_7126[..]),
-        ("reverify-7281-report", &pending_7281[..]),
+        ("reverify-7126-report", &repaired_consumed[..]),
+        ("reverify-7281-report", &pending_latest[..]),
     ] {
         std::fs::write(
             reverify.join(format!("remediation-{report_id}.json")),
