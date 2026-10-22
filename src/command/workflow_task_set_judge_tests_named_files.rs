@@ -27,6 +27,28 @@ fn named_existing_file_content_is_shown_and_judge_rule_is_updated() {
 }
 
 #[test]
+fn named_file_judge_rules_cover_asserting_regression_guards() {
+    let prompt = batched_judge_prompt(&contract()).unwrap();
+    for rule in [
+        "A check that runs an existing test or implementation whose given file contents (named_files) assert the criterion is a valid regression guard.",
+        "A check that names its deciding file by a literal path relative to its working directory and whose named_files assert the criterion is a valid regression guard.",
+        "For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail on its own assertion.",
+        "Duplicated or relocated implementation elsewhere is not an in-bounds counterexample for a guard whose named test asserts the criterion.",
+        "A counterexample against such a guard must show that the named file's assertions pass while the criterion is false.",
+        "When a check names a path outside the given named_files, content not given must not be assumed weaker or stronger than the criterion needs; judge only what is given and the command text.",
+    ] {
+        assert!(prompt.contains(rule), "missing: {rule}\n{prompt}");
+    }
+    let rules = NAMED_FILES_INSTRUCTION.to_ascii_lowercase();
+    for forbidden in [
+        "cargo", "rustc", "cargo.toml", "npm", "pnpm", "yarn", "pytest", "python",
+        "gradle", "mvn", "anthropic", "claude", "openai",
+    ] {
+        assert!(!rules.contains(forbidden), "found {forbidden:?} in {rules}");
+    }
+}
+
+#[test]
 fn named_source_budget_is_shared_across_the_batch() {
     let root = tempfile::tempdir().unwrap();
     let size = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES * 3 / 4;

@@ -29,7 +29,7 @@ mod incomplete;
 pub(crate) use incomplete::JudgeIncomplete;
 use incomplete::judge_error_class;
 
-const NAMED_FILES_INSTRUCTION: &str = "When named_files are given, judge the check against what those files actually assert; a counterexample that claims a named file asserts less than it does is invalid. The statement that tests may be absent or cover less than the criterion applies only to behaviour not covered by the given file contents.";
+const NAMED_FILES_INSTRUCTION: &str = "When named_files are given, judge the check against what those files actually assert; a counterexample that claims a named file asserts less than it does is invalid. The statement that tests may be absent or cover less than the criterion applies only to behaviour not covered by the given file contents. A check that names its deciding file by a literal path relative to its working directory and whose named_files assert the criterion is a valid regression guard. For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail on its own assertion. Duplicated or relocated implementation elsewhere is not an in-bounds counterexample for a guard whose named test asserts the criterion. A counterexample against such a guard must show that the named file's assertions pass while the criterion is false. When a check names a path outside the given named_files, content not given must not be assumed weaker or stronger than the criterion needs; judge only what is given and the command text.";
 
 #[derive(Debug, serde::Deserialize)]
 struct BatchedJudgeResponse {

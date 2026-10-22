@@ -75,7 +75,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // without creating a conflicting build target, changing scratch verdicts.
         // 44: #487 partial judge replies retain valid decisions and ask only
         // for missing checks, which can change the acceptance verdict set.
-        version: 44,
+        // 45: #488 named-file assertions make their regression guards valid; move-aside and duplicate-implementation states cannot refute them.
+        version: 45,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
