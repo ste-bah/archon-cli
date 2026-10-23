@@ -1,3 +1,5 @@
+use std::path::{Component, Path};
+
 use super::SiteRoot;
 
 pub(super) fn valid_relative(path: &Path) -> bool {
