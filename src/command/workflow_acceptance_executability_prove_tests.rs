@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn persisted_output_evidence_is_bounded_utf8_safe_and_redacted() {
+    let secret = format!("sk-proj-{}", "a".repeat(40));
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "AC-EVIDENCE".into(),
+        exit_code: Some(1),
+        quota_walk_count: 0,
+        stdout: format!("{}\n{secret}", "界".repeat(1_000)).into_bytes(),
+        stderr: vec![0xff; 3_000],
+        environment_note: None,
+        operational_error: None,
+        classification: None,
+    };
+    let evidence = output_evidence(&result);
+    assert!(!evidence.contains(&secret));
+    assert!(evidence.contains("***REDACTED***"));
+    assert!(evidence.is_char_boundary(evidence.len()));
+    assert!(evidence.len() < 2_700, "{evidence}");
+}
+
+#[test]
 fn recreated_inputs_route_to_author_action_with_the_named_path() {
     let states = std::collections::BTreeMap::from([
         (

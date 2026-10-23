@@ -376,14 +376,18 @@ pub(super) async fn prove(
 }
 
 fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
-    let excerpt = format!(
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
-    );
-    // Capture already redacts host values; the excerpt is persisted in proof
-    // records and reports, so secret-shaped values are redacted again here.
-    archon_observability::redaction::redact_secret_values(&excerpt)
+    const STDOUT_BYTES: usize = 600;
+    const STDERR_BYTES: usize = 2_000;
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stdout = archon_observability::redaction::redact_secret_values(&stdout);
+    let stdout =
+        archon_workflow::failure_evidence::failure_evidence(stdout.as_bytes(), STDOUT_BYTES);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    let stderr = archon_observability::redaction::redact_secret_values(&stderr);
+    let stderr =
+        archon_workflow::failure_evidence::failure_evidence(stderr.as_bytes(), STDERR_BYTES);
+    let excerpt = format!("stdout: {stdout}\nstderr: {stderr}");
+    excerpt
 }
 
 #[cfg(test)]

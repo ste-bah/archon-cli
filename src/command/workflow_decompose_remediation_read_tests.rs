@@ -51,7 +51,7 @@ fn generated_ledger_subjects_keep_first_seen_order() {
 }
 
 #[tokio::test]
-async fn consumed_ledger_without_current_lineage_proof_reauthors_checks_on_resume() {
+async fn consumed_ledger_without_current_lineage_proof_skips_reauthoring_on_resume() {
     let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
         "AC-F-001",
         "jq -e '.a == true' out.json",
@@ -88,9 +88,9 @@ async fn consumed_ledger_without_current_lineage_proof_reauthors_checks_on_resum
     )
     .await
     .unwrap();
-    assert_eq!(client.authored(), 1);
-    assert!(
-        client.prompts.lock().unwrap()[0]
-            .contains("available pin/history evidence is insufficient")
+    assert_eq!(
+        client.authored(),
+        0,
+        "missing evidence must not route a subject"
     );
 }

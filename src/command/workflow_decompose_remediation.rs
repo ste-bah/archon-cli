@@ -281,6 +281,27 @@ pub(crate) fn prepare(
 ) -> Result<Option<ResumePlan>> {
     let latest = crate::command::workflow_decompose_latest_report::latest_report(store, run_id)?;
     let consumed_path = run_dir.join("decomposition/reverify/consumed.jsonl");
+    let skeleton: archon_workflow::task_skeleton::TaskSkeleton =
+        serde_json::from_slice(&std::fs::read(
+            Path::new(&runtime.task_root_identity)
+                .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
+        )?)?;
+    let task_ids = skeleton
+        .tasks
+        .iter()
+        .map(|task| task.task_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let contract: archon_workflow::task_set_contract::AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(
+            Path::new(&runtime.task_root_identity)
+                .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        )?)?;
+    let check_ids = contract
+        .acceptance
+        .iter()
+        .chain(&contract.supplementary)
+        .map(|entry| entry.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
     let consumed_ids = match std::fs::read_to_string(&consumed_path) {
         Ok(text) => text
             .lines()
@@ -301,6 +322,7 @@ pub(crate) fn prepare(
                 report_id
             )
         })?;
+        validate_subjects(run_dir, &ledger, &task_ids, &check_ids)?;
         let findings = consumed_ledger_findings(
             Path::new(&runtime.project_root_identity),
             Path::new(&runtime.task_root_identity),
@@ -315,15 +337,13 @@ pub(crate) fn prepare(
     if let Some(latest) = latest.filter(|latest| latest.outcome == "needs_remediation") {
         if !consumed_ids.contains(&latest.id) {
             let ledger = read(run_dir, &latest.id)?.ok_or_else(|| anyhow!("latest reverify report {} needs remediation but its matching ledger is missing", latest.id))?;
+            validate_subjects(run_dir, &ledger, &task_ids, &check_ids)?;
             selected.extend(ledger.subjects.iter().cloned());
             pending = Some(ledger);
         }
     }
     selected = deduplicate_subjects(selected);
-    if selected.is_empty() {
-        arguments["forceBodySubjects"] = serde_json::json!([]);
-        return Ok(None);
-    }
+    let selected_is_empty = selected.is_empty();
     let ledger = Ledger {
         report_id: pending
             .as_ref()
@@ -333,28 +353,11 @@ pub(crate) fn prepare(
         subjects: selected,
     };
     {
-        let skeleton: archon_workflow::task_skeleton::TaskSkeleton =
-            serde_json::from_slice(&std::fs::read(
-                Path::new(&runtime.task_root_identity)
-                    .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
-            )?)?;
-        let task_ids = skeleton
-            .tasks
-            .iter()
-            .map(|task| task.task_id.clone())
-            .collect::<std::collections::BTreeSet<_>>();
-        let contract: archon_workflow::task_set_contract::AcceptanceContract =
-            serde_json::from_slice(&std::fs::read(
-                Path::new(&runtime.task_root_identity)
-                    .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-            )?)?;
-        let check_ids = contract
-            .acceptance
-            .iter()
-            .chain(&contract.supplementary)
-            .map(|entry| entry.id.clone())
-            .collect::<std::collections::BTreeSet<_>>();
         validate_subjects(run_dir, &ledger, &task_ids, &check_ids)?;
+        if selected_is_empty {
+            arguments["forceBodySubjects"] = serde_json::json!([]);
+            return Ok(None);
+        }
         force_subjects(arguments, Some(&ledger), &task_ids);
         let missing_phase_seed = arguments
             .get("phaseSeed")

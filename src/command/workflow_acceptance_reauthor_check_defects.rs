@@ -54,8 +54,17 @@ pub(super) fn check_defects(
             ]
             .into_iter()
             .find(|(root, _)| {
+                let inside_selected = selected_canonical.as_ref().is_some_and(|selected| {
+                    canonical_target
+                        .as_ref()
+                        .is_some_and(|target| target.starts_with(selected))
+                        || lexical_target
+                            .as_ref()
+                            .is_some_and(|target| target.starts_with(selected))
+                });
                 root.is_some_and(|root| {
-                    Some(root) != selected_canonical.as_ref()
+                    !inside_selected
+                        && Some(root) != selected_canonical.as_ref()
                         && (canonical_target
                             .as_ref()
                             .is_some_and(|target| target.starts_with(root))

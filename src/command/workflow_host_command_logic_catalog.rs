@@ -117,7 +117,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): regression-fix diagnostic routing and its fixture.
         // Re-pinned for #487: acceptance judge source changed with version 44.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
-        sources_digest: "6b0fa0b952faed2dc2fd7b3a9adf2af4b7188955ac2eb8dfa98d1385f4bd2eb2",
+        sources_digest: "5269e6f809212bf7c0c411923fb5a14a2c18cc37d77a17c555758f8318e4f437",
         build_bound: false,
     },
     CapabilityLogic {
@@ -144,7 +144,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #493 re-pin only: shared freeze sources changed; these acceptance
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
-        sources_digest: "6b0fa0b952faed2dc2fd7b3a9adf2af4b7188955ac2eb8dfa98d1385f4bd2eb2",
+        sources_digest: "5269e6f809212bf7c0c411923fb5a14a2c18cc37d77a17c555758f8318e4f437",
         build_bound: false,
     },
     CapabilityLogic {
@@ -299,7 +299,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
         // 14: #491 an intact skeleton from an older acceptance no longer makes acceptance verification fail.
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
-        sources_digest: "dad66ba7c355f4562b04aeedcd172a89a1ebfe1f8cc4c7436ec443598b248163",
+        sources_digest: "0aa252aeedcbf98140f1d62e9c57dec7dd581676f3e8801ebde57c9cadba702d",
         build_bound: true,
     },
     CapabilityLogic {
@@ -323,7 +323,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #487 re-pin only: frozen-chain verification does not call the acceptance judge.
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
-        sources_digest: "dad66ba7c355f4562b04aeedcd172a89a1ebfe1f8cc4c7436ec443598b248163",
+        sources_digest: "0aa252aeedcbf98140f1d62e9c57dec7dd581676f3e8801ebde57c9cadba702d",
         build_bound: true,
     },
 ];

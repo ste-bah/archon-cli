@@ -88,6 +88,31 @@ fn an_existing_external_sibling_alias_is_not_a_cross_root_refusal() {
     assert!(check_defects::check_defects(&set.contract(), entry, &scope(&set)).is_ok());
 }
 
+#[test]
+fn nested_roots_allow_targets_that_normalize_inside_the_selected_root() {
+    for repository_contains_project in [true, false] {
+        let set = frozen_set(&[("AC-F-NESTED", "test -f feature.txt", false)]);
+        let base = set.project.path().join("roots");
+        let (project, repository) = if repository_contains_project {
+            (base.join("repo/project"), base.join("repo"))
+        } else {
+            (base.join("project"), base.join("project/repo"))
+        };
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&repository).unwrap();
+        std::fs::write(project.join("b"), "present").unwrap();
+        let mut author_scope = scope(&set);
+        author_scope.project_root = project;
+        author_scope.repository_root = repository;
+        let mut candidate = set.contract().acceptance[0].clone();
+        candidate.check = AcceptanceCheck::Command {
+            command: "test -f a/../b".into(),
+            cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+        };
+        assert!(check_defects::check_defects(&set.contract(), candidate, &author_scope).is_ok());
+    }
+}
+
 #[tokio::test]
 async fn a_refuted_check_is_reauthored_and_rejudged_and_nothing_else_changes() {
     let set = frozen_set(&[

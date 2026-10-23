@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn one_resume_reauthors_five_reverted_and_seven_pending_checks_and_consumes_only_pending() {
+async fn one_resume_skips_five_unproven_and_reauthors_seven_pending_checks() {
     let reverted = ["AC-F-001", "AC-F-002", "AC-F-003", "AC-F-004", "AC-F-005"];
     let pending = [
         "AC-F-006", "AC-F-007", "AC-F-008", "AC-F-009", "AC-F-010", "AC-F-011", "AC-F-012",
@@ -59,14 +59,14 @@ async fn one_resume_reauthors_five_reverted_and_seven_pending_checks_and_consume
     let judged = client.judged_ids.lock().unwrap().clone();
     assert_eq!(
         judged.len(),
-        12,
-        "all consumed-reverted and pending subjects route together: {judged:?}"
+        7,
+        "only pending subjects route without positive consumed-subject proof: {judged:?}"
     );
     assert_eq!(
         judged
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>(),
-        ids.iter().map(|id| id.to_string()).collect()
+        pending.iter().map(|id| id.to_string()).collect()
     );
     finish_resume(run.path(), Some(plan), "done".into()).unwrap();
     let report_ids = std::fs::read_to_string(consumed_path)
