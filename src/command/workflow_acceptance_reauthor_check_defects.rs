@@ -26,6 +26,10 @@ pub(super) fn check_defects(
     if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, cwd } =
         &candidate.check
     {
+        // This is a lexical safety scan, not shell evaluation. It covers
+        // path-like words, interpreter operands/program text, and the common
+        // `cd .. && cd child` form; dynamic path construction remains outside
+        // what a static scan can establish.
         let selected = match cwd {
             archon_workflow::task_set_contract::TrustedCwd::ProjectRoot => &scope.project_root,
             archon_workflow::task_set_contract::TrustedCwd::RepoRoot => &scope.repository_root,
@@ -34,11 +38,10 @@ pub(super) fn check_defects(
         for named in archon_workflow::acceptance_sibling_paths::scan(command)
             .into_iter()
             .filter(|named| {
-                named.required
-                    && named
-                        .path
-                        .components()
-                        .any(|part| part == std::path::Component::ParentDir)
+                named
+                    .path
+                    .components()
+                    .any(|part| part == std::path::Component::ParentDir)
             })
         {
             let target = selected.join(&named.path);

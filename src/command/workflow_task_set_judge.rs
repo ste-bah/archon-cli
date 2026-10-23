@@ -18,6 +18,9 @@ mod named_files;
 #[cfg(test)]
 use named_files::named_files;
 pub(super) use named_files::named_files_digest;
+#[cfg(test)]
+pub(super) use named_files::named_files_digest_for_list;
+pub(super) use named_files::named_files_digest_with_budget;
 use named_files::named_files_with_budget;
 
 #[path = "workflow_task_set_judge_rounds.rs"]
@@ -29,7 +32,7 @@ mod incomplete;
 pub(crate) use incomplete::JudgeIncomplete;
 use incomplete::judge_error_class;
 
-const NAMED_FILES_INSTRUCTION: &str = "A check that runs an existing test or implementation whose given file contents (named_files) assert the criterion is a valid regression guard. When named_files are given, judge the check against what those files actually assert; a counterexample that claims a named file asserts less than it does is invalid. The statement that tests may be absent or cover less than the criterion applies only to behaviour not covered by the given file contents. For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail; that host proof is never a counterexample. Duplicated or relocated implementation elsewhere is not an in-bounds counterexample for a guard whose named test asserts the criterion. A regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. Refute a check if any in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file. A status-discarding sequence is one example. When a check names a path outside the given named_files, content not given must not be assumed weaker or stronger than the criterion needs; judge only what is given and the command text.";
+const NAMED_FILES_INSTRUCTION: &str = "A named-file regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails. A guard names its deciding file by its literal path relative to the check's working directory. Naming a file or asserting that it exists does not make it the deciding assertion. Judge supplied named_files content as written. These regression-guard rules apply to a check whose deciding test or implementation exists; a named deciding input marked absent is behaviour not implemented yet and is judged by the general rules; a deciding input marked not_supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Refute a check if an in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file. A duplicated or relocated implementation may be an in-bounds counterexample when the delivered path uses it while the named test checks an old copy; a speculative counterexample requiring deliberate gaming remains invalid. The host may use a move-aside proof only for named inputs it actually moves; requiring the check to fail when such an input is moved aside is proof of the guard, never a counterexample. Inputs the host does not move, including scripts run through an interpreter and build manifests, do not qualify for that proof.";
 
 #[derive(Debug, serde::Deserialize)]
 struct BatchedJudgeResponse {

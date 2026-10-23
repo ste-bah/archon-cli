@@ -124,7 +124,11 @@ async fn bounded_glob(
     pattern: &str,
     ctx: &ToolContext,
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
-    bounded_glob_with_state_roots(base, pattern, ctx, harness_state_roots(&ctx.working_dir)).await
+    let mut roots = harness_state_roots(&ctx.working_dir);
+    roots.extend(harness_state_roots(base));
+    roots.sort();
+    roots.dedup();
+    bounded_glob_with_state_roots(base, pattern, ctx, roots).await
 }
 
 #[cfg(test)]
@@ -217,15 +221,10 @@ async fn bounded_glob_with_state_roots(
                 .run_store
                 .as_ref()
                 .is_some_and(|scope| scope.leads_to_owned_tree(&path));
-            let leads_to_targeted_root =
-                state_roots
-                    .iter()
-                    .zip(&targeted_roots)
-                    .any(|(root, targeted)| {
-                        *targeted
-                            && (path_starts_with_canonical(root, &path)
-                                || path_starts_with_canonical(&path, root))
-                    });
+            let leads_to_targeted_root = state_roots
+                .iter()
+                .zip(&targeted_roots)
+                .any(|(root, targeted)| *targeted && path_starts_with_canonical(root, &path));
             if !leads_to_owned_tree
                 && !leads_to_targeted_root
                 && ignores_match(&global_ignores, &ignores, &path, is_dir)
@@ -374,8 +373,7 @@ fn root_targeted_by_pattern(
 ) -> bool {
     use std::path::Component;
 
-    // A search rooted inside a state store is itself an explicit request to
-    // inspect that subtree, even if the pattern does not repeat the root path.
+    // A base inside a state root is explicit; local ignores below it still apply.
     if archon_shell::paths::path_starts_with(base, root) {
         return true;
     }
@@ -453,7 +451,7 @@ fn is_literal_component(component: &std::ffi::OsStr) -> bool {
 /// Storage roots from the same path definitions used by their owners. These
 /// can be nested under a project when the operator configures cache storage
 /// there, so pruning only hidden directory names is not enough.
-fn harness_state_roots(project_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+pub(crate) fn harness_state_roots(project_root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut roots = Vec::new();
     if let Some(root) = crate::agent_records::sessions_root() {
         roots.push(root);

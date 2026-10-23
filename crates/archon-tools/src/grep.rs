@@ -200,7 +200,16 @@ async fn collect_files(
         Some(filter) => Some(glob::Pattern::new(filter).map_err(|e| format!("{e}"))?),
         None => None,
     };
-    let limit_hit = walk_dir(fs, path, matcher.as_ref(), &mut files, ctx).await;
+    let mut state_roots = crate::glob_tool::harness_state_roots(&ctx.working_dir);
+    state_roots.extend(crate::glob_tool::harness_state_roots(path));
+    state_roots = state_roots
+        .into_iter()
+        .map(|root| root.canonicalize().unwrap_or(root))
+        .collect();
+    state_roots.sort();
+    state_roots.dedup();
+    let base = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let limit_hit = walk_dir(fs, &base, matcher.as_ref(), &mut files, ctx, &state_roots).await;
 
     Ok((files, limit_hit))
 }
@@ -216,6 +225,7 @@ async fn walk_dir(
     matcher: Option<&glob::Pattern>,
     files: &mut Vec<std::path::PathBuf>,
     ctx: &ToolContext,
+    state_roots: &[std::path::PathBuf],
 ) -> bool {
     let mut pending = vec![base.to_path_buf()];
 
@@ -237,6 +247,12 @@ async fn walk_dir(
                 continue;
             };
             if meta.is_dir {
+                if state_roots.iter().any(|root| {
+                    archon_shell::paths::path_starts_with(&path, root)
+                        && !archon_shell::paths::path_starts_with(base, root)
+                }) {
+                    continue;
+                }
                 let name = path
                     .file_name()
                     .map(|name| name.to_string_lossy().to_string())

@@ -62,12 +62,12 @@ fn program_text_paths_are_scanned_but_project_paths_are_not_siblings() {
 fn program_paths_trim_list_and_call_separators() {
     for (command, expected) in [
         (
-            "python3 -c 'run([\"cargo\", \"--manifest-path\", \"../archon-cli/Cargo.toml\", \"-p\"])'",
-            "../archon-cli/Cargo.toml",
+            "runner -c 'run([\"--input\", \"../sibling/package.manifest\"])'",
+            "../sibling/package.manifest",
         ),
         (
-            "python3 -c 'check(\"../sibling/Cargo.toml\")'",
-            "../sibling/Cargo.toml",
+            "runner -c 'check(\"../sibling/package.manifest\")'",
+            "../sibling/package.manifest",
         ),
     ] {
         let paths = scan(command);
@@ -75,6 +75,13 @@ fn program_paths_trim_list_and_call_separators() {
         assert_eq!(paths[0].path, PathBuf::from(expected));
         assert!(paths[0].required, "{command}: {paths:?}");
     }
+}
+
+#[test]
+fn sibling_path_trimming_preserves_non_ascii_letters() {
+    let paths = scan("runner -c 'check(\"../sib/café\')'");
+    assert_eq!(paths.len(), 1, "{paths:?}");
+    assert_eq!(paths[0].path, PathBuf::from("../sib/café"));
 }
 
 #[test]

@@ -3,14 +3,12 @@
 use super::*;
 use crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven as frozen_set;
 use std::path::Path;
-
 fn scope(
     set: &crate::command::workflow_task_set::republish::test_fixture::FrozenSet,
 ) -> AuthorScope {
     AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
         .expect("the task set's repository record is believed")
 }
-
 fn write_task_declaration(tasks: &Path, files: &str, implements: &str) {
     std::fs::create_dir_all(tasks).unwrap();
     std::fs::write(
@@ -21,6 +19,7 @@ fn write_task_declaration(tasks: &Path, files: &str, implements: &str) {
 }
 
 #[test]
+#[rustfmt::skip]
 fn baseline_prompt_leads_with_guard_template_and_verified_candidates() {
     use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
@@ -62,13 +61,14 @@ fn baseline_prompt_leads_with_guard_template_and_verified_candidates() {
     let first = prompt.lines().next().unwrap();
     assert!(first.starts_with("The criterion already holds on the pre-implementation tree"));
     assert!(first.contains("Write a regression guard"));
-    assert!(first.contains("name its file relative to the chosen working directory"));
-    assert!(first.contains("the check must fail whenever the test fails"));
-    assert!(first.contains(
-        "Naming a file or asserting that it exists does not make it the deciding assertion."
-    ));
-    assert!(first.contains("that proof is never a counterexample"));
-    assert!(first.contains("The named file's content is shown to the judge, which judges the check against what it asserts; name the file whose outcome decides the criterion."));
+    assert!(first.contains("name the deciding file by its literal path relative to the check's working directory"));
+    assert!(first.contains("The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails"));
+    assert!(first.contains("Naming a file or asserting that it exists does not make it the deciding assertion."));
+    assert!(first.contains("Its content is shown to the judge only when it is supplied in named_files"));
+    assert!(first.contains("A duplicated or relocated implementation can refute the guard"));
+    assert!(first.contains("The host may prove the guard by moving aside a named input it actually moves and requiring the check to fail"));
+    assert!(!prompt.contains("the named file's content is shown to the judge, which judges the check"));
+    assert!(!prompt.contains("the host moves the named input aside"));
     let template = prompt.find("Template:").unwrap();
     let entry = prompt.find("Re-author exactly one").unwrap();
     assert!(template < entry, "{prompt}");
@@ -102,7 +102,7 @@ fn non_baseline_prompt_keeps_the_refused_check_verbatim() {
     });
     let expected = [
         format!(
-            "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The current entry cannot be used as it is: the host judge did not accept it, or it crashed in its own code when the host ran it (the findings below say which). Author ONLY this entry, not the whole contract.",
+            "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The findings below explain why the current entry needs revision. Author ONLY this entry, not the whole contract.",
             frozen.id
         ),
         format!("Read the PRD at {}.", author_scope.prd_path.display()),
@@ -122,7 +122,7 @@ fn non_baseline_prompt_keeps_the_refused_check_verbatim() {
         super::ENTRY_SHAPES.to_string(),
         "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.".to_string(),
         "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
-        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The host moves those inputs aside, never the check's own script, a program it runs, a directory it changes into or a build manifest; the check must still fail on its own assertion, not by crashing. Read the files that decide the criterion by those paths.".to_string(),
+        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name the deciding file by its literal path relative to the check's working directory. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. The host moves aside only inputs it actually moves, never the check's own script, a program it runs, a directory it changes into or a build manifest; a move-aside failure proves the guard and is never a counterexample. The named file's assertions are known to the judge only when its content is supplied in named_files. Read the deciding file by its named path.".to_string(),
         format!(
             "Use the exact id {}. Criterion and judgment are host-owned placeholders; gap_permitted stays {}.",
             frozen.id, frozen.gap_permitted
@@ -493,5 +493,8 @@ fn baseline_prompt_instruction_has_no_tool_or_language_names() {
             "found {forbidden:?} in {guidance}"
         );
     }
-    assert!(guidance.contains("the named file's content is shown to the judge"));
+    assert!(
+        guidance.contains("content is shown to the judge only when it is supplied in named_files")
+    );
+    assert!(guidance.contains("content is not supplied, its assertions are unknown"));
 }

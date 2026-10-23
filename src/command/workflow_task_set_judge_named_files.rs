@@ -1,6 +1,7 @@
 use super::*;
 use std::path::Path;
 
+#[cfg(test)]
 pub(super) fn named_files(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
@@ -64,8 +65,14 @@ pub(super) fn named_files_with_budget(
     inputs
         .into_iter()
         .filter_map(|relative| {
-            let path = normalize_named_path(Path::new(&relative))?;
+            let Some(path) = normalize_named_path(Path::new(&relative)) else {
+                return Some(serde_json::json!({
+                    "path": archon_shell::paths::stored_text(Path::new(&relative)),
+                    "status": "not_supplied"
+                }));
+            };
             let absolute = root.join(&path);
+            let path_text = archon_shell::paths::stored_text(&path);
             if matches!(
                 criterion.check,
                 archon_workflow::task_set_contract::AcceptanceCheck::Command {
@@ -73,12 +80,26 @@ pub(super) fn named_files_with_budget(
                     ..
                 }
             ) {
-                let commit = roots.repository_commit.as_deref()?;
+                let Some(commit) = roots.repository_commit.as_deref() else {
+                    return Some(repository_missing_entry(
+                        &path_text,
+                        &repository,
+                        None,
+                        &path_text,
+                        &path,
+                    ));
+                };
                 let stored_path = archon_shell::paths::stored_text(&path);
                 let Some(content_bytes) =
                     repository_regular_blob(&repository, commit, &stored_path)
                 else {
-                    return None;
+                    return Some(repository_missing_entry(
+                        &path_text,
+                        &repository,
+                        Some(commit),
+                        &stored_path,
+                        &path,
+                    ));
                 };
                 let bytes = content_bytes;
                 let take = bytes.len().min(*remaining);
@@ -86,19 +107,29 @@ pub(super) fn named_files_with_budget(
                 let truncated = take < bytes.len();
                 let shown = &bytes[..take];
                 *remaining -= take;
-                let mut content = archon_observability::redaction::redact_secret_values(
+                let content = archon_observability::redaction::redact_secret_values(
                     &String::from_utf8_lossy(shown),
                 );
                 if truncated {
-                    content.push_str("\n[truncated at the existing judged-source byte limit]");
+                    return Some(serde_json::json!({
+                        "path": path_text,
+                        "status": "not_supplied",
+                        "content": content,
+                        "detail": "[truncated at the existing judged-source byte limit]"
+                    }));
                 }
                 return Some(
-                    serde_json::json!({"path": archon_shell::paths::stored_text(&path), "content": content}),
+                    serde_json::json!({"path": path_text, "status": "supplied", "content": content}),
                 );
             } else {
-                let canonical = absolute.canonicalize().ok()?;
-                if !canonical.starts_with(&root) || !canonical.is_file() {
-                    return None;
+                match absolute.symlink_metadata() {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        return Some(serde_json::json!({"path": path_text, "status": "absent"}));
+                    }
+                    Err(_) => {
+                        return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                    }
+                    Ok(_) => {}
                 }
                 let relative = absolute.strip_prefix(&project).ok()?;
                 if project_input_excludes.as_ref().is_none_or(|excludes| {
@@ -115,34 +146,73 @@ pub(super) fn named_files_with_budget(
                         .any(|component| component.as_os_str() == ".git")
                     || !project_file_is_copied(&project, relative)
                 {
-                    return None;
+                    return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
                 }
             }
-            let canonical = absolute.canonicalize().ok()?;
+            let canonical = match absolute.canonicalize() {
+                Ok(canonical) => canonical,
+                Err(_) => return Some(serde_json::json!({"path": path_text, "status": "not_supplied"})),
+            };
+            if !canonical.starts_with(&root) || !canonical.is_file() {
+                return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+            }
             let bytes = std::fs::read(&canonical).ok()?;
             let take = bytes.len().min(*remaining);
             let take = utf8_prefix_len(&bytes, take);
             let truncated = take < bytes.len();
             let shown = &bytes[..take];
             *remaining -= take;
-            let mut content = archon_observability::redaction::redact_secret_values(
+            let content = archon_observability::redaction::redact_secret_values(
                 &String::from_utf8_lossy(shown),
             );
             if truncated {
-                content.push_str("\n[truncated at the existing judged-source byte limit]");
+                return Some(serde_json::json!({
+                    "path": path_text,
+                    "status": "not_supplied",
+                    "content": content,
+                    "detail": "[truncated at the existing judged-source byte limit]"
+                }));
             }
             Some(serde_json::json!({
-                "path": archon_shell::paths::stored_text(&path),
+                "path": path_text,
+                "status": "supplied",
                 "content": content,
             }))
         })
         .collect()
 }
 
+fn repository_missing_entry(
+    path: &str,
+    repository: &Path,
+    commit: Option<&str>,
+    stored_path: &str,
+    relative: &Path,
+) -> serde_json::Value {
+    let working_path = repository.join(relative);
+    if commit.is_some_and(|commit| repository_tree_entry(repository, commit, stored_path).is_some())
+        || working_path.symlink_metadata().is_ok()
+        || working_path.exists()
+    {
+        serde_json::json!({"path": path, "status": "not_supplied"})
+    } else {
+        serde_json::json!({"path": path, "status": "absent"})
+    }
+}
+
 /// Digest the exact path/content list the judge prompt will receive.
 pub(in crate::command::workflow_task_set) fn named_files_digest(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
+) -> String {
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    named_files_digest_with_budget(criterion, roots, &mut remaining)
+}
+
+pub(in crate::command::workflow_task_set) fn named_files_digest_with_budget(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+    remaining: &mut usize,
 ) -> String {
     let mut resolved = roots.clone();
     if resolved.repository_commit.is_none() {
@@ -164,9 +234,14 @@ pub(in crate::command::workflow_task_set) fn named_files_digest(
             });
         }
     }
+    named_files_digest_for_list(&named_files_with_budget(criterion, &resolved, remaining))
+}
+
+pub(in crate::command::workflow_task_set) fn named_files_digest_for_list(
+    files: &[serde_json::Value],
+) -> String {
     content_digest(
-        &serde_json::to_vec(&named_files(criterion, &resolved))
-            .expect("named judge files are serializable JSON values"),
+        &serde_json::to_vec(files).expect("named judge files are serializable JSON values"),
     )
 }
 
@@ -193,6 +268,22 @@ fn utf8_prefix_len(bytes: &[u8], limit: usize) -> usize {
 }
 
 fn repository_regular_blob(repository: &Path, commit: &str, path: &str) -> Option<Vec<u8>> {
+    let entry = repository_tree_entry(repository, commit, path)?;
+    // Git regular files are blobs with mode 100644 or 100755. In particular,
+    // mode 120000 is a symlink blob and must never be followed or shown.
+    if !(entry.starts_with(b"100644 blob ") || entry.starts_with(b"100755 blob ")) {
+        return None;
+    }
+    let output = archon_shell::spawn::command("git")
+        .arg("-C")
+        .arg(repository)
+        .args(["cat-file", "blob", &format!("{commit}:{path}")])
+        .output()
+        .ok()?;
+    output.status.success().then_some(output.stdout)
+}
+
+fn repository_tree_entry(repository: &Path, commit: &str, path: &str) -> Option<Vec<u8>> {
     let tree_entry = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
@@ -209,20 +300,9 @@ fn repository_regular_blob(repository: &Path, commit: &str, path: &str) -> Optio
             let separator = record.iter().position(|byte| *byte == b'\t')?;
             let (metadata, entry_path_with_separator) = record.split_at(separator);
             let entry_path = entry_path_with_separator.get(1..)?;
-            (entry_path == path.as_bytes()).then_some(metadata)
+            (entry_path == path.as_bytes()).then_some(metadata.to_vec())
         })?;
-    // Git regular files are blobs with mode 100644 or 100755. In particular,
-    // mode 120000 is a symlink blob and must never be followed or shown.
-    if !(entry.starts_with(b"100644 blob ") || entry.starts_with(b"100755 blob ")) {
-        return None;
-    }
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
-        .args(["cat-file", "blob", &format!("{commit}:{path}")])
-        .output()
-        .ok()?;
-    output.status.success().then_some(output.stdout)
+    Some(entry)
 }
 
 fn project_file_is_copied(project_root: &Path, relative: &Path) -> bool {

@@ -270,6 +270,8 @@ async fn glob_from_archon_directory_skips_workflow_run_stores() {
 async fn glob_from_project_directory_skips_workflow_run_stores() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("project");
+    let repository = temp.path().join("repository");
+    std::fs::create_dir_all(&repository).unwrap();
     let state_root = project.join(".archon/workflows");
     std::fs::create_dir_all(project.join("src")).unwrap();
     std::fs::write(project.join("src/main.rs"), "fn main() {}").unwrap();
@@ -279,7 +281,8 @@ async fn glob_from_project_directory_skips_workflow_run_stores() {
         std::fs::write(file, "{}").unwrap();
     }
     let ctx = ToolContext {
-        working_dir: project.clone(),
+        working_dir: repository,
+        extra_dirs: vec![project.clone()],
         ..ToolContext::default()
     };
 
@@ -304,10 +307,14 @@ async fn glob_rooted_inside_a_run_store_lists_that_run() {
     let own_run = state_root.join("run-1");
     let own_file = own_run.join("artifacts/report.json");
     let other_file = state_root.join("run-0/artifacts/old.json");
+    let ignored_file = own_run.join("node_modules/hidden.json");
     std::fs::create_dir_all(own_file.parent().unwrap()).unwrap();
     std::fs::create_dir_all(other_file.parent().unwrap()).unwrap();
     std::fs::write(&own_file, "{}").unwrap();
     std::fs::write(&other_file, "{}").unwrap();
+    std::fs::create_dir_all(ignored_file.parent().unwrap()).unwrap();
+    std::fs::write(ignored_file, "{}").unwrap();
+    std::fs::write(own_run.join(".gitignore"), "node_modules/\n").unwrap();
     let ctx = ToolContext {
         working_dir: project,
         ..ToolContext::default()
@@ -325,6 +332,62 @@ async fn glob_rooted_inside_a_run_store_lists_that_run() {
             .contains("artifacts/report.json"),
         "a search rooted inside one run must still list its contents: {}",
         result.content
+    );
+    assert!(
+        !result.content.replace('\\', "/").contains("run-0"),
+        "a search rooted in one run must not list its sibling run: {}",
+        result.content
+    );
+    assert!(
+        !result.content.contains("hidden.json"),
+        "local ignore rules must still apply: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn grep_from_project_root_skips_workflow_run_stores() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let run_file = project.join(".archon/workflows/run-1/results/match.txt");
+    std::fs::create_dir_all(run_file.parent().unwrap()).unwrap();
+    std::fs::write(&run_file, "unique-run-marker").unwrap();
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/main.txt"), "unique-run-marker").unwrap();
+    let ctx = ToolContext {
+        working_dir: project.clone(),
+        ..ToolContext::default()
+    };
+    let result = GrepTool
+        .execute(json!({"pattern":"unique-run-marker", "path":project}), &ctx)
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("main.txt"), "{}", result.content);
+    assert!(
+        !result.content.contains(".archon/workflows"),
+        "run-store data leaked: {}",
+        result.content
+    );
+
+    let control_file = project.join(".archon/settings/control.txt");
+    std::fs::create_dir_all(control_file.parent().unwrap()).unwrap();
+    std::fs::write(&control_file, "unique-run-marker").unwrap();
+    let state_search = GrepTool
+        .execute(
+            json!({"pattern":"unique-run-marker", "path":project.join(".archon")}),
+            &ctx,
+        )
+        .await;
+    assert!(!state_search.is_error, "{}", state_search.content);
+    assert!(
+        state_search.content.contains("control.txt"),
+        "{}",
+        state_search.content
+    );
+    assert!(
+        !state_search.content.contains(".archon/workflows"),
+        "state-root pruning must work when the search starts inside a hidden parent: {}",
+        state_search.content
     );
 }
 
