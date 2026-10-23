@@ -8,6 +8,7 @@ struct EntryVerdict {
     judgment: archon_workflow::task_set_contract::JudgeVerdict,
 }
 
+#[cfg(test)]
 pub(super) fn entry_key(
     client: &dyn WorkflowLlmClient,
     tasks_root: &Path,
@@ -15,6 +16,19 @@ pub(super) fn entry_key(
     entry: &AcceptanceCriterion,
     roots: &super::judge::JudgeRoots,
 ) -> Option<String> {
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    entry_key_with_budget(client, tasks_root, prd_digest, entry, roots, &mut remaining)
+}
+
+fn entry_key_with_budget(
+    client: &dyn WorkflowLlmClient,
+    tasks_root: &Path,
+    prd_digest: &str,
+    entry: &AcceptanceCriterion,
+    roots: &super::judge::JudgeRoots,
+    remaining: &mut usize,
+) -> Option<String> {
+    let named_file_digest = super::judge::named_files_digest_with_budget(entry, roots, remaining);
     let (version, digest, _) =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
     Some(content_digest(
@@ -26,7 +40,7 @@ pub(super) fn entry_key(
             entry.check,
             entry.covers,
             entry.gap_permitted,
-            super::judge::named_files_digest(entry, roots),
+            named_file_digest,
             client.resolve_model_alias("sonnet"),
             client.provider_id(),
             version,
@@ -93,12 +107,17 @@ pub(super) fn save_judged_entries(
     pinned_ids: &BTreeSet<String>,
     roots: &super::judge::JudgeRoots,
 ) -> Result<()> {
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     for entry in contract.acceptance.iter().chain(&contract.supplementary) {
-        if judged_ids.contains(&entry.id)
-            && !pinned_ids.contains(&entry.id)
+        if !judged_ids.contains(&entry.id) {
+            continue;
+        }
+        let key =
+            entry_key_with_budget(client, tasks_root, prd_digest, entry, roots, &mut remaining);
+        if !pinned_ids.contains(&entry.id)
             && entry.judgment.verdict == JudgeDecision::Accepted
             && sampling_matches(client, entry)
-            && let Some(key) = entry_key(client, tasks_root, prd_digest, entry, roots)
+            && let Some(key) = key
         {
             save_entry(project, &key, entry)?;
         }
@@ -172,12 +191,21 @@ pub(super) async fn judge(
         .and_then(|pin| validate_acceptance_bundle(tasks, Some(&pin), expected).ok());
     drop(read);
     let mut reused = BTreeSet::new();
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     for entry in contract
         .acceptance
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
-        let Some(key) = entry_key(client, &tasks_root, &contract.prd.digest, entry, roots) else {
+        let before_entry = remaining;
+        let Some(key) = entry_key_with_budget(
+            client,
+            &tasks_root,
+            &contract.prd.digest,
+            entry,
+            roots,
+            &mut remaining,
+        ) else {
             continue;
         };
         // The exact task root and PRD digest scope this verdict to its history.
@@ -185,6 +213,7 @@ pub(super) async fn judge(
             if judgment.verdict == JudgeDecision::Accepted {
                 entry.judgment = judgment;
                 reused.insert(entry.id.clone());
+                remaining = before_entry;
             }
         }
     }

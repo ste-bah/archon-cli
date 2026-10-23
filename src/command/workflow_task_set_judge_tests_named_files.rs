@@ -22,23 +22,33 @@ fn named_existing_file_content_is_shown_and_judge_rule_is_updated() {
         repository_commit: None,
     };
     let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
-    assert!(prompt.contains("\"named_files\":[{\"content\":\"asserts every component against its expected value\\n\",\"path\":\"data/input\"}]"), "{prompt}");
+    assert!(prompt.contains("\"named_files\":[{\"content\":\"asserts every component against its expected value\\n\",\"path\":\"data/input\",\"status\":\"supplied\"}]"), "{prompt}");
     assert!(prompt.contains(NAMED_FILES_INSTRUCTION));
+    assert_eq!(
+        named_files_digest(&subject.acceptance[0], &roots),
+        named_files_digest_for_list(prompt_json(&prompt)[0]["named_files"].as_array().unwrap())
+    );
 }
 
 #[test]
 fn named_file_judge_rules_cover_asserting_regression_guards() {
     let prompt = batched_judge_prompt(&contract()).unwrap();
     for rule in [
-        "A check that runs an existing test or implementation whose given file contents (named_files) assert the criterion is a valid regression guard.",
-        "For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail; that host proof is never a counterexample.",
-        "Duplicated or relocated implementation elsewhere is not an in-bounds counterexample for a guard whose named test asserts the criterion.",
-        "A regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion.",
-        "Refute a check if any in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file. A status-discarding sequence is one example.",
-        "When a check names a path outside the given named_files, content not given must not be assumed weaker or stronger than the criterion needs; judge only what is given and the command text.",
+        "A named-file regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails.",
+        "The host may use a move-aside proof only for named inputs it actually moves; requiring the check to fail when such an input is moved aside is proof of the guard, never a counterexample.",
+        "A duplicated or relocated implementation may be an in-bounds counterexample when the delivered path uses it while the named test checks an old copy;",
+        "A guard names its deciding file by its literal path relative to the check's working directory.",
+        "Refute a check if an in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file.",
+        "These regression-guard rules apply to a check whose deciding test or implementation exists; a named deciding input marked absent is behaviour not implemented yet and is judged by the general rules; a deciding input marked not_supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.",
     ] {
         assert!(prompt.contains(rule), "missing: {rule}\n{prompt}");
     }
+    assert!(!prompt.contains(
+        "Duplicated or relocated implementation elsewhere is not an in-bounds counterexample"
+    ));
+    assert!(!prompt.contains("content not given must not be assumed weaker or stronger"));
+    assert!(!prompt.contains("This includes files absent at freeze time, outside the commit"));
+    assert!(!prompt.contains("If the host knows a criterion already holds before implementation"));
     let rules = NAMED_FILES_INSTRUCTION.to_ascii_lowercase();
     for forbidden in [
         "cargo",
@@ -118,8 +128,9 @@ fn named_source_budget_is_shared_across_the_batch() {
         shown <= archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES + 80,
         "{shown}"
     );
+    assert_eq!(files[1]["status"], "not_supplied");
     assert!(
-        files[1]["content"]
+        files[1]["detail"]
             .as_str()
             .unwrap()
             .contains("truncated at the existing judged-source byte limit")
@@ -244,8 +255,23 @@ fn untracked_repository_file_is_not_named_to_the_judge() {
     )
     .unwrap();
     assert!(
-        prompt_json(&prompt)[0].get("named_files").is_none(),
+        prompt_json(&prompt)[0]["named_files"][0]["status"] == "not_supplied",
         "{prompt}"
+    );
+
+    let prompt = batched_judge_prompt_with_roots(
+        &command_check("operation missing/check.test", TrustedCwd::RepoRoot),
+        &JudgeRoots {
+            project: Some(root.path().to_path_buf()),
+            repository: Some(root.path().to_path_buf()),
+            task_root: Some(root.path().to_path_buf()),
+            repository_commit: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        prompt_json(&prompt)[0]["named_files"],
+        serde_json::json!([{ "path": "missing/check.test", "status": "absent" }])
     );
 }
 
@@ -309,7 +335,7 @@ fn repository_named_file_uses_committed_blob_and_skips_committed_symlink() {
     )
     .unwrap();
     assert!(
-        prompt_json(&prompt)[0].get("named_files").is_none(),
+        prompt_json(&prompt)[0]["named_files"][0]["status"] == "not_supplied",
         "{prompt}"
     );
 }
@@ -359,7 +385,7 @@ fn project_file_under_nested_repository_is_omitted() {
     )
     .unwrap();
     assert!(
-        prompt_json(&prompt)[0].get("named_files").is_none(),
+        prompt_json(&prompt)[0]["named_files"][0]["status"] == "not_supplied",
         "{prompt}"
     );
 }
@@ -409,8 +435,9 @@ fn project_copy_exclusions_are_omitted_and_named_content_is_redacted() {
         },
     )
     .unwrap();
-    assert!(
-        prompt_json(&prompt)[0].get("named_files").is_none(),
+    assert_eq!(
+        prompt_json(&prompt)[0]["named_files"][0]["status"],
+        "not_supplied",
         "{prompt}"
     );
 

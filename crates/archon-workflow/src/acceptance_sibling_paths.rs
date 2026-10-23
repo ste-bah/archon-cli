@@ -265,6 +265,21 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
         }
         command_start = end + 1;
     }
+    // Recognize the common two-step lexical escape without evaluating shell.
+    let commands = words
+        .split(|word| matches!(word.as_str(), ";" | "&&" | "||" | "|" | "&"))
+        .map(<[String]>::to_vec)
+        .collect::<Vec<_>>();
+    for pair in commands.windows(2) {
+        if pair[0].first().is_some_and(|word| word == "cd")
+            && pair[0].get(1).is_some_and(|word| word == "..")
+            && pair[1].first().is_some_and(|word| word == "cd")
+            && let Some(child) = pair[1].get(1)
+            && let Some(path) = sibling_word(&format!("../{child}"))
+        {
+            push(&mut found, path, true);
+        }
+    }
     for program in program_texts(&command) {
         let program = strip_quote_prefixes(&program);
         for word in crate::check_source_resolve::words(&program) {
@@ -287,8 +302,9 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
 
 fn sibling_word(word: &str) -> Option<PathBuf> {
     let value = word.split_once('=').map_or(word, |(_, value)| value);
+    let value = value.strip_prefix("$PWD/").unwrap_or(value);
     let value = value.trim_matches(|character: char| {
-        !character.is_ascii_alphanumeric() && !"._/-\\".contains(character)
+        character.is_ascii_punctuation() && !"._/-\\".contains(character)
     });
     if value.is_empty() {
         return None;
@@ -298,21 +314,20 @@ fn sibling_word(word: &str) -> Option<PathBuf> {
 }
 
 fn names_entry_below_parent(path: &std::path::Path) -> bool {
-    let mut components = path.components();
-    if !matches!(components.next(), Some(std::path::Component::ParentDir)) {
-        return false;
-    }
+    use std::path::Component;
     let mut depth = 0usize;
-    for component in components {
+    let mut escaped = false;
+    for component in path.components() {
         match component {
-            std::path::Component::Normal(_) => depth += 1,
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir if depth > 0 => depth -= 1,
-            std::path::Component::ParentDir => return false,
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::ParentDir if depth > 0 => depth -= 1,
+            Component::ParentDir if !escaped => escaped = true,
+            Component::ParentDir => return false,
             _ => return false,
         }
     }
-    depth > 0
+    escaped && depth > 0
 }
 
 /// The shell lexer removes quote delimiters. Remove a short ASCII prefix

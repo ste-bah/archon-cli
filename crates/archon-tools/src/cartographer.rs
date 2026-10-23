@@ -15,6 +15,41 @@ use crate::tool::{
 use index::CodebaseIndex;
 use parser::{language_for_file, parse_file};
 
+#[cfg(test)]
+mod harness_store_scan_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn codebase_scan_skips_workflow_run_stores() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir_all(project.join("src")).unwrap();
+        std::fs::write(project.join("src/main.rs"), "fn visible() {}\n").unwrap();
+        std::fs::create_dir_all(project.join(".archon/workflows/run-x/src")).unwrap();
+        std::fs::write(
+            project.join(".archon/workflows/run-x/src/hidden.rs"),
+            "fn hidden() {}\n",
+        )
+        .unwrap();
+        let ctx = ToolContext {
+            working_dir: project.clone(),
+            ..ToolContext::default()
+        };
+        let result = CartographerTool
+            .execute(
+                json!({"operation":"scan", "path":project, "force":true}),
+                &ctx,
+            )
+            .await;
+        assert!(!result.is_error, "{}", result.content);
+        assert!(
+            result.content.contains("1 files indexed"),
+            "run-store source was scanned: {}",
+            result.content
+        );
+    }
+}
+
 /// Default directories to skip during codebase scanning.
 const EXCLUDE_DIRS: &[&str] = &[
     ".git",
@@ -169,10 +204,15 @@ fn op_scan(input: &serde_json::Value, ctx: &ToolContext) -> ToolResult {
     let mut sym_count = 0usize;
     let mut skipped_cached = 0usize;
 
+    let mut state_roots = crate::glob_tool::harness_state_roots(&ctx.working_dir);
+    state_roots.extend(crate::glob_tool::harness_state_roots(&scan_path));
+    state_roots.sort();
+    state_roots.dedup();
     scan_directory(
         &scan_path,
         &scan_path,
         &exclude,
+        &state_roots,
         &mut |rel_path: &str, abs_path: &std::path::Path| {
             let language = match language_for_file(rel_path) {
                 Some(l) => l,
@@ -328,8 +368,13 @@ fn load_or_build_index(scan_path: &Path, _working_dir: &Path) -> CodebaseIndex {
 
 /// Recursively walk `dir`, calling `visitor` with (relative_path, absolute_path)
 /// for each file, skipping entries in `exclude`.
-fn scan_directory<F>(root: &Path, dir: &Path, exclude: &[&str], visitor: &mut F)
-where
+fn scan_directory<F>(
+    root: &Path,
+    dir: &Path,
+    exclude: &[&str],
+    state_roots: &[std::path::PathBuf],
+    visitor: &mut F,
+) where
     F: FnMut(&str, &Path),
 {
     let entries = match std::fs::read_dir(dir) {
@@ -352,7 +397,13 @@ where
         }
 
         if abs.is_dir() {
-            scan_directory(root, &abs, exclude, visitor);
+            if state_roots.iter().any(|state_root| {
+                archon_shell::paths::path_starts_with(&abs, state_root)
+                    && !archon_shell::paths::path_starts_with(root, state_root)
+            }) {
+                continue;
+            }
+            scan_directory(root, &abs, exclude, state_roots, visitor);
         } else if abs.is_file() {
             let rel = abs
                 .strip_prefix(root)

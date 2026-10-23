@@ -97,6 +97,39 @@ fn a_missing_parent_path_into_the_other_root_is_still_refused() {
 }
 
 #[test]
+fn lexical_cross_root_paths_in_all_check_positions_are_refused() {
+    let set = frozen_set(&[("AC-X-001", "check", false)]);
+    let project = set.project.path().join("project");
+    let repo = set.project.path().join("repo");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::write(repo.join("src/item"), "x").unwrap();
+    let mut scope = scope(&set);
+    scope.project_root = project;
+    scope.repository_root = repo;
+    for command in [
+        "runner ../repo/src/item",
+        "cat ../repo/src/item",
+        "cd ./../repo",
+        "cd .. && cd repo",
+        "cat $PWD/../repo/src/item",
+        "runner -c 'path = \"../repo/src/item\"'",
+    ] {
+        let mut candidate = set.contract().acceptance[0].clone();
+        candidate.check = AcceptanceCheck::Command {
+            command: command.into(),
+            cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+        };
+        let finding = check_defects::check_defects(&set.contract(), candidate, &scope)
+            .expect_err(&format!("accepted lexical cross-root path: {command}"));
+        assert!(
+            finding.contains("outside the selected root"),
+            "{command}: {finding}"
+        );
+    }
+}
+
+#[test]
 fn an_existing_external_sibling_alias_is_not_a_cross_root_refusal() {
     let set = frozen_set(&[("AC-F-ALIAS", "test -f feature.txt", false)]);
     let alias = set.project.path().parent().unwrap().join("alias");

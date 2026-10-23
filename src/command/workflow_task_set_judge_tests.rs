@@ -134,3 +134,6 @@ fn the_judge_prompt_fixes_the_toolchain_and_bounds_counterexamples() {
 
 #[path = "workflow_task_set_judge_tests_named_files.rs"]
 mod named_files_tests;
+
+#[path = "workflow_task_set_judge_tests_named_file_status.rs"]
+mod named_file_status_tests;
