@@ -23,6 +23,10 @@ pub const TEARDOWN_UNVERIFIED: &str = "scratch process tree teardown could not b
 pub const IDENTITY_CHANGED: &str = "native scratch source or build identity changed";
 /// The check replaced the build output mapping of its tree.
 pub const TARGET_MAPPING_CHANGED: &str = "native build identity changed: target mapping";
+/// The check names a sibling path that resolves to the project root or an
+/// ancestor of it, which no site copies.
+pub const SIBLING_ROOT_REFUSED: &str =
+    "the check names a sibling path that resolves to the project root or an ancestor of it";
 
 /// Parts of the build identity that only the check's own run can change:
 /// the host's tools and environment are not among them.
@@ -77,6 +81,12 @@ pub fn check_fault(error: &str) -> CheckFault {
         return CheckFault::Check {
             trigger: "processes it started still used the scratch after its process tree ended",
             remedy: STOP,
+        };
+    }
+    if error.starts_with(SIBLING_ROOT_REFUSED) {
+        return CheckFault::Check {
+            trigger: "it names a path outside its working directory that resolves to the project root or a directory above it, which the site never copies",
+            remedy: "name only paths under its own working directory or a sibling directory beside it, never the project root or a directory above it",
         };
     }
     if error.contains(TARGET_MAPPING_CHANGED) {

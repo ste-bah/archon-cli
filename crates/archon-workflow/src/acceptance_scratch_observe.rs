@@ -1,9 +1,12 @@
 //! Observation transaction: resolve, snapshot, execute, clean up, audit.
 use super::hooks::{CHECK_DEFERRED, ObserveHooks};
+#[path = "acceptance_scratch_isolate.rs"]
+mod isolate;
 use super::process::{CHECK_TIMED_OUT, CheckResult, run_at};
 use super::*;
 use crate::acceptance_world::{FrozenCommandRef, resolve_command};
 use crate::task_set_contract::{AcceptanceContract, content_digest};
+use isolate::normalized;
 use std::sync::{Arc, atomic::AtomicBool};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -159,9 +162,23 @@ pub async fn observe_commands_hooked(
             }
             return Ok(());
         }
-        let checks = commands
-            .iter()
-            .filter_map(|command| command.as_ref().ok())
+        // Resolved per check before any site exists: a sibling path no site
+        // copies is that one check's finding, and the site is built for the
+        // others (each check analysed as its own target).
+        let refusals: Vec<Option<String>> = (commands.iter())
+            .map(|command| {
+                let command = command.as_ref().ok()?;
+                siblings::refused_sibling(
+                    &policy.project,
+                    &policy.repository,
+                    &String::from_utf8_lossy(command.bytes()),
+                    command.cwd(),
+                )
+            })
+            .collect();
+        let checks = (commands.iter().zip(&refusals))
+            .filter(|(_, refused)| refused.is_none())
+            .filter_map(|(command, _)| command.as_ref().ok())
             .map(|command| {
                 (
                     String::from_utf8_lossy(command.bytes()).into_owned(),
@@ -171,16 +188,26 @@ pub async fn observe_commands_hooked(
             .collect::<Vec<_>>();
         roots =
             Some(phase().run(|| ScratchRoots::prepare_inner_with_checks(policy, commit, &checks))?);
-        let roots = roots.as_ref().expect("prepared");
-        result.copied_project_manifest = phase().run(|| inventory(roots.project()))?;
-        let baseline = phase().run(|| identity::capture(roots, policy))?;
+        let prepared = roots.as_ref().expect("prepared");
+        result.copied_project_manifest = phase().run(|| inventory(prepared.project()))?;
+        let mut baseline = phase().run(|| identity::capture(prepared, policy))?;
         result.source_manifest_digest = content_digest(&serde_json::to_vec(
-            &phase().run(|| roots.source_inventory())?,
+            &phase().run(|| prepared.source_inventory())?,
         )?);
-        // Hashed in full once, then verified per check from metadata.
+        // Hashed in full once per site, then verified per check from metadata.
         let mut cargo_home = seal::TreeSeal::default();
-        let cargo_home_path = roots.root().join("cargo-home");
-        for (index, (reference, command)) in refs.iter().zip(commands).enumerate() {
+        // Each check is its own unit (as a test runner gives each test its
+        // own process): a fault one check leaves is its own result, and the next
+        // check runs on a site restored to the baseline. Only a site that
+        // cannot be restored stops the batch, as the host's.
+        let mut dirty = false;
+        let first = isolate::FirstSite::of(prepared, &baseline, &result.copied_project_manifest);
+        let restore = |roots: &mut Option<ScratchRoots>| {
+            phase().run(|| isolate::restore(roots, policy, commit, &checks, &first))
+        };
+        for (index, ((reference, command), refused)) in
+            refs.iter().zip(commands).zip(&refusals).enumerate()
+        {
             let Some((timeout_secs, cut)) = hooks.bound(policy.timeout_secs) else {
                 for reference in &refs[index..] {
                     let deferred = operational(&reference.acceptance_id, CHECK_DEFERRED.into());
@@ -197,15 +224,42 @@ pub async fn observe_commands_hooked(
                     continue;
                 }
             };
-            phase().run(|| roots.reset_project())?;
-            let before_identity = phase().run(|| identity::capture(roots, policy))?;
-            if before_identity != baseline {
-                return Err(invalid("native build identity changed before cache reuse"));
+            if let Some(refused) = refused {
+                result
+                    .checks
+                    .push(operational(&reference.acceptance_id, refused.clone()));
+                continue;
             }
+            if dirty {
+                baseline = restore(&mut roots)?;
+                cargo_home = seal::TreeSeal::default();
+            }
+            let mut restored = dirty;
+            let before_identity = loop {
+                let current = roots.as_ref().expect("prepared");
+                let verified = phase()
+                    .run(|| current.reset_project())
+                    .and_then(|()| phase().run(|| identity::capture(current, policy)));
+                match verified {
+                    Ok(identity) if identity == baseline => break identity,
+                    // What a check left that no fault named: re-copied once.
+                    _ if !restored => {
+                        baseline = restore(&mut roots)?;
+                        cargo_home = seal::TreeSeal::default();
+                        restored = true;
+                    }
+                    Ok(_) => {
+                        return Err(invalid("native build identity changed before cache reuse"));
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            let roots = roots.as_ref().expect("prepared");
+            let cargo_home_path = roots.root().join("cargo-home");
             let project_before = phase().run(|| inventory(roots.project()))?;
             let cache_before = phase().run(|| cargo_home.digest(&cargo_home_path))?;
             let target = roots.target();
-            let site = check_site(
+            let site = isolate::check_site(
                 roots,
                 policy,
                 &target,
@@ -222,7 +276,11 @@ pub async fn observe_commands_hooked(
             if deferred {
                 check.operational_error = Some(CHECK_DEFERRED.into());
             }
-            let after_identity = phase().run(|| identity::capture(roots, policy));
+            // The check's own site after its own run: a part it removed is
+            // the check's doing (`CaptureFailure::Removed`).
+            let after_identity = phase()
+                .run(|| Ok(identity::capture_site(roots, policy)))
+                .unwrap_or_else(|e| Err(identity::CaptureFailure::Other(e)));
             let mut integrity_failed = after_identity
                 .as_ref()
                 .map_or(true, |current| current != &baseline);
@@ -232,9 +290,7 @@ pub async fn observe_commands_hooked(
                     let parts = baseline.changed_parts(current);
                     check.operational_error = Some(super::faults::identity_changed(&parts));
                 }
-                Err(e) => check.operational_error = Some(format!(
-                    "native scratch source or build identity could not be captured after the check ({e}); warm target reuse refused"
-                )),
+                Err(failure) => check.operational_error = Some(isolate::capture_failed(failure)),
             }
             let project_after = phase().run(|| inventory(roots.project()));
             let cache_after = phase().run(|| cargo_home.digest(&cargo_home_path));
@@ -263,12 +319,11 @@ pub async fn observe_commands_hooked(
             if let Some(on_check) = &hooks.on_check {
                 on_check(&redacted(roots, &check));
             }
-            let stop = integrity_failed
-                || deferred
-                || cancel.load(std::sync::atomic::Ordering::SeqCst)
-                || check.operational_error.as_ref().is_some_and(|e| {
-                    e.contains("teardown") || e.contains("reap") || e.contains("pipes")
-                });
+            // A check that changed its site or ended without a verdict (a
+            // process it started may still use the site) is followed by a
+            // restored site; it stops nothing.
+            dirty = integrity_failed || (check.operational_error.is_some() && !deferred);
+            let stop = deferred || cancel.load(std::sync::atomic::Ordering::SeqCst);
             result.checks.push(check);
             if deferred {
                 for reference in &refs[index + 1..] {
@@ -366,45 +421,6 @@ fn operational(id: &str, error: String) -> CheckResult {
         stderr: vec![],
         operational_error: Some(error),
         environment_note: None,
-    }
-}
-fn normalized(
-    maps: &BTreeMap<String, BTreeMap<String, String>>,
-) -> BTreeMap<String, BTreeMap<String, String>> {
-    let mut maps = maps.clone();
-    for entries in maps.values_mut() {
-        if entries
-            .get(".git/worktrees")
-            .is_some_and(|v| v == "directory")
-            && !entries.keys().any(|p| p.starts_with(".git/worktrees/"))
-        {
-            entries.remove(".git/worktrees");
-        }
-    }
-    maps
-}
-/// The scratch site one check runs at, for at most `timeout_secs`.
-fn check_site<'a>(
-    roots: &'a ScratchRoots,
-    policy: &ScratchPolicy,
-    target: &'a Path,
-    timeout_secs: u64,
-    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
-    mutation_plan: Option<&'a super::process::MutationPlan>,
-) -> super::process::CommandSite<'a> {
-    super::process::CommandSite {
-        project: roots.project(),
-        repository: roots.repository(),
-        environment: roots.command_environment(policy),
-        resource_limits,
-        audit_root: Some(roots.root()),
-        audit_target: Some(target),
-        scratch_bytes: policy.scratch_bytes,
-        output_bytes: policy.output_bytes,
-        timeout_secs,
-        mutation_plan,
-        mutation_root: Some(roots.mutation_root().clone()),
-        redactor: Some(roots),
     }
 }
 /// One authorized check at a site: a nested verifier's declarative

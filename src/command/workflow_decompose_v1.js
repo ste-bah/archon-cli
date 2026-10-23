@@ -403,6 +403,7 @@ async function authorCandidate(w, policy) {
     }
     if (routed.retry.length === 0) {
       requireCommitted(outcome, policy.phase);
+      if (policy.phase === "skeleton") recordSkeletonTasks(outcome, authored.content);
       return outcome;
     }
     history.push({ attempt, findings: routed.retry.slice() });

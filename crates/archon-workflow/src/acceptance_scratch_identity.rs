@@ -31,6 +31,38 @@ impl BuildIdentity {
         .filter_map(|(changed, part)| changed.then_some(part))
         .collect()
     }
+    /// The parts of `other`, captured at a site laid out at `other_at`
+    /// (root, build output), that differ from this identity captured at
+    /// `at` on what does not depend on the site's path: the build output
+    /// object and its links are the site's own and never compared; site
+    /// paths in the environment are compared by what they name.
+    pub(super) fn host_parts_changed(
+        &self,
+        at: (&Path, &Path),
+        other: &Self,
+        other_at: (&Path, &Path),
+    ) -> Vec<&'static str> {
+        let environment = |identity: &Self, (root, target): (&Path, &Path)| {
+            (identity.environment.iter())
+                .map(|(name, value)| (name.clone(), neutral(value, root, target)))
+                .collect::<BTreeMap<_, _>>()
+        };
+        [
+            (self.source != other.source, "source"),
+            (
+                environment(self, at) != environment(other, other_at),
+                "environment",
+            ),
+            (self.tools != other.tools, "tools"),
+            (
+                self.cargo_configuration != other.cargo_configuration,
+                "build configuration",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(changed, part)| changed.then_some(part))
+        .collect()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,20 +123,68 @@ fn object(path: &Path) -> WorkflowResult<String> {
         Ok(format!("{:?}:{}", m.file_type(), m.len()))
     }
 }
+/// Why a site's identity could not be captured.
+#[derive(Debug)]
+pub(super) enum CaptureFailure {
+    /// A part of the site is gone. After a check this is the check's own
+    /// doing: the capture just before its run found the part, and only that
+    /// run used the site between the two (classified by the typed error,
+    /// never by its text).
+    Removed { part: &'static str, path: PathBuf },
+    /// Anything else.
+    Other(WorkflowError),
+}
+impl CaptureFailure {
+    fn of(roots: &ScratchRoots, part: &'static str, error: WorkflowError) -> Self {
+        match &error {
+            WorkflowError::Io { path, source }
+                if source.kind() == std::io::ErrorKind::NotFound
+                    && (path.starts_with(roots.root()) || path.starts_with(roots.target())) =>
+            {
+                Self::Removed {
+                    part,
+                    path: path.clone(),
+                }
+            }
+            _ => Self::Other(error),
+        }
+    }
+    pub(super) fn into_error(self) -> WorkflowError {
+        match self {
+            Self::Removed { part, path } => invalid(format!(
+                "native scratch {part} missing at {}",
+                path.display()
+            )),
+            Self::Other(error) => error,
+        }
+    }
+}
 pub(super) fn capture(
     roots: &ScratchRoots,
     policy: &ScratchPolicy,
 ) -> WorkflowResult<BuildIdentity> {
+    capture_site(roots, policy).map_err(CaptureFailure::into_error)
+}
+/// [`capture`], saying which part of the site is gone when one is.
+pub(super) fn capture_site(
+    roots: &ScratchRoots,
+    policy: &ScratchPolicy,
+) -> Result<BuildIdentity, CaptureFailure> {
+    let site = |part| move |error| CaptureFailure::of(roots, part, error);
     let mut targets = Vec::new();
     for cwd in [roots.project(), roots.repository()] {
         let path = cwd.join("target");
-        let meta = std::fs::symlink_metadata(&path).map_err(|e| WorkflowError::io(&path, e))?;
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|e| WorkflowError::io(&path, e))
+            .map_err(site("target links"))?;
         if !meta.file_type().is_symlink()
             || path.canonicalize().map(archon_shell::paths::plain).ok() != Some(roots.target())
         {
-            return Err(invalid("native build identity changed: target mapping"));
+            return Err(CaptureFailure::Other(invalid(
+                "native build identity changed: target mapping",
+            )));
         }
-        targets.push(object(&path)?);
+        targets.push(object(&path).map_err(site("target links"))?);
     }
     let mut tools = BTreeMap::new();
     for name in ["cargo", "rustc", "python3", "python", "sh"] {
@@ -115,10 +195,11 @@ pub(super) fn capture(
             let path = path
                 .canonicalize()
                 .map(archon_shell::paths::plain)
-                .map_err(|e| WorkflowError::io(&path, e))?;
+                .map_err(|e| CaptureFailure::Other(WorkflowError::io(&path, e)))?;
+            let bytes = io::read(&path).map_err(CaptureFailure::Other)?;
             tools.insert(
                 name.into(),
-                format!("{}:{}", path.display(), content_digest(&io::read(&path)?)),
+                format!("{}:{}", path.display(), content_digest(&bytes)),
             );
         }
     }
@@ -131,13 +212,14 @@ pub(super) fn capture(
         for name in ["config", "config.toml", "credentials", "credentials.toml"] {
             let path = base.join(name);
             if path.symlink_metadata().is_ok() {
-                config.insert(format!("{label}/{name}"), content_digest(&io::read(&path)?));
+                let bytes = io::read(&path).map_err(site("build configuration"))?;
+                config.insert(format!("{label}/{name}"), content_digest(&bytes));
             }
         }
     }
     Ok(BuildIdentity {
-        source: roots.source_inventory()?,
-        target: object(&roots.target())?,
+        source: roots.source_inventory().map_err(site("source"))?,
+        target: object(&roots.target()).map_err(site("target"))?,
         cwd_targets: targets,
         // Never one machine's: its user and computer names stay out.
         environment: (roots.environment(policy).into_iter())
@@ -150,6 +232,13 @@ pub(super) fn capture(
         cargo_configuration: config,
     })
 }
+/// `value` with the site's root and build output paths named, not spelled.
+pub(super) fn neutral(value: &str, root: &Path, target: &Path) -> String {
+    value
+        .replace(&*target.to_string_lossy(), "<build output>")
+        .replace(&*root.to_string_lossy(), "<site>")
+}
+
 pub(super) fn changed(
     before: &BTreeMap<String, String>,
     after: &BTreeMap<String, String>,

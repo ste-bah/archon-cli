@@ -385,18 +385,23 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
     // A check the host could not prove, even after repairing its own
     // environment, is the host's: nothing is published and no author is
     // asked to change it. Like the staged freeze (Issue 263), it ends the
-    // freeze incomplete and resumable, never failed (Issue 288).
+    // freeze incomplete and resumable, never failed (Issue 288). Results are
+    // per check (as a keep-going build keeps them): a defect another
+    // check's own run showed still goes to its author first.
     let unproven = probe.take_unproven();
-    if !unproven.is_empty() {
+    let host_unproven = |unproven| {
         for diagnostic in probe.take_diagnostics() {
             eprintln!("{diagnostic}");
         }
-        return Err(unproven_incomplete(
+        Err(unproven_incomplete(
             super::executability::HostUnproven(unproven).into(),
-        ));
-    }
+        ))
+    };
     let mut named = prepared.non_accepted_ids().clone();
     named.extend(crashed.keys().cloned());
+    if !unproven.is_empty() && named.is_empty() {
+        return host_unproven(unproven);
+    }
     // A check that cannot pass as written is first shown its own finding,
     // with its pre-implementation output (Issue 275).
     let mut seeds = crashed.clone();
@@ -417,25 +422,43 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
         super::reauthor::REAUTHOR_ATTEMPTS,
         named.iter().cloned().collect::<Vec<_>>().join(", ")
     );
-    let repaired = super::reauthor::reauthor(
-        client.as_ref(),
-        &contract,
-        &named,
-        scope,
-        "sonnet",
-        &super::reauthor::ReauthorGate {
-            probe: &probe,
-            seeds: &seeds,
-        },
-    )
-    .await;
+    // A pass that ends incomplete for an unproven check saves each repair
+    // that clears every gate under the task root (`reauthor::cache`), and
+    // the attempt after it reuses them without asking an author or the
+    // judge again; a pass that can publish keeps nothing.
+    let gate = super::reauthor::ReauthorGate {
+        probe: &probe,
+        seeds: &seeds,
+    };
+    let kept = !unproven.is_empty() || super::reauthor::cache::saved(tasks_root);
+    let repaired = match kept {
+        true => {
+            super::reauthor::reauthor_with_cache(
+                client.as_ref(),
+                &contract,
+                &named,
+                scope,
+                "sonnet",
+                &gate,
+                Some(tasks_root),
+            )
+            .await
+        }
+        false => {
+            super::reauthor::reauthor(client.as_ref(), &contract, &named, scope, "sonnet", &gate)
+                .await
+        }
+    };
     for diagnostic in probe.take_diagnostics() {
         eprintln!("{diagnostic}");
     }
     let repaired = repaired.map_err(unproven_incomplete)?;
+    if !unproven.is_empty() {
+        return host_unproven(unproven);
+    }
     let baseline = prepared.lock.baseline_commit.clone();
     let live_contract_digest = prepared.live_contract_digest.clone();
-    prepare_from_judged(
+    let prepared = prepare_from_judged(
         project_root,
         tasks_root,
         prd_path,
@@ -443,7 +466,12 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
         &repaired,
         baseline,
         live_contract_digest,
-    )
+    )?;
+    // Every saved repair is in the prepared contract now.
+    if kept {
+        super::reauthor::cache::remove(tasks_root)?;
+    }
+    Ok(prepared)
 }
 
 /// A check the host could not prove, or a re-author that stopped making

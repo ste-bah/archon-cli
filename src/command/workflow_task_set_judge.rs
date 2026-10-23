@@ -129,6 +129,7 @@ mod partial;
 mod reply;
 pub(crate) use partial::PartialReply;
 use reply::{Ending, complete_reply, ending};
+pub(crate) use reply::{Step, step};
 
 /// Whether `outcome` ended normally (not truncated, not unknown).
 pub(super) fn reply_is_complete(outcome: &WorkflowAgentOutcome) -> bool {
@@ -249,7 +250,7 @@ mod workflow_task_set_judge_tests;
 const JUDGE_NO_PROGRESS_WINDOW: usize = 3;
 
 /// What the judge is asked when its reply was cut off by the output limit.
-pub(super) const CONTINUE_PROMPT: &str = "Your previous reply was cut off by the output limit. Continue it from exactly the next character: output only the remaining text, repeat nothing already written, and add no preamble, commentary or code fence.";
+pub(crate) const CONTINUE_PROMPT: &str = "Your previous reply was cut off by the output limit. Continue it from exactly the next character: output only the remaining text, repeat nothing already written, and add no preamble, commentary or code fence.";
 
 /// No-progress window on one provider stream, including reasoning and pings.
 /// Every observed stream event renews it; a batch has no total time limit.

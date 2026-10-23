@@ -285,6 +285,11 @@ pub(crate) fn forget(state_dir: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether any candidate is saved under `state_dir`.
+pub(crate) fn saved(state_dir: &Path) -> bool {
+    std::fs::read_dir(state_dir.join(RECORDS)).is_ok_and(|mut entries| entries.next().is_some())
+}
+
 pub(crate) fn remove(state_dir: &Path) -> Result<()> {
     let records = state_dir.join(RECORDS);
     if records.exists() {

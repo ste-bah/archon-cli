@@ -149,19 +149,27 @@ pub(super) async fn pre_implementation_findings_with_limits(
     };
     // What the host could not prove is the host's (operational), never the
     // author's: it is not published, and no author is asked to change it.
-    let unproven = probe.take_unproven();
+    let mut unproven = probe.take_unproven();
     // Issue 263: under a staged freeze it is also no reason to fail the run.
     // The freeze ends incomplete and resumable, with every verdict saved, so
     // the executor retries it while progress grows and otherwise pauses.
+    // Results are per check (as a keep-going build keeps them): a defect a
+    // check's own run showed still goes to its author at once, and the
+    // checks the host could not prove are probed again by the freeze that
+    // follows the repair; until then the open findings keep the freeze from
+    // being accepted.
     if resume.persist && !unproven.is_empty() {
-        let reason = super::executability::HostUnproven(unproven).to_string();
-        return Err(
-            crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
-                reason,
-                &resume.progress,
-            )
-            .into(),
-        );
+        let reason = super::executability::HostUnproven(std::mem::take(&mut unproven)).to_string();
+        if defects.is_empty() {
+            return Err(
+                crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+                    reason,
+                    &resume.progress,
+                )
+                .into(),
+            );
+        }
+        eprintln!("{reason}; probed again after the authored findings are repaired");
     }
     let unproven = unproven.into_iter().map(|(id, why)| {
         let text = format!(

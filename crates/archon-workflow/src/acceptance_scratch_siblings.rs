@@ -47,6 +47,17 @@ impl super::ScratchRoots {
     pub(crate) fn sibling_revisions(&self) -> &[crate::acceptance_sibling_paths::SiblingRevision] {
         &self.sibling_revisions
     }
+
+    /// Before this site is restored for another check (`isolate`): see
+    /// `cache::Lease::forget_unless_idle`. Without a build cache every site
+    /// has its own root and build output, so nothing is shared.
+    pub(super) fn forget_unless_idle(&mut self) -> WorkflowResult<()> {
+        let slot = self.root.clone();
+        match &mut self.lease {
+            Some(lease) => lease.forget_unless_idle(&slot),
+            None => Ok(()),
+        }
+    }
 }
 
 pub(super) fn copy_external(
@@ -69,6 +80,8 @@ pub(super) fn copy_external(
         };
         for sibling in crate::acceptance_sibling_paths::discover(root, std::slice::from_ref(check))
         {
+            // Callers resolve each check first (`refused_sibling`); this
+            // guards the copy itself.
             if is_project_or_ancestor(&sibling.source, &project) {
                 return Err(invalid(format!(
                     "refusing to copy sibling source {} because it is the project root or an ancestor",
@@ -241,6 +254,37 @@ fn link_repository_copy(target: &Path, destination: &Path) -> WorkflowResult<()>
             ),
         )
     })
+}
+
+/// Why `check`, run at `cwd`, names a sibling no site copies -- the project
+/// root or an ancestor of it -- resolved for that one check before any site
+/// is prepared, so the path is that check's own finding and never voids the
+/// sites of the checks beside it (each check analysed as its own target).
+/// `None` when it names none, or the roots cannot be read
+/// (preparing the site then reports that).
+pub(super) fn refused_sibling(
+    project: &Path,
+    repository: &Path,
+    check: &str,
+    cwd: crate::task_set_contract::TrustedCwd,
+) -> Option<String> {
+    let project = archon_shell::paths::canonicalize(project).ok()?;
+    let repository = archon_shell::paths::canonicalize(repository).ok()?;
+    let root = match cwd {
+        crate::task_set_contract::TrustedCwd::ProjectRoot => &project,
+        crate::task_set_contract::TrustedCwd::RepoRoot => &repository,
+    };
+    crate::acceptance_sibling_paths::discover(root, &[check.to_string()])
+        .into_iter()
+        .find(|sibling| is_project_or_ancestor(&sibling.source, &project))
+        .map(|sibling| {
+            format!(
+                "{}: {} resolves to {}",
+                super::faults::SIBLING_ROOT_REFUSED,
+                relative(root, &sibling.alias).display(),
+                sibling.source.display()
+            )
+        })
 }
 
 fn is_project_or_ancestor(source: &Path, project: &Path) -> bool {

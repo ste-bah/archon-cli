@@ -212,15 +212,24 @@ async function runSetGateLoop(w, chain, bodies) {
 }
 
 // Re-author and re-freeze the skeleton with `findings` as its opening
-// feedback, then re-author every body against it: each copies its frozen
-// fields from the skeleton, which just changed. A re-frozen skeleton keeps
-// every frozen task; a task it adds is authored like any other.
+// feedback, then re-author only the bodies the change reaches (O3, as an
+// incremental build re-runs only the actions whose inputs changed): a task
+// whose frozen fields differ from the skeleton its body was authored
+// against, a task the skeleton added, and a body a finding names. Every
+// other body keeps its published bytes, and the set gates that follow judge
+// the whole set again, kept bodies included. When either skeleton's frozen
+// fields are unknown to the script (a skeleton verified in place, or a
+// candidate it cannot read), every body is re-authored as before.
 async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
+  const prior = SKELETON_TASKS.get(chain.outcome);
   const outcome = await authorCandidate(w, skeletonPolicy(findings.map((finding) => findingText(finding))));
   if (!Array.isArray(outcome.subjects) || outcome.subjects.length === 0) {
     throw new Error("re-frozen skeleton returned zero host-read task subjects");
   }
   for (const subject of outcome.subjects) requireSubject(subject);
+  // A contract assertion only: the host's freeze-skeleton refuses a
+  // candidate that drops a frozen task before it publishes anything (O1),
+  // returning that refusal to the skeleton author like any other finding.
   for (const kept of chain.subjects) {
     if (!outcome.subjects.some((subject) => subject.taskId === kept.taskId && subject.fileName === kept.fileName)) {
       throw new Error(`re-frozen skeleton dropped frozen task ${kept.taskId} (${kept.fileName}); a re-author may add implements and tasks, never remove one`);
@@ -228,12 +237,54 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
   }
   chain.outcome = outcome;
   chain.subjects = outcome.subjects;
+  const next = SKELETON_TASKS.get(outcome);
   const grouped = new Map(groupFindingsBySubject(bodyFindings, chain.subjects));
+  const reached = (subject) => !prior || !next || !bodies.has(subject.fileName)
+    || grouped.has(subject.fileName) || !prior.has(subject.taskId)
+    || prior.get(subject.taskId) !== next.get(subject.taskId);
   const note = "The frozen skeleton was re-authored to repair set-gate findings; copy this task's frozen fields from the current skeleton exactly.";
-  await authorBodies(w, chain.subjects.map((subject) => [
+  await authorBodies(w, chain.subjects.filter(reached).map((subject) => [
     subject,
     [note, ...(grouped.get(subject.fileName) || []).map((finding) => findingText(finding))]
   ]), bodies);
+}
+
+// Each committed skeleton outcome's frozen fields per task id, read from
+// the candidate it froze: the host stamps every body's frozen fields from
+// them (BODY_SHAPE). Kept beside the outcome, never on it, so the evidence
+// the run reports is the host's alone.
+const SKELETON_TASKS = new WeakMap();
+
+function recordSkeletonTasks(outcome, content) {
+  const tasks = skeletonCandidateTasks(content);
+  if (tasks) SKELETON_TASKS.set(outcome, tasks);
+}
+
+// `taskId -> canonical JSON of its frozen entry`, or null when `content`
+// holds no skeleton the script can read.
+function skeletonCandidateTasks(content) {
+  const text = String(content || "").trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end < start) return null;
+  let skeleton;
+  try {
+    skeleton = JSON.parse(text.slice(start, end + 1));
+  } catch (_) {
+    return null;
+  }
+  if (!skeleton || !Array.isArray(skeleton.tasks)) return null;
+  const canonical = (value) => Array.isArray(value)
+    ? `[${value.map(canonical).join(",")}]`
+    : value && typeof value === "object"
+      ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+  const tasks = new Map();
+  for (const task of skeleton.tasks) {
+    if (!task || typeof task.task_id !== "string") return null;
+    tasks.set(task.task_id, canonical(task));
+  }
+  return tasks;
 }
 
 function committed(outcome) {

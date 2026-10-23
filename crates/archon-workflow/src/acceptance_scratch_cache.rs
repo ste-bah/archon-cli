@@ -386,6 +386,19 @@ impl Lease {
         Ok(())
     }
 
+    /// Before `slot` is laid out again for another check of the same
+    /// observation: its builds are kept only when no process a check
+    /// started there can still reach them -- every recorded group gone and
+    /// nothing holding the slot or the target, the proof a stale slot gives
+    /// at [`Self::acquire`]. Otherwise forget every build, so the next slot
+    /// and target are at paths no such process knows.
+    pub(super) fn forget_unless_idle(&mut self, slot: &Path) -> WorkflowResult<()> {
+        if groups_gone(slot) && target_idle(slot) && target_idle(&self.target()) {
+            return Ok(());
+        }
+        self.poison()
+    }
+
     /// Before teardown: a tracked file no longer holding the bytes and the
     /// time it was given was rewritten or touched by a check, so a build may
     /// have seen other bytes than its time stands for. Forget every build.

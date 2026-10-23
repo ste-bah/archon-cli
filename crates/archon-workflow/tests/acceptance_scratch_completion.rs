@@ -99,7 +99,14 @@ async fn replaced_target_link_voids_result_before_reuse() {
             .unwrap()
             .contains("identity")
     );
-    assert!(out.checks.iter().skip(1).all(|c| c.exit_code.is_none()));
+    // N1: the second check runs on a restored site (never the substituted
+    // target) and its own substitution voids its own result too.
+    assert_eq!(out.checks.len(), 2);
+    assert!(out.checks.iter().all(|c| {
+        c.operational_error
+            .as_ref()
+            .is_some_and(|e| e.contains("identity"))
+    }));
 }
 
 #[tokio::test]
