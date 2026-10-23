@@ -198,8 +198,9 @@ async fn a_refuted_check_is_reauthored_rejudged_and_passes_in_the_same_round() {
 }
 
 #[tokio::test]
-async fn an_unrepairable_refuted_check_is_a_blocking_contract_defect_owned_by_no_task() {
+async fn an_unaccepted_repair_stays_pending_for_its_author_without_blocking_other_checks() {
     let run = run_fixture();
+    record_baseline(&run);
     let before = run.set.chain_bytes();
     let client = ScriptedAuthorJudge::new(
         |entry, attempt| command_entry(entry, &format!("test -f present{attempt}")),
@@ -209,33 +210,27 @@ async fn an_unrepairable_refuted_check_is_a_blocking_contract_defect_owned_by_no
     assert_eq!(client.authored(), 3, "the in-round repair is bounded");
     assert_eq!(run.set.chain_bytes(), before, "nothing republished");
     assert!(!record.contract_repairs[0].repaired);
-    let defect = record
+    let pending = record
         .checks
         .iter()
         .find(|check| check.check_id == "AC-F-002")
         .unwrap();
-    assert!(defect.contract_defect);
-    assert!(defect.failing());
+    assert_eq!(pending.status, AcceptanceCheckStatus::Pending);
+    assert!(!pending.contract_defect);
+    assert!(pending.owning_tasks.is_empty());
+    assert!(pending.operational_error.is_none());
     assert!(
-        defect.owning_tasks.is_empty(),
-        "a contract defect is never routed to the implementing task"
+        record.operational_errors.is_empty(),
+        "{:?}",
+        record.operational_errors
     );
-    let text = defect.operational_error.as_deref().unwrap();
+    assert!(record.contract_repairs[0].failure.contains("AC-F-002"));
     assert!(
-        text.contains(&format!(
-            "archon workflow freeze-acceptance --reauthor AC-F-002 --tasks {}",
-            run.set
-                .tasks
-                .canonicalize()
-                .map(archon_shell::paths::plain)
-                .unwrap()
-                .display()
-        )),
-        "{text}"
+        record.contract_repairs[0]
+            .failure
+            .starts_with("authored pending:")
     );
     assert_eq!(record.passed_check_ids(), vec!["AC-F-001"]);
-    // Batch O: never a task's, but the host's to re-author again next
-    // round, so the loop is not over on the first failed repair.
     assert!(record.task_remediable_check_ids().is_empty());
     assert!(record.has_remediable_failures());
     assert!(!record.final_round);
@@ -243,8 +238,9 @@ async fn an_unrepairable_refuted_check_is_a_blocking_contract_defect_owned_by_no
     assert_eq!(result.status, WorkflowV2Status::Accepted);
     assert_eq!(
         result.data["contract_defect_check_ids"],
-        serde_json::json!(["AC-F-002"])
+        serde_json::json!([])
     );
+    assert_eq!(result.data["operational_errors"], serde_json::json!([]));
 }
 
 #[test]

@@ -328,7 +328,10 @@ pub fn route_failures_owned(
     let texts = TaskTexts::read(universe, root);
     let scope = PlanScopeRoots::of(universe, root);
     for check in &mut record.checks {
-        if !check.failing() || check.contract_defect {
+        if !check.failing()
+            || check.contract_defect
+            || check.status == super::acceptance_stage::AcceptanceCheckStatus::Pending
+        {
             continue;
         }
         let text = commands

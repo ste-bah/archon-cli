@@ -37,17 +37,25 @@ globalThis.args = Object.assign({{
 }}, scenario.args || {{}});
 const calls = [];
 const pauses = [];
+const events = [];
 let lands = 0;
+const work = [
+  [{{ taskId: "TASK-X-001", fileName: "TASK-X-001.md" }}, []],
+  [{{ taskId: "TASK-X-002", fileName: "TASK-X-002.md" }}, []],
+];
+const bodies = new Map();
 const w = {{
   agent: async (id, options) => {{
     calls.push(id);
+    events.push("author:" + id);
     if (scenario.answer) return scenario.answer(calls.length, id);
     const content = id.startsWith("acceptance-author-") ? JSON.stringify({{ id: "AC-X-001" }}) : "# body";
     return {{ status: "accepted", stopReason: "end_turn", content }};
   }},
-  hostCommand: async (capability) => {{
+  hostCommand: async (capability, options) => {{
     lands += 1;
-    const texts = scenario.findings ? scenario.findings(lands, capability) : [];
+    events.push("gate:" + (options?.target?.taskId || capability));
+    const texts = scenario.findings ? scenario.findings(lands, capability, options) : [];
     const callId = capability + "-" + lands;
     const operational = scenario.operational ? scenario.operational(lands, capability) : null;
     if (operational) return {{ gateEnvelope: {{ policy_findings: [], operational_error: {{ kind: "operational", text: operational }} }} }};
@@ -61,6 +69,7 @@ const w = {{
   }},
   pause: async (id, evidence) => {{
     pauses.push({{ id, evidence }});
+    events.push("pause:" + id);
     if ((scenario.resumed || []).includes(id)) return {{ resumed: true, pause_id: id }};
     throw new Error("workflow paused by run control: script requested pause " + id);
   }},
@@ -68,8 +77,8 @@ const w = {{
 }};
 const subject = {{ taskId: "TASK-X-010", fileName: "TASK-X-010.md" }};
 Promise.resolve().then(() => {entry}).then(
-  () => console.log(JSON.stringify({{ accepted: true, calls: calls.length, lands, pauses }})),
-  (error) => console.log(JSON.stringify({{ error: String(error && error.message), calls: calls.length, lands, pauses }})),
+  () => console.log(JSON.stringify({{ accepted: true, calls: calls.length, lands, pauses, events }})),
+  (error) => console.log(JSON.stringify({{ error: String(error && error.message), calls: calls.length, lands, pauses, events }})),
 );
 "##
     );
@@ -345,6 +354,46 @@ fn an_acceptance_entry_that_never_parses_pauses_the_run() {
         evidence(&out, 0)["reason"],
         "no_progress",
         "the provider answered every reply: not an outage"
+    );
+}
+
+#[test]
+fn a_stalled_body_waits_until_independent_bodies_finish_then_retries_on_resume() {
+    let out = run(
+        "enforce",
+        r##"{
+          resumed: ["pause-authored-pending-1"],
+          answer: (_n, id) => ({ status: "accepted", stopReason: "end_turn", content: "# body " + id }),
+          findings: (_n, _capability, options) => options?.target?.taskId === "TASK-X-001" && calls.filter(id => id.includes("TASK-X-001")).length <= 4
+            ? ["candidate artifact was refused: repeated body defect"] : []
+        }"##,
+        "authorBodies(w, work, bodies)",
+    );
+    assert_eq!(out["accepted"], true, "{out}");
+    assert_eq!(
+        out["pauses"][0]["evidence"]["reason"], "authored_pending",
+        "{out}"
+    );
+    assert_eq!(
+        out["pauses"][0]["evidence"]["pending_subjects"],
+        serde_json::json!(["TASK-X-001"])
+    );
+    let events = out["events"].as_array().unwrap();
+    let sibling_gate = events
+        .iter()
+        .position(|event| event == "gate:TASK-X-002")
+        .unwrap();
+    let pending = events
+        .iter()
+        .position(|event| event == "pause:pause-authored-pending-1")
+        .unwrap();
+    assert!(
+        sibling_gate < pending,
+        "independent body must land before pending pause: {events:?}"
+    );
+    assert_eq!(
+        out["calls"], 6,
+        "the resumed run retries only the stalled subject: {out}"
     );
 }
 

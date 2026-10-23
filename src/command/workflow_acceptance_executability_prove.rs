@@ -195,9 +195,8 @@ pub(super) async fn prove(
             continue;
         }
         if result.is_some_and(|result| super::repairs::timed_out(&result.result)) {
-            // #356: the mutated check (its nonce kept across retries) is
-            // judged on the base like any other stall.
-            let commit = &baseline.commit;
+            // CHECK_TIMED_OUT is an explicit per-check timeout result, so a
+            // timed-out mutation probe goes to this check's author as well.
             let result = &result.expect("a timed out result").result;
             let states = input_states(result, &markers, &names);
             let diagnostics = format!(
@@ -208,13 +207,9 @@ pub(super) async fn prove(
             if !all_moved_inputs_restored(result, &markers, &names) {
                 super::sites::discard_mutation_evidence(probe, baseline, &mutated, id);
             }
-            if let Some(finding) = super::silent::settle_timed_out_with_diagnostics(
-                probe,
-                commit,
-                &mutated,
-                id,
-                &diagnostics,
-            ) {
+            if let Some(mut finding) = super::crash_findings_at(&mutated, [result], None).remove(id)
+            {
+                finding.push_str(&format!("\nTimeout proof evidence: {diagnostics}"));
                 findings.insert(id.clone(), finding);
             }
             continue;

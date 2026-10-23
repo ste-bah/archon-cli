@@ -130,6 +130,9 @@ pub(super) fn result_for(
         summary,
     ));
     for check in &record.checks {
+        if check.status == archon_workflow::v2::acceptance_stage::AcceptanceCheckStatus::Pending {
+            continue;
+        }
         result
             .commands_run
             .push(archon_workflow::WorkflowV2CommandRecord {
@@ -151,34 +154,43 @@ pub(super) fn result_for(
     for check in &failing {
         result.residual_gaps.push(WorkflowV2ResidualGap {
             id: format!("acceptance-{}", check.check_id),
-            description: format!(
-                "frozen acceptance check {} {} ({}): {}{}{}",
-                check.check_id,
-                if check.contract_defect {
-                    "is a contract defect"
-                } else {
-                    "failed"
-                },
-                check.operational_error.as_deref().unwrap_or("nonzero exit"),
-                check.criterion,
-                check
-                    .regressed_by
-                    .as_ref()
-                    .map_or(String::new(), |regression| format!(
-                        "; it held at {} and regressed at landing {} ({}) of {}",
-                        regression.held_at,
-                        regression.landing_commit,
-                        regression.landing_stage,
-                        regression.tasks.join(", ")
-                    )),
-                check
-                    .regression_search
-                    .as_ref()
-                    .map_or(String::new(), |search| format!(
-                        "; regression search: {}",
-                        search.note
-                    )),
-            ) + archon_workflow::v2::acceptance_routing::clause(check).as_str(),
+            description: if check.status
+                == archon_workflow::v2::acceptance_stage::AcceptanceCheckStatus::Pending
+            {
+                format!(
+                    "frozen acceptance check {} is pending another authored retry: {}",
+                    check.check_id, check.criterion
+                )
+            } else {
+                format!(
+                    "frozen acceptance check {} {} ({}): {}{}{}",
+                    check.check_id,
+                    if check.contract_defect {
+                        "is a contract defect"
+                    } else {
+                        "failed"
+                    },
+                    check.operational_error.as_deref().unwrap_or("nonzero exit"),
+                    check.criterion,
+                    check
+                        .regressed_by
+                        .as_ref()
+                        .map_or(String::new(), |regression| format!(
+                            "; it held at {} and regressed at landing {} ({}) of {}",
+                            regression.held_at,
+                            regression.landing_commit,
+                            regression.landing_stage,
+                            regression.tasks.join(", ")
+                        )),
+                    check
+                        .regression_search
+                        .as_ref()
+                        .map_or(String::new(), |search| format!(
+                            "; regression search: {}",
+                            search.note
+                        )),
+                ) + archon_workflow::v2::acceptance_routing::clause(check).as_str()
+            },
             severity: Some("high".to_string()),
         });
     }

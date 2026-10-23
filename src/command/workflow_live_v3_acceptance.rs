@@ -24,6 +24,8 @@ use archon_workflow::v2::acceptance_stage::{
     ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION, AcceptanceRoundRecordV1, relative_record_path,
     round_dir,
 };
+#[cfg(test)]
+use archon_workflow::v2::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceCheckStatus};
 use archon_workflow::{
     WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Result,
     poll_v2_run_control,
@@ -49,6 +51,8 @@ mod failability;
 mod ledger;
 #[path = "workflow_live_v3_acceptance_output.rs"]
 mod output;
+#[path = "workflow_live_v3_acceptance_pending.rs"]
+mod pending;
 #[path = "workflow_live_v3_acceptance_regression.rs"]
 mod regression;
 #[path = "workflow_live_v3_acceptance_repair.rs"]
@@ -62,8 +66,6 @@ use check_rec::check_record;
 mod sources;
 #[cfg(test)]
 use archon_workflow::v2::acceptance_stage::ACCEPTANCE_STAGE_TOOL;
-#[cfg(all(test, unix))]
-use archon_workflow::v2::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceCheckStatus};
 use output::{with_frozen_identity, write_output_files, write_repairs};
 use result::result_for;
 
@@ -332,6 +334,7 @@ async fn evaluate(
     else {
         return Ok(());
     };
+    let mut authored_pending = pending::ids_from_record(record);
     for (id, why) in &sources.defects {
         defects.entry(id.clone()).or_insert(why.clone());
     }
@@ -342,7 +345,9 @@ async fn evaluate(
     let mut results = {
         let selected: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
             .chain(&contract.supplementary)
-            .filter(|criterion| !defects.contains_key(&criterion.id))
+            .filter(|criterion| {
+                !defects.contains_key(&criterion.id) && !authored_pending.contains(&criterion.id)
+            })
             .collect();
         poll_v2_run_control(store, run_id, call_id)?;
         // A1: what could not run is the host's to get running, in-round.
@@ -389,6 +394,7 @@ async fn evaluate(
     .await?
     .into_iter()
     .for_each(|(id, defect)| drop(defects.insert(id, defect)));
+    pending::extend_ids(&mut authored_pending, record);
     // Issue 219: a pass counts only from a check proven able to fail.
     let held = failability::hold_passing(
         &round,
@@ -400,11 +406,14 @@ async fn evaluate(
         record,
     );
     held.await?;
+    pending::extend_ids(&mut authored_pending, record);
     let all: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .collect();
     let selected: Vec<&AcceptanceCriterion> = (all.iter().copied())
-        .filter(|criterion| !defects.contains_key(&criterion.id))
+        .filter(|criterion| {
+            !defects.contains_key(&criterion.id) && !authored_pending.contains(&criterion.id)
+        })
         .collect();
     for criterion in &all {
         let result = results.remove(&criterion.id);
@@ -415,6 +424,12 @@ async fn evaluate(
             record
                 .checks
                 .push(repair::defect_record(criterion, defect, result.as_ref()));
+            continue;
+        }
+        if authored_pending.contains(&criterion.id) {
+            record
+                .checks
+                .push(pending::record(criterion, exec::check_kind(criterion)));
             continue;
         }
         let Some(result) = result else {
@@ -477,23 +492,4 @@ async fn evaluate(
     Ok(())
 }
 
-// The stage runs its checks through the POSIX process-group runner; the
-// tests execute `test -f` criteria for real, so they are Unix-only like it.
-#[cfg(all(test, unix))]
-#[path = "workflow_live_v3_acceptance_author_stage_tests.rs"]
-mod author_stage_tests;
-#[cfg(all(test, unix))]
-#[path = "workflow_live_v3_acceptance_crash_tests.rs"]
-mod crash_tests;
-#[cfg(all(test, unix))]
-#[path = "workflow_live_v3_acceptance_refused_tests.rs"]
-mod refused_tests;
-#[cfg(all(test, unix))]
-#[path = "workflow_live_v3_acceptance_repair_tests.rs"]
-mod repair_tests;
-#[cfg(all(test, unix))]
-#[path = "workflow_live_v3_acceptance_replay_tests.rs"]
-mod replay_tests;
-#[cfg(all(test, unix))]
-#[path = "workflow_live_v3_acceptance_tests.rs"]
-mod tests;
+include!("workflow_live_v3_acceptance_test_modules.rs");

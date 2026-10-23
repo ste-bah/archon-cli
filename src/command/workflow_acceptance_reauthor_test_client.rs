@@ -28,6 +28,7 @@ pub(crate) struct ScriptedAuthorJudge {
     /// Every author prompt, in call order: the findings each attempt saw.
     pub(crate) prompts: Mutex<Vec<String>>,
     provider: String,
+    judge_reply: Option<String>,
 }
 
 /// The provider the scripted client reports, and fixtures record.
@@ -47,12 +48,18 @@ impl ScriptedAuthorJudge {
             resolved_agents: Mutex::new(Vec::new()),
             prompts: Mutex::new(Vec::new()),
             provider: SCRIPTED_PROVIDER.into(),
+            judge_reply: None,
         }
     }
 
     /// Report `provider` instead of the scripted default.
     pub(crate) fn with_provider(mut self, provider: &str) -> Self {
         self.provider = provider.into();
+        self
+    }
+
+    pub(crate) fn with_judge_reply(mut self, reply: &str) -> Self {
+        self.judge_reply = Some(reply.to_string());
         self
     }
 
@@ -147,6 +154,9 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
     ) -> WorkflowResult<WorkflowAgentOutcome> {
         assert_eq!(temperature, 0.0);
         self.judged_models.lock().unwrap().push(model.to_string());
+        if let Some(reply) = &self.judge_reply {
+            return Ok(outcome(reply.clone()));
+        }
         let prompt = messages[0]["content"].as_str().expect("judge prompt");
         let checks: Vec<Value> = serde_json::from_str(
             prompt

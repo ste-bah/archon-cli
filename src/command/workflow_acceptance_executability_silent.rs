@@ -254,64 +254,12 @@ pub(super) fn settle(
     )
 }
 
-/// Settle check `id`, which made no progress (no output, no process-tree
-/// activity) for its window on `commit`: unproven the first time, with its
-/// stall strike saved but no progress credit, so the run pauses resumably;
-/// its author's finding when it stalls so again after a resume.
-pub(super) fn settle_timed_out(
-    probe: &HostProbe,
-    commit: &str,
-    contract: &AcceptanceContract,
-    id: &str,
-) -> Option<String> {
-    settle_timed_out_with_diagnostics(probe, commit, contract, id, "")
-}
-
-/// Settle a timeout while appending run-specific diagnostics to either
-/// report path without changing its verdict or resumable route.
-pub(super) fn settle_timed_out_with_diagnostics(
-    probe: &HostProbe,
-    commit: &str,
-    contract: &AcceptanceContract,
-    id: &str,
-    diagnostics: &str,
-) -> Option<String> {
-    let short: String = commit.chars().take(12).collect();
-    let window = probe.check_bound_secs();
-    let why = format!("no output or process-tree activity for {window}s");
-    let diagnostic_suffix = if diagnostics.is_empty() {
-        String::new()
-    } else {
-        format!("; {diagnostics}")
-    };
-    let path = stall_strike(probe, commit, contract, id);
-    struck(probe, &path, id, &why, Credit::None, || {
-        (
-            format!(
-                "check '{id}': it made no progress on the base commit {short} twice: {why}, and so again when the host ran it on that same commit after a resume. A check that waits forever (on input, a socket, a lock or a timer) gives no verdict on any tree. Repair or replace it so that it ends by its own assertion{diagnostic_suffix}"
-            ),
-            format!(
-                "unproven (timed out): {why} on the pre-implementation tree at {short}; every saved verdict is kept and the run pauses resumably, since the host may be at fault. If it stalls so again on that commit after a resume, it goes to its author{diagnostic_suffix}"
-            ),
-        )
-    })
-}
-
 /// Forget the stall strike of check `id` on `commit`: it ran to an end there.
 pub(super) fn ran(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
     let path = stall_strike(probe, commit, contract, id);
     if let Err(error) = archon_workflow::stage_write::remove_file(&path) {
         probe.unproven(id, format!("stall strike could not be cleared: {error}"));
     }
-}
-
-/// Whether saving a first strike is progress for the staged freeze.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Credit {
-    /// A no-verdict failure is a finished run: its strike is saved work.
-    Saved,
-    /// A stall may be the host's fault: no credit, so the run pauses.
-    None,
 }
 
 /// The finding when `id` already has a no-verdict strike on `commit`;
@@ -336,7 +284,7 @@ fn strike_or_unproven(
             .join(format!("{}.strike", content_digest(signature.as_bytes()))),
         None => strike(probe, commit, contract, id),
     };
-    struck(probe, &path, id, why, Credit::Saved, texts)
+    struck(probe, &path, id, why, texts)
 }
 
 /// The finding when the strike at `path` already exists; otherwise save it
@@ -346,7 +294,6 @@ fn struck(
     path: &std::path::Path,
     id: &str,
     why: &str,
-    credit: Credit,
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
     let (finding, unproven) = texts();
@@ -392,9 +339,7 @@ fn struck(
             })?;
         }
         archon_workflow::stage_write::write_bytes(path, why.as_bytes())?;
-        if credit == Credit::Saved {
-            probe.resume.progress.saved(false);
-        }
+        probe.resume.progress.saved(false);
         probe.unproven(id, unproven);
         archon_workflow::WorkflowResult::Ok(None)
     });

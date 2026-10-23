@@ -74,7 +74,7 @@ async fn a_repaired_check_that_then_fails_its_assertion_goes_to_its_tasks() {
 }
 
 #[tokio::test]
-async fn a_crash_the_repair_cannot_fix_is_a_contract_defect_no_task_owns() {
+async fn a_crash_the_repair_cannot_fix_remains_pending_for_its_author() {
     let run = run_fixture_with(&[
         ("AC-F-001", "test -f present", true),
         ("AC-F-002", CRASHING, true),
@@ -90,27 +90,25 @@ async fn a_crash_the_repair_cannot_fix_is_a_contract_defect_no_task_owns() {
         record.contract_repairs[0].trigger,
         REPAIR_TRIGGER_SCRIPT_DEFECT
     );
-    let defect = check(&record, "AC-F-002");
-    assert!(defect.contract_defect, "{defect:?}");
-    assert!(defect.owning_tasks.is_empty(), "never handed to a task");
-    assert_eq!(
-        defect.exit_code,
-        Some(1),
-        "the crash's own evidence is kept"
-    );
-    assert!(defect.stderr_tail.contains(SIGNAL), "{defect:?}");
-    let text = defect.operational_error.as_deref().unwrap();
-    assert!(text.contains(SIGNAL), "{text}");
     assert!(
-        text.contains("freeze-acceptance --reauthor AC-F-002"),
-        "{text}"
+        record
+            .checks
+            .iter()
+            .all(|check| check.check_id != "AC-F-002"),
+        "an unresolved authored check is carried as pending, not published as a defect"
     );
-    // Batch O: never a task's, but the host's to re-author again next
-    // round, so the loop is not over on the first failed repair.
+    let pending = record
+        .operational_errors
+        .iter()
+        .find(|error| error.contains("AC-F-002"))
+        .unwrap_or_else(|| panic!("missing pending check evidence: {record:?}"));
+    assert!(
+        pending.contains("crashed in its own python code"),
+        "{pending}"
+    );
     assert!(record.task_remediable_check_ids().is_empty());
-    assert!(record.has_remediable_failures());
-    assert!(!record.final_round);
     assert!(record.blocks_completion());
+    assert!(!record.final_round);
     assert_eq!(result.status, WorkflowV2Status::Accepted);
     assert_eq!(run.set.contract_bytes(), before, "nothing was published");
 }

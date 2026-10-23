@@ -76,15 +76,17 @@ async fn a_pass_that_ran_no_test_is_a_failure() {
     let result = run(&fixture, &execution(1, 3, &[])).await.unwrap();
     assert_eq!(failing_ids(&result), vec!["REQ-2", "REQ-9"]);
     let failing = result.data["failing"].as_array().unwrap();
-    assert_eq!(failing[0]["status"], "failed", "{}", failing[0]);
-    assert_eq!(
-        failing[0]["owning_tasks"],
-        serde_json::json!(["TASK-F-002"])
+    assert_eq!(failing[0]["status"], "error", "{}", failing[0]);
+    assert!(
+        failing[0]["contract_defect"].as_bool().unwrap_or(false),
+        "{}",
+        failing[0]
     );
+    assert_eq!(failing[0]["owning_tasks"], serde_json::json!([]));
     assert!(
         failing[0]["stdout_tail"]
             .as_str()
-            .is_some_and(|tail| tail.contains("no test ran")),
+            .is_some_and(|tail| tail.contains("running 0 tests")),
         "{}",
         failing[0]
     );

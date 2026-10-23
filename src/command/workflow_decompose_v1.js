@@ -289,6 +289,12 @@ async function authorCandidate(w, policy) {
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
+      // A single task body is authored work. Return its latest findings to
+      // the body pool so independent subjects can finish before this phase
+      // opens a resumable pending window.
+      if (policy.deferAuthoredPending && stall === "no_progress") {
+        return { pendingAuthor: true, findings: lastFindings.slice() };
+      }
       // A stalled artifact is never accepted, even in observe mode. Keep the
       // run resumable so repair findings remain attached to the author loop.
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
