@@ -62,6 +62,138 @@ fn pending_subjects_are_resolved_only_while_the_published_entry_digest_matches()
     );
 }
 
+#[test]
+fn resolved_journal_ignores_only_an_interrupted_unterminated_final_line() {
+    let run = tempfile::tempdir().unwrap();
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
+        "AC-F-001",
+        "test -f a",
+        true,
+    )]);
+    let ledger = Ledger {
+        report_id: "reverify-tail-report".into(),
+        subjects: vec!["AC-F-001".into()],
+    };
+    let path = run.path().join("decomposition/reverify/resolved.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        "{\"report_id\":\"other\",\"subjects\":{}}\n{\"report_id\":",
+    )
+    .unwrap();
+    assert!(
+        unresolved_pending_subjects(run.path(), &ledger, &set.contract())
+            .unwrap()
+            .contains("AC-F-001")
+    );
+    append_resolved(
+        run.path(),
+        &ledger.report_id,
+        &std::collections::BTreeMap::from([(
+            "AC-F-001".into(),
+            entry_digest(&set.contract(), "AC-F-001").unwrap().unwrap(),
+        )]),
+    )
+    .unwrap();
+    assert!(
+        unresolved_pending_subjects(run.path(), &ledger, &set.contract())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn resolved_journal_rejects_a_malformed_complete_line() {
+    let run = tempfile::tempdir().unwrap();
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
+        "AC-F-001",
+        "test -f a",
+        true,
+    )]);
+    let ledger = Ledger {
+        report_id: "reverify-bad-report".into(),
+        subjects: vec!["AC-F-001".into()],
+    };
+    let path = run.path().join("decomposition/reverify/resolved.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "not json\n").unwrap();
+    assert!(unresolved_pending_subjects(run.path(), &ledger, &set.contract()).is_err());
+}
+
+#[tokio::test]
+async fn pending_publication_in_pin_lineage_is_reconciled_without_reauthoring() {
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
+        "AC-F-001",
+        "test -f a",
+        true,
+    )]);
+    let run = tempfile::tempdir().unwrap();
+    let ledger = Ledger {
+        report_id: "reverify-published-report".into(),
+        subjects: vec!["AC-F-001".into()],
+    };
+    let report_dir = run.path().join("decomposition/reverify/reports");
+    std::fs::create_dir_all(&report_dir).unwrap();
+    let old_bytes = set.contract_bytes();
+    let old_digest = archon_workflow::task_set_contract::content_digest(&old_bytes);
+    std::fs::write(
+        report_dir.join(format!("{}.json", ledger.report_id)),
+        serde_json::to_vec(&serde_json::json!({"contract_digest": old_digest})).unwrap(),
+    )
+    .unwrap();
+
+    let contract_path = set
+        .tasks
+        .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let mut contract = set.contract();
+    contract.acceptance[0].criterion.push_str(" published");
+    let new_bytes = serde_json::to_vec_pretty(&contract).unwrap();
+    let new_digest = archon_workflow::task_set_contract::content_digest(&new_bytes);
+    std::fs::write(&contract_path, &new_bytes).unwrap();
+    let pin_path = set.pin_path();
+    let mut pin = set.pin();
+    let from = pin.identity();
+    pin.acceptance_digest = new_digest.clone();
+    let mut to = from.clone();
+    to.acceptance_digest = new_digest;
+    pin.lineage
+        .push(archon_workflow::task_set_lineage::PinTransition::extending(
+            &[],
+            from,
+            to,
+            std::collections::BTreeSet::from(["AC-F-001".into()]),
+            "test publication before journal append",
+        ));
+    std::fs::write(pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
+
+    let plan = ResumePlan {
+        ledger: ledger.clone(),
+        consumed: Vec::new(),
+        pending: Some(ledger),
+    };
+    let client = crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
+        |entry, _| {
+            crate::command::workflow_task_set::reauthor::test_client::command_entry(
+                entry,
+                "test -s a",
+            )
+        },
+        |_, _| true,
+    );
+    reauthor_resume_plan(
+        (set.project.path(), &set.prd, &set.tasks, run.path()),
+        &plan,
+        &client,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
+    assert!(client.judged_ids.lock().unwrap().is_empty());
+    let resolved =
+        std::fs::read_to_string(run.path().join("decomposition/reverify/resolved.jsonl")).unwrap();
+    assert!(resolved.contains("reverify-published-report"));
+}
+
 #[tokio::test]
 async fn one_resume_skips_five_unproven_and_already_resolved_pending_checks() {
     let reverted = ["AC-F-001", "AC-F-002", "AC-F-003", "AC-F-004", "AC-F-005"];

@@ -362,7 +362,9 @@ pub(crate) async fn reauthor_partial_with_cache(
                 .filter(|(id, _)| accepted.contains(id))
                 .collect();
             for (id, reason) in unproven {
-                if reason.contains("not on its search path") {
+                if reason.contains("not on its search path")
+                    || (reason.contains("no program ") && reason.contains("on its search path"))
+                {
                     crashed.insert(
                         id.clone(),
                         format!("the check invokes a program unavailable at the probe site ({reason}); choose a check using what the site provides"),

@@ -26,6 +26,10 @@ fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest
 #[path = "workflow_acceptance_republish_cache_tests.rs"]
 mod cache_tests;
 
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_republish_replay_tests.rs"]
+mod replay_tests;
+
 pub(super) fn ids(list: &[&str]) -> BTreeSet<String> {
     list.iter().map(|id| id.to_string()).collect()
 }

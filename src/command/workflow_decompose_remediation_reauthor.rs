@@ -21,6 +21,15 @@ pub(super) async fn reauthor_resume_plan(
         .chain(&contract.supplementary)
         .map(|entry| entry.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    if let Some(pending) = &plan.pending {
+        super::reconcile_pending_from_lineage(
+            project_root,
+            task_root,
+            run_dir,
+            pending,
+            &contract,
+        )?;
+    }
     let pending_unresolved = plan
         .pending
         .as_ref()
