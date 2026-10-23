@@ -35,7 +35,10 @@ pub fn assert_refuted_repair_judging(requests: &[super::server::RequestRecord]) 
 }
 
 pub fn assert_reauthored(root: &Path, log: &str) {
-    assert!(log.contains("acceptance=reauthored ids=AC-X-001"), "{log}");
+    assert!(
+        log.contains("acceptance=reauthored published_ids=AC-X-001 pending_ids= "),
+        "{log}"
+    );
     assert!(!log.contains("acceptance=reauthor_failed"), "{log}");
     let contract_bytes = fs::read(root.join("tasks/PRD-X/acceptance-contract.json")).unwrap();
     let contract: serde_json::Value = serde_json::from_slice(&contract_bytes).unwrap();
