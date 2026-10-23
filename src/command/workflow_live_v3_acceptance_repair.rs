@@ -8,9 +8,10 @@
 //! `workflow freeze-acceptance --reauthor`, for exactly those checks,
 //! republishing contract, lock, skeleton, skeleton lock and pin atomically.
 //! The round then runs the repaired checks with all the others; accepted
-//! entries and their judgments are untouched. Only when the repair fails does
-//! a check become a contract defect: failing, blocking, owned by no task, and
-//! carrying the operator command that repairs it.
+//! entries and their judgments are untouched. A repair the author or judge
+//! cannot complete becomes a contract defect: failing, blocking, owned by no
+//! task, and carrying the operator command that repairs it. A host-unproven
+//! check remains pending with an operational error so the round retries it.
 //!
 //! A check that ran this round and crashed in its own code
 //! (`acceptance_check_crash`) is the same kind of defect: its crash is fed to
@@ -280,6 +281,18 @@ pub(super) async fn repair_ran(
         Err(error) => {
             if format!("{error:#}").contains(HOST_UNPROVEN) {
                 record.operational_errors.push(format!("{error:#}"));
+                for id in ids.iter().filter(|id| crashed.contains_key(*id)) {
+                    results.remove(id);
+                }
+                record.contract_repairs.push(AcceptanceContractRepairV1 {
+                    check_ids: ids.iter().cloned().collect(),
+                    trigger: trigger.into(),
+                    repaired: false,
+                    freeze_event_id: String::new(),
+                    failure: format!("{error:#}"),
+                    diagnostics: Vec::new(),
+                });
+                return Ok(Defects::new());
             }
             record.contract_repairs.push(AcceptanceContractRepairV1 {
                 check_ids: ids.iter().cloned().collect(),
@@ -346,15 +359,10 @@ pub(super) async fn repair_ran(
         .filter(|criterion| ids.contains(&criterion.id) && !unresolved.contains_key(&criterion.id))
         .collect();
     if selected.is_empty() {
-        return Ok(unresolved
-            .into_iter()
-            .map(|(id, reason)| {
-                (
-                    id.clone(),
-                    format!("the check remains pending because its probe could not prove it: {reason}\nThe subject stays routed to its author."),
-                )
-            })
-            .collect());
+        for id in unresolved.keys() {
+            results.remove(id);
+        }
+        return Ok(Defects::new());
     }
     let rerun = exec::checks::execute_checks(
         round.store,
@@ -388,11 +396,8 @@ pub(super) async fn repair_ran(
         }
         results.insert(result.acceptance_id.clone(), result);
     }
-    for (id, reason) in unresolved {
-        defects.insert(
-            id.clone(),
-            format!("the check remains pending because its probe could not prove it: {reason}\nThe subject stays routed to its author."),
-        );
+    for id in unresolved.keys() {
+        results.remove(id);
     }
     Ok(defects)
 }

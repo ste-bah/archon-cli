@@ -20,8 +20,50 @@ fn an_unproven_pending_subject_keeps_its_remediation_ledger_unconsumed() {
     assert!(!is_consumed(run.path(), "pending-report").unwrap());
 }
 
+#[test]
+fn pending_subjects_are_resolved_only_while_the_published_entry_digest_matches() {
+    let run = tempfile::tempdir().unwrap();
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[
+        ("AC-F-001", "test -f a", true),
+        ("AC-F-002", "test -f b", true),
+    ]);
+    let ledger = Ledger {
+        report_id: "reverify-7281".into(),
+        subjects: vec!["AC-F-001".into(), "AC-F-002".into()],
+    };
+    let contract = set.contract();
+    let digest = super::entry_digest(&contract, "AC-F-001").unwrap().unwrap();
+    append_resolved(
+        run.path(),
+        &ledger.report_id,
+        &std::collections::BTreeMap::from([("AC-F-001".into(), digest)]),
+    )
+    .unwrap();
+    assert_eq!(
+        unresolved_pending_subjects(run.path(), &ledger, &contract).unwrap(),
+        std::collections::BTreeSet::from(["AC-F-002".into()])
+    );
+    let changed = archon_workflow::task_set_contract::AcceptanceContract {
+        acceptance: contract
+            .acceptance
+            .into_iter()
+            .map(|mut entry| {
+                if entry.id == "AC-F-001" {
+                    entry.criterion.push_str(" changed");
+                }
+                entry
+            })
+            .collect(),
+        ..contract
+    };
+    assert_eq!(
+        unresolved_pending_subjects(run.path(), &ledger, &changed).unwrap(),
+        std::collections::BTreeSet::from(["AC-F-001".into(), "AC-F-002".into()])
+    );
+}
+
 #[tokio::test]
-async fn one_resume_skips_five_unproven_and_reauthors_seven_pending_checks() {
+async fn one_resume_skips_five_unproven_and_already_resolved_pending_checks() {
     let reverted = ["AC-F-001", "AC-F-002", "AC-F-003", "AC-F-004", "AC-F-005"];
     let pending = [
         "AC-F-006", "AC-F-007", "AC-F-008", "AC-F-009", "AC-F-010", "AC-F-011", "AC-F-012",
@@ -51,6 +93,16 @@ async fn one_resume_skips_five_unproven_and_reauthors_seven_pending_checks() {
         report_id: "reverify-7281-report".into(),
         subjects: pending.iter().map(|id| id.to_string()).collect(),
     };
+    let published_contract = set.contract();
+    let resolved_digest = entry_digest(&published_contract, pending[0])
+        .unwrap()
+        .unwrap();
+    append_resolved(
+        run.path(),
+        &pending_ledger.report_id,
+        &std::collections::BTreeMap::from([(pending[0].to_string(), resolved_digest)]),
+    )
+    .unwrap();
     let plan = ResumePlan {
         ledger: Ledger {
             report_id: pending_ledger.report_id.clone(),
@@ -79,14 +131,14 @@ async fn one_resume_skips_five_unproven_and_reauthors_seven_pending_checks() {
     let judged = client.judged_ids.lock().unwrap().clone();
     assert_eq!(
         judged.len(),
-        7,
-        "only pending subjects route without positive consumed-subject proof: {judged:?}"
+        6,
+        "a pending subject whose published entry digest is unchanged is not re-authored: {judged:?}"
     );
     assert_eq!(
         judged
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>(),
-        pending.iter().map(|id| id.to_string()).collect()
+        pending.iter().skip(1).map(|id| id.to_string()).collect()
     );
     finish_resume(run.path(), Some(plan), "done".into()).unwrap();
     let report_ids = std::fs::read_to_string(consumed_path)

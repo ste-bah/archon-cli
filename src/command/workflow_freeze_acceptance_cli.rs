@@ -184,15 +184,47 @@ pub(super) async fn reauthor_acceptance(
     for (id, reason) in &result.unproven {
         eprintln!("acceptance check {id} remains pending for its author: {reason}");
     }
+    let published = ids
+        .iter()
+        .filter(|id| !result.unproven.contains_key(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let pending = result.unproven.keys().cloned().collect::<Vec<_>>();
     println!(
-        "acceptance checks re-authored: {} digest={} event={} skeleton_digest={} published={}",
-        ids.iter().cloned().collect::<Vec<_>>().join(","),
+        "acceptance checks re-authored: published_ids={} pending_ids={} digest={} event={} skeleton_digest={}",
+        published.join(","),
+        pending.join(","),
         result.acceptance_digest,
         result.freeze_event_id,
         result.skeleton_digest.as_deref().unwrap_or("none"),
-        result.published
     );
+    if let Some(error) = unpublished_repair_error(result.published, &pending) {
+        return Err(exit_if_incomplete(error));
+    }
     Ok(())
+}
+
+fn unpublished_repair_error(published: bool, pending: &[String]) -> Option<anyhow::Error> {
+    (!published).then(|| {
+        crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+            format!(
+                "no acceptance checks were published; pending checks: {}",
+                pending.join(", ")
+            ),
+            &crate::command::workflow_freeze_budget::FreezeProgress::default(),
+        )
+        .into()
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn an_all_unproven_cli_repair_is_incomplete_and_names_pending_checks() {
+    let error = unpublished_repair_error(false, &["AC-F-001".into()]).unwrap();
+    let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+        .expect("the CLI reports an incomplete resumable repair");
+    assert!(incomplete.report().contains("AC-F-001"));
+    assert!(unpublished_repair_error(true, &["AC-F-001".into()]).is_none());
 }
 
 /// An incomplete, resumable freeze ends by the operational contract (Issue

@@ -83,6 +83,10 @@ async fn repair_without_a_base(accepted: bool) {
         let (_, record) = stage(&run, &client).await;
         assert!(!record.contract_repairs[0].repaired, "{record:?}");
         assert!(
+            record.contract_defect_ids().is_empty(),
+            "host-unproven checks stay pending: {record:?}"
+        );
+        assert!(
             record
                 .operational_errors
                 .iter()

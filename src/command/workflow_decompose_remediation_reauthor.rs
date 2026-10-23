@@ -21,6 +21,11 @@ pub(super) async fn reauthor_resume_plan(
         .chain(&contract.supplementary)
         .map(|entry| entry.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    let pending_unresolved = plan
+        .pending
+        .as_ref()
+        .map(|pending| super::unresolved_pending_subjects(run_dir, pending, &contract))
+        .transpose()?;
     let mut seeds = std::collections::BTreeMap::new();
     for ledger in &plan.consumed {
         let findings = consumed_ledger_findings(task_root, run_dir, ledger)?;
@@ -41,7 +46,11 @@ pub(super) async fn reauthor_resume_plan(
         )
         .with_context(|| format!("parsing {}", report_path.display()))?;
         for id in &pending.subjects {
-            if check_ids.contains(id) {
+            if check_ids.contains(id)
+                && pending_unresolved
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(id))
+            {
                 let finding = report["checks"]
                     .as_array()
                     .into_iter()
@@ -88,6 +97,24 @@ pub(super) async fn reauthor_resume_plan(
         &scope,
     )
     .await?;
+    if let Some(pending) = &plan.pending {
+        let current_bytes = std::fs::read(&contract_path)
+            .with_context(|| format!("reading {}", contract_path.display()))?;
+        let current: archon_workflow::task_set_contract::AcceptanceContract =
+            serde_json::from_slice(&current_bytes)
+                .with_context(|| format!("parsing {}", contract_path.display()))?;
+        let resolved = pending
+            .subjects
+            .iter()
+            .filter(|id| !result.unproven.contains_key(*id))
+            .filter_map(|id| {
+                super::entry_digest(&current, id)
+                    .transpose()
+                    .map(|digest| digest.map(|digest| (id.clone(), digest)))
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
+        super::append_resolved(run_dir, &pending.report_id, &resolved)?;
+    }
     for (id, reason) in &result.unproven {
         eprintln!("acceptance check {id} remains pending: {reason}");
     }

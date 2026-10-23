@@ -308,7 +308,7 @@ fn publish_chain_owned(
         &pin.lineage,
         verified.pin.identity(),
         pin.identity(),
-        request.ids.clone(),
+        publish_ids.iter().cloned().collect(),
         &trigger,
     );
     pin.lineage.push(link);

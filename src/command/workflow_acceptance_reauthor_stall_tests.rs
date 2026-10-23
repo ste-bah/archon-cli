@@ -91,6 +91,13 @@ async fn one_host_unproven_check_does_not_discard_two_proven_repairs() {
             .acceptance[0]
     );
     assert_ne!(set.contract_bytes(), before);
+    let pin = set.pin();
+    let transition = pin.lineage.last().expect("published repair lineage");
+    assert_eq!(
+        transition.reauthored_ids,
+        ids(&["AC-F-002", "AC-F-003"]),
+        "unproven entries are not recorded as published"
+    );
 }
 
 #[async_trait::async_trait]

@@ -55,15 +55,7 @@ async fn repair_unaccepted_detailed(
                     diagnostics: result.diagnostics.clone(),
                 });
             }
-            let defects = unresolved
-                .iter()
-                .map(|(id, reason)| {
-                    (
-                        (*id).clone(),
-                        format!("the check remains pending because its probe could not prove it: {reason}\nThe subject stays routed to its author."),
-                    )
-                })
-                .collect();
+            let defects = Defects::new();
             if !unresolved.is_empty() {
                 repairs.push(AcceptanceContractRepairV1 {
                     check_ids: unresolved.iter().map(|(id, _)| (*id).clone()).collect(),

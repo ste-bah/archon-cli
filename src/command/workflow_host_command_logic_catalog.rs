@@ -85,7 +85,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 49: merge of 48 (#493 #492) and #495: cross-root parent paths are
         // refused before judging; one check's own setup-path failure goes to
         // its author after host-side integrity checks.
-        version: 52,
+        version: 53,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -122,7 +122,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // binds publication to its recorded absence.
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
-        sources_digest: "2ded6fde8244fa16c284b27cbb9851cbff166bed35301b5ab5ab2ba5630c5651",
+        // 53: #496 a CLI repair that publishes no checks exits incomplete.
+        sources_digest: "e3643299cdd4d24ba49c1bff4b3ba501837cf8f7cd9e9daaad8e66632734b620",
         build_bound: false,
     },
     CapabilityLogic {
@@ -149,7 +150,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #493 re-pin only: shared freeze sources changed; these acceptance
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
-        sources_digest: "2ded6fde8244fa16c284b27cbb9851cbff166bed35301b5ab5ab2ba5630c5651",
+        // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
+        sources_digest: "e3643299cdd4d24ba49c1bff4b3ba501837cf8f7cd9e9daaad8e66632734b620",
         build_bound: false,
     },
     CapabilityLogic {
@@ -305,7 +307,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 14: #491 an intact skeleton from an older acceptance no longer makes acceptance verification fail.
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
-        sources_digest: "e7482c312fdc93bd975862272002d3574795434f38cafe129864791f2acfe7f8",
+        // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
+        sources_digest: "f73985f6857269354824c0fcb9267ec33e4678690153efded62a2a5594214137",
         build_bound: true,
     },
     CapabilityLogic {
@@ -330,7 +333,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
-        sources_digest: "e7482c312fdc93bd975862272002d3574795434f38cafe129864791f2acfe7f8",
+        // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
+        sources_digest: "f73985f6857269354824c0fcb9267ec33e4678690153efded62a2a5594214137",
         build_bound: true,
     },
 ];

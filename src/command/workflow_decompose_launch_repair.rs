@@ -220,8 +220,16 @@ pub(crate) async fn reauthor_refused(
     for (id, reason) in &result.unproven {
         eprintln!("acceptance check {id} remains pending for its author: {reason}");
     }
+    let published = ids
+        .iter()
+        .filter(|id| !result.unproven.contains_key(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let pending = result.unproven.keys().cloned().collect::<Vec<_>>();
     let line = format!(
-        "frozen_chain_launch acceptance=reauthored ids={named} acceptance_digest={} freeze_event={} skeleton_digest={}",
+        "frozen_chain_launch acceptance=reauthored published_ids={} pending_ids={} acceptance_digest={} freeze_event={} skeleton_digest={}",
+        published.join(","),
+        pending.join(","),
         result.acceptance_digest,
         result.freeze_event_id,
         result.skeleton_digest.as_deref().unwrap_or("none")
@@ -229,6 +237,8 @@ pub(crate) async fn reauthor_refused(
     let detail = serde_json::json!({
         "event": REAUTHORED_EVENT,
         "ids": ids,
+        "published_ids": published,
+        "pending_ids": pending,
         "refusals": decision.reauthor,
         "recorded_logic": decision.recorded,
         "acceptance_digest": result.acceptance_digest,

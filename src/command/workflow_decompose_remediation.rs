@@ -91,6 +91,10 @@ pub(crate) fn is_consumed(run_dir: &Path, report_id: &str) -> Result<bool> {
     Ok(false)
 }
 
+#[path = "workflow_decompose_remediation_resolved.rs"]
+mod resolved;
+pub(crate) use resolved::{append_resolved, entry_digest, unresolved_pending_subjects};
+
 #[path = "workflow_decompose_remediation_lineage.rs"]
 mod lineage;
 use lineage::consumed_ledger_findings;
