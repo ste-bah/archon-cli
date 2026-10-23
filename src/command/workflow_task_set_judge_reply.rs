@@ -85,6 +85,92 @@ pub(super) fn document(reply: &str) -> Document {
 /// whose it is (the judge's own truncation, or the provider's finish).
 pub(super) type Unusable = (String, JudgeIncompleteKind);
 
+/// What one more chunk makes of a reply (shared with the fidelity critic,
+/// `topology_lint/fidelity_critic.rs`): `reply` is the text so far,
+/// `continuing` whether the chunk in `outcome` continues it.
+pub(crate) enum Step {
+    /// One whole document, ended normally.
+    Done(String),
+    /// Cut off with its document still open: continue with this reply.
+    Continue(String),
+    /// No usable verdict; it may be asked again. `spent` when a saved
+    /// partial reply must not be continued again.
+    Unusable {
+        why: String,
+        kind: JudgeIncompleteKind,
+        spent: bool,
+    },
+    /// A continuation that made no progress: why.
+    Stalled(JudgeIncompleteKind, String),
+}
+
+/// The next [`Step`] of `reply` given `outcome` (see the module docs).
+pub(crate) fn step(reply: &str, continuing: bool, outcome: &WorkflowAgentOutcome) -> Step {
+    let grown = format!("{reply}{}", outcome.content);
+    if grown.len() > MAX_PARTIAL_REPLY_BYTES
+        || archon_observability::redaction::redact_text(&grown).len() > MAX_PARTIAL_REPLY_BYTES
+    {
+        return Step::Stalled(
+            JudgeIncompleteKind::AuthoredReply,
+            format!(
+                "the reply grew past {MAX_PARTIAL_REPLY_BYTES} bytes, more than any verdict needs"
+            ),
+        );
+    }
+    let state = document(&grown);
+    let unusable = |why, kind, spent| Step::Unusable { why, kind, spent };
+    match ending(outcome) {
+        Ending::Unsupported(why) => unusable(why, JudgeIncompleteKind::Provider, false),
+        Ending::Refused(why) => unusable(why, JudgeIncompleteKind::Refusal, true),
+        Ending::Complete if !continuing => Step::Done(grown),
+        Ending::Complete => match state {
+            Document::Complete => Step::Done(grown),
+            state => Step::Stalled(
+                JudgeIncompleteKind::AuthoredReply,
+                format!(
+                    "the continuation ended normally with the document {}",
+                    describe(state)
+                ),
+            ),
+        },
+        // A whole document cut off after it: never continued (a
+        // continuation could restart with another one) and never accepted
+        // as it stands.
+        Ending::Truncated(reason) if state == Document::Complete => unusable(
+            format!(
+                "the reply was truncated by stop reason '{reason}' after a complete document; a truncated reply is never accepted"
+            ),
+            JudgeIncompleteKind::AuthoredReply,
+            true,
+        ),
+        // No document begun (prose only), or not a JSON prefix: nothing to
+        // continue, and no usable verdict.
+        Ending::Truncated(reason) if !continuing && state != Document::Open => unusable(
+            format!("the reply was truncated by stop reason '{reason}' before any JSON document"),
+            JudgeIncompleteKind::AuthoredReply,
+            false,
+        ),
+        // Progress: the document's parse position moved over at least one
+        // token that is not whitespace.
+        Ending::Truncated(reason)
+            if outcome.content.trim().is_empty() || state != Document::Open =>
+        {
+            Step::Stalled(
+                JudgeIncompleteKind::AuthoredReply,
+                format!(
+                    "the reply was truncated by stop reason '{reason}' and its continuation {}",
+                    if outcome.content.trim().is_empty() {
+                        "added no token"
+                    } else {
+                        "contradicts the document it must extend"
+                    }
+                ),
+            )
+        }
+        Ending::Truncated(_) => Step::Continue(grown),
+    }
+}
+
 /// One whole reply to `task`. `Ok(Ok(reply))` ended normally with a document
 /// to judge; `Ok(Err(unusable))` gave no usable verdict and may be asked
 /// again; `Err` is [`JudgeIncomplete`] (no progress, a provider error, a
@@ -127,82 +213,16 @@ pub(super) async fn complete_reply(
             .map_err(|error| {
                 JudgeIncomplete::provider(format!("the provider gave no reply: {error}"))
             })?;
-        let grown = format!("{reply}{}", outcome.content);
-        if grown.len() > MAX_PARTIAL_REPLY_BYTES
-            || archon_observability::redaction::redact_text(&grown).len() > MAX_PARTIAL_REPLY_BYTES
-        {
-            return Err(stalled(
-                JudgeIncompleteKind::AuthoredReply,
-                &reply,
-                &format!(
-                    "the reply grew past {MAX_PARTIAL_REPLY_BYTES} bytes, more than any verdict needs"
-                ),
-            ));
-        }
-        let state = document(&grown);
-        match ending(&outcome) {
-            Ending::Unsupported(why) => return Ok(Err((why, JudgeIncompleteKind::Provider))),
-            Ending::Refused(why) => {
-                if let Some(partial) = partial {
+        match step(&reply, continuing, &outcome) {
+            Step::Done(whole) => return Ok(Ok(whole)),
+            Step::Unusable { why, kind, spent } => {
+                if spent && let Some(partial) = partial {
                     partial.spent();
                 }
-                return Ok(Err((why, JudgeIncompleteKind::Refusal)));
+                return Ok(Err((why, kind)));
             }
-            Ending::Complete if !continuing => return Ok(Ok(grown)),
-            Ending::Complete => {
-                return match state {
-                    Document::Complete => Ok(Ok(grown)),
-                    state => Err(stalled(
-                        JudgeIncompleteKind::AuthoredReply,
-                        &reply,
-                        &format!(
-                            "the continuation ended normally with the document {}",
-                            describe(state)
-                        ),
-                    )),
-                };
-            }
-            Ending::Truncated(reason) => {
-                if state == Document::Complete {
-                    // A whole document cut off after it: never continued
-                    // (a continuation could restart with another one) and
-                    // never accepted as it stands.
-                    if let Some(partial) = partial {
-                        partial.spent();
-                    }
-                    return Ok(Err((
-                        format!(
-                            "the reply was truncated by stop reason '{reason}' after a complete document; a truncated reply is never accepted"
-                        ),
-                        JudgeIncompleteKind::AuthoredReply,
-                    )));
-                }
-                if !continuing && state != Document::Open {
-                    // No document begun (prose only), or not a JSON prefix:
-                    // nothing to continue, and no usable verdict.
-                    return Ok(Err((
-                        format!(
-                            "the reply was truncated by stop reason '{reason}' before any JSON document"
-                        ),
-                        JudgeIncompleteKind::AuthoredReply,
-                    )));
-                }
-                // Progress: the document's parse position moved over at
-                // least one token that is not whitespace.
-                if outcome.content.trim().is_empty() || state != Document::Open {
-                    return Err(stalled(
-                        JudgeIncompleteKind::AuthoredReply,
-                        &reply,
-                        &format!(
-                            "the reply was truncated by stop reason '{reason}' and its continuation {}",
-                            if outcome.content.trim().is_empty() {
-                                "added no token"
-                            } else {
-                                "contradicts the document it must extend"
-                            }
-                        ),
-                    ));
-                }
+            Step::Stalled(kind, why) => return Err(stalled(kind, &reply, &why)),
+            Step::Continue(grown) => {
                 reply = grown;
                 chunks = chunks.saturating_add(1);
                 continuing = true;

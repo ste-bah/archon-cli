@@ -76,7 +76,12 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   Markdown code contents retain their bytes and cannot pass after alteration.
 /// - D5, version 2 unchanged: an unusable or refused critic reply is typed as
 ///   the critic's own operational outcome; no verdict's meaning changes.
-pub const SOURCES_DIGEST: &str = "ed50c1439d182f09adde2dd1362a49ef0377f6c6f6d33b9ae2af9e65591ae62e";
+/// - C1, version 2 unchanged: a reply's finish reason is read before it is
+///   parsed, by the acceptance judge's continuation rule (its reply file is
+///   listed now): a reply cut at the output limit is continued, one that
+///   never completes is the critic's unusable reply. Only a whole reply is
+///   ever parsed, under the same checks, so no verdict's meaning changes.
+pub const SOURCES_DIGEST: &str = "7f288efee9d9043a79cf92a0e9ac76d50d9b0e2e79a8596241c83539b9787a9e";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.
@@ -94,6 +99,7 @@ pub const FILES: &[&str] = &[
     "src/command/topology_lint/fidelity_critic.rs",
     "src/command/topology_lint/fidelity_set_helpers.rs",
     "src/command/topology_lint/fidelity_store.rs",
+    "src/command/workflow_task_set_judge_reply.rs",
 ];
 
 /// Fidelity files beside [`FILES`] that are not hashed, each with the reason.

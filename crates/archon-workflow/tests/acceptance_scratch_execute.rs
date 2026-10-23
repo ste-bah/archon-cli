@@ -397,15 +397,15 @@ async fn changed_scratch_source_cannot_feed_a_later_check() {
         !result.passed(),
         "changed source must invalidate observation rather than reuse its target"
     );
+    // N1: the later check still runs, on a site restored to the recorded
+    // source, so it never sees the modification (it passes only against it).
     assert_eq!(
-        result
-            .checks
-            .iter()
-            .filter(|check| check.exit_code.is_some())
-            .count(),
-        1,
-        "later command must not execute against modified source"
+        result.checks[1].exit_code,
+        Some(1),
+        "later command must not execute against modified source: {:?}",
+        result.checks[1]
     );
+    assert!(result.checks[1].operational_error.is_none());
     assert!(
         result.checks[0]
             .operational_error

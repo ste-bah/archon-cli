@@ -98,6 +98,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         &marker_value,
         true,
     ));
+    defects.extend(dropped_frozen_tasks(tasks_root, &pin, &skeleton));
     let mut findings = findings::skeleton_findings(
         tasks_root,
         &canonical_prd,
@@ -159,6 +160,49 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         findings,
         result,
     })
+}
+
+/// A re-authored skeleton keeps every task the published skeleton froze:
+/// it may add implements and tasks, never remove one. A candidate that drops
+/// one is refused before anything is published, as a defect its author
+/// repairs -- for every caller of the freeze, not only the decomposition
+/// script. With no published skeleton (the pin names none, or the file on
+/// disk is not the one it names, as when the candidate is that file) there
+/// is nothing to keep.
+fn dropped_frozen_tasks(
+    tasks_root: &Path,
+    pin: &AcceptancePin,
+    candidate: &TaskSkeleton,
+) -> Vec<archon_workflow::defect::ValidationDefect> {
+    let Some(published) = pin.skeleton_digest.as_deref() else {
+        return Vec::new();
+    };
+    let Ok(bytes) = std::fs::read(tasks_root.join(TASK_SKELETON_FILE)) else {
+        return Vec::new();
+    };
+    if content_digest(&bytes) != published {
+        return Vec::new();
+    }
+    let Ok(frozen) = serde_json::from_slice::<TaskSkeleton>(&bytes) else {
+        return Vec::new();
+    };
+    (frozen.tasks.iter())
+        .filter(|kept| {
+            !(candidate.tasks.iter())
+                .any(|task| task.task_id == kept.task_id && task.file_name == kept.file_name)
+        })
+        .map(|dropped| archon_workflow::defect::ValidationDefect {
+            identity: archon_workflow::defect::DeterministicDefect::new(
+                "missing_frozen_task",
+                &dropped.task_id,
+                "tasks",
+            ),
+            message: format!(
+                "the skeleton drops frozen task {} ({}); a re-authored skeleton keeps every frozen task_id and file_name and may only add implements and tasks",
+                dropped.task_id, dropped.file_name
+            ),
+        })
+        .collect()
 }
 
 pub(crate) fn publish_skeleton_freeze(

@@ -386,6 +386,8 @@ fn seed_frozen_acceptance(temp: &tempfile::TempDir) -> (std::path::PathBuf, Acce
     (tasks, pin)
 }
 
+#[path = "workflow_task_set_skeleton_keep_tests.rs"]
+mod skeleton_keep_tests;
 #[path = "workflow_task_set_skeleton_tests.rs"]
 mod skeleton_tests;
 

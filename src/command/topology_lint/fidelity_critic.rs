@@ -155,29 +155,10 @@ pub(super) async fn ask(
     let mut attempt = 0;
     let last = loop {
         attempt += 1;
-        let progress = archon_shell::progress::Progress::new(true);
-        let outcome = match progress
-            .bound(
-                Duration::from_secs(FIDELITY_CALL_TIMEOUT_SECS),
-                client.send_message_with_progress(
-                    messages.clone(),
-                    request.system.clone(),
-                    request.tools.to_vec(),
-                    &request.model,
-                    CRITIC_TEMPERATURE,
-                    progress.clone(),
-                ),
-            )
-            .await
-        {
-            Ok(Ok(outcome)) => outcome,
-            Ok(Err(archon_workflow::WorkflowError::ControlPaused(_))) => return Ok(Asked::Stopped),
-            Ok(Err(error)) => return Err(anyhow::Error::new(error)),
-            Err(_) => return Ok(Asked::Stopped),
+        let outcome = match complete_reply(client, &request, &messages).await? {
+            Some(outcome) => outcome,
+            None => return Ok(Asked::Stopped),
         };
-        // A truncated reply is not re-asked: the budget that cut it off has
-        // not changed, and partial JSON is never repaired into a verdict.
-        require_complete(&outcome)?;
         let document = crate::command::workflow_freeze_candidate::candidate_document(
             outcome.content.trim().as_bytes(),
         );
@@ -393,6 +374,69 @@ fn expanded_supports(
         .collect()
 }
 
+/// One whole critic reply to `messages`, read by its finish reason before
+/// anything parses it, by the acceptance judge's own rule
+/// (`workflow_task_set_judge_reply::step`): a reply cut off at the output
+/// limit is continued while its JSON document is open, and one that never
+/// completes is the critic's unusable reply ([`CriticUnusable`]), never a
+/// provider or host failure. `None` when a call stopped making provider
+/// progress, or run control paused it.
+async fn complete_reply(
+    client: &dyn WorkflowLlmClient,
+    request: &archon_llm::provider::LlmRequest,
+    messages: &[serde_json::Value],
+) -> Result<Option<WorkflowAgentOutcome>> {
+    use crate::command::workflow_task_set::judge::{CONTINUE_PROMPT, Step, step};
+    let (mut reply, mut continuing) = (String::new(), false);
+    loop {
+        let mut asked = messages.to_vec();
+        if continuing {
+            asked.push(serde_json::json!({"role": "assistant", "content": reply.clone()}));
+            asked.push(serde_json::json!({"role": "user", "content": CONTINUE_PROMPT}));
+        }
+        let progress = archon_shell::progress::Progress::new(true);
+        let mut outcome = match progress
+            .bound(
+                Duration::from_secs(FIDELITY_CALL_TIMEOUT_SECS),
+                client.send_message_with_progress(
+                    asked,
+                    request.system.clone(),
+                    request.tools.to_vec(),
+                    &request.model,
+                    CRITIC_TEMPERATURE,
+                    progress.clone(),
+                ),
+            )
+            .await
+        {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(archon_workflow::WorkflowError::ControlPaused(_))) => return Ok(None),
+            Ok(Err(error)) => return Err(anyhow::Error::new(error)),
+            Err(_) => return Ok(None),
+        };
+        // A refusal or an unsupported finish keeps the critic's own reading.
+        if !matches!(
+            outcome.stop_reason.as_deref(),
+            Some("end_turn" | "stop" | "completed" | "max_tokens" | "length")
+        ) {
+            require_complete(&outcome)?;
+        }
+        match step(&reply, continuing, &outcome) {
+            Step::Done(whole) => {
+                outcome.content = whole;
+                return Ok(Some(outcome));
+            }
+            Step::Continue(grown) => (reply, continuing) = (grown, true),
+            Step::Unusable { why, .. } | Step::Stalled(_, why) => {
+                return Err(CriticUnusable(format!(
+                    "fidelity critic reply was unusable: {why}; a truncated verdict is never parsed"
+                ))
+                .into());
+            }
+        }
+    }
+}
+
 fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {
     match outcome.stop_reason.as_deref() {
         Some("end_turn" | "stop" | "completed") => Ok(()),
@@ -415,3 +459,6 @@ mod provider_tests;
 #[cfg(test)]
 #[path = "fidelity_transport_tests.rs"]
 mod transport_tests;
+#[cfg(test)]
+#[path = "fidelity_truncation_tests.rs"]
+mod truncation_tests;

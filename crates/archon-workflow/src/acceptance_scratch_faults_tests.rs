@@ -14,6 +14,7 @@ fn what_the_checks_own_run_caused_is_the_checks() {
         identity_changed(&["source"]),
         identity_changed(&["target", "target links", "build configuration"]),
         format!("invalid spec: {TARGET_MAPPING_CHANGED}"),
+        format!("{SIBLING_ROOT_REFUSED}: ../project resolves to /work/project"),
     ] {
         assert!(is_check(&error), "{error}");
     }

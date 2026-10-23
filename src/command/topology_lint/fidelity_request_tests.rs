@@ -126,10 +126,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // R3b: a stale rebuild keeps the loop's unpublished drafts (seed path too); guard-proof text.
     // Review merge: the decomposition author gets the host re-author's check-path rule byte for byte, plus the absent/not-supplied input rule.
     // D5: a set gate's unusable judge reply counts in the ordinary no-progress window, not the host's operational one.
+    // O1/O3: a skeleton re-author re-authors only the bodies its change reaches; the dropped-task check is an assertion.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "8b6ef69a22a1746bb2c67e42e681634e0c276c86c4318852853bab072a8ffeb0"
+        "cdfd19ffb17189c37fe7d1eedba7cfc75008df4a680560d2661a63c942124839"
     );
 }
