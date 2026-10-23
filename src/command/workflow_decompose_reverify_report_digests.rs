@@ -1,4 +1,8 @@
 use super::*;
+use crate::command::workflow_decompose_remediation as remediation;
+
+/// The entry identity every digest in `judged_check_digests` uses.
+pub(super) const IDENTITY: &str = remediation::ENTRY_IDENTITY;
 
 pub(super) fn for_report(
     judged_contract_bytes: &[u8],
@@ -16,19 +20,12 @@ pub(super) fn for_report(
     let judged = checks
         .iter()
         .filter_map(|check| {
-            contract
-                .acceptance
-                .iter()
-                .chain(&contract.supplementary)
-                .find(|entry| entry.id == check.check_id)
-                .and_then(|entry| {
-                    serde_json::to_vec(&serde_json::json!({
-                        "id": &entry.id, "criterion": &entry.criterion, "check": &entry.check,
-                        "covers": &entry.covers, "gap_permitted": entry.gap_permitted,
-                    }))
-                    .ok()
-                })
-                .map(|entry| (check.check_id.clone(), content_digest(&entry)))
+            remediation::contract_entry(&contract, &check.check_id).map(|entry| {
+                (
+                    check.check_id.clone(),
+                    remediation::authored_entry_digest(entry),
+                )
+            })
         })
         .collect();
     let mut calls = v2
@@ -77,6 +74,25 @@ mod tests {
             after["acceptance"][0]["criterion"]
         );
         assert_eq!(judged.len(), 1);
-        assert!(judged["AC-X-001"] != content_digest(later));
+        // The digest names the judged entry's authored bytes: the snapshot's
+        // entry, never the later one, and never the whole entry.
+        let entry = |bytes: &[u8]| {
+            serde_json::from_slice::<archon_workflow::task_set_contract::AcceptanceContract>(bytes)
+                .unwrap()
+                .acceptance[0]
+                .clone()
+        };
+        assert_eq!(
+            judged["AC-X-001"],
+            remediation::authored_entry_digest(&entry(snapshot))
+        );
+        assert_ne!(
+            judged["AC-X-001"],
+            remediation::authored_entry_digest(&entry(later))
+        );
+        assert_ne!(
+            judged["AC-X-001"],
+            content_digest(&serde_json::to_vec(&entry(snapshot)).unwrap())
+        );
     }
 }

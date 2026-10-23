@@ -23,6 +23,10 @@ pub(super) struct ReverifyReport {
     pub(super) contract_digest: Option<String>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub(super) judged_check_digests: std::collections::BTreeMap<String, String>,
+    /// The entry identity `judged_check_digests` uses; absent on a report a
+    /// previous build wrote, whose digests cover the whole entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) judged_check_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) operational_failure_cause: Option<String>,
 }

@@ -73,6 +73,10 @@ function seedWouldReplaceLiveFeedback(policy) {
   return false;
 }
 
+function isStaleContractFinding(finding) {
+  return finding?.deterministic_defect?.code === "stale_acceptance_contract";
+}
+
 function seedRepairFindings(gate, policy) {
   return (Array.isArray(gate.findings) ? gate.findings : []).filter((finding) => policy.retryScopes.has(finding.remediation_scope));
 }
@@ -102,11 +106,18 @@ function seedEntries(seed, policy, state) {
   // `null` from the last gate: a finding no rule attributes to one entry, which
   // the live loop answers by authoring every entry again.
   let refuted = new Set();
+  const carriedIds = new Set(listed.map((entry) => entry.id));
   gates.forEach((gate, index) => {
     const last = index === gates.length - 1;
-    const named = seedRepairIds(seedRepairFindings(gate, policy), ids, gate.published === true,
-      last ? candidate : null, last ? heldOmissionIds : new Set());
-    if (last) refuted = named;
+    // A stale freeze judged an older candidate, as the live loop reads it
+    // (refreshFromCurrentContract): its stale finding names no entry, and
+    // its other findings send back only an id the published contract the
+    // host carried does not supply.
+    const findings = seedRepairFindings(gate, policy);
+    const stale = findings.some(isStaleContractFinding);
+    const named = seedRepairIds(findings.filter((finding) => !isStaleContractFinding(finding)), ids,
+      gate.published === true && !stale, last ? candidate : null, last ? heldOmissionIds : new Set());
+    if (last) refuted = stale && named !== null ? new Set([...named].filter((id) => !carriedIds.has(id))) : named;
   });
   // Current-logic refutations remain owed per id even when a later candidate
   // omitted that id. Stale gates never enter this list.
@@ -156,6 +167,9 @@ function seedEntries(seed, policy, state) {
     }
     setHostOwnedFields(entry, criteria);
     if (!judged || kept(judged) !== acceptanceEntryKey(entry)) repaired.add(reply.id);
+    // The host passes a reply only while its published entry is unchanged
+    // since it was authored: it is this loop's unpublished draft of it.
+    recordDraft(state, reply.id, entry);
     state.entries.set(reply.id, entry);
   }
   for (const entry of state.entries.values()) {

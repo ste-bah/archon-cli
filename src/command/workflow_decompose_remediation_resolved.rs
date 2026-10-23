@@ -32,7 +32,13 @@ pub(super) fn resolved_rows(text: &str, path: &Path) -> Result<Vec<serde_json::V
     Ok(rows)
 }
 
-fn resolved_subjects(run_dir: &Path, report_id: &str) -> Result<BTreeMap<String, String>> {
+/// Whether a ledger row's digests carry this build's entry identity.
+fn identity_versioned(row: &serde_json::Value) -> bool {
+    row["entry_identity"].as_str() == Some(ENTRY_IDENTITY)
+}
+
+/// Each subject's resolved digest, and whether its row is identity-versioned.
+fn resolved_subjects(run_dir: &Path, report_id: &str) -> Result<BTreeMap<String, (String, bool)>> {
     let path = run_dir.join("decomposition/reverify/resolved.jsonl");
     let mut resolved = BTreeMap::new();
     for row in resolved_rows(&resolved_text(&path)?, &path)? {
@@ -42,7 +48,7 @@ fn resolved_subjects(run_dir: &Path, report_id: &str) -> Result<BTreeMap<String,
         if let Some(subjects) = row["subjects"].as_object() {
             for (id, digest) in subjects {
                 if let Some(digest) = digest.as_str() {
-                    resolved.insert(id.clone(), digest.to_string());
+                    resolved.insert(id.clone(), (digest.to_string(), identity_versioned(&row)));
                 }
             }
         }
@@ -50,9 +56,11 @@ fn resolved_subjects(run_dir: &Path, report_id: &str) -> Result<BTreeMap<String,
     Ok(resolved)
 }
 
-pub(crate) fn resolved_publications(
-    run_dir: &Path,
-) -> Result<Vec<(String, chrono::DateTime<chrono::FixedOffset>, String)>> {
+/// A resolved-journal publication: subject, time, digest, and whether the
+/// row is identity-versioned (see [`recorded_digest_names`]).
+pub(crate) type ResolvedPublication = (String, chrono::DateTime<chrono::FixedOffset>, String, bool);
+
+pub(crate) fn resolved_publications(run_dir: &Path) -> Result<Vec<ResolvedPublication>> {
     let path = run_dir.join("decomposition/reverify/resolved.jsonl");
     let mut publications = Vec::new();
     for row in resolved_rows(&resolved_text(&path)?, &path)? {
@@ -66,34 +74,67 @@ pub(crate) fn resolved_publications(
         };
         for (id, digest) in subjects {
             if let Some(digest) = digest.as_str() {
-                publications.push((id.clone(), at, digest.to_string()));
+                publications.push((id.clone(), at, digest.to_string(), identity_versioned(&row)));
             }
         }
     }
     Ok(publications)
 }
 
-pub(crate) fn entry_digest(
-    contract: &archon_workflow::task_set_contract::AcceptanceContract,
-    id: &str,
-) -> Result<Option<String>> {
-    let Some(entry) = contract
-        .acceptance
-        .iter()
-        .chain(&contract.supplementary)
-        .find(|entry| entry.id == id)
-    else {
-        return Ok(None);
-    };
-    Ok(Some(archon_workflow::task_set_contract::content_digest(
+/// The identity version a record writes beside entry digests made by
+/// [`authored_entry_digest`]. A record without it was written by a previous
+/// build, whose digests covered the whole entry, judgment included.
+pub(crate) const ENTRY_IDENTITY: &str = "authored-fields-v1";
+
+/// The one identity of an acceptance entry: its authored fields only, so a
+/// host-owned judgment change keeps the entry it names.
+pub(crate) fn authored_entry_digest(
+    entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
+) -> String {
+    archon_workflow::task_set_contract::content_digest(
         &serde_json::to_vec(&serde_json::json!({
             "id": &entry.id,
             "criterion": &entry.criterion,
             "check": &entry.check,
             "covers": &entry.covers,
             "gap_permitted": entry.gap_permitted,
-        }))?,
-    )))
+        }))
+        .expect("an acceptance entry serializes"),
+    )
+}
+
+/// Whether `recorded` names `entry`: by this build's identity, or, on a
+/// record with no identity version, by the whole-entry digest the previous
+/// build wrote.
+pub(crate) fn recorded_digest_names(
+    recorded: &str,
+    versioned: bool,
+    entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
+) -> bool {
+    recorded == authored_entry_digest(entry)
+        || (!versioned
+            && recorded
+                == archon_workflow::task_set_contract::content_digest(
+                    &serde_json::to_vec(entry).expect("an acceptance entry serializes"),
+                ))
+}
+
+pub(crate) fn contract_entry<'a>(
+    contract: &'a archon_workflow::task_set_contract::AcceptanceContract,
+    id: &str,
+) -> Option<&'a archon_workflow::task_set_contract::AcceptanceCriterion> {
+    contract
+        .acceptance
+        .iter()
+        .chain(&contract.supplementary)
+        .find(|entry| entry.id == id)
+}
+
+pub(crate) fn entry_digest(
+    contract: &archon_workflow::task_set_contract::AcceptanceContract,
+    id: &str,
+) -> Result<Option<String>> {
+    Ok(contract_entry(contract, id).map(authored_entry_digest))
 }
 
 pub(crate) fn append_resolved(
@@ -120,6 +161,7 @@ pub(crate) fn append_resolved(
         &serde_json::json!({
             "report_id": report_id,
             "subjects": subjects,
+            "entry_identity": ENTRY_IDENTITY,
             "published_at": chrono::Utc::now(),
         }),
     )?;
@@ -140,8 +182,12 @@ pub(crate) fn unresolved_pending_subjects(
     let resolved = resolved_subjects(run_dir, &ledger.report_id)?;
     let mut unresolved = std::collections::BTreeSet::new();
     for id in &ledger.subjects {
-        let current = entry_digest(contract, id)?;
-        if current.is_none() || resolved.get(id) != current.as_ref() {
+        let named = contract_entry(contract, id).is_some_and(|entry| {
+            resolved
+                .get(id)
+                .is_some_and(|(digest, versioned)| recorded_digest_names(digest, *versioned, entry))
+        });
+        if !named {
             unresolved.insert(id.clone());
         }
     }

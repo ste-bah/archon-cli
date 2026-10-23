@@ -20,7 +20,7 @@ async function run(gates) {
   const ctx = {args:{acceptanceCriteria:{A:'a', B:'b', C:'c'}, authorMaxParallelism:1, gateMode:'enforce'},
     __archonValidateAcceptanceEntry: () => '[]'};
   vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
-  const authored = [], stdins = [], pauses = [];
+  const authored = [], stdins = [], pauses = [], prompts = [];
   let error;
   try {
     await ctx.authorCandidate({
@@ -28,6 +28,7 @@ async function run(gates) {
         if (authored.length > 30) throw new Error('bounded test exhausted');
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
         authored.push(id);
+        prompts.push(options.task);
         return {status:'accepted', stopReason:'end_turn',
           content:JSON.stringify({id, version:authored.filter(x => x === id).length, criterion:''})};
       },
@@ -40,7 +41,7 @@ async function run(gates) {
     }, {phase:'acceptance', prompt:() => 'author', author:ctx.authorAcceptanceEntries,
       capability:'freeze-acceptance', retryScopes:new Set(['candidate_artifact'])});
   } catch (e) { error = e.message; }
-  return {authored, stdins, pauses, error};
+  return {authored, stdins, pauses, prompts, error};
 }
 
 async function outageAfterFirstPass() {
@@ -133,7 +134,38 @@ async function persistingStaleContractPausesOnNoProgress() {
   assert.equal(out.pauses[0].reason, 'no_progress');
 }
 
+// B5: the stale contract changed elsewhere (B), not the entry this round
+// re-authored (A): the round's unpublished repair of A is kept, never the
+// refuted bytes it repaired.
+const withB = (a) => ({acceptance:[a, {id:'B', version:'published', criterion:'b',
+  check:{kind:'command', command:'fixed elsewhere', cwd:'project_root'}}], supplementary:[]});
+async function staleContractKeepsTheRoundsUnpublishedRepair() {
+  const out = await run([() => refute('A'), stale(withB({id:'A', version:1, criterion:'a'})), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'A'], 'nothing is re-authored after the stale freeze');
+  assert.equal(out.stdins.length, 3);
+  const rebuilt = JSON.parse(out.stdins[2]);
+  assert.equal(rebuilt.entries[0].version, 2, "this round's repair of A is kept");
+  assert.equal(rebuilt.entries[1].version, 'published', 'the newer published B wins');
+}
+
+// A published entry that changed since the base the round's draft repaired
+// wins; the draft is shown to that entry's next author.
+async function stalePublishedChangeWinsAndShowsTheDraft() {
+  const changed = {id:'A', version:'published', criterion:'a',
+    check:{kind:'command', command:'repaired elsewhere', cwd:'project_root'}};
+  const out = await run([() => refute('A'), stale(withB(changed)), () => refute('A'), clean]);
+  assert.equal(out.error, undefined);
+  assert.equal(JSON.parse(out.stdins[2]).entries[0].version, 'published');
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'A', 'A']);
+  assert.match(out.prompts[4], /A newer published version of this entry replaced your previous draft/);
+  assert.match(out.prompts[4], /"version":2/);
+  assert.doesNotMatch(out.prompts[3], /replaced your previous draft/);
+}
+
 const tests = [
+  ['a stale freeze keeps the round\'s unpublished repair', staleContractKeepsTheRoundsUnpublishedRepair],
+  ['a published change since the draft base wins and shows the draft', stalePublishedChangeWinsAndShowsTheDraft],
   ['a stale freeze rebuilds from the current contract', staleContractRebuildsFromTheCurrentContract],
   ['a stale freeze re-authors only flagged entries it does not supply', staleContractReauthorsOnlyUnsuppliedFlaggedEntries],
   ['a persisting stale contract pauses on no progress', persistingStaleContractPausesOnNoProgress],

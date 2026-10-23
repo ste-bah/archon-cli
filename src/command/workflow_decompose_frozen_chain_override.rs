@@ -368,11 +368,9 @@ pub(super) fn freeze_outcome_decision(
         return Ok(OverrideDecision::keep(format!(
             "judged attempt {id} has {} open finding(s){}",
             findings.len(),
-            if holds {
-                String::new()
-            } else {
-                format!("; phase must be re-gated under current logic ({logic_text})")
-            }
+            (!holds)
+                .then(|| format!("; gate logic changed, so the phase must be re-gated under current logic ({logic_text})"))
+                .unwrap_or_default()
         )));
     }
     if !holds {

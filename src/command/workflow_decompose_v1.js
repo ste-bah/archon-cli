@@ -350,6 +350,7 @@ async function authorCandidate(w, policy) {
       stdin: authored.content,
       ...(policy.target ? { target: policy.target } : {})
     });
+    if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (routed.operational) {
       if (routed.operationalKind === "authored_judge_reply") {

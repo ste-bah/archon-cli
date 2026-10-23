@@ -166,12 +166,16 @@ async fn reverify_report_contains_per_check_execution_evidence() {
             .chain(&contract.supplementary)
             .find(|entry| entry.id == check_id)
             .unwrap();
+        // Authored-field identity (#493): a judgment-only change keeps the
+        // entry the report judged, so the digest leaves the judgment out.
         assert_eq!(
             report["judged_check_digests"][check_id],
-            archon_workflow::task_set_contract::content_digest(
-                &serde_json::to_vec(authored_entry).unwrap()
-            ),
+            crate::command::workflow_decompose_remediation::authored_entry_digest(authored_entry),
             "missing authored entry digest for {check_id}"
+        );
+        assert_eq!(
+            report["judged_check_identity"],
+            crate::command::workflow_decompose_remediation::ENTRY_IDENTITY
         );
         assert!(check["verdict"].as_str().is_some());
         assert!(check["really_ran"].is_boolean());

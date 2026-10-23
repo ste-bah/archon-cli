@@ -5,8 +5,12 @@ mod lineage_tests;
 
 #[path = "workflow_decompose_remediation_early_resume_tests.rs"]
 mod early_resume_tests;
+#[path = "workflow_decompose_remediation_ordinals_tests.rs"]
+mod ordinals_tests;
 #[path = "workflow_decompose_remediation_read_tests.rs"]
 mod read_tests;
+#[path = "workflow_decompose_remediation_records_tests.rs"]
+mod records_tests;
 #[path = "workflow_decompose_remediation_scope_tests.rs"]
 mod scope_tests;
 
