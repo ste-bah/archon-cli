@@ -14,9 +14,28 @@ fn provider_authentication_failure_survives_the_freeze_incomplete_message() {
     ));
     let error =
         super::super::passability::incomplete_judge_error(error, &resume, vec!["AC-X-001".into()]);
+    assert!(
+        !crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+            .unwrap()
+            .is_authored_judge_reply(),
+        "provider failures remain operational"
+    );
     let message = error.to_string();
     assert!(message.contains("authentication_error"), "{message}");
     assert!(message.contains("invalid API key"), "{message}");
+}
+
+#[test]
+fn authored_incomplete_freeze_judge_is_typed_for_the_fixed_script_retry() {
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let error = anyhow::Error::new(super::super::judge::JudgeIncomplete(
+        "3 replies; malformed batched JSON".into(),
+    ));
+    let error =
+        super::super::passability::incomplete_judge_error(error, &resume, vec!["AC-X-001".into()]);
+    let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+        .expect("typed incomplete freeze");
+    assert!(incomplete.is_authored_judge_reply());
 }
 
 #[test]

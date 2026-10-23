@@ -13,7 +13,14 @@ pub(super) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
         crate::command::workflow_host_exit_drain::exit_after_drain(status);
     }
     crate::command::workflow_host_command_operational::exit_if_unsettled_publish(error);
-    GateEvaluation::new("", Vec::new()).with_operational_error(error.to_string())
+    let evaluation = GateEvaluation::new("", Vec::new()).with_operational_error(error.to_string());
+    if crate::command::workflow_freeze_budget::FreezeIncomplete::caused(error).is_some_and(
+        crate::command::workflow_freeze_budget::FreezeIncomplete::is_authored_judge_reply,
+    ) {
+        evaluation.with_operational_error_kind("authored_judge_reply")
+    } else {
+        evaluation
+    }
 }
 
 #[cfg(test)]
@@ -42,5 +49,30 @@ mod tests {
             "gate setup failed".into(),
         ));
         assert!(body_input_finding(&error).is_none());
+    }
+
+    #[test]
+    fn authored_incomplete_freeze_judge_keeps_its_kind_in_the_gate_envelope() {
+        let progress = crate::command::workflow_freeze_budget::FreezeProgress::default();
+        let error = crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+            "malformed judge reply",
+            &progress,
+        )
+        .authored_judge_reply();
+        let envelope = gate_error_evaluation(&Error::new(error))
+            .into_envelope()
+            .unwrap();
+        assert_eq!(
+            envelope.operational_error.unwrap().kind,
+            "authored_judge_reply"
+        );
+    }
+
+    #[test]
+    fn provider_gate_failure_keeps_the_generic_operational_kind() {
+        let envelope = gate_error_evaluation(&Error::msg("provider gave no reply"))
+            .into_envelope()
+            .unwrap();
+        assert_eq!(envelope.operational_error.unwrap().kind, "gate_operational");
     }
 }

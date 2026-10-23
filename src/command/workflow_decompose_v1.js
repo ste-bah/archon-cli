@@ -352,6 +352,13 @@ async function authorCandidate(w, policy) {
     });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (routed.operational) {
+      if (routed.operationalKind === "authored_judge_reply") {
+        // The candidate is intact; only its judge reply was unusable. Retry
+        // the same freeze without charging the host operational no-progress
+        // window. Provider and other host failures keep the normal path.
+        carried = authored.content;
+        continue;
+      }
       // The gate never judged the candidate; only the round that made it can
       // be progress: a pass in it, or a previously missing entry it added.
       if (!measuredReplies) progress.answered += 1;
@@ -431,6 +438,7 @@ function routeFindings(outcome, retryScopes, shadowScopes) {
   };
   if (outcome.gateEnvelope?.operational_error) {
     routed.operational = String(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
+    routed.operationalKind = String(outcome.gateEnvelope.operational_error.kind || "");
     return routed;
   }
   const findings = Array.isArray(outcome.gateEnvelope?.policy_findings)

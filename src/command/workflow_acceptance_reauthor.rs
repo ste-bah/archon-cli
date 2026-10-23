@@ -26,6 +26,9 @@ use reply_parse::candidate_entry;
 use reply_parse::candidate_entry_with_markers;
 #[path = "workflow_acceptance_reauthor_check_defects.rs"]
 mod check_defects;
+#[path = "workflow_acceptance_reauthor_passability.rs"]
+mod passability_pending;
+use passability_pending::authored_passability_pending;
 
 #[path = "workflow_acceptance_reauthor_cache.rs"]
 pub(crate) mod cache;
@@ -373,9 +376,10 @@ pub(crate) async fn reauthor_partial_with_cache(
                 .filter(|id| !crashed.contains_key(*id))
                 .cloned()
                 .collect();
+            let mut passability_pending = BTreeSet::new();
             let cannot_pass = match gate.probe.take_baseline_runs() {
                 Some(runs) if !sound.is_empty() => {
-                    super::passability::cannot_pass_findings(
+                    match super::passability::cannot_pass_findings(
                         client,
                         judge_model,
                         &working,
@@ -383,12 +387,36 @@ pub(crate) async fn reauthor_partial_with_cache(
                         &runs,
                         &prd_text,
                     )
-                    .await?
+                    .await
+                    {
+                        Ok(findings) => findings,
+                        Err(error) => {
+                            if let Some((pending_ids, finding)) =
+                                authored_passability_pending(&error, &sound)
+                            {
+                                for id in pending_ids {
+                                    passability_pending.insert(id.clone());
+                                    *entry_mut(&mut working, &id).expect("named id") =
+                                        entry(contract, &id).expect("named id").clone();
+                                    feedback
+                                        .get_mut(&id)
+                                        .expect("feedback seeded per id")
+                                        .push(finding.clone());
+                                }
+                                BTreeMap::new()
+                            } else {
+                                return Err(error);
+                            }
+                        }
+                    }
                 }
                 _ => BTreeMap::new(),
             };
             for id in accepted {
                 if unproven_checks.contains_key(&id) {
+                    continue;
+                }
+                if passability_pending.contains(&id) {
                     continue;
                 }
                 if let Some(finding) = crashed.get(&id).or_else(|| cannot_pass.get(&id)) {

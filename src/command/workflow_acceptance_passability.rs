@@ -254,13 +254,16 @@ pub(super) fn incomplete_judge_error(
     resume: &FreezeResume,
     deferred: Vec<String>,
 ) -> anyhow::Error {
+    let authored_reply = super::judge::JudgeIncomplete::caused(&error)
+        .is_some_and(super::judge::JudgeIncomplete::is_authored_reply);
     let cause = archon_observability::redaction::redact_text(&format!("{error:#}"));
-    anyhow::Error::from(FreezeIncomplete::awaiting_judge(
-        &resume.budget,
-        &resume.progress,
-        deferred,
-        cause,
-    ))
+    let incomplete =
+        FreezeIncomplete::awaiting_judge(&resume.budget, &resume.progress, deferred, cause);
+    if authored_reply {
+        incomplete.authored_judge_reply().into()
+    } else {
+        incomplete.into()
+    }
 }
 
 /// The candidates among `ids` of `contract` that failed in `runs`.

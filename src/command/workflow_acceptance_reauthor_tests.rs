@@ -29,6 +29,29 @@ fn baseline_finding(id: &str, candidates: &str) -> String {
 }
 
 #[test]
+fn passability_authored_incomplete_keeps_only_the_affected_checks_pending() {
+    let affected = ids(&["AC-F-001", "AC-F-002"]);
+    let authored = anyhow::Error::new(super::super::judge::JudgeIncomplete(
+        "malformed batched JSON".into(),
+    ));
+    let (pending, finding) =
+        authored_passability_pending(&authored, &affected).expect("authored reply is retryable");
+    assert_eq!(pending, affected);
+    assert!(
+        finding.contains("remains pending for judge retry"),
+        "{finding}"
+    );
+
+    let provider = anyhow::Error::new(super::super::judge::JudgeIncomplete(
+        "the provider gave no reply: disconnected".into(),
+    ));
+    assert!(
+        authored_passability_pending(&provider, &ids(&["AC-F-001"])).is_none(),
+        "provider failures keep propagating through the host path"
+    );
+}
+
+#[test]
 fn a_parent_path_into_the_other_root_is_an_author_finding_before_judging() {
     let set = frozen_set(&[("AC-F-ROOT", "test -f feature.txt", false)]);
     let project = set.project.path().join("project");

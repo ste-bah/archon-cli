@@ -85,11 +85,33 @@ async function observeStallPausesWithLatestFindings() {
   assert.equal(out.pauses[0].reason, 'no_progress');
   assert.deepEqual(Array.from(out.pauses[0].last_findings), ['invalid_verifier TASK-X-0', 'invalid_verifier TASK-X-1']);
 }
+// An authored-incomplete freeze judge reply retries the same candidate and
+// does not consume the gate's operational no-progress window.
+async function authoredFreezeJudgeReplyRetriesWithoutOperationalStrike() {
+  const ctx = { args: { gateMode: 'enforce' } };
+  vm.createContext(withAuthorContext(ctx));
+  vm.runInContext(source, ctx);
+  let calls = 0;
+  const w = {
+    agent: async () => ({ status: 'accepted', stopReason: 'end_turn', content: '{}' }),
+    hostCommand: async () => ++calls === 1
+      ? { gateEnvelope: { operational_error: { kind: 'authored_judge_reply', text: 'malformed judge reply' } } }
+      : { publicationReceipt: { call_id: 'freeze' }, postcondition: { satisfied: true }, gateEnvelope: { policy_findings: [] } },
+    pause: async () => { throw new Error('authored judge reply counted as operational no-progress'); },
+  };
+  const result = await ctx.authorCandidate(w, {
+    phase: 'skeleton', capability: 'freeze-acceptance', prompt: () => 'candidate',
+    retryScopes: new Set(),
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.publicationReceipt.call_id, 'freeze');
+}
 (async () => {
   let failed = 0;
   for (const [name, test] of [['finding 2 later-stage repairs', laterStageRepairs],
     ['finding 1 ownership identities', ownership], ['finding 3 element shapes', shapes],
-    ['same-stage total must fall', sameStageTotalMustFall], ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings]]) {
+    ['same-stage total must fall', sameStageTotalMustFall], ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings],
+    ['authored incomplete freeze judge retry', authoredFreezeJudgeReplyRetriesWithoutOperationalStrike]]) {
     try { await test(); console.log(`PASS ${name}`); }
     catch (error) { failed++; console.error(`FAIL ${name}: ${error.message}`); }
   }

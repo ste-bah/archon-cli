@@ -212,11 +212,16 @@ fn resumable(
 ) -> anyhow::Error {
     match judge::JudgeIncomplete::caused(&error) {
         Some(incomplete) if resume.persist => {
-            crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
-                incomplete.to_string(),
-                &resume.progress,
-            )
-            .into()
+            let freeze_incomplete =
+                crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+                    incomplete.to_string(),
+                    &resume.progress,
+                );
+            if incomplete.is_authored_reply() {
+                freeze_incomplete.authored_judge_reply().into()
+            } else {
+                freeze_incomplete.into()
+            }
         }
         _ => error,
     }

@@ -72,6 +72,7 @@ pub(crate) struct GateEvaluation {
     pub(crate) report: String,
     pub(crate) findings: Vec<GateFinding>,
     operational_error: Option<String>,
+    operational_error_kind: Option<String>,
     publication_identity: Option<String>,
     expected_acceptance_contract: Option<archon_workflow::v2::ExpectedAcceptanceContract>,
 }
@@ -82,6 +83,7 @@ impl GateEvaluation {
             report: report.into(),
             findings,
             operational_error: None,
+            operational_error_kind: None,
             publication_identity: None,
             expected_acceptance_contract: None,
         }
@@ -89,6 +91,11 @@ impl GateEvaluation {
 
     pub(crate) fn with_operational_error(mut self, error: impl Into<String>) -> Self {
         self.operational_error = Some(error.into());
+        self
+    }
+
+    pub(crate) fn with_operational_error_kind(mut self, kind: impl Into<String>) -> Self {
+        self.operational_error_kind = Some(kind.into());
         self
     }
 
@@ -122,7 +129,9 @@ impl GateEvaluation {
         let operational_error =
             self.operational_error
                 .map(|text| archon_workflow::GateOperationalError {
-                    kind: "gate_operational".to_string(),
+                    kind: self
+                        .operational_error_kind
+                        .unwrap_or_else(|| "gate_operational".to_string()),
                     text,
                 });
         let policy_findings = self

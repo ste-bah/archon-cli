@@ -170,6 +170,7 @@ fn add(counter: &AtomicU64, units: u64) {
 pub(crate) struct FreezeIncomplete {
     cause: IncompleteCause,
     progress: String,
+    authored_judge_reply: bool,
 }
 
 #[derive(Debug)]
@@ -209,6 +210,7 @@ impl FreezeIncomplete {
                 lacking: "probe verdict",
             },
             progress: progress.line(),
+            authored_judge_reply: false,
         }
     }
 
@@ -218,6 +220,7 @@ impl FreezeIncomplete {
         Self {
             cause: IncompleteCause::Stalled(reason.into()),
             progress: progress.line(),
+            authored_judge_reply: false,
         }
     }
 
@@ -228,6 +231,7 @@ impl FreezeIncomplete {
         Self {
             cause: IncompleteCause::Unsaved(reason.into()),
             progress: FreezeProgress::default().line(),
+            authored_judge_reply: false,
         }
     }
 
@@ -250,6 +254,17 @@ impl FreezeIncomplete {
             *cause = Some(judge_error.into());
         }
         incomplete
+    }
+
+    /// Mark a retryable judge reply whose incompleteness was authored by the
+    /// model. Provider, host and persistence failures remain operational.
+    pub(crate) fn authored_judge_reply(mut self) -> Self {
+        self.authored_judge_reply = true;
+        self
+    }
+
+    pub(crate) fn is_authored_judge_reply(&self) -> bool {
+        self.authored_judge_reply
     }
 
     /// What the staged freeze writes to stderr before it exits
