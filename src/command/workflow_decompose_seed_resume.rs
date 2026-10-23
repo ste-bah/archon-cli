@@ -344,8 +344,16 @@ fn reverify_report_publications(
     let consumed = match std::fs::read_to_string(&consumed_path) {
         Ok(consumed) => consumed
             .lines()
-            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-            .filter_map(|row| row["report_id"].as_str().map(str::to_string))
+            .enumerate()
+            .map(|(index, line)| {
+                let row: serde_json::Value = serde_json::from_str(line).with_context(|| {
+                    format!("parsing line {} of {}", index + 1, consumed_path.display())
+                })?;
+                Ok(row["report_id"].as_str().map(str::to_string))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
             .collect::<std::collections::BTreeSet<_>>(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
         Err(error) => {

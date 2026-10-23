@@ -49,8 +49,8 @@ pub(crate) fn read(run_dir: &Path, report_id: &str) -> Result<Option<Ledger>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
-    let mut ledger: Ledger =
-        serde_json::from_slice(&bytes).context("parsing reverify remediation ledger")?;
+    let mut ledger: Ledger = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parsing reverify remediation ledger {}", path.display()))?;
     ledger.subjects = deduplicate_subjects(ledger.subjects);
     if ledger.subjects.is_empty() {
         return Err(anyhow!("reverify remediation ledger has no subjects"));
@@ -60,13 +60,19 @@ pub(crate) fn read(run_dir: &Path, report_id: &str) -> Result<Option<Ledger>> {
 
 pub(crate) fn is_consumed(run_dir: &Path, report_id: &str) -> Result<bool> {
     let path = run_dir.join("decomposition/reverify/consumed.jsonl");
-    if !path.exists() {
-        return Ok(false);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+    };
+    for (index, line) in text.lines().enumerate() {
+        let row: serde_json::Value = serde_json::from_str(line)
+            .with_context(|| format!("parsing line {} of {}", index + 1, path.display()))?;
+        if row["report_id"].as_str() == Some(report_id) {
+            return Ok(true);
+        }
     }
-    Ok(std::fs::read_to_string(&path)?
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .any(|row| row["report_id"].as_str() == Some(report_id)))
+    Ok(false)
 }
 
 #[path = "workflow_decompose_remediation_lineage.rs"]
@@ -129,10 +135,13 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
     {
         return Ok(());
     }
-    let contract: archon_workflow::task_set_contract::AcceptanceContract =
-        serde_json::from_slice(&std::fs::read(
-            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        )?)?;
+    let contract_path =
+        task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let contract: archon_workflow::task_set_contract::AcceptanceContract = serde_json::from_slice(
+        &std::fs::read(&contract_path)
+            .with_context(|| format!("reading {}", contract_path.display()))?,
+    )
+    .with_context(|| format!("parsing {}", contract_path.display()))?;
     let ids = ledger
         .subjects
         .iter()
@@ -152,7 +161,11 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
         "decomposition/reverify/reports/{}.json",
         ledger.report_id
     ));
-    let report: serde_json::Value = serde_json::from_slice(&std::fs::read(report_path)?)?;
+    let report: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&report_path)
+            .with_context(|| format!("reading {}", report_path.display()))?,
+    )
+    .with_context(|| format!("parsing {}", report_path.display()))?;
     let uncertain = if is_consumed(run_dir, &ledger.report_id)? {
         consumed_ledger_findings(task_root, run_dir, ledger)?
     } else {
@@ -281,38 +294,58 @@ pub(crate) fn prepare(
 ) -> Result<Option<ResumePlan>> {
     let latest = crate::command::workflow_decompose_latest_report::latest_report(store, run_id)?;
     let consumed_path = run_dir.join("decomposition/reverify/consumed.jsonl");
-    let skeleton: archon_workflow::task_skeleton::TaskSkeleton =
-        serde_json::from_slice(&std::fs::read(
-            Path::new(&runtime.task_root_identity)
-                .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
-        )?)?;
-    let task_ids = skeleton
-        .tasks
-        .iter()
-        .map(|task| task.task_id.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    let contract: archon_workflow::task_set_contract::AcceptanceContract =
-        serde_json::from_slice(&std::fs::read(
-            Path::new(&runtime.task_root_identity)
-                .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        )?)?;
-    let check_ids = contract
-        .acceptance
-        .iter()
-        .chain(&contract.supplementary)
-        .map(|entry| entry.id.clone())
-        .collect::<std::collections::BTreeSet<_>>();
     let consumed_ids = match std::fs::read_to_string(&consumed_path) {
         Ok(text) => text
             .lines()
-            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-            .filter_map(|row| row["report_id"].as_str().map(str::to_string))
+            .enumerate()
+            .map(|(index, line)| {
+                let row: serde_json::Value = serde_json::from_str(line).with_context(|| {
+                    format!("parsing line {} of {}", index + 1, consumed_path.display())
+                })?;
+                Ok(row["report_id"].as_str().map(str::to_string))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
             .collect::<std::collections::BTreeSet<_>>(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
         Err(error) => {
             return Err(error).with_context(|| format!("reading {}", consumed_path.display()));
         }
     };
+    if consumed_ids.is_empty()
+        && !latest
+            .as_ref()
+            .is_some_and(|report| report.outcome == "needs_remediation")
+    {
+        arguments["forceBodySubjects"] = serde_json::json!([]);
+        return Ok(None);
+    }
+    let skeleton_path = Path::new(&runtime.task_root_identity)
+        .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
+    let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(
+        &std::fs::read(&skeleton_path)
+            .with_context(|| format!("reading {}", skeleton_path.display()))?,
+    )
+    .with_context(|| format!("parsing {}", skeleton_path.display()))?;
+    let task_ids = skeleton
+        .tasks
+        .iter()
+        .map(|task| task.task_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let contract_path = Path::new(&runtime.task_root_identity)
+        .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let contract: archon_workflow::task_set_contract::AcceptanceContract = serde_json::from_slice(
+        &std::fs::read(&contract_path)
+            .with_context(|| format!("reading {}", contract_path.display()))?,
+    )
+    .with_context(|| format!("parsing {}", contract_path.display()))?;
+    let check_ids = contract
+        .acceptance
+        .iter()
+        .chain(&contract.supplementary)
+        .map(|entry| entry.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
     let mut consumed = Vec::new();
     let mut selected = Vec::new();
     for report_id in &consumed_ids {

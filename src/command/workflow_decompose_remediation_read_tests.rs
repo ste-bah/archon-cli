@@ -41,6 +41,31 @@ fn read_deduplicates_subjects_without_changing_first_seen_order() {
 }
 
 #[test]
+fn read_missing_ledger_is_none_and_corrupt_ledger_names_its_path() {
+    let temp = tempfile::tempdir().unwrap();
+    assert!(read(temp.path(), "missing").unwrap().is_none());
+
+    let directory = temp.path().join("decomposition/reverify");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("remediation-corrupt.json");
+    std::fs::write(&path, b"not json").unwrap();
+    let error = read(temp.path(), "corrupt").unwrap_err();
+    assert!(format!("{error:#}").contains(&path.display().to_string()));
+}
+
+#[test]
+fn is_consumed_treats_missing_file_as_empty_and_names_invalid_utf8_path() {
+    let temp = tempfile::tempdir().unwrap();
+    assert!(!is_consumed(temp.path(), "report").unwrap());
+
+    let path = temp.path().join("decomposition/reverify/consumed.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, [0xff]).unwrap();
+    let error = is_consumed(temp.path(), "report").unwrap_err();
+    assert!(format!("{error:#}").contains(&path.display().to_string()));
+}
+
+#[test]
 fn generated_ledger_subjects_keep_first_seen_order() {
     let subjects = deduplicate_subjects(
         ["TASK-X-010", "TASK-X-020", "TASK-X-010", "TASK-X-010"]

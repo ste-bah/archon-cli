@@ -20,17 +20,32 @@ pub(super) fn consumed_ledger_findings(
 ) -> Result<std::collections::BTreeMap<String, String>> {
     let contract_path =
         task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-    let contract_bytes = std::fs::read(&contract_path)?;
+    let contract_bytes = std::fs::read(&contract_path)
+        .with_context(|| format!("reading {}", contract_path.display()))?;
     let current: archon_workflow::task_set_contract::AcceptanceContract =
-        serde_json::from_slice(&contract_bytes)?;
+        serde_json::from_slice(&contract_bytes)
+            .with_context(|| format!("parsing {}", contract_path.display()))?;
     let mut findings = std::collections::BTreeMap::new();
     let consumed_path = run_dir.join("decomposition/reverify/consumed.jsonl");
-    let is_consumed_here = std::fs::read_to_string(consumed_path)
-        .ok()
+    let consumed_text = match std::fs::read_to_string(&consumed_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", consumed_path.display()));
+        }
+    };
+    let is_consumed_here = consumed_text
+        .lines()
+        .enumerate()
+        .map(|(index, line)| {
+            let row: serde_json::Value = serde_json::from_str(line).with_context(|| {
+                format!("parsing line {} of {}", index + 1, consumed_path.display())
+            })?;
+            Ok(row["report_id"].as_str() == Some(ledger.report_id.as_str()))
+        })
+        .collect::<Result<Vec<_>>>()?
         .into_iter()
-        .flat_map(|text| text.lines().map(str::to_owned).collect::<Vec<_>>())
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
-        .any(|row| row["report_id"].as_str() == Some(ledger.report_id.as_str()));
+        .any(|matches| matches);
     if !is_consumed_here {
         return Ok(findings);
     }
@@ -38,16 +53,18 @@ pub(super) fn consumed_ledger_findings(
         "decomposition/reverify/reports/{}.json",
         ledger.report_id
     ));
-    let report: serde_json::Value = match std::fs::read(&report_path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-    {
-        Some(report) => report,
-        None => {
+    let report_bytes = match std::fs::read(&report_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             tracing::info!(report = %ledger.report_id, "consumed reverify report has no recorded judged digests; heal needs the next reverify");
             return Ok(findings);
         }
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", report_path.display()));
+        }
     };
+    let report: serde_json::Value = serde_json::from_slice(&report_bytes)
+        .with_context(|| format!("parsing {}", report_path.display()))?;
     let judged_digests = report["judged_check_digests"].as_object();
     if report["contract_digest"].as_str().is_none() || judged_digests.is_none() {
         tracing::info!(report = %ledger.report_id, "consumed reverify report has no recorded judged digests; heal needs the next reverify");

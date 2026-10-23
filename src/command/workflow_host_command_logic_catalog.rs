@@ -118,7 +118,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned for #487: acceptance judge source changed with version 44.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // 50: canonical symlink resolution refuses checks that escape the selected root into the other root.
-        sources_digest: "6a296396d7dee914d8a18274315a621e65e1fbbd9e642e60047c84fe21ed6916",
+        sources_digest: "c2d3bf31093dc35e67cac91c16098680528e96ced1c22c855ae74db5fd2bd2c4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -145,7 +145,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #493 re-pin only: shared freeze sources changed; these acceptance
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
-        sources_digest: "6a296396d7dee914d8a18274315a621e65e1fbbd9e642e60047c84fe21ed6916",
+        sources_digest: "c2d3bf31093dc35e67cac91c16098680528e96ced1c22c855ae74db5fd2bd2c4",
         build_bound: false,
     },
     CapabilityLogic {

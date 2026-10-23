@@ -3,6 +3,8 @@ use super::*;
 #[path = "workflow_decompose_remediation_lineage_tests.rs"]
 mod lineage_tests;
 
+#[path = "workflow_decompose_remediation_early_resume_tests.rs"]
+mod early_resume_tests;
 #[path = "workflow_decompose_remediation_read_tests.rs"]
 mod read_tests;
 #[path = "workflow_decompose_remediation_scope_tests.rs"]

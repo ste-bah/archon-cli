@@ -8,10 +8,13 @@ pub(super) async fn reauthor_resume_plan(
     client: &dyn archon_workflow::WorkflowLlmClient,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<()> {
-    let contract: archon_workflow::task_set_contract::AcceptanceContract =
-        serde_json::from_slice(&std::fs::read(
-            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        )?)?;
+    let contract_path =
+        task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let contract: archon_workflow::task_set_contract::AcceptanceContract = serde_json::from_slice(
+        &std::fs::read(&contract_path)
+            .with_context(|| format!("reading {}", contract_path.display()))?,
+    )
+    .with_context(|| format!("parsing {}", contract_path.display()))?;
     let check_ids = contract
         .acceptance
         .iter()
@@ -32,7 +35,11 @@ pub(super) async fn reauthor_resume_plan(
             "decomposition/reverify/reports/{}.json",
             pending.report_id
         ));
-        let report: serde_json::Value = serde_json::from_slice(&std::fs::read(report_path)?)?;
+        let report: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&report_path)
+                .with_context(|| format!("reading {}", report_path.display()))?,
+        )
+        .with_context(|| format!("parsing {}", report_path.display()))?;
         for id in &pending.subjects {
             if check_ids.contains(id) {
                 let finding = report["checks"]

@@ -10,11 +10,13 @@ pub(super) fn for_report(
     String,
     std::collections::BTreeMap<String, String>,
 )> {
-    let bytes = std::fs::read(
-        task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-    )?;
+    let contract_path =
+        task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let bytes = std::fs::read(&contract_path)
+        .with_context(|| format!("reading {}", contract_path.display()))?;
     let contract: archon_workflow::task_set_contract::AcceptanceContract =
-        serde_json::from_slice(&bytes)?;
+        serde_json::from_slice(&bytes)
+            .with_context(|| format!("parsing {}", contract_path.display()))?;
     let judged = checks
         .iter()
         .filter_map(|check| {

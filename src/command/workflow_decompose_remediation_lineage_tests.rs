@@ -83,6 +83,31 @@ fn flagged_authored_bytes_back_are_routed_but_repaired_bytes_are_not() {
 }
 
 #[test]
+fn missing_consumed_lineage_is_empty_but_corrupt_report_names_its_path() {
+    let (set, run, ledger, _) = setup();
+    let consumed_path = run.path().join("decomposition/reverify/consumed.jsonl");
+    std::fs::remove_file(&consumed_path).unwrap();
+    assert!(
+        consumed_ledger_findings(&set.tasks, run.path(), &ledger)
+            .unwrap()
+            .is_empty()
+    );
+
+    std::fs::write(
+        &consumed_path,
+        format!("{{\"report_id\":\"{}\"}}\n", ledger.report_id),
+    )
+    .unwrap();
+    let report_path = run.path().join(format!(
+        "decomposition/reverify/reports/{}.json",
+        ledger.report_id
+    ));
+    std::fs::write(&report_path, b"not json").unwrap();
+    let error = consumed_ledger_findings(&set.tasks, run.path(), &ledger).unwrap_err();
+    assert!(format!("{error:#}").contains(&report_path.display().to_string()));
+}
+
+#[test]
 fn legacy_report_without_digests_is_not_routed_and_logs_once() {
     let (set, run, ledger, _) = setup();
     let report_path = run
