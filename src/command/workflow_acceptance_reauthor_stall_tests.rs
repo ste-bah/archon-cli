@@ -177,7 +177,11 @@ async fn malformed_judge_replies_keep_each_authored_check_pending_for_retry() {
             .values()
             .all(|finding| finding.contains("judge returned no usable authored verdict"))
     );
-    assert_eq!(client.authored(), 2 * REAUTHOR_ATTEMPTS);
+    assert_eq!(
+        client.authored(),
+        2,
+        "the unusable judge reply retries each same candidate without spending another author attempt"
+    );
 }
 
 #[async_trait::async_trait]

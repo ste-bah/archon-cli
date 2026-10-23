@@ -29,6 +29,9 @@ pub(crate) struct ScriptedAuthorJudge {
     pub(crate) prompts: Mutex<Vec<String>>,
     provider: String,
     judge_reply: Option<String>,
+    /// The reply to every passability batch (checks shown with their
+    /// pre-implementation output), when set.
+    evidence_reply: Option<String>,
 }
 
 /// The provider the scripted client reports, and fixtures record.
@@ -49,6 +52,7 @@ impl ScriptedAuthorJudge {
             prompts: Mutex::new(Vec::new()),
             provider: SCRIPTED_PROVIDER.into(),
             judge_reply: None,
+            evidence_reply: None,
         }
     }
 
@@ -60,6 +64,11 @@ impl ScriptedAuthorJudge {
 
     pub(crate) fn with_judge_reply(mut self, reply: &str) -> Self {
         self.judge_reply = Some(reply.to_string());
+        self
+    }
+
+    pub(crate) fn with_evidence_reply(mut self, reply: &str) -> Self {
+        self.evidence_reply = Some(reply.to_string());
         self
     }
 
@@ -158,6 +167,11 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
             return Ok(outcome(reply.clone()));
         }
         let prompt = messages[0]["content"].as_str().expect("judge prompt");
+        if let Some(reply) = &self.evidence_reply
+            && prompt.contains("\"baseline\":")
+        {
+            return Ok(outcome(reply.clone()));
+        }
         let checks: Vec<Value> = serde_json::from_str(
             prompt
                 .rsplit_once("Checks: ")

@@ -76,7 +76,8 @@ async fn takeover(case: u8) {
                 &contract,
                 &result,
                 classified
-                    .as_deref()
+                    .as_ref()
+                    .map(|(why, _)| why.as_str())
                     .expect("missing tool must give no verdict"),
                 &at,
             );

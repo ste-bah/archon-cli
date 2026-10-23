@@ -77,11 +77,15 @@ pub async fn cannot_fail_findings(
                     continue;
                 }
             }
-            if let Some(why) = silent::silent_failure_off_thread(contract, result, &at).await {
+            if let Some((why, cause)) =
+                silent::silent_failure_off_thread(contract, result, &at).await
+            {
                 // Issue 328: failing without a verdict proves nothing; failing
                 // so again on the same base goes to the author.
                 let commit = &baseline.commit;
-                if let Some(finding) = silent::settle(probe, commit, contract, result, &why, &at) {
+                let why = (why.as_str(), cause);
+                if let Some(finding) = silent::settle_as(probe, commit, contract, result, why, &at)
+                {
                     findings.insert(id.clone(), finding);
                 }
                 continue;
@@ -163,12 +167,15 @@ pub async fn newly_passing_findings(
             );
         } else if let Some(result) = result {
             let at = silent::baseline_context(probe, contract, result.copy_layout.as_ref());
-            if let Some(reason) = silent::silent_failure_off_thread(contract, result, &at).await {
-                probe.unproven(
+            if let Some((reason, cause)) =
+                silent::silent_failure_off_thread(contract, result, &at).await
+            {
+                probe.unproven_as(
                     id,
                     format!(
                         "the repair gave no verdict on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
                     ),
+                    cause,
                 );
             } else if passed(result) {
                 findings.insert(

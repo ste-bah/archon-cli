@@ -25,6 +25,39 @@ fn both_json_staged_paths_report_operational_failure_through_the_envelope() {
 }
 
 #[test]
+fn authored_incomplete_freeze_stages_the_script_operational_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let staging = temp.path().join("stage");
+    std::fs::create_dir_all(&staging).unwrap();
+    let envelope = staging.join("gate-envelope.json");
+    let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+        "unusable authored reply",
+        &crate::command::workflow_freeze_budget::FreezeProgress::default(),
+    )
+    .authored_judge_reply();
+    report_authored_judge_incomplete(
+        temp.path(),
+        StagedArgs {
+            staging_root: &staging,
+            gate_envelope: &envelope,
+            call_id: "call-1",
+        },
+        "freeze-acceptance",
+        &incomplete,
+    )
+    .unwrap();
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(envelope).unwrap()).unwrap();
+    assert_eq!(value["operational_error"]["kind"], "authored_judge_reply");
+    assert!(
+        value["operational_error"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("unusable authored reply")
+    );
+}
+
+#[test]
 fn both_json_staged_paths_refuse_the_candidate_instead_of_failing_the_run() {
     let whole = include_str!("workflow_freeze_cli.rs");
     // Only the production half counts: this module's own literals would
@@ -148,7 +181,9 @@ fn an_empty_or_missing_cli_path_fails_naming_its_option() {
 }
 
 /// Issue 255: an incomplete, resumable freeze leaves by the host's
-/// operational exit, never through the envelope or a plain failure.
+/// operational exit, never through the envelope or a plain failure -- except
+/// an unusable judge reply the model authored (F3), which the envelope carries
+/// back to the script's retry (`an_authored_judge_incomplete_staged_freeze_...`).
 #[test]
 fn an_incomplete_freeze_exits_by_the_operational_contract() {
     let whole = include_str!("workflow_freeze_cli.rs");
@@ -157,9 +192,24 @@ fn an_incomplete_freeze_exits_by_the_operational_contract() {
         .split("FreezeIncomplete::caused(&error)")
         .nth(1)
         .expect("the staged acceptance freeze tells an incomplete freeze apart");
+    let branch = &branch[..branch.find("\n                }\n").expect("its end")];
+    let authored = branch
+        .split("if incomplete.is_authored_judge_reply() {")
+        .nth(1)
+        .expect("only an authored judge reply is told apart");
+    let (authored, rest) = authored
+        .split_once("\n                    }\n")
+        .expect("its block");
     assert!(
-        branch[..branch.len().min(200)].contains("exit_incomplete_resumable(incomplete)"),
-        "{branch}"
+        authored
+            .trim_start()
+            .starts_with("return report_authored_judge_incomplete("),
+        "{authored}"
+    );
+    assert_eq!(
+        rest.trim(),
+        "exit_incomplete_resumable(incomplete);",
+        "every other incomplete freeze exits resumable: {branch}"
     );
     let exit = source
         .split("fn exit_incomplete_resumable(")
@@ -267,4 +317,74 @@ fn workflow_host_command_shape_and_json_refusals_carry_their_own_stage() {
         assert_eq!(defect["code"], code, "{value}");
         assert_eq!(defect["stage"], stage, "{value}");
     }
+}
+
+/// F3 through the real staged stage: a judge whose every reply is unusable
+/// JSON it authored ends the staged freeze through the gate envelope (kind
+/// `authored_judge_reply`), so the script retries it in its ordinary
+/// no-progress window; it never exits resumable without an envelope. The
+/// stage runs in a child process, so that an exit is observed, not suffered.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_authored_judge_incomplete_staged_freeze_writes_its_envelope_and_returns() {
+    const CHILD: &str = "ARCHON_TEST_STAGED_FREEZE_DIR";
+    let Some(dir) = std::env::var_os(CHILD).map(PathBuf::from) else {
+        let temp = tempfile::tempdir().unwrap();
+        let name = concat!(
+            module_path!(),
+            "::an_authored_judge_incomplete_staged_freeze_writes_its_envelope_and_returns"
+        );
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name.split_once("::").unwrap().1, "--nocapture"])
+            .env(CHILD, temp.path())
+            .output()
+            .unwrap();
+        let envelope = temp.path().join("stage/gate-envelope.json");
+        assert!(
+            output.status.success() && envelope.exists(),
+            "the staged freeze ended {} with no envelope: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(envelope).unwrap()).unwrap();
+        assert_eq!(value["operational_error"]["kind"], "authored_judge_reply");
+        let text = value["operational_error"]["text"].as_str().unwrap();
+        assert!(text.contains("malformed batched JSON"), "{text}");
+        return;
+    };
+    let (project, _outside, tasks, prd) =
+        crate::command::workflow_task_set::outside_set("test -f out");
+    let contract = archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE;
+    let candidate = std::fs::read(tasks.join(contract)).unwrap();
+    let staging = dir.join("stage");
+    std::fs::create_dir_all(&staging).unwrap();
+    let client = std::sync::Arc::new(
+        crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
+            |entry, _| {
+                crate::command::workflow_task_set::reauthor::test_client::command_entry(
+                    entry,
+                    "test -f out",
+                )
+            },
+            |_, _| true,
+        )
+        .with_judge_reply("{ truncated"),
+    );
+    let resume = staged_freeze_resume(&mut std::io::sink());
+    stage_acceptance_candidate(
+        project.path(),
+        (&tasks, &prd),
+        &ArchonConfig::default(),
+        client,
+        &resume,
+        StagedArgs {
+            staging_root: &staging,
+            gate_envelope: &staging.join("gate-envelope.json"),
+            call_id: "call-1",
+        },
+        &candidate,
+    )
+    .await
+    .unwrap();
 }

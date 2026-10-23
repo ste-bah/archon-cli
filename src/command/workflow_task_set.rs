@@ -445,6 +445,8 @@ pub(crate) mod passability_tests_support;
 #[path = "workflow_task_set_tests.rs"]
 mod tests;
 
+#[cfg(all(test, unix))]
+pub(crate) use findings::tests::outside_set;
 #[cfg(test)]
 pub(crate) use publish::fail_after_rename;
 #[cfg(test)]

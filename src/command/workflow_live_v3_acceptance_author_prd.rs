@@ -13,6 +13,21 @@ use std::path::{Path, PathBuf};
 
 use crate::command::workflow_decompose_state::FIXED_STATE_PATH as DECOMPOSITION_STATE;
 
+pub(super) fn project_relative(root: &Path, path: &Path) -> String {
+    let root = root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| root.to_path_buf());
+    let path = path
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| path.to_path_buf());
+    path.strip_prefix(&root)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn canonical(path: &Path) -> Option<PathBuf> {
     path.canonicalize().map(archon_shell::paths::plain).ok()
 }

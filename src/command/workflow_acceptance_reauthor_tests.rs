@@ -31,9 +31,13 @@ fn baseline_finding(id: &str, candidates: &str) -> String {
 #[test]
 fn passability_authored_incomplete_keeps_only_the_affected_checks_pending() {
     let affected = ids(&["AC-F-001", "AC-F-002"]);
-    let authored = anyhow::Error::new(super::super::judge::JudgeIncomplete(
-        "malformed batched JSON".into(),
-    ));
+    let authored = super::super::passability::incomplete_judge_error(
+        anyhow::Error::new(super::super::judge::JudgeIncomplete(
+            "malformed batched JSON".into(),
+        )),
+        &crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance"),
+        affected.iter().cloned().collect(),
+    );
     let (pending, finding) =
         authored_passability_pending(&authored, &affected).expect("authored reply is retryable");
     assert_eq!(pending, affected);
@@ -42,9 +46,13 @@ fn passability_authored_incomplete_keeps_only_the_affected_checks_pending() {
         "{finding}"
     );
 
-    let provider = anyhow::Error::new(super::super::judge::JudgeIncomplete(
-        "the provider gave no reply: disconnected".into(),
-    ));
+    let provider = super::super::passability::incomplete_judge_error(
+        anyhow::Error::new(super::super::judge::JudgeIncomplete(
+            "the provider gave no reply: disconnected".into(),
+        )),
+        &crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance"),
+        vec!["AC-F-001".into()],
+    );
     assert!(
         authored_passability_pending(&provider, &ids(&["AC-F-001"])).is_none(),
         "provider failures keep propagating through the host path"

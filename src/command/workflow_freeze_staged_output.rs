@@ -38,6 +38,23 @@ pub(super) fn report_operational_failure(
     )
 }
 
+/// Surface an authored judge reply through the staged gate envelope so the
+/// author loop can retry its candidate inside the ordinary no-progress window.
+pub(super) fn report_authored_judge_incomplete(
+    cwd: &Path,
+    staged: StagedArgs<'_>,
+    command_id: &str,
+    incomplete: &crate::command::workflow_freeze_budget::FreezeIncomplete,
+) -> Result<()> {
+    let evaluation = crate::command::workflow_gate::GateEvaluation::new(
+        "staged acceptance judge returned no usable authored verdict",
+        Vec::new(),
+    )
+    .with_operational_error(incomplete.report())
+    .with_operational_error_kind("authored_judge_reply");
+    write_staged_manifest(cwd, staged, command_id, evaluation, Vec::new())
+}
+
 /// Refuse a candidate the host cannot even deserialize, as an authoritative
 /// finding rather than a process failure.
 ///

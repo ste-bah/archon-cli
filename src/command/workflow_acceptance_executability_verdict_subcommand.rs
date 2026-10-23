@@ -53,7 +53,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use super::super::verdict_shell::{Simple, simple_commands};
-use super::{ASSERTED, Context, which};
+use super::{ASSERTED, Context, UnprovenCause, which};
 
 #[path = "workflow_acceptance_executability_verdict_subcommand_list.rs"]
 mod list;
@@ -117,7 +117,16 @@ pub(super) fn host_path() -> Option<String> {
 /// program's own line claims is judged as that program's, by this table.) Every cell where the site may lack what the check needs, which
 /// no implementation can supply, gives no verdict: the check goes back to
 /// its author, and never becomes a task that can never pass.
-pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option<String> {
+///
+/// Its cause (F6): only the cell where no program anywhere provides the
+/// word is [`UnprovenCause::ProgramAbsent`], its author's at once; every
+/// other no-verdict cell is the host's (the site lacks what the host has,
+/// or the host could not tell), so it stays unproven under the strike rule.
+pub(super) fn missing(
+    commands: &[Simple],
+    output: &str,
+    at: &Context,
+) -> Option<(String, UnprovenCause)> {
     if ASSERTED.is_match(output) {
         return None;
     }
@@ -154,24 +163,28 @@ pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option
             );
             let depends = depends(&tool, name);
             let host = plugin(&tool, name, at);
+            let site = |why: String| Some((why, UnprovenCause::Host));
             match (listing(&program, at), host) {
-                (Listing::Commands(builtins), _) if builtins.contains(name) => Some(format!(
+                (Listing::Commands(builtins), _) if builtins.contains(name) => site(format!(
                     "{lacks}; the host lists `{name}` as built into `{tool}`, yet `{tool}` rejected it at the check's site, so that site lacks it (for example a toolchain its tree pins, which the host does not read). {depends}"
                 )),
-                (Listing::Commands(_), Some(host)) => Some(format!(
+                (Listing::Commands(_), Some(host)) => site(format!(
                     "{lacks} and `{name}` is not a command built into `{tool}`, though the host has one at {}: a subcommand its environment lacks. {depends}",
                     host.display()
                 )),
-                (Listing::Unlisted(why), Some(host)) => Some(format!(
+                (Listing::Unlisted(why), Some(host)) => site(format!(
                     "{lacks}, though the host has one at {}: a subcommand its environment lacks (whether `{name}` is built into `{tool}` is not known: {why}). {depends}",
                     host.display()
                 )),
-                (Listing::Commands(_), None) => Some(format!(
-                    "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`: it passes only if the deliverable adds it. {}",
-                    guard(&tool, name)
+                (Listing::Commands(_), None) => Some((
+                    format!(
+                        "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`: it passes only if the deliverable adds it. {}",
+                        guard(&tool, name)
+                    ),
+                    UnprovenCause::ProgramAbsent,
                 )),
                 (Listing::Unlisted(_), None) => None,
-                (Listing::NoAnswer(why), _) => Some(format!(
+                (Listing::NoAnswer(why), _) => site(format!(
                     "{lacks}, and the host could not tell whether `{name}` is built into `{tool}`: {why}. {depends}"
                 )),
             }

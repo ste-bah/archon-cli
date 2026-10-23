@@ -416,7 +416,7 @@ async function pauseLoop(w, subject, evidence) {
     subject,
     ordinal,
     ...evidence,
-    recovery
+    recovery: typeof evidence.recovery === "string" ? evidence.recovery : recovery
   });
 }
 

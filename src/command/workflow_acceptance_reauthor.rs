@@ -229,6 +229,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     let mut pending = ids.clone();
     let mut reused = BTreeMap::new();
     let mut unproven_checks = BTreeMap::new();
+    let mut judge_retry_candidates = passability_pending::JudgeRetryCandidates::default();
     if let Some(state_dir) = state_dir {
         for id in ids {
             let frozen = entry(contract, id).expect("named ids were checked above");
@@ -262,6 +263,10 @@ pub(crate) async fn reauthor_partial_with_cache(
             if reused.contains_key(id) {
                 continue;
             }
+            if let Some(candidate) = judge_retry_candidates.take(id) {
+                authored.push(candidate);
+                continue;
+            }
             let frozen = entry(contract, id).expect("named ids were checked above");
             let notes = feedback.get_mut(id).expect("feedback seeded per id");
             let reply = author_entry(client, scope, frozen, notes, attempt).await?;
@@ -287,12 +292,8 @@ pub(crate) async fn reauthor_partial_with_cache(
                 .partition(|candidate| acceptance_ids.contains(&candidate.id));
             subset.acceptance = acceptance;
             subset.supplementary = supplementary;
-            let candidate_ids: Vec<String> = subset
-                .acceptance
-                .iter()
-                .chain(&subset.supplementary)
-                .map(|entry| entry.id.clone())
-                .collect();
+            let candidate_ids = passability_pending::candidate_ids(&subset);
+            let retry_contract = subset.clone();
             let judged = judge::judge_entries_with_roots(
                 client,
                 subset,
@@ -314,6 +315,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                     if judge::JudgeIncomplete::caused(&error)
                         .is_some_and(judge::JudgeIncomplete::is_authored_reply) =>
                 {
+                    judge_retry_candidates.remember_contract(&retry_contract);
                     let finding = format!(
                         "the acceptance judge returned no usable authored verdict: {error:#}; this check remains pending for re-author and judge retry"
                     );
@@ -321,8 +323,6 @@ pub(crate) async fn reauthor_partial_with_cache(
                         if let Some(notes) = feedback.get_mut(&id) {
                             notes.push(finding.clone());
                         }
-                        *entry_mut(&mut working, &id).expect("named id") =
-                            entry(contract, &id).expect("named id").clone();
                     }
                     None
                 }
@@ -350,13 +350,13 @@ pub(crate) async fn reauthor_partial_with_cache(
         if !accepted.is_empty() {
             let _ = gate.probe.take_baseline_runs();
             let mut crashed = gate.probe.script_defects(&working, &accepted).await;
-            let unproven: BTreeMap<String, String> = (gate.probe.take_unproven().into_iter())
+            let unproven: BTreeMap<String, _> = (gate.probe.take_unproven_causes().into_iter())
                 .filter(|(id, _)| accepted.contains(id))
                 .collect();
-            for (id, reason) in unproven {
-                if reason.contains("not on its search path")
-                    || (reason.contains("no program ") && reason.contains("on its search path"))
-                {
+            // F6: only a program neither the site nor the host has is the
+            // author's; a site lacking what the host has stays the host's.
+            for (id, (reason, cause)) in unproven {
+                if cause == super::executability::UnprovenCause::ProgramAbsent {
                     crashed.insert(
                         id.clone(),
                         format!("the check invokes a program unavailable at the probe site ({reason}); choose a check using what the site provides"),

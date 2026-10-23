@@ -593,6 +593,49 @@ function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntri
   return retry;
 }
 
+// A staged freeze whose contract changed after it was prepared publishes
+// nothing and returns the current published contract
+// (`report.current_acceptance_contract`, null when none is published). Its
+// entries replace this loop's, so a newer published repair is never
+// overwritten by an older candidate, and its supplementary checks are owed
+// from then on. A finding of this
+// outcome judged the older candidate, so it sends back only an id the
+// current contract does not supply; that, or an id with no entry, is
+// re-authored. Returns the rebuilt candidate when nothing is, else null with
+// `state.retryIds` set for the next author round.
+function refreshFromCurrentContract(state, report, others, ids, candidate) {
+  if (!report || !Object.prototype.hasOwnProperty.call(report, "current_acceptance_contract")) {
+    throw new Error("a stale acceptance freeze returned no current contract to rebuild from");
+  }
+  const current = report.current_acceptance_contract === null
+    ? { acceptance: [], supplementary: [] } : report.current_acceptance_contract;
+  if (!current || !Array.isArray(current.acceptance) || !Array.isArray(current.supplementary)) {
+    throw new Error("a stale acceptance freeze returned a current contract without entry lists");
+  }
+  const owed = owedSupplementary();
+  for (const entry of current.supplementary) {
+    const sup = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(String(entry && entry.id));
+    if (sup && !owed.has(entry.id)) owed.set(entry.id, { requirement: sup[1], text: currentRequirementText(sup[1]) });
+  }
+  const supplied = new Set();
+  for (const entry of current.acceptance.concat(current.supplementary)) {
+    if (entry && typeof entry.id === "string") { state.entries.set(entry.id, entry); supplied.add(entry.id); }
+  }
+  const all = [...ids].sort().concat([...owed.keys()].sort());
+  const attributed = acceptanceRepairIds(others, ids, false, candidate, state.entries);
+  const flagged = attributed === null ? null : new Set([...attributed].filter((id) => !supplied.has(id)));
+  const missing = all.filter((id) => !state.entries.has(id));
+  if (flagged !== null && flagged.size === 0 && missing.length === 0) {
+    state.retryIds = new Set();
+    return JSON.stringify({
+      entries: [...ids].sort().map((id) => state.entries.get(id)),
+      supplementary: [...owed.keys()].sort().map((id) => state.entries.get(id))
+    });
+  }
+  state.retryIds = flagged === null ? null : new Set([...flagged, ...missing]);
+  return null;
+}
+
 function currentRequirementText(requirement) {
   const text = (args.prdRequirementTexts || {})[requirement];
   if (typeof text !== "string") throw new Error(`current PRD text is missing for supplementary requirement ${requirement}`);

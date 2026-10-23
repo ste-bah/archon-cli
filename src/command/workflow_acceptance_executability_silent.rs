@@ -28,7 +28,7 @@ use std::path::PathBuf;
 #[cfg(test)]
 use super::silent_strike::normalize_path;
 use super::silent_strike::setup_path_signature;
-use super::verdict::{Context, no_verdict};
+use super::verdict::{Context, no_verdict_cause};
 use super::*;
 use crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR;
 use crate::command::workflow_task_set::passability::evidence::{Redactor, program_output};
@@ -135,11 +135,14 @@ pub(super) async fn silent_failure_off_thread(
     contract: &AcceptanceContract,
     result: &CheckResult,
     at: &Context,
-) -> Option<String> {
+) -> Option<(String, UnprovenCause)> {
     let (contract, result, at) = (contract.clone(), result.clone(), at.clone());
-    tokio::task::spawn_blocking(move || silent_failure(&contract, &result, &at))
+    tokio::task::spawn_blocking(move || silent_failure_cause(&contract, &result, &at))
         .await
-        .unwrap_or_else(|error| Some(format!("deciding its verdict failed: {error}")))
+        .unwrap_or_else(|error| {
+            let why = format!("deciding its verdict failed: {error}");
+            Some((why, UnprovenCause::Host))
+        })
 }
 
 /// Why `result`, a failed run of a check of `contract`, gave no verdict;
@@ -149,11 +152,20 @@ pub(super) fn silent_failure(
     result: &CheckResult,
     at: &Context,
 ) -> Option<String> {
+    silent_failure_cause(contract, result, at).map(|(why, _)| why)
+}
+
+/// [`silent_failure`] with its cause ([`UnprovenCause`]).
+fn silent_failure_cause(
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<(String, UnprovenCause)> {
     let entry = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .find(|entry| entry.id == result.acceptance_id)?;
     let (_, text) = executed_text(entry)?;
-    no_verdict(text, result, at)
+    no_verdict_cause(text, result, at)
 }
 
 pub(super) async fn setup_path_failure_off_thread(
@@ -220,12 +232,32 @@ fn check_text<'a>(contract: &'a AcceptanceContract, id: &str) -> &'a str {
 /// unproven the first time (the strike is saved, which a staged freeze
 /// counts as progress, so it is retried); the author's finding when an
 /// earlier attempt already saw it fail so.
+#[cfg(test)]
 pub(super) fn settle(
     probe: &HostProbe,
     commit: &str,
     contract: &AcceptanceContract,
     result: &CheckResult,
     why: &str,
+    at: &Context,
+) -> Option<String> {
+    settle_as(
+        probe,
+        commit,
+        contract,
+        result,
+        (why, UnprovenCause::Host),
+        at,
+    )
+}
+
+/// [`settle`], recording an unproven check with the cause of `why`.
+pub(super) fn settle_as(
+    probe: &HostProbe,
+    commit: &str,
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    (why, cause): (&str, UnprovenCause),
     at: &Context,
 ) -> Option<String> {
     let id = result.acceptance_id.as_str();
@@ -240,7 +272,7 @@ pub(super) fn settle(
         contract,
         id,
         signature.as_deref(),
-        why,
+        (why, cause),
         || {
             (
                 format!(
@@ -271,7 +303,7 @@ fn strike_or_unproven(
     contract: &AcceptanceContract,
     id: &str,
     setup_signature: Option<&str>,
-    why: &str,
+    why: (&str, UnprovenCause),
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
     let path = match setup_signature {
@@ -293,7 +325,7 @@ fn struck(
     probe: &HostProbe,
     path: &std::path::Path,
     id: &str,
-    why: &str,
+    (why, cause): (&str, UnprovenCause),
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
     let (finding, unproven) = texts();
@@ -340,7 +372,7 @@ fn struck(
         }
         archon_workflow::stage_write::write_bytes(path, why.as_bytes())?;
         probe.resume.progress.saved(false);
-        probe.unproven(id, unproven);
+        probe.unproven_as(id, unproven, cause);
         archon_workflow::WorkflowResult::Ok(None)
     });
     match settled {

@@ -13,6 +13,7 @@ use super::super::exec::StageContext;
 pub(in super::super) struct Refused {
     pub(in super::super) findings: Vec<(String, String)>,
     pub(in super::super) error: String,
+    pub(in super::super) stale_contract: bool,
 }
 
 /// Freeze `contract` exactly as `workflow freeze-acceptance` publishes, under
@@ -23,6 +24,7 @@ pub(in super::super) fn publish_fresh(
     prd_path: &Path,
     contract: &AcceptanceContract,
     baseline_commit: Option<String>,
+    live_contract_digest: Option<String>,
 ) -> Result<String, Refused> {
     archon_workflow::stage_write::with_write(|| {
         archon_workflow::WorkflowResult::Ok(publish_fresh_owned(
@@ -30,11 +32,13 @@ pub(in super::super) fn publish_fresh(
             prd_path,
             contract,
             baseline_commit,
+            live_contract_digest,
         ))
     })
     .map_err(|error| Refused {
         findings: Vec::new(),
         error: error.to_string(),
+        stale_contract: false,
     })?
 }
 
@@ -43,16 +47,17 @@ fn publish_fresh_owned(
     prd_path: &Path,
     contract: &AcceptanceContract,
     baseline_commit: Option<String>,
+    live_contract_digest: Option<String>,
 ) -> Result<String, Refused> {
     use crate::command::workflow_gate::{GateEvaluation, GateId, run_sync_gate};
     let refused = |error: anyhow::Error| Refused {
         findings: Vec::new(),
         error: format!("{error:#}"),
+        stale_contract: error
+            .downcast_ref::<crate::command::workflow_task_set::StaleAcceptanceContract>()
+            .is_some(),
     };
     let mode = archon_core::config::GateMode::Enforce;
-    let live_contract_digest =
-        crate::command::workflow_task_set::capture_live_contract_digest(&context.task_root)
-            .map_err(refused)?;
     let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
         &context.project,
         &context.task_root,
@@ -77,6 +82,7 @@ fn publish_fresh_owned(
         return Err(Refused {
             findings,
             error: format!("{error:#}"),
+            stale_contract: false,
         });
     }
     let permit = disposition
@@ -84,6 +90,7 @@ fn publish_fresh_owned(
         .ok_or_else(|| Refused {
             findings: Vec::new(),
             error: "the acceptance freeze received no publication permit".into(),
+            stale_contract: false,
         })?;
     let result = crate::command::workflow_task_set::publish_acceptance_freeze(prepared, permit)
         .map_err(refused)?;

@@ -127,7 +127,7 @@ async function authorBodies(w, work, bodies) {
   const pending = [];
   settled.forEach((result, index) => {
     if (result && result.status === "fulfilled") {
-      if (result.value?.pendingAuthor) pending.push([work[index][0], result.value.findings]);
+      if (result.value?.pendingAuthor) pending.push([work[index][0], result.value.findings, work[index][1] || []]);
       else bodies.set(work[index][0].fileName, result.value);
     }
   });
@@ -140,7 +140,9 @@ async function authorBodies(w, work, bodies) {
       last_findings: pending.flatMap(([, findings]) => findings).slice(0, PAUSE_EVIDENCE_FINDINGS),
       recovery: "The run is paused with authored subjects pending. Resume to retry these subjects; completed independent bodies remain published."
     });
-    await authorBodies(w, pending, bodies);
+    await authorBodies(w, pending.map(([subject, findings, priorFeedback]) => [
+      subject, [...priorFeedback, ...findings]
+    ]), bodies);
   }
 }
 

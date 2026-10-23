@@ -168,7 +168,7 @@ async fn the_verdict_path_lists_off_the_async_thread() {
     let silent = super::super::super::silent::silent_failure_off_thread;
     let why = silent(&check, &odd, &bin.context()).await;
     let during = ticks.load(Ordering::SeqCst);
-    assert!(why.is_some_and(|why| why.contains(NOWHERE)));
+    assert!(why.is_some_and(|(why, _)| why.contains(NOWHERE)));
     // The originals a repair holds, at a site of its own (another
     // variable), so the tool is listed there too.
     let site = bin.context_with(&[("ARCHON_333_SITE", "repair")]);

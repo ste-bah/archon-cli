@@ -267,6 +267,14 @@ impl FreezeIncomplete {
         self.authored_judge_reply
     }
 
+    /// The checks still awaiting a verdict; none when the cause names none.
+    pub(crate) fn deferred(&self) -> &[String] {
+        match &self.cause {
+            IncompleteCause::Budget { deferred, .. } => deferred,
+            IncompleteCause::Stalled(_) | IncompleteCause::Unsaved(_) => &[],
+        }
+    }
+
     /// What the staged freeze writes to stderr before it exits
     /// `EXIT_INCOMPLETE_RESUMABLE`: the reason, then the progress line,
     /// last, as the host reads it.

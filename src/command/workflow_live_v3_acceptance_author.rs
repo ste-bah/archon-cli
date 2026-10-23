@@ -55,9 +55,9 @@ mod publish;
 mod staging;
 use publish::Refused;
 pub(super) use publish::publish_fresh;
-pub(super) use staging::Staged;
 #[cfg(test)]
 use staging::staging_path;
+pub(super) use staging::{Staged, owed_errors};
 
 /// Why a repair record says the host authored checks.
 pub(super) const REPAIR_TRIGGER_AUTHORED: &str = "authored_in_run";
@@ -287,42 +287,12 @@ pub(super) async fn author_owed(
     Ok(Ok(probe.take_diagnostics()))
 }
 
-/// One round error per owed check still unauthored, with its last finding.
-pub(super) fn owed_errors(owed: &[AcceptanceCriterion], staged: &Staged, how: &str) -> Vec<String> {
-    (owed.iter())
-        .filter(|entry| !staged.entries.contains_key(&entry.id))
-        .map(|entry| {
-            format!(
-                "acceptance check {} is owed ({how}) and not yet authored and accepted; the host authors it again next round{}",
-                entry.id,
-                staged
-                    .feedback
-                    .get(&entry.id)
-                    .map_or(String::new(), |why| format!(": {why}"))
-            )
-        })
-        .collect()
-}
-
-fn project_relative(root: &Path, path: &Path) -> String {
-    let root = root
-        .canonicalize()
-        .map(archon_shell::paths::plain)
-        .unwrap_or_else(|_| root.to_path_buf());
-    let path = path
-        .canonicalize()
-        .map(archon_shell::paths::plain)
-        .unwrap_or_else(|_| path.to_path_buf());
-    path.strip_prefix(&root)
-        .unwrap_or(&path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
 /// REM-13: a task set with no frozen contract -- none at all, or an
 /// unfrozen candidate, and no pin -- gets one authored and frozen here.
 /// `None` when the task set is frozen (or its chain is only partly there,
-/// which is the stage's integrity error, never a reason to re-freeze).
+/// which is the stage's integrity error, never a reason to re-freeze). A
+/// contract published while the author ran is never overwritten: the heal
+/// starts again from it, keeping every staged entry.
 pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Authored>> {
     let context = site.context;
     let pin = crate::command::workflow_task_set::acceptance_pin_path(
@@ -367,7 +337,7 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
     let mut base = AcceptanceContract {
         schema_version: 1,
         prd: PrdIdentity {
-            path: project_relative(&context.project, &prd_path),
+            path: prd::project_relative(&context.project, &prd_path),
             digest: prd_digest.clone(),
         },
         gap_policy: GapPolicy {
@@ -412,6 +382,15 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
         Ok(staged) => staged,
         Err(why) => return failed(why),
     };
+    let live_contract_digest =
+        match crate::command::workflow_task_set::capture_live_contract_digest(&context.task_root) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return failed(format!(
+                    "reading the live acceptance contract digest: {error:#}"
+                ));
+            }
+        };
     let diagnostics = match author_owed(
         site,
         &prd_path,
@@ -436,7 +415,13 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
     }
     let contract = working(&base, &owed, &staged);
     let baseline = baseline_of(site).map(|baseline| baseline.commit);
-    let published = publish_fresh(context, &prd_path, &contract, baseline);
+    let published = publish_fresh(
+        context,
+        &prd_path,
+        &contract,
+        baseline,
+        live_contract_digest,
+    );
     let mut repair = AcceptanceContractRepairV1 {
         check_ids,
         trigger: REPAIR_TRIGGER_AUTHORED.into(),
@@ -455,7 +440,19 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
                 errors: Vec::new(),
             }))
         }
-        Err(Refused { findings, error }) => {
+        Err(Refused {
+            findings,
+            error,
+            stale_contract,
+        }) => {
+            if stale_contract {
+                // Published under the author: nothing was overwritten. Retry
+                // from the current contract with every staged entry kept.
+                if let Err(why) = staged.save(site.run_dir) {
+                    return failed(why);
+                }
+                return Box::pin(heal_unfrozen(site)).await;
+            }
             // Each check a gate finding names goes back to its author.
             for (subject, text) in &findings {
                 if staged.entries.contains_key(subject) {

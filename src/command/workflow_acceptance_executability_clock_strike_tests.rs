@@ -22,7 +22,7 @@ fn issue356_legacy_total_clock_strikes_do_not_authorize_a_finding() {
             &contract,
             "AC-B-001",
             None,
-            "a tool could not run",
+            ("a tool could not run", UnprovenCause::Host),
             || ("author finding".into(), "host unproven".into()),
         );
         assert!(

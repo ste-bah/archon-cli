@@ -135,11 +135,11 @@ fn replay_fixture() -> ReplayFixture {
     archon_workflow::repository_record::write_repository_record(&tasks, &record).unwrap();
     // The shim keeps the replay offline and preserves the two host failure
     // classes: a missing sibling manifest, and cargo's unavailable nextest
-    // subcommand at the site.
+    // subcommand at the site, which it lists no built-in command for.
     let cargo = tool_bin.join("cargo");
     std::fs::write(
         &cargo,
-        "#!/bin/sh\ncase \"$*\" in\n  *--manifest-path*)\n    if [ -f ../archon-cli/Cargo.toml ]; then exit 0; fi\n    echo 'error: manifest path `../archon-cli/Cargo.toml` does not exist' >&2\n    exit 101\n    ;;\n  *nextest*) echo 'error: no such command: `nextest`' >&2; exit 101 ;;\n  *) exit 0 ;;\nesac\n",
+        "#!/bin/sh\ncase \"$*\" in\n  --list) printf 'Installed Commands:\\n    build\\n    test\\n' ;;\n  *--manifest-path*)\n    if [ -f ../archon-cli/Cargo.toml ]; then exit 0; fi\n    echo 'error: manifest path `../archon-cli/Cargo.toml` does not exist' >&2\n    exit 101\n    ;;\n  *nextest*) echo 'error: no such command: `nextest`' >&2; exit 101 ;;\n  *) exit 0 ;;\nesac\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -171,6 +171,15 @@ fn replay_fixture() -> ReplayFixture {
 async fn recorded_resume_failures_become_author_findings_and_allow_only_the_valid_repair_to_publish()
  {
     let fixture = replay_fixture();
+    // The recorded failure is a subcommand neither the site nor the host
+    // has (F6): pin the host's search path so the machine running this
+    // test cannot supply it.
+    let site_path = format!(
+        "{}:/usr/bin:/bin",
+        fixture.project.parent().unwrap().join("site-bin").display()
+    );
+    crate::command::workflow_task_set::executability::HOST_PATH
+        .with(|path| *path.borrow_mut() = Some(site_path));
     let named = BTreeSet::from(["SUP-REQ-F-083".to_string()]);
     let initial_pin: archon_workflow::task_set_contract::AcceptancePin = serde_json::from_slice(
         &std::fs::read(crate::command::workflow_task_set::acceptance_pin_path(
@@ -211,6 +220,8 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
     .await
     .expect("the valid third reply publishes after both recorded findings");
 
+    crate::command::workflow_task_set::executability::HOST_PATH
+        .with(|path| *path.borrow_mut() = None);
     let prompts = client.prompts.lock().unwrap();
     assert_eq!(prompts.len(), 3, "both drafts were shown back as findings");
     assert!(

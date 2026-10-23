@@ -121,10 +121,12 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // #476 re-pin only: block-form refusal guidance changed; verdict rules unchanged.
     // #497: stalled bodies stay pending until their siblings settle, then pause once;
     // an unusable freeze judge reply retries inside the ordinary no-progress window.
+    // F8b: a pause keeps its caller's recovery and a pending body its earlier note;
+    // C4: a stale acceptance freeze rebuilds its candidate from the current contract.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "596a12b64101511466762f53ebd659e7a54cdca8704e5b0c7671042c749a5cfd"
+        "2012e30746818f8d3d1d53ca55ba432a9a1851f7aa92912f18bd18aaab2b67f8"
     );
 }

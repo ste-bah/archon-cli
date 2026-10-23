@@ -164,9 +164,14 @@ impl HostProbe {
 
     /// Record that the host could not prove `id`.
     pub(super) fn unproven(&self, id: &str, why: String) {
+        self.unproven_as(id, why, UnprovenCause::Host);
+    }
+
+    /// Record that the host could not prove `id`, for `cause`.
+    pub(super) fn unproven_as(&self, id: &str, why: String, cause: UnprovenCause) {
         self.unproven
             .lock()
             .expect("unproven lock")
-            .insert(id.to_string(), why);
+            .insert(id.to_string(), (why, cause));
     }
 }

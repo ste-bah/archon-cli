@@ -109,6 +109,48 @@ async fn a_task_set_without_a_contract_gets_one_authored_frozen_and_run() {
     assert_eq!(result.data["final"], true);
 }
 
+/// C5: another writer freezes a contract while the in-round author runs.
+/// The heal's publication finds the contract changed under it, overwrites
+/// nothing, and starts again from the current contract: the newer published
+/// entry is kept and run, and no gate refusal is reported.
+#[tokio::test]
+async fn a_contract_published_while_the_author_runs_is_kept_not_overwritten() {
+    let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+    let mut newer = run.set.contract();
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut newer.acceptance[0].check
+    {
+        *command = "test -s present".into();
+    }
+    unfrozen(&run);
+    pre_implementation_head(&run);
+    let (project, tasks) = (run.set.project.path().to_path_buf(), run.set.tasks.clone());
+    let published = newer.clone();
+    let once = std::sync::atomic::AtomicBool::new(false);
+    let client = ScriptedAuthorJudge::new(
+        move |entry, _| {
+            if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                write_chain(&project, &tasks, &published, FreezeGateMode::Enforce, 0);
+            }
+            command_entry(entry, "test -f present && test -s present")
+        },
+        |_, _| true,
+    );
+    let (result, record) = stage(&run, &client).await;
+    assert!(
+        record.operational_errors.is_empty(),
+        "a stale base is retried, never refused: {:?}",
+        record.operational_errors
+    );
+    assert_eq!(
+        run.set.contract(),
+        newer,
+        "the contract published under the author is not overwritten"
+    );
+    assert_eq!(record.passed_check_ids(), vec!["AC-F-001"]);
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+}
+
 /// M5: with no run base commit and no checkout to fall back to, no
 /// authored check can be proven able to fail: a round error naming why,
 /// and nothing is frozen.

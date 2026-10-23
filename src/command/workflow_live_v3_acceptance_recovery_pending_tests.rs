@@ -83,6 +83,7 @@ fn pending_evidence(damage: Damage) {
         &run.set.prd,
         &run.set.contract(),
         None,
+        crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
     );
     let error = result
         .err()
