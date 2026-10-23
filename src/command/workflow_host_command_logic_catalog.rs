@@ -128,7 +128,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "4a146b42c82a5306c1644239693cab222da89a7b12bd974b79255035b1cff0eb",
+        sources_digest: "ed9dc71bd96cf19c2932785ec10069b18c3999eab8c1601556360e8174af5e96",
         build_bound: false,
     },
     CapabilityLogic {
@@ -156,7 +156,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "4a146b42c82a5306c1644239693cab222da89a7b12bd974b79255035b1cff0eb",
+        sources_digest: "ed9dc71bd96cf19c2932785ec10069b18c3999eab8c1601556360e8174af5e96",
         build_bound: false,
     },
     CapabilityLogic {
