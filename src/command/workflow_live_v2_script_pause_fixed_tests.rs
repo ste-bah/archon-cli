@@ -252,10 +252,15 @@ async fn a_stalled_body_pauses_the_fixed_run_and_a_resume_after_a_fix_accepts_it
     let paused = pause_events(&store, &run_id);
     assert_eq!(paused.len(), 1, "{paused:?}");
     let detail = &paused[0].detail;
-    assert_eq!(detail["pause_id"], "pause-body-TASK-X-010-1", "{detail}");
-    assert_eq!(detail["evidence"]["subject"], "body-TASK-X-010", "{detail}");
-    assert_eq!(detail["evidence"]["reason"], "no_progress", "{detail}");
-    assert_eq!(detail["evidence"]["author_calls"], 4, "{detail}");
+    // Issue 497: the stalled body is held pending until its siblings settle,
+    // then the run pauses once for every pending subject.
+    assert_eq!(detail["pause_id"], "pause-authored-pending-1", "{detail}");
+    assert_eq!(
+        detail["evidence"]["pending_subjects"],
+        serde_json::json!(["TASK-X-010"]),
+        "{detail}"
+    );
+    assert_eq!(detail["evidence"]["reason"], "authored_pending", "{detail}");
     assert!(
         detail["evidence"]["last_findings"][0]
             .as_str()
@@ -294,15 +299,21 @@ async fn a_resume_with_nothing_changed_makes_new_attempts_before_it_pauses_again
         matches!(error, WorkflowError::ControlPaused(_)),
         "{error:?}"
     );
+    // Issue 497: the resume re-authors the pending subject in a fresh author
+    // window (a baseline attempt and three without progress), not an
+    // immediate re-pause.
     assert_eq!(
         llm.calls.load(Ordering::SeqCst),
-        9,
-        "the resume grants a fresh window: three new attempts, not an immediate re-pause"
+        10,
+        "the resume grants a fresh window: four new attempts, not an immediate re-pause"
     );
     let paused = pause_events(&store, &run_id);
     assert_eq!(paused.len(), 2, "{paused:?}");
-    assert_eq!(paused[1].detail["pause_id"], "pause-body-TASK-X-010-2");
-    assert_eq!(paused[1].detail["evidence"]["author_calls"], 7);
+    assert_eq!(paused[1].detail["pause_id"], "pause-authored-pending-2");
+    assert_eq!(
+        paused[1].detail["evidence"]["pending_subjects"],
+        serde_json::json!(["TASK-X-010"])
+    );
 }
 
 /// A refused landing (no receipt) is the subject's last record before the

@@ -119,10 +119,12 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     );
     // #472 re-pin only: reply unwrapping and mixed-form refusal text; verdict rules unchanged.
     // #476 re-pin only: block-form refusal guidance changed; verdict rules unchanged.
+    // #497: stalled bodies stay pending until their siblings settle, then pause once;
+    // an unusable freeze judge reply retries inside the ordinary no-progress window.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "6570ff9657862fe29664b5a9aef9f6ddaa0e9aa784a1664b521bf039b48e5c72"
+        "596a12b64101511466762f53ebd659e7a54cdca8704e5b0c7671042c749a5cfd"
     );
 }

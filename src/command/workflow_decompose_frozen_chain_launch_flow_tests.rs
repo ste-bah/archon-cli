@@ -421,6 +421,8 @@ async fn a_refuted_launch_repair_is_logged_and_leaves_the_chain_for_the_run_repa
     );
 }
 
+#[path = "workflow_decompose_frozen_chain_partial_repair_test.rs"]
+mod partial_repair_test;
 #[path = "workflow_decompose_frozen_chain_refutation_script_test.rs"]
 mod refutation_script_test;
 

@@ -366,9 +366,53 @@ pub(crate) async fn after_claim(
             run_id,
             seq,
             WorkflowEventKind::DecompositionPhaseCompleted,
-            detail,
+            detail.clone(),
         )?;
         lines.push(line);
+        if let Some((ids, reasons)) = detail
+            .get("pending_ids")
+            .and_then(serde_json::Value::as_array)
+            .filter(|pending| !pending.is_empty())
+            .map(|pending| {
+                let ids = pending
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                let reasons = detail
+                    .get("unproven")
+                    .and_then(serde_json::Value::as_object)
+                    .map(|unproven| {
+                        ids.iter()
+                            .filter_map(|id| {
+                                unproven.get(id).map(|reason| format!("{id}: {reason}"))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    })
+                    .unwrap_or_default();
+                (ids, reasons)
+            })
+        {
+            let routed = format!(
+                "frozen_chain_launch acceptance=reauthor_refuted_routed ids={} detail={}",
+                ids.join(","),
+                crate::command::workflow_decompose_events::log_field(&reasons)
+            );
+            log(&routed)?;
+            lines.push(routed);
+            launched.acceptance = false;
+            launched.skeleton = false;
+            launched.subjects.clear();
+            launched.bodies.clear();
+            launched.body_digests.clear();
+            for line in &lines {
+                ui.emit(archon_workflow::WorkflowUiEvent::Text(format!("{line}\n")))
+                    .await
+                    .map_err(|error| anyhow!("reporting {line}: {error}"))?;
+            }
+            return Ok(());
+        }
         let republished = frozen_chain_snapshot(project_root, prd_path, task_root)
             .context("reading the frozen chain the launch republished")?;
         let new_skeleton_bytes = if launched.skeleton {
