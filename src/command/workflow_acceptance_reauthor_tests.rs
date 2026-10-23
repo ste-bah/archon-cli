@@ -23,7 +23,7 @@ fn ids(list: &[&str]) -> BTreeSet<String> {
 
 fn baseline_finding(id: &str, candidates: &str) -> String {
     format!(
-        "check '{id}': it {} at base; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must still fail on its own assertion when that input is moved aside; considered inputs: {candidates}",
+        "check '{id}': it {} at base; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must fail whenever the deciding test fails; considered inputs: {candidates}",
         super::executability::CANNOT_FAIL
     )
 }

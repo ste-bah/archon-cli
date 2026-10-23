@@ -9,7 +9,7 @@ pub(super) fn baseline_escalation(
         "data the check writes itself is never evidence",
         "movable inputs must exist under the check's selected root before the run",
         "select the root that contains the existing implementation or test dependency",
-        "the check must still fail on its own assertion when that input is moved aside",
+        "the check must fail whenever the deciding test fails",
     ];
     let notes: Vec<&String> = pending.iter().zip(lines).map(|(_, line)| line).collect();
     if notes.len() != pending.len()

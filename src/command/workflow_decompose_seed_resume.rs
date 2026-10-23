@@ -370,6 +370,8 @@ fn reverify_report_publications(
     if selected.is_empty() {
         return Ok(Vec::new());
     }
+    let durable_publications =
+        crate::command::workflow_decompose_remediation::resolved_publication_times(run_root)?;
     let mut publications = Vec::new();
     for report_id in selected {
         let at = reports[&report_id];
@@ -391,7 +393,13 @@ fn reverify_report_publications(
                 .into_iter()
                 .flatten()
                 .filter_map(serde_json::Value::as_str)
-                .map(|id| (id.to_string(), at)),
+                .map(|id| {
+                    let published_at = durable_publications
+                        .get(&(report_id.clone(), id.to_string()))
+                        .copied()
+                        .unwrap_or(at);
+                    (id.to_string(), published_at)
+                }),
         );
     }
     Ok(publications)

@@ -371,8 +371,6 @@ pub(super) async fn prove(
 }
 
 fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
-    const STDOUT_BYTES: usize = 600;
-    const STDERR_BYTES: usize = 2_000;
     // Captured output is already bounded by the capture limit, so the whole
     // capture is redacted before the excerpt keeps its tail: a cut before
     // redaction could split a secret and leave part of it in the record.
@@ -381,8 +379,14 @@ fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) ->
         let redacted = archon_observability::redaction::redact_secret_values(&decoded);
         archon_workflow::failure_evidence::failure_evidence(redacted.as_bytes(), budget)
     }
-    let stdout = bounded_excerpt(&result.stdout, STDOUT_BYTES);
-    let stderr = bounded_excerpt(&result.stderr, STDERR_BYTES);
+    let stdout = bounded_excerpt(
+        &result.stdout,
+        crate::command::workflow_task_set::passability::evidence::STDOUT_BYTES,
+    );
+    let stderr = bounded_excerpt(
+        &result.stderr,
+        crate::command::workflow_task_set::passability::evidence::STDERR_BYTES,
+    );
     let excerpt = format!("stdout: {stdout}\nstderr: {stderr}");
     excerpt
 }

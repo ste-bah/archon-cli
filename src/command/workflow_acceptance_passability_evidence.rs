@@ -8,8 +8,8 @@ use serde::Serialize;
 use super::super::executability::BaselineRuns;
 
 /// Bytes of the baseline stderr, then stdout, the judge and the author see.
-const STDERR_BYTES: usize = 2_000;
-const STDOUT_BYTES: usize = 600;
+pub(crate) const STDERR_BYTES: usize = 2_000;
+pub(crate) const STDOUT_BYTES: usize = 600;
 /// The judge's prose in a finding, flattened to one line and capped.
 const PROSE_CAP: usize = 400;
 /// Bytes of one covered requirement's text the judge sees.

@@ -422,8 +422,8 @@ pub(super) mod workflow_acceptance_check_reuse;
 #[cfg(test)]
 pub(crate) use findings::prepare_acceptance_freeze_reauthoring;
 pub(crate) use findings::{
-    non_accepted_ids, prepare_acceptance_freeze_reauthoring_with_limits, prepare_from_judged,
-    unproven_incomplete,
+    capture_live_contract_digest, non_accepted_ids,
+    prepare_acceptance_freeze_reauthoring_with_limits, prepare_from_judged, unproven_incomplete,
 };
 #[cfg(test)]
 use publish::cleanup_committed_backups;

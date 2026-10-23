@@ -86,6 +86,41 @@ fn a_reply_newer_than_the_publication_remains_an_overlay() {
 }
 
 #[test]
+fn per_check_publication_time_drops_only_replies_started_before_republish() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("decomposition/reverify")).unwrap();
+    std::fs::write(
+        temp.path().join("events.jsonl"),
+        r#"{"ts":"2026-10-22T01:00:00Z","kind":"decomposition_reverified","detail":{"outcome":"needs_remediation","report_id":"reverify-report"}}"#,
+    ).unwrap();
+    std::fs::write(
+        temp.path()
+            .join("decomposition/reverify/remediation-reverify-report.json"),
+        r#"{"report_id":"reverify-report","subjects":["AC-X-001"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        temp.path().join("decomposition/reverify/resolved.jsonl"),
+        r#"{"report_id":"reverify-report","subjects":{"AC-X-001":"digest"},"published_at":"2026-10-22T03:00:00Z"}"#,
+    ).unwrap();
+
+    let current = entry("AC-X-001", "repaired");
+    let publications = super::reverify_report_publications(temp.path()).unwrap();
+    assert_eq!(publications.len(), 1);
+    let published_at = publications[0].1;
+    assert!(super::reply_was_published_after(
+        Some(&vec![(published_at, current.clone())]),
+        at("2026-10-22T02:00:00Z"),
+        &current,
+    ));
+    assert!(!super::reply_was_published_after(
+        Some(&vec![(published_at, current.clone())]),
+        at("2026-10-22T04:00:00Z"),
+        &current,
+    ));
+}
+
+#[test]
 fn later_acceptance_freeze_keeps_all_seven_repaired_bytes() {
     let repairs: Vec<_> = (0..7)
         .map(|index| entry(&format!("SUP-REQ-REPAIR-{index:03}"), "per-check repaired"))

@@ -66,6 +66,27 @@ fn is_consumed_treats_missing_file_as_empty_and_names_invalid_utf8_path() {
 }
 
 #[test]
+fn consumed_journal_ignores_only_an_unterminated_partial_final_line() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("decomposition/reverify/consumed.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"{\"report_id\":\"complete\"}\n{\"report_id\":").unwrap();
+
+    assert!(!is_consumed(temp.path(), "partial").unwrap());
+    assert!(is_consumed(temp.path(), "complete").unwrap());
+}
+
+#[test]
+fn consumed_journal_rejects_a_malformed_terminated_line() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("decomposition/reverify/consumed.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"{\"report_id\":\"complete\"}\nnot-json\n").unwrap();
+
+    assert!(is_consumed(temp.path(), "missing").is_err());
+}
+
+#[test]
 fn generated_ledger_subjects_keep_first_seen_order() {
     let subjects = deduplicate_subjects(
         ["TASK-X-010", "TASK-X-020", "TASK-X-010", "TASK-X-010"]

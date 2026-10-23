@@ -56,6 +56,7 @@ pub(super) fn refreeze(run: &Run) {
         archon_core::config::GateMode::Observe,
         &contract,
         None,
+        crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
     )
     .unwrap();
     prepared.record_recovery_refreeze().unwrap();

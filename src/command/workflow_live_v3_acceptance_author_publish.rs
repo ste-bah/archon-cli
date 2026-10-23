@@ -50,6 +50,9 @@ fn publish_fresh_owned(
         error: format!("{error:#}"),
     };
     let mode = archon_core::config::GateMode::Enforce;
+    let live_contract_digest =
+        crate::command::workflow_task_set::capture_live_contract_digest(&context.task_root)
+            .map_err(refused)?;
     let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
         &context.project,
         &context.task_root,
@@ -57,6 +60,7 @@ fn publish_fresh_owned(
         mode,
         contract,
         baseline_commit,
+        live_contract_digest,
     )
     .map_err(refused)?;
     prepared.record_recovery_refreeze().map_err(refused)?;

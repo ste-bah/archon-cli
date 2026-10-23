@@ -159,6 +159,7 @@ fn issue301_unbound_live_skeleton_tampering_is_refused_before_rebinding() {
         archon_core::config::GateMode::Observe,
         &run.set.contract(),
         None,
+        crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
     )
     .unwrap();
     let error = prepared
@@ -291,6 +292,7 @@ fn combined_shape(format: bool, tampered: bool, rebound: bool, changed_shape: bo
             archon_core::config::GateMode::Observe,
             &run.set.contract(),
             None,
+            crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
         )
         .unwrap();
         let result = prepared.record_recovery_refreeze();
@@ -399,6 +401,7 @@ fn prior_pin_live_launch_skeleton(mode: &str) {
         archon_core::config::GateMode::Observe,
         &run.set.contract(),
         None,
+        crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
     )
     .unwrap();
     let error = prepared

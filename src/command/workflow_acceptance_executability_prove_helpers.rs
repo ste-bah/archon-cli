@@ -158,7 +158,7 @@ pub(in crate::command::workflow_task_set::executability) fn author_recreated_fin
     paths: &[String],
 ) -> String {
     format!(
-        "{passed_there}; it recreated {} while running, so that data is not evidence; use a movable input that exists under the selected root before the run and make the check fail on its own assertion when it is moved aside",
+        "{passed_there}; it recreated {} while running, so that data is not evidence; use a movable input that exists under the selected root before the run and make the check fail whenever the deciding test fails",
         paths.join(", ")
     )
 }

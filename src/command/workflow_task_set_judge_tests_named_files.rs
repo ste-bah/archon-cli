@@ -31,10 +31,10 @@ fn named_file_judge_rules_cover_asserting_regression_guards() {
     let prompt = batched_judge_prompt(&contract()).unwrap();
     for rule in [
         "A check that runs an existing test or implementation whose given file contents (named_files) assert the criterion is a valid regression guard.",
-        "A check that names its deciding file by a literal path relative to its working directory and whose named_files assert the criterion is a valid regression guard.",
-        "For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail on its own assertion; failing when a named file is moved aside is that proof and is never a counterexample.",
+        "For a criterion that already holds before implementation, the host proves the check by moving the literally named input file or files aside and requiring the check to fail; that host proof is never a counterexample.",
         "Duplicated or relocated implementation elsewhere is not an in-bounds counterexample for a guard whose named test asserts the criterion.",
-        "A counterexample against such a guard must show that the named file's assertions pass while the criterion is false.",
+        "A regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion.",
+        "Refute a check if any in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file. A status-discarding sequence is one example.",
         "When a check names a path outside the given named_files, content not given must not be assumed weaker or stronger than the criterion needs; judge only what is given and the command text.",
     ] {
         assert!(prompt.contains(rule), "missing: {rule}\n{prompt}");
@@ -57,6 +57,19 @@ fn named_file_judge_rules_cover_asserting_regression_guards() {
     ] {
         assert!(!rules.contains(forbidden), "found {forbidden:?} in {rules}");
     }
+}
+
+#[test]
+fn named_file_judge_omits_invalid_old_rules_and_states_decision_dependency() {
+    let prompt = batched_judge_prompt(&contract()).unwrap();
+    assert!(!prompt.contains("A counterexample against such a guard must show that the named file's assertions pass while the criterion is false."));
+    assert!(!prompt.contains("A check that names its deciding file by a literal path relative to its working directory and whose named_files assert the criterion is a valid regression guard."));
+    assert!(prompt.contains("it fails whenever that test fails"));
+    assert!(prompt.contains("while the check still passes"));
+    assert!(prompt.contains("decides by matching text in a source or test file"));
+    assert!(prompt.contains(
+        "Naming a file or asserting that it exists does not make it the deciding assertion."
+    ));
 }
 
 #[test]

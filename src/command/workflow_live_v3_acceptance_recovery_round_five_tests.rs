@@ -171,6 +171,7 @@ fn recovery_refreeze_reruns_skeleton_coverage() {
         archon_core::config::GateMode::Enforce,
         &contract,
         None,
+        crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
     )
     .unwrap();
     prepared.record_recovery_refreeze().unwrap();
@@ -200,6 +201,7 @@ fn stale_recovery_root_refuses_a_fresh_freeze_by_name() {
         archon_core::config::GateMode::Enforce,
         &run.set.contract(),
         None,
+        crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
     )
     .unwrap();
     let refused = prepared

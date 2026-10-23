@@ -316,7 +316,7 @@ impl PreparedAcceptanceFreeze {
 
 #[path = "workflow_task_set_findings_prepare.rs"]
 mod prepare;
-pub(crate) use prepare::prepare_from_judged;
+pub(crate) use prepare::{capture_live_contract_digest, prepare_from_judged};
 
 /// Prepare a whole-set freeze, returning every check the judge did not accept
 /// to its author — with the judge's reason and counterexample — bounded, before
@@ -434,6 +434,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
     }
     let repaired = repaired.map_err(unproven_incomplete)?;
     let baseline = prepared.lock.baseline_commit.clone();
+    let live_contract_digest = prepared.live_contract_digest.clone();
     prepare_from_judged(
         project_root,
         tasks_root,
@@ -441,6 +442,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
         mode,
         &repaired,
         baseline,
+        live_contract_digest,
     )
 }
 

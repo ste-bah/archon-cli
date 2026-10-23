@@ -200,7 +200,7 @@ fn live_fenced_replies_report_locations_inside_the_json_entry() {
 
 #[test]
 fn refusal_for_saved_array_wrapped_entry_leads_with_array_shape_diagnosis() {
-    let set = frozen_set(&[("SUP-REQ-AHDM-020", "run", false)]);
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
     let contract = set.contract();
     let frozen = &contract.acceptance[0];
     let reply = include_str!("../../tests/fixtures/reply-parser/array-wrapped-entry.json");
@@ -210,7 +210,7 @@ fn refusal_for_saved_array_wrapped_entry_leads_with_array_shape_diagnosis() {
         "{refusal}"
     );
     assert!(
-        !refusal.contains("the reply is not an entry with id 'SUP-REQ-AHDM-020'"),
+        !refusal.contains("the reply is not an entry with id 'AC-X-001'"),
         "{refusal}"
     );
 }

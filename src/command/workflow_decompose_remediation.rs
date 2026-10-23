@@ -81,9 +81,7 @@ pub(crate) fn is_consumed(run_dir: &Path, report_id: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
-    for (index, line) in text.lines().enumerate() {
-        let row: serde_json::Value = serde_json::from_str(line)
-            .with_context(|| format!("parsing line {} of {}", index + 1, path.display()))?;
+    for row in resolved::resolved_rows(&text, &path)? {
         if row["report_id"].as_str() == Some(report_id) {
             return Ok(true);
         }
@@ -94,7 +92,8 @@ pub(crate) fn is_consumed(run_dir: &Path, report_id: &str) -> Result<bool> {
 #[path = "workflow_decompose_remediation_resolved.rs"]
 mod resolved;
 pub(crate) use resolved::{
-    append_resolved, entry_digest, reconcile_pending_from_lineage, unresolved_pending_subjects,
+    append_resolved, entry_digest, reconcile_pending_from_lineage, resolved_publication_times,
+    unresolved_pending_subjects,
 };
 
 #[path = "workflow_decompose_remediation_lineage.rs"]
@@ -320,17 +319,9 @@ pub(crate) fn prepare(
     let latest = crate::command::workflow_decompose_latest_report::latest_report(store, run_id)?;
     let consumed_path = run_dir.join("decomposition/reverify/consumed.jsonl");
     let consumed_ids = match std::fs::read_to_string(&consumed_path) {
-        Ok(text) => text
-            .lines()
-            .enumerate()
-            .map(|(index, line)| {
-                let row: serde_json::Value = serde_json::from_str(line).with_context(|| {
-                    format!("parsing line {} of {}", index + 1, consumed_path.display())
-                })?;
-                Ok(row["report_id"].as_str().map(str::to_string))
-            })
-            .collect::<Result<Vec<_>>>()?
+        Ok(text) => resolved::resolved_rows(&text, &consumed_path)?
             .into_iter()
+            .map(|row| row["report_id"].as_str().map(str::to_string))
             .flatten()
             .collect::<std::collections::BTreeSet<_>>(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
@@ -454,15 +445,17 @@ pub(crate) fn append_consumed(run_dir: &Path, ledger: &Ledger) -> Result<()> {
         .append(true)
         .open(&path)
         .with_context(|| format!("opening {}", path.display()))?;
+    let mut row = Vec::new();
     serde_json::to_writer(
-        &mut file,
+        &mut row,
         &serde_json::json!({
             "report_id": ledger.report_id,
             "subjects": ledger.subjects,
             "consumed_at": chrono::Utc::now(),
         }),
     )?;
-    file.write_all(b"\n")?;
+    row.push(b'\n');
+    file.write_all(&row)?;
     file.sync_all()?;
     Ok(())
 }

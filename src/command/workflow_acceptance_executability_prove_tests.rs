@@ -1,6 +1,19 @@
 use super::*;
 
 #[test]
+fn persisted_output_evidence_uses_the_shared_excerpt_limits() {
+    let source = include_str!("workflow_acceptance_executability_prove.rs");
+    assert!(
+        source.contains("crate::command::workflow_task_set::passability::evidence::STDOUT_BYTES")
+    );
+    assert!(
+        source.contains("crate::command::workflow_task_set::passability::evidence::STDERR_BYTES")
+    );
+    assert!(!source.contains("const STDOUT_BYTES: usize"));
+    assert!(!source.contains("const STDERR_BYTES: usize"));
+}
+
+#[test]
 fn persisted_output_evidence_is_bounded_utf8_safe_and_redacted() {
     let secret = format!("sk-proj-{}", "a".repeat(40));
     let result = archon_workflow::acceptance_scratch::CheckResult {
@@ -83,11 +96,7 @@ fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
             "select the root that contains the existing implementation or test dependency"
         )
     );
-    assert!(
-        finding.contains(
-            "the check must still fail on its own assertion when that input is moved aside"
-        )
-    );
+    assert!(finding.contains("the check must fail whenever the deciding test fails"));
     let recreated = ["output/state.txt".to_string()];
     let diagnostics = describe_candidates_with_run_state(
         &[super::mutation::CandidateDiagnostic {

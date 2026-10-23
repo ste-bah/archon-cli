@@ -61,10 +61,14 @@ fn baseline_prompt_leads_with_guard_template_and_verified_candidates() {
     let prompt = super::author::author_prompt(&scope, &frozen, &[note.into()], 1);
     let first = prompt.lines().next().unwrap();
     assert!(first.starts_with("The criterion already holds on the pre-implementation tree"));
-    assert!(first.contains("write a regression guard"));
-    assert!(first.contains("name that file relative to the chosen working directory"));
-    assert!(first.contains("fail on its own assertion when that file is moved aside"));
-    assert!(first.contains("The named file's content is shown to the judge, which judges the check against what that file asserts, so name the file whose assertions decide the criterion."));
+    assert!(first.contains("Write a regression guard"));
+    assert!(first.contains("name its file relative to the chosen working directory"));
+    assert!(first.contains("the check must fail whenever the test fails"));
+    assert!(first.contains(
+        "Naming a file or asserting that it exists does not make it the deciding assertion."
+    ));
+    assert!(first.contains("that proof is never a counterexample"));
+    assert!(first.contains("The named file's content is shown to the judge, which judges the check against what it asserts; name the file whose outcome decides the criterion."));
     let template = prompt.find("Template:").unwrap();
     let entry = prompt.find("Re-author exactly one").unwrap();
     assert!(template < entry, "{prompt}");

@@ -41,8 +41,8 @@ pub(super) fn author_prompt(
     let mut prompt = Vec::new();
     if baseline_pass {
         prompt.extend([
-            "The criterion already holds on the pre-implementation tree. write a regression guard. Run the existing test or implementation file that decides the criterion, and name that file relative to the chosen working directory. The check must fail on its own assertion when that file is moved aside. The named file's content is shown to the judge, which judges the check against what that file asserts, so name the file whose assertions decide the criterion. Do not generate substitute data.".to_string(),
-            "Template: choose the root containing the named file; run the existing test or implementation that decides the criterion; assert the criterion's result; the check fails when the named file is moved aside.".to_string(),
+            "The criterion already holds on the pre-implementation tree. Write a regression guard by running the existing test or implementation that decides the criterion, and name its file relative to the chosen working directory. The check's pass or fail must be decided by that test or implementation, and the check must fail whenever the test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The named file's content is shown to the judge, which judges the check against what it asserts; name the file whose outcome decides the criterion. The host proves the guard by moving the literally named input aside and requiring the check to fail; that proof is never a counterexample. Do not generate substitute data.".to_string(),
+            "Template: choose the root containing the named file; run the existing test or implementation that decides the criterion; make its failure fail the check; the host moves the named input aside as proof.".to_string(),
         ]);
     }
     prompt.push(format!(

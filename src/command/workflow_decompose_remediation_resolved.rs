@@ -12,7 +12,7 @@ fn resolved_text(path: &Path) -> Result<String> {
     }
 }
 
-fn resolved_rows(text: &str, path: &Path) -> Result<Vec<serde_json::Value>> {
+pub(super) fn resolved_rows(text: &str, path: &Path) -> Result<Vec<serde_json::Value>> {
     let mut rows = Vec::new();
     let lines = text.split_terminator('\n').collect::<Vec<_>>();
     let unterminated = !text.is_empty() && !text.ends_with('\n');
@@ -48,6 +48,29 @@ fn resolved_subjects(run_dir: &Path, report_id: &str) -> Result<BTreeMap<String,
         }
     }
     Ok(resolved)
+}
+
+pub(crate) fn resolved_publication_times(
+    run_dir: &Path,
+) -> Result<BTreeMap<(String, String), chrono::DateTime<chrono::FixedOffset>>> {
+    let path = run_dir.join("decomposition/reverify/resolved.jsonl");
+    let mut publications = BTreeMap::new();
+    for row in resolved_rows(&resolved_text(&path)?, &path)? {
+        let (Some(report_id), Some(timestamp), Some(subjects)) = (
+            row["report_id"].as_str(),
+            row["published_at"].as_str(),
+            row["subjects"].as_object(),
+        ) else {
+            continue;
+        };
+        let Ok(at) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
+            continue;
+        };
+        for id in subjects.keys() {
+            publications.insert((report_id.to_string(), id.clone()), at);
+        }
+    }
+    Ok(publications)
 }
 
 pub(crate) fn entry_digest(
@@ -88,7 +111,11 @@ pub(crate) fn append_resolved(
     }
     serde_json::to_writer(
         &mut bytes,
-        &serde_json::json!({"report_id": report_id, "subjects": subjects}),
+        &serde_json::json!({
+            "report_id": report_id,
+            "subjects": subjects,
+            "published_at": chrono::Utc::now(),
+        }),
     )?;
     bytes.push(b'\n');
     let temp = path.with_extension("jsonl.tmp");

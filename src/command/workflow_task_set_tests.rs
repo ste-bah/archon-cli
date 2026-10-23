@@ -9,6 +9,8 @@ use async_trait::async_trait;
 
 use super::*;
 
+#[path = "workflow_task_set_cas_tests.rs"]
+mod cas_tests;
 #[path = "workflow_task_set_refuted_tests.rs"]
 mod refuted_tests;
 #[path = "workflow_task_set_scope_tests.rs"]
