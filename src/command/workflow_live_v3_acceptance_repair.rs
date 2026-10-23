@@ -62,6 +62,8 @@ use crate::command::workflow_task_set::republish::{
 };
 use crate::command::workflow_task_set::{non_accepted_ids, pause_if_unsettled};
 
+pub(super) const HOST_PENDING_PREFIX: &str = "host pending:";
+
 pub(super) fn repair_author_scope(
     project: &Path,
     task_root: &Path,
@@ -280,17 +282,16 @@ pub(super) async fn repair_ran(
     let (result, reloaded, digest) = match reloaded {
         Ok(reloaded) => reloaded,
         Err(error) => {
+            // The re-author/probe path can return the typed incomplete reason
+            // rendered with HOST_UNPROVEN; keep this routed as host-owned.
             if format!("{error:#}").contains(HOST_UNPROVEN) {
                 record.operational_errors.push(format!("{error:#}"));
-                for id in ids.iter().filter(|id| crashed.contains_key(*id)) {
-                    results.remove(id);
-                }
                 record.contract_repairs.push(AcceptanceContractRepairV1 {
                     check_ids: ids.iter().cloned().collect(),
                     trigger: trigger.into(),
                     repaired: false,
                     freeze_event_id: String::new(),
-                    failure: format!("{error:#}"),
+                    failure: format!("{AUTHORED_PENDING_PREFIX}{error:#}"),
                     diagnostics: Vec::new(),
                 });
                 return Ok(Defects::new());
@@ -335,7 +336,10 @@ pub(super) async fn repair_ran(
             diagnostics: result.diagnostics.clone(),
         });
     }
-    for (pending, prefix) in [(true, AUTHORED_PENDING_PREFIX), (false, "")] {
+    for (pending, prefix) in [
+        (true, AUTHORED_PENDING_PREFIX),
+        (false, HOST_PENDING_PREFIX),
+    ] {
         let group: Vec<_> = unresolved
             .iter()
             .filter(|(id, _)| authored_pending.contains(*id) == pending)
@@ -350,14 +354,17 @@ pub(super) async fn repair_ran(
                     .map(|(id, reason)| format!("{HOST_UNPROVEN} {id}: {reason}")),
             );
         }
-        let failure = format!(
-            "{prefix}{}",
-            group
-                .iter()
-                .map(|(id, reason)| format!("{id}: {reason}"))
-                .collect::<Vec<_>>()
-                .join(" | ")
-        );
+        let details = group
+            .iter()
+            .map(|(id, reason)| format!("{id}: {reason}"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let remedy = if trigger == REPAIR_TRIGGER_SCRIPT_DEFECT {
+            format!("; operator re-author command: {command}")
+        } else {
+            String::new()
+        };
+        let failure = format!("{prefix}{details}{remedy}");
         record.contract_repairs.push(AcceptanceContractRepairV1 {
             check_ids: group.iter().map(|(id, _)| (*id).clone()).collect(),
             trigger: trigger.into(),
@@ -373,9 +380,6 @@ pub(super) async fn repair_ran(
         .filter(|criterion| ids.contains(&criterion.id) && !unresolved.contains_key(&criterion.id))
         .collect();
     if selected.is_empty() {
-        for id in unresolved.keys() {
-            results.remove(id);
-        }
         return Ok(Defects::new());
     }
     let rerun = exec::checks::execute_checks(
@@ -409,9 +413,6 @@ pub(super) async fn repair_ran(
             );
         }
         results.insert(result.acceptance_id.clone(), result);
-    }
-    for id in unresolved.keys() {
-        results.remove(id);
     }
     Ok(defects)
 }
@@ -448,3 +449,6 @@ mod base_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_repair_pause_tests.rs"]
 mod pause_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_repair_provider_tests.rs"]
+mod provider_tests;

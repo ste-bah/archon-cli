@@ -90,9 +90,8 @@ async fn a_rounds_base_copy_bounds_each_check_by_the_same_bound() {
     assert!(elapsed < QUICK, "bounded in the copy: {elapsed:?}");
 }
 
-/// #356: a real stall is the host's the first time (resumable, no credit);
-/// the same check stalling so again after a resume goes to its author, and
-/// the other verdicts survive both attempts.
+/// A first no-progress stall is host-unproven; the same check, window and
+/// commit stalling again after resume goes to its author without sibling loss.
 #[tokio::test]
 async fn issue356_repeated_silent_check_goes_to_its_author() {
     let trees = trees(&[
@@ -112,10 +111,12 @@ async fn issue356_repeated_silent_check_goes_to_its_author() {
     let findings = first.script_defects(&trees.contract(), &trees.ids()).await;
     let elapsed = started.elapsed();
     let unproven = first.take_unproven();
-    assert!(timeout_finding(&findings, "AC-B-005"), "{findings:?}");
+    assert!(!timeout_finding(&findings, "AC-B-005"), "{findings:?}");
     assert!(
-        !unproven.contains_key("AC-B-005"),
-        "the check's own timeout: {unproven:?}"
+        unproven
+            .get("AC-B-005")
+            .is_some_and(|why| why.contains("unproven (timed out)")),
+        "the first stall belongs to the host: {unproven:?}"
     );
     assert!(!unproven.contains_key("AC-B-006"), "{unproven:?}");
     assert!(
@@ -123,11 +124,10 @@ async fn issue356_repeated_silent_check_goes_to_its_author() {
         "the stall is local to its check"
     );
     let saved = first.resume.progress.saved_count();
-    assert!(saved > 0, "the other check is durably saved");
+    assert!(saved > 0, "the proven sibling earns saved credit");
     assert!(elapsed < QUICK, "{elapsed:?}");
 
-    // The timeout is local to its authored check; a freeze of only the
-    // stalled check saves nothing, while the independent check remains proven.
+    // A changed window makes a fresh host strike.
     let ids = std::collections::BTreeSet::from(["AC-B-005".to_string()]);
     let other = tempfile::tempdir().unwrap();
     let fresh = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
@@ -136,7 +136,8 @@ async fn issue356_repeated_silent_check_goes_to_its_author() {
         .without_process_memo()
         .with_check_cap(BOUND + 1);
     let findings = fresh.script_defects(&trees.contract(), &ids).await;
-    assert!(timeout_finding(&findings, "AC-B-005"), "{findings:?}");
+    assert!(!timeout_finding(&findings, "AC-B-005"), "{findings:?}");
+    assert!(fresh.take_unproven().contains_key("AC-B-005"));
     assert_eq!(
         fresh.resume.progress.saved_count(),
         0,
@@ -146,16 +147,15 @@ async fn issue356_repeated_silent_check_goes_to_its_author() {
     let retry = freeze();
     let findings = retry.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = retry.take_unproven();
-    let finding = findings
-        .get("AC-B-005")
-        .expect("the timeout is the author's");
     assert!(
-        finding.contains("no-progress execution window") && finding.contains("CHECK_TIMED_OUT"),
-        "{finding}"
+        findings.get("AC-B-005").is_some_and(|finding| {
+            finding.contains("made no progress") && finding.contains("CHECK_TIMED_OUT")
+        }),
+        "{findings:?}"
     );
     assert!(
         !unproven.contains_key("AC-B-005"),
-        "no longer the host's: {unproven:?}"
+        "the repeated unchanged stall now goes to its author: {unproven:?}"
     );
     assert!(
         retry.resume.progress.reused_count() > 0,

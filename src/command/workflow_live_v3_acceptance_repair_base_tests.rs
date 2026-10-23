@@ -87,6 +87,14 @@ async fn repair_without_a_base(accepted: bool) {
             "host-unproven checks stay pending: {record:?}"
         );
         assert!(
+            record.checks.iter().any(|check| {
+                check.check_id == "AC-F-001"
+                    && check.status
+                        == archon_workflow::v2::acceptance_stage::AcceptanceCheckStatus::Pending
+            }),
+            "host-unproven check has an explicit pending round record: {record:?}"
+        );
+        assert!(
             record
                 .operational_errors
                 .iter()

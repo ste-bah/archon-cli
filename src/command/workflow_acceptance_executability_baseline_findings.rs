@@ -36,13 +36,14 @@ pub async fn cannot_fail_findings(
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
         if result.is_some_and(|result| timed_out(&result.result)) {
-            // CHECK_TIMED_OUT is the runner's explicit per-check timeout
-            // signal. With no separate host-pressure signal, route it to the
-            // check's author just like a timeout on the live tree.
-            if let Some(finding) =
-                crash_findings_at(contract, [&result.expect("timed out result").result], None)
-                    .remove(id)
-            {
+            let diagnostic = format!("CHECK_TIMED_OUT on the pre-implementation tree at {short}");
+            if let Some(finding) = silent::settle_timed_out_with_diagnostics(
+                probe,
+                &baseline.commit,
+                contract,
+                id,
+                &diagnostic,
+            ) {
                 findings.insert(id.clone(), finding);
             }
             continue;

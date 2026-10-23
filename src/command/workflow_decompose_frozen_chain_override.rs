@@ -239,12 +239,7 @@ pub(super) fn freeze_override_decision(
     Ok(decision)
 }
 
-/// Every receipt entry must be on disk as published, or reached from it by a
-/// chain of later committed publications in this run, each by a later
-/// pipeline stage and each replacing exactly the bytes the previous link left
-/// (`prior_blake3`). A shared file such as the acceptance pin is legitimately
-/// extended by the next freeze; any other write leaves the verdict stale. `Ok` names
-/// each entry a later publication rewrote, and by whom.
+/// Verify receipt entries against disk; `Ok` lists later rewrites.
 pub(super) fn receipt_accounts_for_live(
     receipt: &PublicationReceiptV1,
     successors: &[PublicationReceiptV1],
@@ -353,6 +348,15 @@ pub(super) fn freeze_outcome_decision(
         .get(logic::LOGIC_DIGEST_STAMP)
         .and_then(serde_json::Value::as_str);
     let holds = recorded_gate_logic_holds(record, catalog)?;
+    if !findings.is_empty()
+        && !freeze_record_status_allows_override(record.status, record.invalidated_by.is_some())
+    {
+        return Ok(OverrideDecision::keep(format!(
+            "judged attempt {id} status={} invalidated={}",
+            status_text(record.status),
+            record.invalidated_by.is_some()
+        )));
+    }
     let logic_text = format!(
         "logicVersion recorded={} current={current} logicDigest recorded={} current={current_digest}",
         outcome
@@ -360,6 +364,17 @@ pub(super) fn freeze_outcome_decision(
             .map_or_else(|| "none".to_string(), ToString::to_string),
         recorded_digest.unwrap_or("none"),
     );
+    if !findings.is_empty() {
+        return Ok(OverrideDecision::keep(format!(
+            "judged attempt {id} has {} open finding(s){}",
+            findings.len(),
+            if holds {
+                String::new()
+            } else {
+                format!("; phase must be re-gated under current logic ({logic_text})")
+            }
+        )));
+    }
     if !holds {
         return Ok(OverrideDecision::verify(
             format!(
@@ -367,12 +382,6 @@ pub(super) fn freeze_outcome_decision(
             ),
             false,
         ));
-    }
-    if !findings.is_empty() {
-        return Ok(OverrideDecision::keep(format!(
-            "judged attempt {id} has {} open finding(s)",
-            findings.len()
-        )));
     }
     Ok(OverrideDecision {
         logic_holds: Some(true),

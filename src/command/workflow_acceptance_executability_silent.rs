@@ -254,6 +254,52 @@ pub(super) fn settle(
     )
 }
 
+/// Settle a check timeout using a durable per-check stall strike.
+#[cfg(test)]
+pub(super) fn settle_timed_out(
+    probe: &HostProbe,
+    commit: &str,
+    contract: &AcceptanceContract,
+    id: &str,
+) -> Option<String> {
+    settle_timed_out_with_diagnostics(probe, commit, contract, id, "")
+}
+
+/// Add run-specific diagnostics without changing the timeout verdict.
+pub(super) fn settle_timed_out_with_diagnostics(
+    probe: &HostProbe,
+    commit: &str,
+    contract: &AcceptanceContract,
+    id: &str,
+    diagnostics: &str,
+) -> Option<String> {
+    let short: String = commit.chars().take(12).collect();
+    let window = probe.check_bound_secs();
+    let why = format!("no output or process-tree activity for {window}s");
+    let suffix = if diagnostics.is_empty() {
+        String::new()
+    } else {
+        format!("; {diagnostics}")
+    };
+    let path = stall_strike(probe, commit, contract, id);
+    struck(probe, &path, id, &why, Credit::None, || {
+        (
+            format!(
+                "check '{id}': it made no progress on the base commit {short} twice: {why}, and so again after a resume. Repair or replace it so that it ends by its own assertion{suffix}"
+            ),
+            format!(
+                "unproven (timed out): {why} on the pre-implementation tree at {short}; the run pauses resumably since the host may be at fault. If it stalls again after a resume, it goes to its author{suffix}"
+            ),
+        )
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Credit {
+    Saved,
+    None,
+}
+
 /// Forget the stall strike of check `id` on `commit`: it ran to an end there.
 pub(super) fn ran(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
     let path = stall_strike(probe, commit, contract, id);
@@ -284,7 +330,7 @@ fn strike_or_unproven(
             .join(format!("{}.strike", content_digest(signature.as_bytes()))),
         None => strike(probe, commit, contract, id),
     };
-    struck(probe, &path, id, why, texts)
+    struck(probe, &path, id, why, Credit::Saved, texts)
 }
 
 /// The finding when the strike at `path` already exists; otherwise save it
@@ -294,6 +340,7 @@ fn struck(
     path: &std::path::Path,
     id: &str,
     why: &str,
+    credit: Credit,
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
     let (finding, unproven) = texts();
@@ -339,7 +386,9 @@ fn struck(
             })?;
         }
         archon_workflow::stage_write::write_bytes(path, why.as_bytes())?;
-        probe.resume.progress.saved(false);
+        if credit == Credit::Saved {
+            probe.resume.progress.saved(false);
+        }
         probe.unproven(id, unproven);
         archon_workflow::WorkflowResult::Ok(None)
     });

@@ -371,7 +371,17 @@ pub(crate) fn prepare(
                 report_id
             )
         })?;
-        validate_subjects(run_dir, &ledger, &task_ids, &check_ids)?;
+        let mut ledger = ledger;
+        ledger.subjects.retain(|subject| {
+            let exists = task_ids.contains(subject) || check_ids.contains(subject);
+            if !exists {
+                eprintln!(
+                    "consumed remediation report {} names removed subject {}; no repair is needed for that subject",
+                    ledger.report_id, subject
+                );
+            }
+            exists
+        });
         let findings =
             consumed_ledger_findings(Path::new(&runtime.task_root_identity), run_dir, &ledger)?;
         if !findings.is_empty() {

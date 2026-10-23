@@ -146,10 +146,18 @@ fn a_recreated_input_read_and_deleted_by_the_check_is_marked_recreated() {
         )
     );
     assert_eq!(
-        markers.recreated(&recreated, &names),
-        std::collections::BTreeSet::new(),
-        "{}",
-        String::from_utf8_lossy(&recreated.stderr)
+        markers
+            .states(&recreated, &names)
+            .get("data/state.txt")
+            .map(String::as_str),
+        Some("original-recreated"),
+        "the restoration protocol records the recreated input"
+    );
+    assert!(
+        !crate::command::workflow_task_set::executability::prove::all_moved_inputs_restored(
+            &recreated, &markers, &names
+        ),
+        "recreated input must not be proven"
     );
     assert_eq!(
         std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
@@ -193,10 +201,18 @@ fn recreating_reading_and_deleting_an_input_cannot_hide_behind_restored_parent_m
         .unwrap();
     assert_eq!(parent_mtime_before, parent_mtime_after);
     assert_eq!(
-        markers.recreated(&recreated, &names),
-        std::collections::BTreeSet::new(),
-        "{}",
-        String::from_utf8_lossy(&recreated.stderr)
+        markers
+            .states(&recreated, &names)
+            .get("data/state.txt")
+            .map(String::as_str),
+        Some("original-recreated"),
+        "the parent metadata signal still catches the recreated input after its timestamp is restored"
+    );
+    assert!(
+        !crate::command::workflow_task_set::executability::prove::all_moved_inputs_restored(
+            &recreated, &markers, &names
+        ),
+        "parent metadata change must prevent proof even when its timestamp is restored"
     );
     assert_eq!(
         std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),

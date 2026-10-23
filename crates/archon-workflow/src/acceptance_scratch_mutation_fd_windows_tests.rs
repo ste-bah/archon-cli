@@ -38,3 +38,13 @@ fn ordinary_directory_with_replaced_root_path_is_unsafe_to_restore() {
     assert!(!replacement.join("target").exists());
     assert_eq!(std::fs::read(root_path.join("aside")).unwrap(), b"original");
 }
+
+#[test]
+fn missing_parent_for_site_entry_is_absent() {
+    let temp = tempfile::tempdir().unwrap();
+    let root_path = temp.path().join("site");
+    std::fs::create_dir(&root_path).unwrap();
+    let root = SiteRoot::capture(&root_path).unwrap();
+
+    assert!(!site_entry_exists(&root, Path::new("missing/entry.txt")).unwrap());
+}

@@ -24,6 +24,15 @@ use crate::command::workflow_task_set::executability::ExecutabilityProbe;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
 
+#[cfg(test)]
+static AFTER_REAUTHOR_PUBLISHED_HOOK: std::sync::Mutex<Option<fn(&Path)>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
+pub(super) fn set_after_reauthor_published_hook(hook: fn(&Path)) {
+    *AFTER_REAUTHOR_PUBLISHED_HOOK.lock().unwrap() = Some(hook);
+}
+
 /// The event detail that records a launch repair once the run exists.
 pub(crate) const REAUTHORED_EVENT: &str = "frozen_acceptance_checks_reauthored";
 
@@ -326,6 +335,9 @@ pub(crate) async fn after_claim(
                 // A judge refutation is a content result. Hand it to the
                 // normal acceptance author loop in the fixed script; provider,
                 // IO, and publication failures remain launch errors.
+                // reauthor_refused reaches ReauthorStalled when a judge
+                // repeatedly refuses the authored candidate; that typed
+                // content result still routes back into the phase author loop.
                 if error
                     .downcast_ref::<crate::command::workflow_task_set::reauthor::ReauthorStalled>()
                     .is_some()
@@ -369,6 +381,53 @@ pub(crate) async fn after_claim(
             detail.clone(),
         )?;
         lines.push(line);
+        #[cfg(test)]
+        if let Some(hook) = AFTER_REAUTHOR_PUBLISHED_HOOK.lock().unwrap().take() {
+            hook(task_root);
+        }
+        // Validate the published chain before clearing the launch snapshot for
+        // a pending route; even a partial repair must preserve frozen inputs.
+        let republished = frozen_chain_snapshot(project_root, prd_path, task_root)
+            .context("reading the frozen chain the launch republished")?;
+        let new_skeleton_bytes = if launched.skeleton {
+            Some(std::fs::read(&skeleton_path).with_context(|| {
+                format!(
+                    "reading republished task skeleton at {}",
+                    skeleton_path.display()
+                )
+            })?)
+        } else {
+            None
+        };
+        let acceptance_path =
+            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+        let acceptance_bytes = std::fs::read(&acceptance_path).with_context(|| {
+            format!(
+                "reading republished acceptance contract at {}",
+                acceptance_path.display()
+            )
+        })?;
+        let acceptance_digest =
+            archon_workflow::task_set_contract::content_digest(&acceptance_bytes);
+        let new_bodies = if launched.skeleton {
+            body_contents(task_root, &republished)?
+        } else {
+            Default::default()
+        };
+        if let Err(difference) = compare_repaired_chain(
+            launched,
+            &republished,
+            old_skeleton_bytes.as_deref(),
+            new_skeleton_bytes.as_deref(),
+            &acceptance_digest,
+            &old_bodies,
+            &new_bodies,
+        ) {
+            return Err(anyhow!(
+                "the per-check repair republished a frozen chain under {} that differs from the one this run was launched with: {difference}",
+                task_root.display(),
+            ));
+        }
         if let Some((ids, reasons)) = detail
             .get("pending_ids")
             .and_then(serde_json::Value::as_array)
@@ -412,47 +471,6 @@ pub(crate) async fn after_claim(
                     .map_err(|error| anyhow!("reporting {line}: {error}"))?;
             }
             return Ok(());
-        }
-        let republished = frozen_chain_snapshot(project_root, prd_path, task_root)
-            .context("reading the frozen chain the launch republished")?;
-        let new_skeleton_bytes = if launched.skeleton {
-            Some(std::fs::read(&skeleton_path).with_context(|| {
-                format!(
-                    "reading republished task skeleton at {}",
-                    skeleton_path.display()
-                )
-            })?)
-        } else {
-            None
-        };
-        let acceptance_path =
-            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-        let acceptance_bytes = std::fs::read(&acceptance_path).with_context(|| {
-            format!(
-                "reading republished acceptance contract at {}",
-                acceptance_path.display()
-            )
-        })?;
-        let acceptance_digest =
-            archon_workflow::task_set_contract::content_digest(&acceptance_bytes);
-        let new_bodies = if launched.skeleton {
-            body_contents(task_root, &republished)?
-        } else {
-            Default::default()
-        };
-        if let Err(difference) = compare_repaired_chain(
-            launched,
-            &republished,
-            old_skeleton_bytes.as_deref(),
-            new_skeleton_bytes.as_deref(),
-            &acceptance_digest,
-            &old_bodies,
-            &new_bodies,
-        ) {
-            return Err(anyhow!(
-                "the per-check repair republished a frozen chain under {} that differs from the one this run was launched with: {difference}",
-                task_root.display(),
-            ));
         }
     }
     for line in &lines {

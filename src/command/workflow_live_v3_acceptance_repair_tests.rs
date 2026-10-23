@@ -5,7 +5,7 @@ use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
 };
 use crate::command::workflow_task_set::republish::test_fixture::{
-    FrozenSet, assert_only_named_entries_changed, frozen_set,
+    FrozenSet, assert_only_named_entries_changed, frozen_set_in,
 };
 use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
 
@@ -55,10 +55,27 @@ fn run_fixture() -> Run {
     ])
 }
 
+pub(super) fn run_fixture_with_mode(
+    checks: &[(&str, &str, bool)],
+    mode: archon_workflow::task_set_contract::FreezeGateMode,
+) -> Run {
+    run_fixture_with_mode_inner(checks, mode)
+}
+
 /// A run over `checks` (id, command, accepted), TASK-F-00n implementing the
 /// n-th, with a `present` file in the project.
 pub(super) fn run_fixture_with(checks: &[(&str, &str, bool)]) -> Run {
-    let set = frozen_set(checks);
+    run_fixture_with_mode_inner(
+        checks,
+        archon_workflow::task_set_contract::FreezeGateMode::Observe,
+    )
+}
+
+fn run_fixture_with_mode_inner(
+    checks: &[(&str, &str, bool)],
+    mode: archon_workflow::task_set_contract::FreezeGateMode,
+) -> Run {
+    let set = frozen_set_in(checks, mode, "");
     std::fs::write(set.project.path().join("present"), "x").unwrap();
     let task = |id: &str, implements: &str| WorkflowV2TaskUniverseTask {
         canonical_task_id: id.into(),
@@ -197,9 +214,22 @@ async fn a_refuted_check_is_reauthored_rejudged_and_passes_in_the_same_round() {
     );
 }
 
-#[tokio::test]
-async fn an_unaccepted_repair_stays_pending_for_its_author_without_blocking_other_checks() {
+async fn unaccepted_repair_stays_pending(mode: archon_workflow::task_set_contract::FreezeGateMode) {
     let run = run_fixture();
+    let mode = serde_json::to_value(mode).unwrap();
+    let lock_path = run
+        .set
+        .tasks
+        .join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE);
+    let mut lock: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+    lock["gate"]["mode"] = mode.clone();
+    std::fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+    let pin_path = run.set.pin_path();
+    let mut pin: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&pin_path).unwrap()).unwrap();
+    pin["acceptance_gate"]["mode"] = mode;
+    std::fs::write(pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
     record_baseline(&run);
     let before = run.set.chain_bytes();
     let client = ScriptedAuthorJudge::new(
@@ -241,6 +271,55 @@ async fn an_unaccepted_repair_stays_pending_for_its_author_without_blocking_othe
         serde_json::json!([])
     );
     assert_eq!(result.data["operational_errors"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn an_unaccepted_repair_stays_pending_for_its_author_without_blocking_other_checks() {
+    unaccepted_repair_stays_pending(archon_workflow::task_set_contract::FreezeGateMode::Observe)
+        .await;
+}
+
+#[tokio::test]
+async fn enforce_unaccepted_repair_keeps_pending_and_publishes_accepted_siblings() {
+    let run = run_fixture_with_mode(
+        &[
+            ("AC-X-001", "test -f missing-a", false),
+            ("AC-X-002", "test -f missing-b", false),
+        ],
+        archon_workflow::task_set_contract::FreezeGateMode::Enforce,
+    );
+    record_baseline(&run);
+    let context = crate::command::workflow_live::workflow_live_v2::workflow_live_v3_acceptance::exec::resolve_context(
+        &run.store,
+        &run.run_id,
+        run.runtime.target_repository_root.as_deref(),
+        Some(&run.universe),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .unwrap();
+    let (contract, _, _) = crate::command::workflow_live::workflow_live_v2::workflow_live_v3_acceptance::exec::load_contract(&context).unwrap();
+    let base =
+        crate::command::workflow_task_set::executability::Baseline::head_of(run.set.project.path())
+            .unwrap()
+            .commit;
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "test -f present && test -s present"),
+        |id, _| id == "AC-X-001",
+    );
+    let (repair, defects) =
+        crate::command::workflow_live::workflow_live_v2::workflow_live_v3_acceptance::repair::repair_unaccepted(Some(&client), &context, &contract, Some(&base))
+            .await
+            .unwrap()
+            .unwrap();
+    assert!(repair.repaired, "{}", repair.failure);
+    assert_eq!(repair.check_ids, vec!["AC-X-001".to_string()]);
+    assert!(defects.is_empty());
+    let repaired = crate::command::workflow_live::workflow_live_v2::workflow_live_v3_acceptance::exec::load_contract(&context).unwrap().0;
+    assert!(crate::command::workflow_task_set::non_accepted_ids(&repaired).contains("AC-X-002"));
+    assert_eq!(
+        run.set.pin().lineage.last().unwrap().reauthored_ids,
+        std::collections::BTreeSet::from(["AC-X-001".to_string()])
+    );
 }
 
 #[test]

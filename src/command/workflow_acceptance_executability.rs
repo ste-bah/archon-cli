@@ -329,14 +329,6 @@ pub(crate) fn crash_findings_at<'a>(
                 .chain(&contract.supplementary)
                 .find(|entry| entry.id == result.acceptance_id)?;
             let (_, text) = executed_text(entry)?;
-            if result.operational_error.as_deref()
-                == Some(archon_workflow::acceptance_scratch::CHECK_TIMED_OUT)
-            {
-                let output = program_output(&result.stderr, &redactor, FINDING_TAIL_BYTES);
-                return Some((entry.id.clone(), format!(
-                    "check '{}' exceeded its own no-progress execution window before it could assert its criterion; shorten or correct the check command. The timeout is attributed to this check because the runner recorded CHECK_TIMED_OUT, with no separate host-pressure signal. Captured stderr:\n{output}", entry.id
-                )));
-            }
             let stdout = String::from_utf8_lossy(&result.stdout);
             let stderr = String::from_utf8_lossy(&result.stderr);
             if result.operational_error.is_none()

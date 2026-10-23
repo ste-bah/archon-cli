@@ -52,7 +52,8 @@ fn frozen_override_rechecks_stale_logic_even_when_old_findings_are_open() {
         "logicVersion": version.saturating_sub(1),
         "logicDigest": "old-digest",
     }));
-    assert!(open.verify);
+    assert!(!open.verify);
+    assert!(open.reason.contains("open finding(s)"));
     assert!(open.reason.contains("gate logic changed"));
     let current_open = decide(serde_json::json!({
         "gateEnvelope": {"policy_findings": [{"text": "repair remains open"}]},

@@ -402,4 +402,13 @@ fn unrelated_sibling_touch_keeps_the_parent_metadata_signal_on_legacy_path() {
         Some("original-recreated")
     );
     assert_eq!(recreated_paths(&states), vec!["data/state.txt"]);
+    let finding = super::unattributed_recreation_finding("the check passed on the baseline");
+    assert!(
+        finding.contains("parent directory metadata changed"),
+        "{finding}"
+    );
+    assert!(
+        finding.contains("does not identify who wrote the input"),
+        "{finding}"
+    );
 }

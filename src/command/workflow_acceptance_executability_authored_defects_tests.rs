@@ -19,16 +19,15 @@ fn result(id: &str, stdout: &[u8], operational_error: Option<&str>) -> CheckResu
 }
 
 #[test]
-fn a_check_timeout_is_an_author_finding_with_timeout_evidence() {
-    let set = frozen_set(&[("AC-F-001", "sleep 20", true)]);
+fn a_check_timeout_is_not_classified_as_an_author_finding() {
+    let set = frozen_set(&[("AC-X-001", "check-with-timeout", true)]);
     let finding = super::super::crash_findings(
         &set.contract(),
-        [&result("AC-F-001", b"", Some(CHECK_TIMED_OUT))],
+        [&result("AC-X-001", b"", Some(CHECK_TIMED_OUT))],
     );
-    assert!(finding["AC-F-001"].contains("no-progress execution window"));
     assert!(
-        finding["AC-F-001"].contains("CHECK_TIMED_OUT")
-            || finding["AC-F-001"].contains("timed out")
+        finding.is_empty(),
+        "a timeout has no implementation verdict: {finding:?}"
     );
 }
 

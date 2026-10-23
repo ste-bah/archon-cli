@@ -112,7 +112,7 @@ fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
         &std::collections::BTreeMap::new(),
         true,
     );
-    assert!(diagnostics.contains("present again after mutation; writer unknown: output/state.txt"));
+    assert!(diagnostics.contains("parent directory metadata changed"));
     assert!(
         super::mutation::ExclusionReason::CheckRecreatedPathObserved
             .label()
@@ -124,7 +124,8 @@ fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
 fn baseline_passing_check_with_only_unattributed_reappearing_path_is_rejected() {
     let finding =
         super::unattributed_recreation_finding(&baseline_pass_finding("AC-X", "0123456789ab"));
-    assert!(finding.contains("writer is unknown"));
+    assert!(finding.contains("parent directory metadata changed"));
+    assert!(finding.contains("does not identify who wrote the input"));
     assert!(finding.contains("does not prove that the check depends on the moved input"));
     assert!(!finding.contains("accepted as a regression guard"));
 }

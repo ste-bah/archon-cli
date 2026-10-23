@@ -1,7 +1,17 @@
 use super::*;
 
-#[tokio::test]
-async fn a_partial_launch_repair_records_publication_then_routes_pending_checks() {
+fn rewrite_skeleton(root: &std::path::Path) {
+    let path = root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
+    let mut skeleton: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    skeleton["tasks"][0]["task_id"] = "TASK-X-999".into();
+    std::fs::write(path, serde_json::to_vec_pretty(&skeleton).unwrap()).unwrap();
+}
+
+async fn partial_launch_repair(
+    mode: archon_workflow::task_set_contract::FreezeGateMode,
+    rewrite: bool,
+) {
     use crate::command::workflow_task_set::reauthor::test_client::{
         ScriptedAuthorJudge, command_entry,
     };
@@ -41,6 +51,24 @@ async fn a_partial_launch_repair_records_publication_then_routes_pending_checks(
         value[key] = digest.clone().into();
         std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
     }
+    let mode = serde_json::to_value(mode).unwrap();
+    let lock_path = fixture.tasks.join(ACCEPTANCE_LOCK_FILE);
+    let mut lock: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+    lock["gate"]["mode"] = mode.clone();
+    std::fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+    let pin_path =
+        crate::command::workflow_task_set::acceptance_pin_path(&fixture.project, &fixture.tasks);
+    let mut pin: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&pin_path).unwrap()).unwrap();
+    pin["acceptance_gate"]["mode"] = mode;
+    std::fs::write(pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
+    if rewrite {
+        with_skeleton(&fixture);
+        crate::command::workflow_decompose_launch_repair::set_after_reauthor_published_hook(
+            rewrite_skeleton,
+        );
+    }
     crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
 
     let client = std::sync::Arc::new(ScriptedAuthorJudge::new(
@@ -52,6 +80,14 @@ async fn a_partial_launch_repair_records_publication_then_routes_pending_checks(
         origins: std::sync::Mutex::new(Vec::new()),
     };
     let error = format!("{:#}", launch_with(&fixture, &factory).await);
+    if rewrite {
+        assert!(
+            error.contains("frozen chain the launch republished"),
+            "{error}"
+        );
+        assert!(!error.contains("barrier observed"), "{error}");
+        return;
+    }
     assert!(error.contains("barrier observed"), "{error}");
 
     let log = std::fs::read_to_string(fixture.tasks.join(".decompose.log")).unwrap();
@@ -106,4 +142,31 @@ async fn a_partial_launch_repair_records_publication_then_routes_pending_checks(
                     if command == "test -f marker"
             )
     }));
+}
+
+#[tokio::test]
+async fn a_partial_launch_repair_records_publication_then_routes_pending_checks() {
+    partial_launch_repair(
+        archon_workflow::task_set_contract::FreezeGateMode::Observe,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_enforce_partial_launch_repair_publishes_siblings_then_routes_pending_checks() {
+    partial_launch_repair(
+        archon_workflow::task_set_contract::FreezeGateMode::Enforce,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_partial_repair_rejects_a_skeleton_rewrite_before_routing_pending_checks() {
+    partial_launch_repair(
+        archon_workflow::task_set_contract::FreezeGateMode::Observe,
+        true,
+    )
+    .await;
 }

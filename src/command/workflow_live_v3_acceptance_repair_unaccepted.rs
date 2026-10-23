@@ -85,25 +85,35 @@ async fn repair_unaccepted_detailed(
             (repairs, defects)
         }
         Err(error) => {
+            let text = format!("{error:#}");
+            let host_unproven = text.contains(HOST_UNPROVEN);
             let command = reauthor_command(&context.project, &context.task_root, contract, &ids);
-            let defects = ids
-                .iter()
-                .map(|id| {
-                    (
-                        id.clone(),
-                        format!(
-                            "contract defect: frozen check '{id}' was not accepted by the judge, so it can never run and no task can fix it; the in-round re-author did not produce an accepted check ({error:#}); repair the contract with: {command}"
-                        ),
-                    )
-                })
-                .collect();
+            let defects = if host_unproven {
+                Defects::new()
+            } else {
+                ids.iter()
+                    .map(|id| {
+                        (
+                            id.clone(),
+                            format!(
+                                "contract defect: frozen check '{id}' was not accepted by the judge, so it can never run and no task can fix it; the in-round re-author did not produce an accepted check ({text}); repair the contract with: {command}"
+                            ),
+                        )
+                    })
+                    .collect()
+            };
+            let failure = if host_unproven {
+                format!("{AUTHORED_PENDING_PREFIX}{text}")
+            } else {
+                text
+            };
             (
                 vec![AcceptanceContractRepairV1 {
                     check_ids,
                     trigger: REPAIR_TRIGGER_NOT_ACCEPTED.into(),
                     repaired: false,
                     freeze_event_id: String::new(),
-                    failure: format!("{error:#}"),
+                    failure,
                     diagnostics: Vec::new(),
                 }],
                 defects,
@@ -131,13 +141,8 @@ pub async fn apply(
     };
     let repaired = repairs.iter().any(|repair| repair.repaired);
     for repair in &repairs {
-        if !repair.repaired
-            && !repair.failure.is_empty()
-            && !repair.failure.starts_with(AUTHORED_PENDING_PREFIX)
-        {
-            record
-                .operational_errors
-                .push(format!("{HOST_UNPROVEN} {}", repair.failure));
+        if !repair.repaired && repair.failure.contains(HOST_UNPROVEN) {
+            record.operational_errors.push(repair.failure.clone());
         }
     }
     record.contract_repairs.extend(repairs);
