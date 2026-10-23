@@ -355,7 +355,12 @@ async function authorCandidate(w, policy) {
       if (routed.operationalKind === "authored_judge_reply") {
         // The candidate is intact; only its judge reply was unusable. Retry
         // the same freeze without charging the host operational no-progress
-        // window. Provider and other host failures keep the normal path.
+        // window, but count it in the ordinary no-progress window so a judge
+        // that never answers usably pauses the loop with evidence instead of
+        // retrying forever. Provider and other host failures keep the normal
+        // path.
+        recordAnswered(progress, call, "authored_judge_reply", advanced, !measuredReplies, round);
+        lastFindings = [`freeze judge reply unusable: ${routed.operational}`];
         carried = authored.content;
         continue;
       }

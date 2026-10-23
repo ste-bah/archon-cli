@@ -131,7 +131,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "a9ae4a5926878d85738a44206db5624e5243ec420287a1fa7e154efb01f83f89",
+        sources_digest: "58ba75427f7525df6cf05dfd73cba1c13250b1dec7b92ef34d2d418b5a7bbc22",
         build_bound: false,
     },
     CapabilityLogic {
@@ -159,7 +159,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "a9ae4a5926878d85738a44206db5624e5243ec420287a1fa7e154efb01f83f89",
+        sources_digest: "58ba75427f7525df6cf05dfd73cba1c13250b1dec7b92ef34d2d418b5a7bbc22",
         build_bound: false,
     },
     CapabilityLogic {
@@ -217,7 +217,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "1dc0535ce77db2d576546d2f8868a89998a1258880215f930babac379c88da27",
+        sources_digest: "d9da8d18384e4b6e16cb57ce16e0235bf3685782a00e7777e55bdb76e096ae69",
         build_bound: false,
     },
     CapabilityLogic {
@@ -263,7 +263,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "1dc0535ce77db2d576546d2f8868a89998a1258880215f930babac379c88da27",
+        sources_digest: "d9da8d18384e4b6e16cb57ce16e0235bf3685782a00e7777e55bdb76e096ae69",
         build_bound: false,
     },
     CapabilityLogic {
@@ -319,7 +319,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
-        sources_digest: "60691cc93067dee0740479d7ff7b6834dbff5609f1ebb2e692966be887f5ef80",
+        sources_digest: "95202f0a3496c4a35b51dbfa647a3e98853508780faf7d90c68fa3285f04fd64",
         build_bound: true,
     },
     CapabilityLogic {
@@ -346,7 +346,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
-        sources_digest: "60691cc93067dee0740479d7ff7b6834dbff5609f1ebb2e692966be887f5ef80",
+        sources_digest: "95202f0a3496c4a35b51dbfa647a3e98853508780faf7d90c68fa3285f04fd64",
         build_bound: true,
     },
 ];

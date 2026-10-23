@@ -106,12 +106,42 @@ async function authoredFreezeJudgeReplyRetriesWithoutOperationalStrike() {
   assert.equal(calls, 2);
   assert.equal(result.publicationReceipt.call_id, 'freeze');
 }
+// A freeze judge whose reply is never usable pauses the loop on the ordinary
+// no-progress window instead of retrying forever.
+async function persistentAuthoredFreezeJudgeReplyPausesOnNoProgress() {
+  const ctx = { args: { gateMode: 'enforce' } };
+  vm.createContext(withAuthorContext(ctx));
+  vm.runInContext(source, ctx);
+  let calls = 0;
+  const pauses = [];
+  const w = {
+    agent: async () => ({ status: 'accepted', stopReason: 'end_turn', content: '{}' }),
+    hostCommand: async () => {
+      calls += 1;
+      if (calls > 50) throw new Error('freeze judge retry did not stop');
+      return { gateEnvelope: { operational_error: { kind: 'authored_judge_reply', text: 'malformed judge reply' } } };
+    },
+    pause: async (_reason, evidence) => { pauses.push(evidence); throw new Error('paused'); },
+  };
+  let error = null;
+  try {
+    await ctx.authorCandidate(w, {
+      phase: 'skeleton', capability: 'freeze-acceptance', prompt: () => 'candidate',
+      retryScopes: new Set(),
+    });
+  } catch (caught) { error = caught; }
+  assert.ok(error, 'a never-usable judge reply must stop the loop');
+  assert.ok(calls <= 50, `retries must be bounded by the no-progress window, got ${calls}`);
+  assert.equal(pauses.length, 1, `expected one pause, got ${JSON.stringify(pauses)}`);
+  assert.equal(pauses[0].reason, 'no_progress');
+}
 (async () => {
   let failed = 0;
   for (const [name, test] of [['finding 2 later-stage repairs', laterStageRepairs],
     ['finding 1 ownership identities', ownership], ['finding 3 element shapes', shapes],
     ['same-stage total must fall', sameStageTotalMustFall], ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings],
-    ['authored incomplete freeze judge retry', authoredFreezeJudgeReplyRetriesWithoutOperationalStrike]]) {
+    ['authored incomplete freeze judge retry', authoredFreezeJudgeReplyRetriesWithoutOperationalStrike],
+    ['persistent authored judge reply pauses on no progress', persistentAuthoredFreezeJudgeReplyPausesOnNoProgress]]) {
     try { await test(); console.log(`PASS ${name}`); }
     catch (error) { failed++; console.error(`FAIL ${name}: ${error.message}`); }
   }
