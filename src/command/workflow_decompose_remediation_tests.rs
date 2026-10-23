@@ -213,7 +213,7 @@ fn force_subjects_only_overrides_the_ledger_subjects_and_consumption_is_append_o
 }
 
 #[test]
-fn paused_finding_report_prepares_resume_seed_and_rejects_unknown_consumed_subjects() {
+fn paused_finding_report_prepares_resume_seed_from_the_persisted_ledger() {
     // EXPECTED BEFORE RUN: a paused run with a persisted needs_remediation
     // report and ledger prepares a phase seed and tolerates a torn event tail.
     let temp = tempfile::tempdir().unwrap();
@@ -403,21 +403,22 @@ fn paused_finding_report_prepares_resume_seed_and_rejects_unknown_consumed_subje
         subjects: vec!["UNKNOWN-X".into()],
     };
     append_consumed(store.run_dir(&run.id).as_path(), &ledger).unwrap();
-    let error = prepare(
-        &store,
-        &run.id,
-        &store.run_dir(&run.id),
-        &mut consumed_arguments,
-        &runtime,
-        &criteria,
-        &requirement_texts,
-    )
-    .unwrap_err()
-    .to_string();
-    assert!(error.contains("UNKNOWN-X"), "{error}");
+    assert!(
+        prepare(
+            &store,
+            &run.id,
+            &store.run_dir(&run.id),
+            &mut consumed_arguments,
+            &runtime,
+            &criteria,
+            &requirement_texts,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(
         consumed_arguments["forceBodySubjects"],
-        serde_json::json!(["stale"])
+        serde_json::json!([])
     );
     assert!(consumed_arguments["phaseSeed"].is_null());
 

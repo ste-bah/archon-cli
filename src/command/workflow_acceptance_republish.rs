@@ -1,12 +1,5 @@
-//! The sanctioned repair of a frozen acceptance contract: re-author named
-//! checks, keep every other entry byte-identical, and republish the whole
-//! frozen chain — contract, lock, skeleton, skeleton lock and pin — in one
-//! atomic transaction, so no follow-up `freeze-skeleton` and no hand edit of
-//! the task directory is ever needed.
-//!
-//! Used by `workflow freeze-acceptance --reauthor` and by the authored run's
-//! acceptance stage when a round meets a check the judge did not accept. Also
-//! home of the launch guard that refuses to start a run bound to such a check.
+//! Re-author named checks and atomically republish the frozen chain.
+//! Used by the acceptance repair command and authored-run launch guard.
 
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_LOCK_FILE, FreezeGateMode, TASK_SKELETON_LOCK_FILE,
@@ -18,7 +11,7 @@ use std::collections::BTreeMap;
 use super::reauthor::{AuthorScope, ReauthorGate};
 use super::*;
 
-/// One per-check repair of the contract frozen beside `tasks_root`.
+/// Per-check repair of the contract frozen beside `tasks_root`.
 pub(crate) struct ReauthorRequest<'a> {
     pub(crate) project_root: &'a Path,
     pub(crate) tasks_root: &'a Path,
@@ -40,13 +33,8 @@ use verify::verify;
 #[path = "workflow_acceptance_republish_extend.rs"]
 pub(crate) mod extend;
 
-/// Re-author and re-judge exactly `request.ids`, then republish the chain.
-/// Nothing is written unless every named check ends accepted by the
-/// freeze-time judge and cleared the executability probe, both gates allow publication under the mode their stage
-/// was frozen in, and — checked inside the publish transaction, just before its
-/// first rename — the chain on disk is still the one verified before the
-/// author ran. Verification and publication each hold the chain lock;
-/// authoring holds no lock across its await.
+/// Re-author named checks and publish only if judgment, probes and frozen
+/// gates pass and the verified chain still matches under the publication lock.
 pub(crate) async fn reauthor_and_republish(
     client: &dyn WorkflowLlmClient,
     request: ReauthorRequest<'_>,
@@ -230,10 +218,22 @@ fn publish_chain_owned(
             &repaired,
         ));
     }
+    // The freeze metadata and gate evaluate only the entries being published.
+    // Findings for a still-pending refused entry stay in `findings` for the
+    // returned repair report, while its non-accepted judgment remains on the
+    // contract and therefore keeps the chain pending on the next read.
+    let acceptance_gate_findings = findings
+        .iter()
+        .filter(|finding| {
+            finding.remediation_scope == archon_workflow::RemediationScope::PrdInput
+                || publish_ids.contains(&finding.subject)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     let (lock, mut pin) = findings::acceptance_lock_and_pin(
         tasks_root,
         verified.acceptance_mode,
-        &findings,
+        &acceptance_gate_findings,
         &contract_bytes,
         request.gate.probe.baseline_commit(),
     );
@@ -264,7 +264,11 @@ fn publish_chain_owned(
         ),
         sidecar,
     ];
-    let mut gates = vec![(GateId::FreezeAcceptance, verified.acceptance_mode, findings)];
+    let mut gates = vec![(
+        GateId::FreezeAcceptance,
+        verified.acceptance_mode,
+        acceptance_gate_findings,
+    )];
     if let Some(mut skeleton) = verified.skeleton.clone() {
         if let Some(extension) = extension {
             extension.claim_new_obligations(&mut skeleton);

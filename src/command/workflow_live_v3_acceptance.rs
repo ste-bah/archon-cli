@@ -427,9 +427,13 @@ async fn evaluate(
             continue;
         }
         if authored_pending.contains(&criterion.id) {
-            record
-                .checks
-                .push(pending::record(criterion, exec::check_kind(criterion)));
+            let pending = pending::record_from_round(
+                criterion,
+                exec::check_kind(criterion),
+                result.as_ref(),
+                record,
+            );
+            record.checks.push(pending);
             continue;
         }
         let Some(result) = result else {

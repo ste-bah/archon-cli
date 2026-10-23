@@ -254,13 +254,10 @@ pub(crate) fn snapshot_locked(
     verify_acceptance(project_root, prd_path, task_root, &pin)?;
     snapshot.acceptance = true;
     if !skeleton_lock.exists() {
-        let skeleton_file = task_root.join(TASK_SKELETON_FILE).exists();
-        if pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some() {
-            return Err(anyhow!(
-                "partial skeleton freeze beside {}: file={skeleton_file}, lock=false, pin=true; restore a matching frozen triple or re-run `workflow freeze-skeleton`",
-                task_root.display()
-            ));
-        }
+        // Originating acceptance-only behavior: without the skeleton lock,
+        // the skeleton is not a frozen successor, even if its draft bytes or
+        // pin fields remain. Preflight tells operators to remove successor
+        // artifacts, and every chain reader therefore leaves this phase open.
         return Ok(snapshot);
     }
     // An acceptance published before the skeleton phase leaves the old

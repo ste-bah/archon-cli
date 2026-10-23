@@ -35,9 +35,12 @@ impl ExecutabilityProbe for OneUnprovenProbe {
         _contract: &AcceptanceContract,
         ids: &BTreeSet<String>,
     ) -> BTreeMap<String, String> {
-        if ids.contains("AC-F-001") {
+        if let Some(id) = ["AC-F-001", "AC-X-001"]
+            .into_iter()
+            .find(|id| ids.contains(*id))
+        {
             self.unproven.lock().unwrap().insert(
-                "AC-F-001".into(),
+                id.into(),
                 "the mutation copy had an operational I/O failure".into(),
             );
         }
@@ -99,6 +102,106 @@ async fn one_host_unproven_check_does_not_discard_two_proven_repairs() {
         ids(&["AC-F-002", "AC-F-003"]),
         "unproven entries are not recorded as published"
     );
+}
+
+#[tokio::test]
+async fn enforce_partial_republish_publishes_proven_siblings_and_keeps_pending_ids() {
+    let set = super::super::test_fixture::frozen_set_in(
+        &[
+            ("AC-X-001", "test -f missing-a", false),
+            ("AC-X-002", "test -f missing-b", false),
+            ("AC-X-003", "test -f missing-c", false),
+        ],
+        archon_workflow::task_set_contract::FreezeGateMode::Enforce,
+        "",
+    );
+    let before = set.contract_bytes();
+    let named = ids(&["AC-X-001", "AC-X-002", "AC-X-003"]);
+    let probe = OneUnprovenProbe::default();
+    let client =
+        ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "test -s out"), |_, _| true);
+    let result = reauthor_and_republish(
+        &client,
+        ReauthorRequest {
+            project_root: set.project.path(),
+            tasks_root: &set.tasks,
+            prd_path: &set.prd,
+            ids: &named,
+            gate: ReauthorGate {
+                probe: &probe,
+                seeds: &BTreeMap::new(),
+            },
+            trigger: "test",
+        },
+        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+    )
+    .await
+    .expect("pending check must not block proven siblings under enforcement");
+    assert!(result.published);
+    assert!(result.unproven.contains_key("AC-X-001"), "{result:?}");
+    assert_eq!(set.contract().acceptance[0].id, "AC-X-001");
+    assert_ne!(set.contract_bytes(), before);
+    assert_eq!(
+        set.pin().lineage.last().unwrap().reauthored_ids,
+        ids(&["AC-X-002", "AC-X-003"])
+    );
+    assert!(
+        !non_accepted_ids(&set.contract()).is_empty(),
+        "pending ids remain visible"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn enforce_timeout_stays_pending_while_proven_siblings_publish() {
+    let mut set = super::super::test_fixture::frozen_set_in_proven(
+        &[
+            ("AC-X-001", "check-with-no-progress", false),
+            ("AC-X-002", "check-two", false),
+            ("AC-X-003", "check-three", false),
+        ],
+        archon_workflow::task_set_contract::FreezeGateMode::Enforce,
+        "",
+    );
+    set.probe = set.probe.with_check_cap(1);
+    let named = ids(&["AC-X-001", "AC-X-002", "AC-X-003"]);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            command_entry(
+                entry,
+                if entry["id"] == "AC-X-001" {
+                    "sleep 5; test -s out"
+                } else {
+                    "test -s out"
+                },
+            )
+        },
+        |_, _| true,
+    );
+    let result = reauthor_and_republish(
+        &client,
+        ReauthorRequest {
+            project_root: set.project.path(),
+            tasks_root: &set.tasks,
+            prd_path: &set.prd,
+            ids: &named,
+            gate: ReauthorGate {
+                probe: &set.probe,
+                seeds: &BTreeMap::new(),
+            },
+            trigger: "test",
+        },
+        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+    )
+    .await
+    .expect("host-unproven timeout must not block siblings");
+    assert!(result.published);
+    assert!(result.unproven.contains_key("AC-X-001"), "{result:?}");
+    assert_eq!(
+        set.pin().lineage.last().unwrap().reauthored_ids,
+        ids(&["AC-X-002", "AC-X-003"])
+    );
+    assert!(!non_accepted_ids(&set.contract()).is_empty());
 }
 
 #[tokio::test]

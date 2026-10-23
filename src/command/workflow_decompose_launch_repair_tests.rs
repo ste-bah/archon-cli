@@ -179,3 +179,27 @@ fn frozen_chain_verifier_rejects_lock_digest_that_does_not_match_skeleton() {
     let error = frozen_chain_snapshot(&project, &prd, &tasks).unwrap_err();
     assert!(format!("{error:#}").contains("digest"), "{error:#}");
 }
+
+#[test]
+fn missing_skeleton_lock_keeps_only_acceptance_frozen() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().canonicalize().unwrap();
+    let prd = project.join("prds/PRD-X.md");
+    let tasks = project.join("tasks/PRD-X");
+    std::fs::create_dir_all(prd.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::write(
+        &prd,
+        "# PRD X\n\n## Requirements\n\n| ID | Requirement |\n|---|---|\n| REQ-X-001 | Prove the fixture. |\n\n## Acceptance Criteria\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | The fixture is proven. |\n",
+    )
+    .unwrap();
+    use super::super::workflow_decompose_frozen_chain::test_support as support;
+    let acceptance_digest = support::freeze_acceptance(&project, &prd, &tasks);
+    support::freeze_skeleton(&project, &tasks, &acceptance_digest, &["TASK-X-001"]);
+    std::fs::remove_file(tasks.join(archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE))
+        .unwrap();
+
+    let snapshot = frozen_chain_snapshot(&project, &prd, &tasks).unwrap();
+    assert!(snapshot.acceptance);
+    assert!(!snapshot.skeleton);
+}

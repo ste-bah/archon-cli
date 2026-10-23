@@ -76,7 +76,7 @@ async fn resume_to_barrier(
 }
 
 #[tokio::test]
-async fn older_body_gate_findings_are_reverified_under_current_logic() {
+async fn observe_mode_body_with_findings_reopens_while_a_clean_body_stays_frozen() {
     let (project, store, run_id, _) = chained_run(1, None).await;
     let findings = serde_json::json!([{
         "text": "body repair remains open", "subject": "land-task-body",
@@ -100,7 +100,7 @@ async fn older_body_gate_findings_are_reverified_under_current_logic() {
         "{output}"
     );
     assert!(
-        output.contains("frozen_chain_override body:TASK-X-011.md=verify reason=judged attempt land-observed gate logic changed; re-run the phase under current logic"),
+        output.contains("frozen_chain_override body:TASK-X-011.md=keep reason=judged attempt land-observed status=needs_review"),
         "{output}"
     );
     let script = resume_to_barrier(&project, &store, &run_id).await;
@@ -109,7 +109,7 @@ async fn older_body_gate_findings_are_reverified_under_current_logic() {
     assert_eq!(chain["skeleton"], true, "{chain}");
     assert_eq!(
         chain["bodies"],
-        serde_json::json!(["TASK-X-010.md", "TASK-X-011.md"]),
+        serde_json::json!(["TASK-X-010.md"]),
         "{chain}"
     );
     assert_eq!(chain["subjects"].as_array().unwrap().len(), 2, "{chain}");

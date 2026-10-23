@@ -267,11 +267,10 @@ async fn open_acceptance_findings_keep_the_chain_prefix_closed_on_resume() {
         true,
     )
     .unwrap();
-    assert_eq!(effective["acceptance"], true, "{effective}");
-    assert_eq!(effective["skeleton"], true, "{effective}");
-    assert_eq!(
-        effective["subjects"].as_array().unwrap().len(),
-        1,
+    assert_eq!(effective["acceptance"], false, "{effective}");
+    assert_eq!(effective["skeleton"], false, "{effective}");
+    assert!(
+        effective["subjects"].as_array().unwrap().is_empty(),
         "{effective}"
     );
     let resume = UpgradeBarrier {

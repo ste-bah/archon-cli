@@ -76,9 +76,10 @@ async fn a_repaired_check_that_then_fails_its_assertion_goes_to_its_tasks() {
 #[tokio::test]
 async fn a_crash_the_repair_cannot_fix_remains_pending_for_its_author() {
     let run = run_fixture_with(&[
-        ("AC-F-001", "test -f present", true),
-        ("AC-F-002", CRASHING, true),
+        ("AC-X-001", "test -f present", true),
+        ("AC-X-002", CRASHING, true),
     ]);
+    super::repair_tests::record_baseline(&run);
     let before = run.set.contract_bytes();
     let client = ScriptedAuthorJudge::new(
         |entry, attempt| command_entry(entry, &format!("{CRASHING}# {attempt}\n")),
@@ -90,21 +91,20 @@ async fn a_crash_the_repair_cannot_fix_remains_pending_for_its_author() {
         record.contract_repairs[0].trigger,
         REPAIR_TRIGGER_SCRIPT_DEFECT
     );
-    assert!(
-        record
-            .checks
-            .iter()
-            .all(|check| check.check_id != "AC-F-002"),
-        "an unresolved authored check is carried as pending, not published as a defect"
+    let pending = check(&record, "AC-X-002");
+    assert_eq!(
+        pending.status,
+        archon_workflow::v2::acceptance_stage::AcceptanceCheckStatus::Pending,
+        "{pending:?}"
     );
-    let pending = record
-        .operational_errors
-        .iter()
-        .find(|error| error.contains("AC-F-002"))
-        .unwrap_or_else(|| panic!("missing pending check evidence: {record:?}"));
+    assert!(pending.owning_tasks.is_empty(), "not handed to a task");
+    assert_eq!(pending.exit_code, Some(1), "crash evidence is kept");
+    assert!(pending.stderr_tail.contains(SIGNAL), "{pending:?}");
+    let text = pending.operational_error.as_deref().unwrap();
+    assert!(text.contains(SIGNAL), "{text}");
     assert!(
-        pending.contains("crashed in its own python code"),
-        "{pending}"
+        text.contains("freeze-acceptance --reauthor AC-X-002"),
+        "{text}"
     );
     assert!(record.task_remediable_check_ids().is_empty());
     assert!(record.blocks_completion());

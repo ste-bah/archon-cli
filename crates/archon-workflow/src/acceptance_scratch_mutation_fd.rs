@@ -79,7 +79,11 @@ pub(crate) fn site_entry_exists(root: &SiteRoot, rel: &Path) -> std::io::Result<
                 "unsafe relative path",
             ));
         }
-        windows::windows_components_are_safe(root, rel, false)?;
+        match windows::windows_components_are_safe(root, rel, false) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
         match std::fs::symlink_metadata(root.path.join(rel)) {
             Ok(_) => Ok(true),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),

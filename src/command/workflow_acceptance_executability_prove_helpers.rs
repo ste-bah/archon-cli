@@ -35,7 +35,7 @@ pub(in crate::command::workflow_task_set::executability) fn unattributed_recreat
     baseline: &str,
 ) -> String {
     format!(
-        "{baseline}; the check passed, but a moved path was present again after mutation and its writer is unknown, so this run does not prove that the check depends on the moved input"
+        "{baseline}; the check passed, and the parent directory metadata changed while the moved input was restored after mutation; the observed change does not identify who wrote the input, so this run does not prove that the check depends on it"
     )
 }
 
