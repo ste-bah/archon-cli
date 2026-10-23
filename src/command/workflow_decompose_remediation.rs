@@ -92,7 +92,7 @@ pub(crate) fn is_consumed(run_dir: &Path, report_id: &str) -> Result<bool> {
 #[path = "workflow_decompose_remediation_resolved.rs"]
 mod resolved;
 pub(crate) use resolved::{
-    append_resolved, entry_digest, reconcile_pending_from_lineage, resolved_publication_times,
+    append_resolved, entry_digest, reconcile_pending_from_lineage, resolved_publications,
     unresolved_pending_subjects,
 };
 

@@ -69,6 +69,7 @@ pub(crate) fn reported_siblings(
 }
 
 pub(super) struct ReverifyChecks {
+    pub(super) judged_contract_bytes: Vec<u8>,
     pub(super) checks: Vec<CheckResult>,
     pub(super) task_subjects: Vec<String>,
     pub(super) accepted: bool,
@@ -259,10 +260,9 @@ pub(super) async fn reverify_checks(
         .into_keys()
         .collect::<BTreeSet<_>>();
     let contract_path = task_root.join(ACCEPTANCE_CONTRACT_FILE);
-    let raw: AcceptanceContract = serde_json::from_slice(
-        &std::fs::read(&contract_path)
-            .with_context(|| format!("reading {}", contract_path.display()))?,
-    )?;
+    let judged_contract_bytes = std::fs::read(&contract_path)
+        .with_context(|| format!("reading {}", contract_path.display()))?;
+    let raw: AcceptanceContract = serde_json::from_slice(&judged_contract_bytes)?;
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project_root, task_root);
     let pin: AcceptancePin = serde_json::from_slice(
         &std::fs::read(&pin_path).with_context(|| format!("reading {}", pin_path.display()))?,
@@ -456,6 +456,7 @@ pub(super) async fn reverify_checks(
     task_subjects.dedup();
     let accepted = !operational_failure && results.iter().all(|check| check.verdict == "accepted");
     Ok(ReverifyChecks {
+        judged_contract_bytes,
         checks: results,
         task_subjects,
         accepted,

@@ -6,13 +6,21 @@ fn authored_entry_digest(
     entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
 ) -> anyhow::Result<String> {
     Ok(archon_workflow::task_set_contract::content_digest(
-        &serde_json::to_vec(entry)?,
+        &serde_json::to_vec(&serde_json::json!({
+            "id": &entry.id,
+            "criterion": &entry.criterion,
+            "check": &entry.check,
+            "covers": &entry.covers,
+            "gap_permitted": entry.gap_permitted,
+        }))?,
     ))
 }
 
-/// Re-author a consumed subject only when filed lineage positively proves a
-/// repair followed by a return to the older bytes. Missing lineage is not
-/// evidence that a repair was lost.
+/// Re-author a consumed subject when the recorded report was consumed and its
+/// authored entry digest is still present in the live contract. This proves
+/// that the report's flagged authored bytes remain; it does not prove an
+/// intervening repair followed by a return. Missing lineage is not evidence
+/// that a repair was lost.
 pub(super) fn consumed_ledger_findings(
     task_root: &Path,
     run_dir: &Path,

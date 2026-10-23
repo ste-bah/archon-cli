@@ -23,8 +23,13 @@ fn setup() -> (
     let contract: archon_workflow::task_set_contract::AcceptanceContract =
         serde_json::from_slice(&contract_bytes).unwrap();
     let entry = &contract.acceptance[0];
-    let entry_digest =
-        archon_workflow::task_set_contract::content_digest(&serde_json::to_vec(entry).unwrap());
+    let entry_digest = archon_workflow::task_set_contract::content_digest(
+        &serde_json::to_vec(&serde_json::json!({
+            "id": &entry.id, "criterion": &entry.criterion, "check": &entry.check,
+            "covers": &entry.covers, "gap_permitted": entry.gap_permitted,
+        }))
+        .unwrap(),
+    );
     let report = serde_json::json!({
         "id": report_id,
         "contract_digest": archon_workflow::task_set_contract::content_digest(&contract_bytes),
@@ -80,6 +85,27 @@ fn flagged_authored_bytes_back_are_routed_but_repaired_bytes_are_not() {
             .is_empty()
     );
     drop(run);
+}
+
+#[test]
+fn judgment_only_change_preserves_authored_entry_identity() {
+    let (set, run, ledger, _) = setup();
+    let contract_path = set
+        .tasks
+        .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let mut contract: archon_workflow::task_set_contract::AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(&contract_path).unwrap()).unwrap();
+    contract.acceptance[0].judgment.reason = "a later judgment".into();
+    std::fs::write(
+        &contract_path,
+        serde_json::to_vec_pretty(&contract).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        consumed_ledger_findings(&set.tasks, run.path(), &ledger)
+            .unwrap()
+            .contains_key("AC-F-001")
+    );
 }
 
 #[test]
@@ -153,6 +179,13 @@ fn same_report_id_in_another_run_is_ignored() {
     let (set, report_root, ledger, _) = setup();
     let run_dir = set.project.path().join(".archon/workflows/current-run");
     let other_run = set.project.path().join(".archon/workflows/other-run");
+    let current_consumed = run_dir.join("decomposition/reverify");
+    std::fs::create_dir_all(&current_consumed).unwrap();
+    std::fs::write(
+        current_consumed.join("consumed.jsonl"),
+        "{\"report_id\":\"another-report\"}\n",
+    )
+    .unwrap();
     let other_consumed = other_run.join("decomposition/reverify");
     std::fs::create_dir_all(&other_consumed).unwrap();
     std::fs::write(

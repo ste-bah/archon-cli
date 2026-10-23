@@ -202,6 +202,7 @@ pub(crate) async fn reverify(
                 ));
             }
         };
+    let judged_contract_bytes = acceptance.judged_contract_bytes;
     let checks = acceptance.checks;
     operational_failure |= acceptance.operational_failure;
     failed_subjects.extend(acceptance.task_subjects);
@@ -382,7 +383,7 @@ pub(crate) async fn reverify(
     let report_event_seq = store.next_event_seq(run_id)?;
     let report_id = format!("reverify-{event_seq}-report");
     let (call_record_ids_at_report, contract_digest, judged_check_digests) =
-        report_digests::for_report(&task_root, &v2, &report_id, &checks)?;
+        report_digests::for_report(&judged_contract_bytes, &v2, &report_id, &checks)?;
     let report = ReverifyReport {
         schema_version: 1,
         id: report_id.clone(),

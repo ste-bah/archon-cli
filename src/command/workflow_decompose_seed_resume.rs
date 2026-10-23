@@ -197,7 +197,7 @@ pub(crate) fn resume_script_arguments(
 /// Refresh the acceptance entries in the seed handed to a resumed script.
 /// Replies remain a later overlay in the script, preserving newly authored
 /// entries while removing stale carried bytes from the candidate base.
-fn refresh_acceptance_carried_entries(
+pub(crate) fn refresh_acceptance_carried_entries(
     task_root: &Path,
     run_root: &Path,
     seed: &mut PhaseSeed,
@@ -229,22 +229,17 @@ fn refresh_acceptance_carried_entries(
         ..
     }) = seed.subjects.get_mut("acceptance")
     {
-        // A reply remains an overlay unless a consumed or latest pending
-        // reverify lineage names that subject as repaired and the current
-        // contract supplies its committed bytes.
+        // A reply remains an overlay unless the durable resolved journal
+        // proves that its authored bytes were actually published later.
         let mut published = std::collections::BTreeMap::<
             String,
-            Vec<(chrono::DateTime<chrono::FixedOffset>, serde_json::Value)>,
+            Vec<(chrono::DateTime<chrono::FixedOffset>, String)>,
         >::new();
-        // Per-check re-publishes have no whole-candidate stdin record. Their
-        // durable evidence is the reverify report filed in the run ledger and
-        // the matching completion event. Whole-set freezes are not evidence of
-        // a per-check repair: their candidate normally repeats every unchanged
-        // carried entry. Attribute the report only to its named subjects.
-        for (id, at) in reverify_report_publications(run_root)? {
-            if let Some(entry) = live.get(&id) {
-                published.entry(id).or_default().push((at, entry.clone()));
-            }
+        // Only the resolved journal proves that these subject bytes were
+        // actually published. Pending reports and their flagged subjects do
+        // not establish publication.
+        for (id, at, digest) in reverify_report_publications(run_root)? {
+            published.entry(id).or_default().push((at, digest));
         }
         replies.retain(|reply| {
             let Some(current) = live.get(&reply.id) else {
@@ -287,122 +282,60 @@ fn refresh_acceptance_carried_entries(
     Ok(Some(digest))
 }
 
+/// Refresh the arguments that will run after resume checks may have healed
+/// the acceptance contract.
+pub(crate) fn refresh_after_resume_heal(
+    task_root: &Path,
+    run_root: &Path,
+    arguments: &mut serde_json::Value,
+    seed: Option<&mut PhaseSeed>,
+    expected_arguments: &serde_json::Value,
+) -> Result<()> {
+    if let Some(seed) = seed {
+        let records =
+            archon_workflow::WorkflowV2ResultStore::new(run_root.join("v2")).load_call_records()?;
+        refresh_acceptance_carried_entries(task_root, run_root, seed, &records)?;
+        let refreshed = crate::command::workflow_decompose_seed::seeded_arguments(
+            expected_arguments,
+            Some(seed),
+        );
+        arguments["phaseSeed"] = refreshed["phaseSeed"].clone();
+    }
+    Ok(())
+}
+
 /// Replies and published entries may carry host-owned judgment metadata.
 /// Compare only the authored fields to recognize the bytes a publication
 /// committed, even when the reply itself is byte-identical to those fields.
-fn same_authored_entry(published: &serde_json::Value, current: &serde_json::Value) -> bool {
-    ["criterion", "check", "covers", "gap_permitted"]
-        .iter()
-        .all(|field| published.get(field) == current.get(field))
-}
-
 fn reply_was_published_after(
-    publications: Option<&Vec<(chrono::DateTime<chrono::FixedOffset>, serde_json::Value)>>,
+    publications: Option<&Vec<(chrono::DateTime<chrono::FixedOffset>, String)>>,
     reply_at: chrono::DateTime<chrono::FixedOffset>,
     current: &serde_json::Value,
 ) -> bool {
     publications.is_some_and(|versions| {
-        versions
-            .iter()
-            .any(|(at, entry)| *at > reply_at && same_authored_entry(entry, current))
+        versions.iter().any(|(at, digest)| {
+            *at > reply_at && authored_entry_digest(current).as_deref() == Some(digest)
+        })
     })
+}
+
+fn authored_entry_digest(entry: &serde_json::Value) -> Option<String> {
+    let authored = serde_json::json!({
+        "id": entry.get("id"),
+        "criterion": entry.get("criterion"),
+        "check": entry.get("check"),
+        "covers": entry.get("covers").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "gap_permitted": entry.get("gap_permitted").cloned().unwrap_or(serde_json::Value::Bool(false)),
+    });
+    serde_json::to_vec(&authored)
+        .ok()
+        .map(|bytes| archon_workflow::task_set_contract::content_digest(&bytes))
 }
 
 fn reverify_report_publications(
     run_root: &Path,
-) -> Result<Vec<(String, chrono::DateTime<chrono::FixedOffset>)>> {
-    let events_path = run_root.join("events.jsonl");
-    let events = match std::fs::read_to_string(&events_path) {
-        Ok(events) => events,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("reading {}", events_path.display()));
-        }
-    };
-    let mut reports = std::collections::BTreeMap::new();
-    let mut latest_report_id = None;
-    for line in events.lines() {
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if event["kind"] == "decomposition_reverified"
-            && event["detail"]["outcome"] == "needs_remediation"
-        {
-            let Some(report_id) = event["detail"]["report_id"].as_str() else {
-                continue;
-            };
-            let Some(timestamp) = event["ts"].as_str() else {
-                continue;
-            };
-            if let Ok(at) = chrono::DateTime::parse_from_rfc3339(timestamp) {
-                reports.insert(report_id.to_string(), at);
-                latest_report_id = Some(report_id.to_string());
-            }
-        }
-    }
-    let consumed_path = run_root.join("decomposition/reverify/consumed.jsonl");
-    let consumed = match std::fs::read_to_string(&consumed_path) {
-        Ok(consumed) => consumed
-            .lines()
-            .enumerate()
-            .map(|(index, line)| {
-                let row: serde_json::Value = serde_json::from_str(line).with_context(|| {
-                    format!("parsing line {} of {}", index + 1, consumed_path.display())
-                })?;
-                Ok(row["report_id"].as_str().map(str::to_string))
-            })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect::<std::collections::BTreeSet<_>>(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
-        Err(error) => {
-            return Err(error).with_context(|| format!("reading {}", consumed_path.display()));
-        }
-    };
-    let selected = reports
-        .keys()
-        .filter(|report_id| {
-            consumed.contains(*report_id) || Some(report_id.as_str()) == latest_report_id.as_deref()
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if selected.is_empty() {
-        return Ok(Vec::new());
-    }
-    let durable_publications =
-        crate::command::workflow_decompose_remediation::resolved_publication_times(run_root)?;
-    let mut publications = Vec::new();
-    for report_id in selected {
-        let at = reports[&report_id];
-        let report_path = run_root
-            .join("decomposition/reverify")
-            .join(format!("remediation-{report_id}.json"));
-        let bytes = match std::fs::read(&report_path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| format!("reading {}", report_path.display()));
-            }
-        };
-        let report: serde_json::Value = serde_json::from_slice(&bytes)
-            .with_context(|| format!("parsing {}", report_path.display()))?;
-        publications.extend(
-            report["subjects"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(serde_json::Value::as_str)
-                .map(|id| {
-                    let published_at = durable_publications
-                        .get(&(report_id.clone(), id.to_string()))
-                        .copied()
-                        .unwrap_or(at);
-                    (id.to_string(), published_at)
-                }),
-        );
-    }
-    Ok(publications)
+) -> Result<Vec<(String, chrono::DateTime<chrono::FixedOffset>, String)>> {
+    crate::command::workflow_decompose_remediation::resolved_publications(run_root)
 }
 
 #[cfg(test)]

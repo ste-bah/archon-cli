@@ -319,7 +319,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Some(&resume_chain.argument),
         &reply_leaked_markers,
     )?;
-    let (mut script_arguments, script_seed) =
+    let (mut script_arguments, mut script_seed) =
         crate::command::workflow_decompose_seed::resume_script_arguments(
             &store,
             run_id,
@@ -361,17 +361,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .await
             .map_err(|error| anyhow!("reporting the resume decision: {error}"))?;
     }
-    let calls = archon_workflow::v2::script::dry_run_workflow_plan(
-        FIXED_SCRIPT_SOURCE,
-        Some(&script_arguments),
-    )
-    .await?;
-    let plan = super::super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
-        compiled_spec,
-        FIXED_SCRIPT_SOURCE,
-        calls,
-        script_arguments,
-    );
     entry::cancel_if_requested(&store, run_id, cancellation_requested)?;
     let program = std::env::current_exe()
         .context("resolving the fixed decomposition binary")?
@@ -432,11 +421,27 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         config.tools.cargo.to_limits(),
     )
     .await?;
-    // Keep a report pending when any of its subjects remains unproven; the
-    // next resume retries it and consumes the ledger only after proof.
+    crate::command::workflow_decompose_seed::refresh_after_resume_heal(
+        &task_root,
+        &store.run_dir(run_id),
+        &mut script_arguments,
+        script_seed.seed.as_mut(),
+        &expected_arguments,
+    )?;
     crate::command::workflow_decompose_remediation::withhold_pending_ledger_while_unproven(
         &mut ledger,
         &unproven,
+    );
+    let calls = archon_workflow::v2::script::dry_run_workflow_plan(
+        FIXED_SCRIPT_SOURCE,
+        Some(&script_arguments),
+    )
+    .await?;
+    let plan = super::super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
+        compiled_spec,
+        FIXED_SCRIPT_SOURCE,
+        calls,
+        script_arguments,
     );
     execution_lease.record_executor()?;
     upgrade::mark_started(&store, run_id)?;

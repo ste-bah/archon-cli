@@ -50,24 +50,24 @@ fn resolved_subjects(run_dir: &Path, report_id: &str) -> Result<BTreeMap<String,
     Ok(resolved)
 }
 
-pub(crate) fn resolved_publication_times(
+pub(crate) fn resolved_publications(
     run_dir: &Path,
-) -> Result<BTreeMap<(String, String), chrono::DateTime<chrono::FixedOffset>>> {
+) -> Result<Vec<(String, chrono::DateTime<chrono::FixedOffset>, String)>> {
     let path = run_dir.join("decomposition/reverify/resolved.jsonl");
-    let mut publications = BTreeMap::new();
+    let mut publications = Vec::new();
     for row in resolved_rows(&resolved_text(&path)?, &path)? {
-        let (Some(report_id), Some(timestamp), Some(subjects)) = (
-            row["report_id"].as_str(),
-            row["published_at"].as_str(),
-            row["subjects"].as_object(),
-        ) else {
+        let (Some(timestamp), Some(subjects)) =
+            (row["published_at"].as_str(), row["subjects"].as_object())
+        else {
             continue;
         };
         let Ok(at) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
             continue;
         };
-        for id in subjects.keys() {
-            publications.insert((report_id.to_string(), id.clone()), at);
+        for (id, digest) in subjects {
+            if let Some(digest) = digest.as_str() {
+                publications.push((id.clone(), at, digest.to_string()));
+            }
         }
     }
     Ok(publications)
@@ -86,7 +86,13 @@ pub(crate) fn entry_digest(
         return Ok(None);
     };
     Ok(Some(archon_workflow::task_set_contract::content_digest(
-        &serde_json::to_vec(entry)?,
+        &serde_json::to_vec(&serde_json::json!({
+            "id": &entry.id,
+            "criterion": &entry.criterion,
+            "check": &entry.check,
+            "covers": &entry.covers,
+            "gap_permitted": entry.gap_permitted,
+        }))?,
     )))
 }
 

@@ -485,7 +485,7 @@ pub(crate) fn status_lines(store: &WorkflowStore, run_id: &str) -> String {
 mod derive;
 #[path = "workflow_decompose_seed_resume.rs"]
 pub(crate) mod resume;
-pub(crate) use resume::{host_criteria, resume_script_arguments};
+pub(crate) use resume::{host_criteria, refresh_after_resume_heal, resume_script_arguments};
 
 #[cfg(test)]
 #[path = "workflow_decompose_seed_tests.rs"]
