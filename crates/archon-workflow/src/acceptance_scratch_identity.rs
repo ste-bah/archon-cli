@@ -12,6 +12,27 @@ pub struct BuildIdentity {
     tools: BTreeMap<String, String>,
     cargo_configuration: BTreeMap<String, String>,
 }
+impl BuildIdentity {
+    /// The parts of `other` that differ from this identity, named as
+    /// [`super::faults::check_fault`] reads them.
+    pub(super) fn changed_parts(&self, other: &Self) -> Vec<&'static str> {
+        [
+            (self.source != other.source, "source"),
+            (self.target != other.target, "target"),
+            (self.cwd_targets != other.cwd_targets, "target links"),
+            (self.environment != other.environment, "environment"),
+            (self.tools != other.tools, "tools"),
+            (
+                self.cargo_configuration != other.cargo_configuration,
+                "build configuration",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(changed, part)| changed.then_some(part))
+        .collect()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CheckEvidence {
     pub acceptance_id: String,

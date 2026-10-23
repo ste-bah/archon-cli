@@ -228,10 +228,13 @@ pub async fn observe_commands_hooked(
                 .map_or(true, |current| current != &baseline);
             match &after_identity {
                 Ok(current) if current == &baseline => {}
-                _ => check.operational_error = Some(
-                    "native scratch source or build identity changed; warm target reuse refused"
-                        .into(),
-                ),
+                Ok(current) => {
+                    let parts = baseline.changed_parts(current);
+                    check.operational_error = Some(super::faults::identity_changed(&parts));
+                }
+                Err(e) => check.operational_error = Some(format!(
+                    "native scratch source or build identity could not be captured after the check ({e}); warm target reuse refused"
+                )),
             }
             let project_after = phase().run(|| inventory(roots.project()));
             let cache_after = phase().run(|| cargo_home.digest(&cargo_home_path));

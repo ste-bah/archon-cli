@@ -30,6 +30,9 @@ use super::{CONTINUE_PROMPT, JUDGE_TIMEOUT_SECS, JudgeIncomplete};
 pub(super) enum Ending {
     Complete,
     Truncated(String),
+    /// The judge declined to judge the content it was shown: its own
+    /// outcome about the candidates of this call, never the provider's.
+    Refused(String),
     Unsupported(String),
 }
 
@@ -37,6 +40,9 @@ pub(super) fn ending(outcome: &WorkflowAgentOutcome) -> Ending {
     match outcome.stop_reason.as_deref() {
         Some("end_turn" | "stop" | "completed") => Ending::Complete,
         Some(reason @ ("max_tokens" | "length")) => Ending::Truncated(reason.to_string()),
+        Some(reason @ ("refusal" | "content_filter")) => Ending::Refused(format!(
+            "acceptance judge refused to judge these checks (stop reason '{reason}')"
+        )),
         Some(reason) => Ending::Unsupported(format!(
             "acceptance judge ended with unsupported stop reason '{reason}'"
         )),
@@ -136,6 +142,12 @@ pub(super) async fn complete_reply(
         let state = document(&grown);
         match ending(&outcome) {
             Ending::Unsupported(why) => return Ok(Err((why, JudgeIncompleteKind::Provider))),
+            Ending::Refused(why) => {
+                if let Some(partial) = partial {
+                    partial.spent();
+                }
+                return Ok(Err((why, JudgeIncompleteKind::Refusal)));
+            }
             Ending::Complete if !continuing => return Ok(Ok(grown)),
             Ending::Complete => {
                 return match state {

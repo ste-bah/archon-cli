@@ -197,7 +197,10 @@ fn normalize(path: PathBuf) -> PathBuf {
 /// arguments; missing ordinary arguments are not setup failures.
 pub fn scan(command: &str) -> Vec<SiblingPath> {
     let command = strip_quote_prefixes(command);
-    let words = crate::check_source_resolve::words(&command);
+    // R2: comments set aside, so an apostrophe in one opens no quote that
+    // would hide every path after it.
+    let shell = without_comments(&crate::check_source_resolve::without_heredocs(&command));
+    let words = crate::check_source_resolve::words(&shell);
     let mut found = Vec::new();
     let mut command_start = 0;
     let mut redirect_target = false;
@@ -282,8 +285,15 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
     }
     for program in program_texts(&command) {
         let program = strip_quote_prefixes(&program);
-        for word in crate::check_source_resolve::words(&program) {
+        for word in crate::check_source_resolve::words(&without_comments(&program)) {
             if let Some(path) = sibling_word(&word) {
+                push(&mut found, path, true);
+            }
+        }
+        // R2: a quoted string glued to the code before it (`run(['../x'`)
+        // is no word of its own; it is read from its opening quote.
+        for quoted in quoted_parent_paths(&program) {
+            if let Some(path) = sibling_word(quoted) {
                 push(&mut found, path, true);
             }
         }
@@ -298,6 +308,61 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
         }
     }
     merged
+}
+
+/// `text` without its comments: from a `#` that starts a word outside
+/// quotes to the end of its line, as the shell reads them.
+fn without_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let (mut quote, mut comment, mut previous) = (None, false, '\n');
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if comment {
+            if c == '\n' {
+                comment = false;
+                out.push(c);
+            }
+            previous = c;
+            continue;
+        }
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some('"') | None if c == '\\' => {
+                out.push(c);
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+                previous = c;
+                continue;
+            }
+            Some(_) => {}
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '#' && previous.is_whitespace() => {
+                comment = true;
+                previous = c;
+                continue;
+            }
+            None => {}
+        }
+        out.push(c);
+        previous = c;
+    }
+    out
+}
+
+/// Every quoted string of program text that lexically starts with `../`:
+/// the text from just after its opening quote to the same quote closing it.
+fn quoted_parent_paths(program: &str) -> Vec<&str> {
+    program
+        .char_indices()
+        .filter(|(_, quote)| matches!(quote, '\'' | '"'))
+        .filter_map(|(at, quote)| {
+            let rest = &program[at + 1..];
+            rest.starts_with("../")
+                .then(|| rest.find(quote).map(|end| &rest[..end]))
+                .flatten()
+        })
+        .collect()
 }
 
 fn sibling_word(word: &str) -> Option<PathBuf> {

@@ -75,3 +75,50 @@ async fn a_judge_reply_that_stays_truncated_is_incomplete_never_parsed() {
         incomplete.report()
     );
 }
+
+/// D2: a judge that refuses to judge the candidate is the judge's own
+/// outcome about it. A staged freeze reports it as an authored judge reply,
+/// which the staged command carries in its envelope back to the author loop
+/// (`report_authored_judge_incomplete`), never as the host's resumable exit
+/// that pauses the run.
+#[tokio::test]
+async fn a_judge_refusal_under_a_staged_freeze_is_an_authored_judge_reply() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, prd, original) = seed(&temp);
+    let client = Arc::new(FinishReasonJudge {
+        calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        content: String::new(),
+        stop_reason: Some("refusal".into()),
+    });
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::saving(
+        crate::command::workflow_freeze_budget::FreezeBudget::unlimited(),
+        true,
+    );
+    let error = prepare_acceptance_freeze_resumable(
+        temp.path(),
+        &tasks,
+        &prd,
+        archon_core::config::GateMode::Observe,
+        original.clone(),
+        client,
+        &resume,
+    )
+    .await
+    .unwrap_err();
+    let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+        .expect("a judge that refuses is no failure of the run");
+    assert!(
+        incomplete.is_authored_judge_reply(),
+        "a refusal is the judge's own reply, never the host's: {}",
+        incomplete.report()
+    );
+    assert!(
+        incomplete.report().contains("refused to judge"),
+        "{}",
+        incomplete.report()
+    );
+    assert_eq!(
+        std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
+        original
+    );
+}

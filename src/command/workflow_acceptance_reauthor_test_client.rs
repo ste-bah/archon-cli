@@ -12,6 +12,9 @@ use serde_json::Value;
 
 type AuthorFn = dyn Fn(&Value, usize) -> String + Send + Sync;
 type JudgeFn = dyn Fn(&str, &Value) -> bool + Send + Sync;
+/// `stop(ids, passability)`: how a judge call over `ids` ends instead of
+/// answering (`passability`: the batch shown pre-implementation output).
+type StopFn = dyn Fn(&[String], bool) -> Option<Result<&'static str, &'static str>> + Send + Sync;
 
 /// `author(entry_being_replaced, attempt)` returns the author's reply;
 /// `judge(id, check)` says whether the judge accepts that check.
@@ -32,6 +35,7 @@ pub(crate) struct ScriptedAuthorJudge {
     /// The reply to every passability batch (checks shown with their
     /// pre-implementation output), when set.
     evidence_reply: Option<String>,
+    stop: Option<Box<StopFn>>,
 }
 
 /// The provider the scripted client reports, and fixtures record.
@@ -53,7 +57,21 @@ impl ScriptedAuthorJudge {
             provider: SCRIPTED_PROVIDER.into(),
             judge_reply: None,
             evidence_reply: None,
+            stop: None,
         }
+    }
+
+    /// End every judge call `stop` names: `Ok(reason)` is an empty reply
+    /// with that stop reason, `Err(message)` a provider error.
+    pub(crate) fn with_judge_stop(
+        mut self,
+        stop: impl Fn(&[String], bool) -> Option<Result<&'static str, &'static str>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.stop = Some(Box::new(stop));
+        self
     }
 
     /// Report `provider` instead of the scripted default.
@@ -167,6 +185,29 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
             return Ok(outcome(reply.clone()));
         }
         let prompt = messages[0]["content"].as_str().expect("judge prompt");
+        if let Some(stop) = &self.stop {
+            let asked: Vec<String> = prompt
+                .rsplit_once("Checks: ")
+                .and_then(|(_, checks)| serde_json::from_str::<Vec<Value>>(checks).ok())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|check| check["id"].as_str().map(str::to_string))
+                .collect();
+            match stop(&asked, prompt.contains("\"baseline\":")) {
+                Some(Ok(reason)) => {
+                    return Ok(WorkflowAgentOutcome {
+                        stop_reason: Some(reason.into()),
+                        ..WorkflowAgentOutcome::default()
+                    });
+                }
+                Some(Err(message)) => {
+                    return Err(archon_workflow::WorkflowError::port(std::io::Error::other(
+                        message,
+                    )));
+                }
+                None => {}
+            }
+        }
         if let Some(reply) = &self.evidence_reply
             && prompt.contains("\"baseline\":")
         {

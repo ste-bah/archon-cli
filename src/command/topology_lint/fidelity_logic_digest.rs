@@ -74,7 +74,9 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   confirmation candidates before exact and normalized matching fails.
 /// - #441 review, version 2 unchanged: quote normalization changes prose only;
 ///   Markdown code contents retain their bytes and cannot pass after alteration.
-pub const SOURCES_DIGEST: &str = "7ba773e2950be80f0f0dabdd3d5e9a30b01e2b93e9c6154957649050761d2f84";
+/// - D5, version 2 unchanged: an unusable or refused critic reply is typed as
+///   the critic's own operational outcome; no verdict's meaning changes.
+pub const SOURCES_DIGEST: &str = "ed50c1439d182f09adde2dd1362a49ef0377f6c6f6d33b9ae2af9e65591ae62e";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

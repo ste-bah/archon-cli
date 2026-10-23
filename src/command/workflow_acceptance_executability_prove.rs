@@ -267,12 +267,19 @@ pub(super) async fn prove(
             &baseline_finding,
         ) {
             Some(MutationFinding::HostUnproven(reason)) => {
-                probe.unproven(
-                    id,
-                    format!(
-                        "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail"
-                    ),
+                // What the check's own run caused is its author's (D1).
+                let unproven = format!(
+                    "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail"
                 );
+                let fault = super::check_fault::of_mutation(&result.result, &markers);
+                let at = format!(
+                    "on the pre-implementation tree at {short} with the data it names moved aside"
+                );
+                let key = (Some(baseline.commit.as_str()), &mutated, id.as_str());
+                if let Some(finding) = super::check_fault::settle(probe, key, fault, &at, unproven)
+                {
+                    findings.insert(id.clone(), finding);
+                }
                 continue;
             }
             Some(MutationFinding::AuthorFinding(finding)) => {
@@ -283,6 +290,9 @@ pub(super) async fn prove(
         }
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
+        // It gave a verdict with its data moved aside: an earlier strike of
+        // a signal there is forgotten.
+        super::silent::clear(probe, &baseline.commit, &mutated, id);
         let moved_all = markers.moved(result, &names);
         let moved: Vec<String> = moved_all.iter().cloned().collect();
         // Issue 328: nor did a run that failed for its host (a program that

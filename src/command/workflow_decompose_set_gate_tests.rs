@@ -70,7 +70,8 @@ const w = {{
       publicationReceipt: {{ call_id: callId }},
       result: {{ data: {{ publicationReceipt: {{ call_id: callId }} }} }},
       postcondition: {{ satisfied: true }},
-      gateEnvelope: {{ policy_findings: findings }},
+      // A round that is not a finding list is the whole envelope.
+      gateEnvelope: Array.isArray(findings) ? {{ policy_findings: findings }} : findings,
       subjects: capability.endsWith("skeleton") ? subjects : [],
     }};
   }},
@@ -202,6 +203,33 @@ fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_l
         count(&out, "hostCalls", "land-task-body"),
         2 + 1 + 1 + 2,
         "two bodies, one re-author per round, both bodies at the escalation: {out}"
+    );
+}
+
+/// D5: a set gate whose judge gave no usable reply (an authored judge
+/// reply) judged nothing, like an operational gate, but the fault is the
+/// judge's own: it counts in the ordinary no-progress window and pauses as
+/// `no_progress`, never charging the host's operational window.
+#[test]
+fn an_authored_judge_reply_from_the_set_gate_pauses_as_no_progress_not_operational() {
+    let rounds = |kind: &str| {
+        format!(
+            r#"[{{ "operational_error": {{ "kind": "{kind}", "text": "critic reply unusable" }} }}]"#
+        )
+    };
+    let authored = run(&driver("{}", &rounds("authored_judge_reply"), ""));
+    assert_eq!(
+        authored["pauses"][0]["id"], "pause-set-gates-1",
+        "{authored}"
+    );
+    assert_eq!(
+        authored["pauses"][0]["evidence"]["reason"], "no_progress",
+        "{authored}"
+    );
+    let host = run(&driver("{}", &rounds("gate_operational"), ""));
+    assert_eq!(
+        host["pauses"][0]["evidence"]["reason"], "operational_no_progress",
+        "{host}"
     );
 }
 

@@ -17,6 +17,7 @@ use archon_workflow::fidelity_audit::{
 use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 
 use crate::command::workflow_freeze_budget::FreezeBudget;
+use crate::command::workflow_gate::GateEvaluation;
 
 /// The alias the audit asks for. The critic reads whole task files and is
 /// asked to find the sentence that lets a claim go hollow; that is the
@@ -278,10 +279,51 @@ pub(super) async fn ask(
             serde_json::json!({"role": "user", "content": reask(&refused, &open(&answered))}),
         );
     };
-    Err(anyhow!(
+    Err(CriticUnusable(format!(
         "fidelity critic returned no usable verdict for {:?} after {attempt} attempts, the last {FIDELITY_NO_PROGRESS_WINDOW} without progress: {last}",
         open(&answered)
     ))
+    .into())
+}
+
+/// D5: the critic's own replies gave no usable verdict (malformed, or a
+/// refusal to judge): an authored judge reply, never the provider's fault.
+#[derive(Debug)]
+struct CriticUnusable(String);
+
+impl std::fmt::Display for CriticUnusable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CriticUnusable {}
+
+/// `evaluation` with the audit's operational `error`, after any it holds.
+pub(super) fn operational(evaluation: GateEvaluation, error: &anyhow::Error) -> GateEvaluation {
+    let text = format!("obligation fidelity audit failed operationally: {error:#}");
+    match evaluation.operational_error() {
+        Some(existing) => {
+            let text = format!("{existing}; {text}");
+            evaluation.with_operational_error(text)
+        }
+        None => tag_unusable_critic_reply(evaluation.with_operational_error(text), error),
+    }
+}
+
+/// `evaluation`, its operational error tagged as an authored judge reply
+/// when `error` is the critic's own unusable reply (D5): the author loop
+/// counts it in its ordinary no-progress window. A stalled or absent
+/// provider stays the gate's operational error.
+pub(crate) fn tag_unusable_critic_reply(
+    evaluation: GateEvaluation,
+    error: &anyhow::Error,
+) -> GateEvaluation {
+    if error.chain().any(|cause| cause.is::<CriticUnusable>()) {
+        evaluation.with_operational_error_kind("authored_judge_reply")
+    } else {
+        evaluation
+    }
 }
 
 /// The turn that answers a rejected reply: its exact errors, the
@@ -354,6 +396,10 @@ fn expanded_supports(
 fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {
     match outcome.stop_reason.as_deref() {
         Some("end_turn" | "stop" | "completed") => Ok(()),
+        Some(reason @ ("refusal" | "content_filter")) => Err(CriticUnusable(format!(
+            "fidelity critic refused to judge these obligations (stop reason '{reason}')"
+        ))
+        .into()),
         Some(reason) => Err(anyhow!(
             "fidelity critic reply ended with stop reason '{reason}'; a truncated verdict is never parsed"
         )),

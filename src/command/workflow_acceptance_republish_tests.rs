@@ -353,6 +353,9 @@ mod stall;
 #[path = "workflow_acceptance_reauthor_passability_tests.rs"]
 mod passability_pending;
 
+#[path = "workflow_acceptance_republish_pending_tests.rs"]
+mod judge_pending;
+
 async fn gc_refused_publication(case: u8) {
     use archon_workflow::{
         LifecycleAction, LifecycleController, RunStatus, WorkflowSpec, WorkflowStore,

@@ -122,14 +122,7 @@ pub(crate) async fn evaluate_lint_with_fidelity_resumable(
         Err(error) if LintIncomplete::caused(&error).is_some() => Err(error),
         // Issue 338: the run's pause, never the gate's operational error.
         Err(error) if crate::command::workflow_task_set::UnsettledPublish::is(&error) => Err(error),
-        Err(error) => {
-            let text = format!("obligation fidelity audit failed operationally: {error:#}");
-            let text = match evaluation.operational_error() {
-                Some(existing) => format!("{existing}; {text}"),
-                None => text,
-            };
-            Ok(evaluation.with_operational_error(text))
-        }
+        Err(error) => Ok(super::fidelity_critic::operational(evaluation, &error)),
     }
 }
 

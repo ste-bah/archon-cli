@@ -62,6 +62,12 @@ impl TreeRun {
         }
     }
 
+    /// The operational error `id`'s last run ended with, if it ran at all:
+    /// what [`super::check_fault::of_error`] judges.
+    pub(super) fn operational_error(&self, id: &str) -> Option<&str> {
+        self.results.get(id)?.operational_error.as_deref()
+    }
+
     /// Why `id` gave no verdict after every repair, the repairs included;
     /// `None` when it gave one.
     pub(super) fn unrun(&self, id: &str) -> Option<String> {

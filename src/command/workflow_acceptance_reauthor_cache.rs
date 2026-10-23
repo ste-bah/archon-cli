@@ -267,6 +267,24 @@ fn write_atomic(target: &Path, bytes: &[u8]) -> Result<()> {
     result
 }
 
+/// Forget every saved candidate of check `id`: a gate refused it.
+pub(crate) fn forget(state_dir: &Path, id: &str) -> Result<()> {
+    let directory = state_dir.join(RECORDS);
+    if !directory.exists() {
+        return Ok(());
+    }
+    let prefix = format!("{}.", digest(id.as_bytes()));
+    for item in std::fs::read_dir(&directory)? {
+        let path = item?.path();
+        if (path.file_name().and_then(|name| name.to_str()))
+            .is_some_and(|name| name.starts_with(&prefix))
+        {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn remove(state_dir: &Path) -> Result<()> {
     let records = state_dir.join(RECORDS);
     if records.exists() {

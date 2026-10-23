@@ -63,6 +63,7 @@ pub(crate) use fences::{
 pub(crate) use fidelity::{
     audit_task_file_candidate, evaluate_lint_with_fidelity, evaluate_lint_with_fidelity_resumable,
 };
+pub(crate) use fidelity_critic::tag_unusable_critic_reply;
 pub(crate) use fidelity_resume::resumable_exit;
 pub(crate) use fidelity_waivers::{record_waivers, recorded_waivers, waivers_from_flags};
 use graph_load::load_graph;

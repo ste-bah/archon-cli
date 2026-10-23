@@ -339,7 +339,7 @@ pub async fn run_at(
 
             _=tokio::time::sleep(Duration::from_millis(25))=>{
                 if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break Some(terminate(child,confinement,&mut stall).await);}
-                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break Some(terminate(child,confinement,&mut stall).await);}
+                if overflow.load(Ordering::SeqCst) {error=Some(super::faults::OUTPUT_LIMIT_EXCEEDED.into());break Some(terminate(child,confinement,&mut stall).await);}
                 if progress.stalled(window) {error=Some(CHECK_TIMED_OUT.into());break Some(terminate(child,confinement,&mut stall).await);}
                 ticks += 1;
                 if ticks.is_multiple_of(SCAN_TICKS) { confinement.scan(); }
@@ -348,7 +348,7 @@ pub async fn run_at(
                 quota_walk_count += 1;
                 if let Some(root) = site.audit_root {
                     match site.audited_size(root) {
-                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break Some(terminate(child,confinement,&mut stall).await);}
+                        Ok(size) if size>site.scratch_bytes=>{error=Some(super::faults::SCRATCH_LIMIT_EXCEEDED.into());break Some(terminate(child,confinement,&mut stall).await);}
                         Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break Some(terminate(child,confinement,&mut stall).await);}
                         _=>{}
                     }
@@ -389,9 +389,7 @@ pub async fn run_at(
         Err(_) => {
             stdout.abort();
             stderr.abort();
-            error = Some(
-                "scratch child output pipes stayed open after teardown: a process outside the check's process tree still holds them".into(),
-            );
+            error = Some(super::faults::PIPES_HELD.into());
             ((Vec::new(), false), (Vec::new(), false))
         }
     };
@@ -415,13 +413,13 @@ pub async fn run_at(
         error = Some(escape);
     }
     if overflow.load(Ordering::SeqCst) {
-        error = Some("native acceptance output limit exceeded".into());
+        error = Some(super::faults::OUTPUT_LIMIT_EXCEEDED.into());
     }
     if let Some(root) = site.audit_root {
         quota_walk_count += 1;
         match site.audited_size(root) {
             Ok(size) if size > site.scratch_bytes => {
-                error = Some("native acceptance scratch limit exceeded".into())
+                error = Some(super::faults::SCRATCH_LIMIT_EXCEEDED.into())
             }
             Err(e) => error = Some(format!("scratch size audit failed: {e}")),
             _ => {}

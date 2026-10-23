@@ -86,3 +86,16 @@ async fn a_continuation_that_adds_nothing_is_the_judges_own() {
     assert!(incomplete.to_string().contains("no token"), "{error:#}");
     assert!(incomplete.is_authored_reply(), "{error:#}");
 }
+
+/// D2: a judge that refuses to judge what it is shown has given its own
+/// outcome about those checks; it is never the provider's fault.
+#[tokio::test]
+async fn an_exhausted_loop_of_refusals_is_the_judges_own() {
+    let error = produced(repeated(Ok(("", Some("refusal"))))).await;
+    let incomplete = incomplete(&error);
+    assert!(
+        incomplete.to_string().contains("refused to judge"),
+        "{error:#}"
+    );
+    assert!(incomplete.is_authored_reply(), "{error:#}");
+}

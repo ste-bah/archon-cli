@@ -253,3 +253,32 @@ async fn fidelity_a_kept_verdict_answered_again_with_the_other_meaning_is_only_l
     assert_eq!(entries.len(), 1, "no second entry");
     assert_eq!(entries[0]["verdict"]["necessarily_true"], true);
 }
+
+/// D5: replies that never give a usable verdict are the critic's own
+/// unusable replies, carried as an authored judge reply so the author loop
+/// counts them without charging the host's operational window; a provider
+/// that gives no reply at all stays the host's operational error.
+#[tokio::test]
+async fn fidelity_an_unusable_critic_reply_is_authored_and_a_provider_fault_is_operational() {
+    let (temp, ids) = wide_corpus();
+    let bad = vec![ids[7].clone()];
+    let critic = FakeCritic::new(vec![
+        Ok(batch_reply(&ids, &bad));
+        1 + FIDELITY_NO_PROGRESS_WINDOW
+    ]);
+    let envelope = evaluate(temp.path(), Ok(critic))
+        .await
+        .into_envelope()
+        .unwrap();
+    let error = envelope.operational_error.expect("no usable verdict");
+    assert_eq!(error.kind, "authored_judge_reply", "{}", error.text);
+
+    let (temp, _) = wide_corpus();
+    let provider = FakeCritic::new(vec![Err("upstream unavailable".into())]);
+    let envelope = evaluate(temp.path(), Ok(provider))
+        .await
+        .into_envelope()
+        .unwrap();
+    let error = envelope.operational_error.expect("no reply at all");
+    assert_eq!(error.kind, "gate_operational", "{}", error.text);
+}
