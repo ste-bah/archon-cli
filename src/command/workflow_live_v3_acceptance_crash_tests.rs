@@ -100,7 +100,14 @@ async fn a_crash_the_repair_cannot_fix_remains_pending_for_its_author() {
     assert!(pending.owning_tasks.is_empty(), "not handed to a task");
     assert_eq!(pending.exit_code, Some(1), "crash evidence is kept");
     assert!(pending.stderr_tail.contains(SIGNAL), "{pending:?}");
-    let text = pending.operational_error.as_deref().unwrap();
+    // The author's pending check is not an operational error: its reason
+    // is the round's unrepaired contract repair.
+    assert!(pending.operational_error.is_none(), "{pending:?}");
+    let text = (record.contract_repairs.iter())
+        .find(|repair| !repair.repaired && repair.check_ids.contains(&"AC-X-002".to_string()))
+        .map(|repair| repair.failure.as_str())
+        .unwrap();
+    assert!(text.starts_with("authored pending: "), "{text}");
     assert!(text.contains(SIGNAL), "{text}");
     assert!(
         text.contains("freeze-acceptance --reauthor AC-X-002"),

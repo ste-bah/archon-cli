@@ -28,13 +28,11 @@ fn baseline_finding(id: &str, candidates: &str) -> String {
     )
 }
 
-#[test]
-fn passability_authored_incomplete_keeps_only_the_affected_checks_pending() {
+#[tokio::test]
+async fn passability_authored_incomplete_keeps_only_the_affected_checks_pending() {
     let affected = ids(&["AC-F-001", "AC-F-002"]);
     let authored = super::super::passability::incomplete_judge_error(
-        anyhow::Error::new(super::super::judge::JudgeIncomplete(
-            "malformed batched JSON".into(),
-        )),
+        super::super::judge::produced_incomplete(vec![Ok(("no json", Some("end_turn"))); 4]).await,
         &crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance"),
         affected.iter().cloned().collect(),
     );
@@ -47,9 +45,7 @@ fn passability_authored_incomplete_keeps_only_the_affected_checks_pending() {
     );
 
     let provider = super::super::passability::incomplete_judge_error(
-        anyhow::Error::new(super::super::judge::JudgeIncomplete(
-            "the provider gave no reply: disconnected".into(),
-        )),
+        super::super::judge::produced_incomplete(vec![Err("disconnected")]).await,
         &crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance"),
         vec!["AC-F-001".into()],
     );

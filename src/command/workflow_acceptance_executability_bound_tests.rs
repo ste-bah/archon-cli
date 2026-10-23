@@ -41,6 +41,13 @@ fn timeout_finding(findings: &BTreeMap<String, String>, id: &str) -> bool {
     })
 }
 
+/// #356: a first stall is the host's, unproven and resumable.
+fn timed_out(unproven: &BTreeMap<String, String>, id: &str) -> bool {
+    unproven
+        .get(id)
+        .is_some_and(|why| why.contains("unproven (timed out)"))
+}
+
 #[tokio::test]
 async fn a_direct_site_check_past_its_bound_is_unproven_timed_out_and_the_others_are_proven() {
     let trees = trees(&[
@@ -53,11 +60,8 @@ async fn a_direct_site_check_past_its_bound_is_unproven_timed_out_and_the_others
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
     let elapsed = started.elapsed();
     let unproven = probe.take_unproven();
-    assert!(timeout_finding(&findings, "AC-B-001"), "{findings:?}");
-    assert!(
-        !unproven.contains_key("AC-B-001"),
-        "the check's own timeout: {unproven:?}"
-    );
+    assert!(timed_out(&unproven, "AC-B-001"), "{unproven:?}");
+    assert!(findings.is_empty(), "never the author's: {findings:?}");
     assert!(!unproven.contains_key("AC-B-002"), "proven: {unproven:?}");
     assert!(elapsed < QUICK, "bounded at the site: {elapsed:?}");
     trees.assert_live_untouched(copies.path());
@@ -81,10 +85,10 @@ async fn a_rounds_base_copy_bounds_each_check_by_the_same_bound() {
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
     let elapsed = started.elapsed();
     let unproven = probe.take_unproven();
-    assert!(timeout_finding(&findings, "AC-B-003"), "{findings:?}");
+    assert!(timed_out(&unproven, "AC-B-003"), "{unproven:?}");
     assert!(
-        !unproven.contains_key("AC-B-003"),
-        "the check's own timeout: {unproven:?}"
+        findings.is_empty(),
+        "a first stall is the host's: {findings:?}"
     );
     assert!(!unproven.contains_key("AC-B-004"), "{unproven:?}");
     assert!(elapsed < QUICK, "bounded in the copy: {elapsed:?}");

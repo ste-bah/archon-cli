@@ -266,6 +266,14 @@ pub(super) fn settle_as(
     let redactor = Redactor::for_environment(environment, &forwarded);
     let evidence = program_output(&result.stderr, &redactor, EVIDENCE_BYTES);
     let signature = setup_path_signature(contract, id, result, why, at);
+    let retried = match cause {
+        UnprovenCause::SiteLacks => {
+            "its site lacks what the host has, which is the host's to repair and never its author's; it is probed again once the site provides it"
+        }
+        UnprovenCause::Host | UnprovenCause::ProgramAbsent => {
+            "it is probed again on retry, and goes to its author if it fails so again"
+        }
+    };
     strike_or_unproven(
         probe,
         commit,
@@ -279,7 +287,7 @@ pub(super) fn settle_as(
                     "check '{id}': it cannot be proven on the base commit {short}: {why}. It failed so again when the host ran it on that same commit, and the commit never changes, so no retry can prove it. Its stderr there:\n{evidence}\nMake it fail by its own assertion on that tree -- exercise what the implementation must add -- not through a tool, build or environment it cannot run there"
                 ),
                 format!(
-                    "it failed on the pre-implementation tree at {short}, but {why}, so it gave no verdict there and is not proven able to fail; it is probed again on retry, and goes to its author if it fails so again. Its stderr there:\n{evidence}"
+                    "it failed on the pre-implementation tree at {short}, but {why}, so it gave no verdict there and is not proven able to fail; {retried}. Its stderr there:\n{evidence}"
                 ),
             )
         },
@@ -399,6 +407,13 @@ fn struck(
                 // Old binaries saved total-clock cutoffs as strikes. They are
                 // not evidence against the author, even if a later failure is
                 // non-clock.
+                // F6: a site that lacks what the host has is the site's
+                // defect, so an earlier strike is no evidence against the
+                // author; it stays the host's, earning no credit again.
+                if cause == UnprovenCause::SiteLacks {
+                    probe.unproven_as(id, unproven, cause);
+                    return Ok(None);
+                }
                 if !prefix.starts_with(b"it ran past the probe's per-check bound") {
                     probe.resume.progress.reused(false);
                     return Ok(Some(finding));

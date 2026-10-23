@@ -48,12 +48,12 @@ fn named_inputs_report_absence_exclusion_and_shared_budget_status() {
     let rendered = checks[1]["named_files"].as_array().unwrap();
     assert_eq!(rendered[0]["path"], "second");
     assert_eq!(rendered[0]["status"], "not_supplied");
-    assert!(rendered[0]["content"].as_str().unwrap().is_empty());
+    assert!(rendered[0].get("content").is_none(), "{rendered:?}");
     assert!(
         rendered[0]["detail"]
             .as_str()
             .unwrap()
-            .contains("truncated")
+            .contains("byte limit")
     );
 
     let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
@@ -70,4 +70,62 @@ fn named_inputs_report_absence_exclusion_and_shared_budget_status() {
         named_files_digest_with_budget(&subject.acceptance[1], &roots, &mut digest_remaining),
         named_files_digest_for_list(&exact_second)
     );
+}
+
+fn roots_at(root: &std::path::Path) -> JudgeRoots {
+    JudgeRoots {
+        project: Some(root.to_path_buf()),
+        repository: None,
+        task_root: Some(root.to_path_buf()),
+        repository_commit: None,
+    }
+}
+
+/// R8: a named input the host cannot read is reported, never dropped.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_named_input_is_not_supplied_never_dropped() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("input");
+    std::fs::write(&path, "content").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let unreadable = std::fs::read(&path).is_err();
+    let subject = command_check("operation input", TrustedCwd::ProjectRoot);
+    let files = named_files(&subject.acceptance[0], &roots_at(root.path()));
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    if !unreadable {
+        return; // a user that reads every file cannot make this failure
+    }
+    assert_eq!(
+        files,
+        vec![serde_json::json!({ "path": "input", "status": "not_supplied" })]
+    );
+}
+
+/// R8: not_supplied content has unknown assertions, so none is sent: a file
+/// the judged-source byte limit would cut carries no partial content, and
+/// it spends none of the batch's budget.
+#[test]
+fn a_named_input_past_the_byte_limit_is_not_supplied_without_partial_content() {
+    let root = tempfile::tempdir().unwrap();
+    let limit = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    std::fs::write(root.path().join("large"), vec![b'x'; limit + 1]).unwrap();
+    std::fs::write(root.path().join("small"), "small content").unwrap();
+    let roots = roots_at(root.path());
+    let large = command_check("operation large", TrustedCwd::ProjectRoot);
+    let small = command_check("operation small", TrustedCwd::ProjectRoot);
+    let mut remaining = limit;
+    let files = named_files_with_budget(&large.acceptance[0], &roots, &mut remaining);
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert_eq!(files[0]["status"], "not_supplied");
+    assert!(files[0].get("content").is_none(), "{files:?}");
+    assert!(
+        (files[0]["detail"].as_str().unwrap()).contains("byte limit"),
+        "{files:?}"
+    );
+    assert_eq!(remaining, limit, "nothing was sent");
+    let files = named_files_with_budget(&small.acceptance[0], &roots, &mut remaining);
+    assert_eq!(files[0]["status"], "supplied");
+    assert_eq!(files[0]["content"], "small content");
 }

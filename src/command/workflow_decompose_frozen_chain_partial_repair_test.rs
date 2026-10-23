@@ -66,6 +66,7 @@ async fn partial_launch_repair(
     if rewrite {
         with_skeleton(&fixture);
         crate::command::workflow_decompose_launch_repair::set_after_reauthor_published_hook(
+            &fixture.tasks,
             rewrite_skeleton,
         );
     }
@@ -169,4 +170,47 @@ async fn a_partial_repair_rejects_a_skeleton_rewrite_before_routing_pending_chec
         true,
     )
     .await;
+}
+
+/// R7: a check left pending because the host could not prove it (here: no
+/// pre-implementation tree to prove it on) is the host's. It is never
+/// routed to the fixed script's author loop; the launch stops resumably
+/// with the host-unproven report, and nothing the author must fix is named.
+#[tokio::test]
+async fn a_host_pending_launch_repair_stops_resumably_and_is_never_routed_to_the_author() {
+    use crate::command::workflow_task_set::reauthor::test_client::{
+        ScriptedAuthorJudge, command_entry,
+    };
+    // A commitless checkout: no pre-implementation tree exists.
+    let fixture = frozen(Some(names_live_root));
+    let before = std::fs::read(fixture.tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
+    let client = std::sync::Arc::new(ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "test -f marker"),
+        |_, _| true,
+    ));
+    let factory = ReauthorThenBarrier {
+        reauthor: std::sync::Mutex::new(Some(client)),
+        origins: std::sync::Mutex::new(Vec::new()),
+    };
+    let error = format!("{:#}", launch_with(&fixture, &factory).await);
+    assert!(!error.contains("barrier observed"), "{error}");
+    assert!(
+        error.contains(crate::command::workflow_task_set::executability::HOST_UNPROVEN)
+            && error.contains("AC-X-001"),
+        "{error}"
+    );
+    let log = std::fs::read_to_string(fixture.tasks.join(".decompose.log")).unwrap();
+    assert!(
+        !log.contains("acceptance=reauthor_refuted_routed"),
+        "a host-pending check is never the author's: {log}"
+    );
+    assert!(
+        log.contains("frozen_chain_launch acceptance=reauthor_host_pending ids=AC-X-001"),
+        "{log}"
+    );
+    assert_eq!(
+        std::fs::read(fixture.tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
+        before,
+        "nothing was published"
+    );
 }

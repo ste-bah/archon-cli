@@ -53,10 +53,11 @@ pub(crate) fn describe_candidates_with_run_state(
             moved.contains(&candidate.path) || original_recreated.contains(&candidate.path);
         let reason = if was_moved && recreated.contains(&candidate.path) {
             mutation::ExclusionReason::CheckRecreatedPathObserved.label()
-        } else if was_moved
-            && (generated.contains(&candidate.path) || original_recreated.contains(&candidate.path))
-        {
+        } else if was_moved && generated.contains(&candidate.path) {
             "present again after mutation; writer unknown"
+        } else if was_moved && original_recreated.contains(&candidate.path) {
+            // Only the parent's metadata changed while it was moved aside.
+            "parent directory metadata changed while it was moved aside; writer unknown"
         } else if run_observed
             && (candidate.exclusion.is_none()
                 || candidate.exclusion == Some(mutation::ExclusionReason::RepositoryCopyAlias)

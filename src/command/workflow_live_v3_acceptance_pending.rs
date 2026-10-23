@@ -32,11 +32,15 @@ pub(super) fn record_from_round(
     result: Option<&CheckResult>,
     round: &AcceptanceRoundRecordV1,
 ) -> AcceptanceCheckRecordV1 {
+    // A check pending its author is the author's, not an operational
+    // error: only the host's pending reason is one. The author's reason
+    // stays on the round's contract repair.
     let reason = round
         .contract_repairs
         .iter()
         .find(|repair| !repair.repaired && repair.check_ids.contains(&criterion.id))
-        .map(|repair| repair.failure.as_str());
+        .map(|repair| repair.failure.as_str())
+        .filter(|failure| failure.starts_with(HOST_PENDING_PREFIX));
     record(criterion, kind, result, reason)
 }
 

@@ -1,7 +1,9 @@
 //! Issue 331 through a real freeze probe at a configured scratch site: a
 //! check that runs `cargo nextest` on a toolchain path with `cargo` (and a
 //! `cargo-*` program) but no `cargo-nextest`, which the host has, is
-//! unproven, then its author's finding -- never a proof.
+//! unproven -- never a proof. The site lacks what the host has, so it
+//! stays the host's after a resume too (F6): no strike makes it the
+//! author's.
 
 use super::super::super::probe_tests::{Trees, scratch_left, trees};
 use super::super::super::verdict_probe_tests::REPO;
@@ -63,12 +65,12 @@ async fn a_scratch_freeze_never_counts_a_missing_cargo_subcommand_as_a_proof() {
     );
     let second = freeze();
     let findings = second.script_defects(&trees.contract(), &trees.ids()).await;
-    assert!(second.take_unproven().is_empty(), "no longer the host's");
-    let finding = findings.get("AC-331-001").expect("the author's finding");
+    assert!(findings.is_empty(), "never the author's: {findings:?}");
+    let why =
+        (second.take_unproven().remove("AC-331-001")).expect("still the host's after a resume");
     assert!(
-        finding.contains("cannot be proven on the base commit")
-            && finding.contains("`cargo nextest`"),
-        "{finding}"
+        why.contains("`cargo nextest`") && why.contains("never its author's"),
+        "{why}"
     );
     assert!(
         scratch_left(&scratch).is_empty(),

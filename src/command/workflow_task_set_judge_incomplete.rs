@@ -18,12 +18,45 @@ pub(super) fn judge_error_class(error: &str) -> &'static str {
     }
 }
 
+/// Who an incomplete judge is owed to, set where it is produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JudgeIncompleteKind {
+    /// The judge's own replies gave no usable verdict (malformed, missing
+    /// or empty decisions, a truncation it never completed): retried with
+    /// the affected checks.
+    AuthoredReply,
+    /// The provider or the host failed (no reply, a stall, an unsupported
+    /// or absent finish reason, a reply the host could not save): an
+    /// operational outcome.
+    Provider,
+}
+
 /// The judge could not complete its batch (Issue 260): an operational,
 /// resumable outcome, never a verdict and never a candidate defect.
 #[derive(Debug)]
-pub(crate) struct JudgeIncomplete(pub(crate) String);
+pub(crate) struct JudgeIncomplete {
+    pub(crate) kind: JudgeIncompleteKind,
+    /// What happened, for display only: never classified.
+    pub(crate) message: String,
+    /// The entries the judge did decide in this call before it could not
+    /// complete; every other entry it was asked about is still undecided.
+    pub(crate) decided: Vec<archon_workflow::task_set_contract::AcceptanceCriterion>,
+}
 
 impl JudgeIncomplete {
+    /// The provider or the host failed.
+    pub(crate) fn provider(message: impl Into<String>) -> Self {
+        Self::new(JudgeIncompleteKind::Provider, message)
+    }
+
+    pub(crate) fn new(kind: JudgeIncompleteKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            decided: Vec::new(),
+        }
+    }
+
     /// The incomplete judge `error` carries, if any.
     pub(crate) fn caused(error: &anyhow::Error) -> Option<&Self> {
         error.chain().find_map(|cause| cause.downcast_ref::<Self>())
@@ -32,25 +65,7 @@ impl JudgeIncomplete {
     /// A judge-authored reply can be retried with the affected checks. A
     /// stalled provider call or provider error remains a host outcome.
     pub(crate) fn is_authored_reply(&self) -> bool {
-        [
-            "malformed batched JSON",
-            "duplicated decision",
-            "decision ids do not match",
-            "left decisions missing",
-            "extra decision",
-            "unknown verdict",
-            "invalid verdict",
-            "left 'counterexample' empty",
-            "left 'reason' empty",
-            "continuation ended normally with the document",
-            "reply was truncated",
-            "reply grew past",
-            "continuation added no token",
-            "continuation contradicts",
-            "replies; the last",
-        ]
-        .iter()
-        .any(|defect| self.0.contains(defect))
+        self.kind == JudgeIncompleteKind::AuthoredReply
     }
 }
 
@@ -59,7 +74,7 @@ impl std::fmt::Display for JudgeIncomplete {
         write!(
             f,
             "operational: acceptance judge incomplete, resumable: {}",
-            self.0
+            self.message
         )
     }
 }
@@ -67,52 +82,5 @@ impl std::fmt::Display for JudgeIncomplete {
 impl std::error::Error for JudgeIncomplete {}
 
 #[cfg(test)]
-mod tests {
-    use super::JudgeIncomplete;
-
-    #[test]
-    fn only_authored_reply_exhaustion_is_subject_retryable() {
-        assert!(JudgeIncomplete("3 replies; malformed batched JSON".into()).is_authored_reply());
-        assert!(
-            JudgeIncomplete("the continuation ended normally with the document still open".into())
-                .is_authored_reply()
-        );
-        assert!(
-            !JudgeIncomplete("the provider gave no reply: disconnected".into()).is_authored_reply()
-        );
-        assert!(
-            !JudgeIncomplete("a judge call stalled after 30s with no provider progress".into())
-                .is_authored_reply()
-        );
-        assert!(
-            !JudgeIncomplete("usable redacted continuation could not be persisted".into())
-                .is_authored_reply()
-        );
-        for provider_fault in [
-            "unsupported stop reason 'lengthy'",
-            "returned no finish reason",
-            "the provider gave no reply: disconnected",
-            "a judge call stalled with no provider progress",
-            "the usable redacted continuation could not be persisted",
-        ] {
-            assert!(
-                !JudgeIncomplete(provider_fault.into()).is_authored_reply(),
-                "provider or adapter fault was classified as authored: {provider_fault}"
-            );
-        }
-        for authored_reply in [
-            "malformed batched JSON",
-            "duplicated decision id",
-            "decision ids do not match",
-            "left decisions missing",
-            "left 'counterexample' empty",
-            "left 'reason' empty",
-            "unknown verdict value",
-        ] {
-            assert!(
-                JudgeIncomplete(authored_reply.into()).is_authored_reply(),
-                "judge-authored defect was not retryable: {authored_reply}"
-            );
-        }
-    }
-}
+#[path = "workflow_task_set_judge_incomplete_tests.rs"]
+pub(crate) mod tests;

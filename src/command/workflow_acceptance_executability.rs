@@ -85,8 +85,13 @@ fn probe_check_cap_secs(site: &Site) -> u64 {
 /// that lacks what the host has is a defect of the site the host built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum UnprovenCause {
-    /// The host's: its site, its environment or its run.
+    /// The host's: its site, its environment or its run. A strike makes
+    /// the same failure its author's after a resume (Issue 328, #356).
     Host,
+    /// The check's site lacks a program (or a tool's subcommand) the host
+    /// has, or the host could not tell: a defect of the site the host
+    /// built, so no strike ever makes it the author's (F6).
+    SiteLacks,
     /// The check runs a program neither its site nor the host provides.
     ProgramAbsent,
 }

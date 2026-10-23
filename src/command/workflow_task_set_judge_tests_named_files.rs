@@ -121,7 +121,7 @@ fn named_source_budget_is_shared_across_the_batch() {
         .collect::<Vec<_>>();
     let shown: usize = files
         .iter()
-        .map(|file| file["content"].as_str().unwrap().len())
+        .map(|file| file["content"].as_str().map_or(0, str::len))
         .sum();
     assert_eq!(files.len(), 2, "{prompt}");
     assert!(
@@ -130,10 +130,14 @@ fn named_source_budget_is_shared_across_the_batch() {
     );
     assert_eq!(files[1]["status"], "not_supplied");
     assert!(
+        files[1].get("content").is_none(),
+        "no partial content: {prompt}"
+    );
+    assert!(
         files[1]["detail"]
             .as_str()
             .unwrap()
-            .contains("truncated at the existing judged-source byte limit")
+            .contains("larger than the judged-source byte limit")
     );
 }
 
@@ -230,7 +234,7 @@ fn named_file_content_is_truncated_at_existing_judged_source_limit() {
         },
     )
     .unwrap();
-    assert!(prompt.contains("[truncated at the existing judged-source byte limit]"));
+    assert!(prompt.contains("larger than the judged-source byte limit"));
     assert!(!prompt.contains(&"x".repeat(limit + 1)));
 }
 
@@ -413,7 +417,7 @@ fn named_file_digest_tracks_content_and_truncates_at_utf8_boundary() {
     std::fs::write(&path, bytes).unwrap();
     let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
     assert!(!prompt.contains('�'), "{prompt}");
-    assert!(prompt.contains("[truncated at the existing judged-source byte limit]"));
+    assert!(prompt.contains("larger than the judged-source byte limit"));
     subject.acceptance[0].check = AcceptanceCheck::Command {
         command: "operation nested/file".into(),
         cwd: TrustedCwd::ProjectRoot,

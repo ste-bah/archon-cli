@@ -22,6 +22,7 @@ use anyhow::Result;
 use archon_workflow::WorkflowLlmClient;
 use archon_workflow::llm_client_port::WorkflowAgentOutcome;
 
+use super::incomplete::JudgeIncompleteKind;
 use super::partial::{MAX_PARTIAL_REPLY_BYTES, PartialReply};
 use super::{CONTINUE_PROMPT, JUDGE_TIMEOUT_SECS, JudgeIncomplete};
 
@@ -74,15 +75,20 @@ pub(super) fn document(reply: &str) -> Document {
     }
 }
 
+/// A reply that gave no usable verdict and may be asked again: why, and
+/// whose it is (the judge's own truncation, or the provider's finish).
+pub(super) type Unusable = (String, JudgeIncompleteKind);
+
 /// One whole reply to `task`. `Ok(Ok(reply))` ended normally with a document
-/// to judge; `Ok(Err(why))` gave no usable verdict and may be asked again;
-/// `Err` is [`JudgeIncomplete`] (no progress, a provider error, a timeout).
+/// to judge; `Ok(Err(unusable))` gave no usable verdict and may be asked
+/// again; `Err` is [`JudgeIncomplete`] (no progress, a provider error, a
+/// timeout).
 pub(super) async fn complete_reply(
     client: &dyn WorkflowLlmClient,
     messages: &[serde_json::Value],
     model: &str,
     partial: Option<&PartialReply<'_>>,
-) -> Result<std::result::Result<String, String>> {
+) -> Result<std::result::Result<String, Unusable>> {
     let (mut reply, mut chunks) = partial
         .and_then(PartialReply::open_reply)
         .unwrap_or_default();
@@ -108,16 +114,19 @@ pub(super) async fn complete_reply(
             )
             .await
             .map_err(|_| {
-                JudgeIncomplete(format!(
+                JudgeIncomplete::provider(format!(
                     "a judge call stalled after {JUDGE_TIMEOUT_SECS}s with no provider progress"
                 ))
             })?
-            .map_err(|error| JudgeIncomplete(format!("the provider gave no reply: {error}")))?;
+            .map_err(|error| {
+                JudgeIncomplete::provider(format!("the provider gave no reply: {error}"))
+            })?;
         let grown = format!("{reply}{}", outcome.content);
         if grown.len() > MAX_PARTIAL_REPLY_BYTES
             || archon_observability::redaction::redact_text(&grown).len() > MAX_PARTIAL_REPLY_BYTES
         {
             return Err(stalled(
+                JudgeIncompleteKind::AuthoredReply,
                 &reply,
                 &format!(
                     "the reply grew past {MAX_PARTIAL_REPLY_BYTES} bytes, more than any verdict needs"
@@ -126,12 +135,13 @@ pub(super) async fn complete_reply(
         }
         let state = document(&grown);
         match ending(&outcome) {
-            Ending::Unsupported(why) => return Ok(Err(why)),
+            Ending::Unsupported(why) => return Ok(Err((why, JudgeIncompleteKind::Provider))),
             Ending::Complete if !continuing => return Ok(Ok(grown)),
             Ending::Complete => {
                 return match state {
                     Document::Complete => Ok(Ok(grown)),
                     state => Err(stalled(
+                        JudgeIncompleteKind::AuthoredReply,
                         &reply,
                         &format!(
                             "the continuation ended normally with the document {}",
@@ -148,21 +158,28 @@ pub(super) async fn complete_reply(
                     if let Some(partial) = partial {
                         partial.spent();
                     }
-                    return Ok(Err(format!(
-                        "the reply was truncated by stop reason '{reason}' after a complete document; a truncated reply is never accepted"
+                    return Ok(Err((
+                        format!(
+                            "the reply was truncated by stop reason '{reason}' after a complete document; a truncated reply is never accepted"
+                        ),
+                        JudgeIncompleteKind::AuthoredReply,
                     )));
                 }
                 if !continuing && state != Document::Open {
                     // No document begun (prose only), or not a JSON prefix:
                     // nothing to continue, and no usable verdict.
-                    return Ok(Err(format!(
-                        "the reply was truncated by stop reason '{reason}' before any JSON document"
+                    return Ok(Err((
+                        format!(
+                            "the reply was truncated by stop reason '{reason}' before any JSON document"
+                        ),
+                        JudgeIncompleteKind::AuthoredReply,
                     )));
                 }
                 // Progress: the document's parse position moved over at
                 // least one token that is not whitespace.
                 if outcome.content.trim().is_empty() || state != Document::Open {
                     return Err(stalled(
+                        JudgeIncompleteKind::AuthoredReply,
                         &reply,
                         &format!(
                             "the reply was truncated by stop reason '{reason}' and its continuation {}",
@@ -180,7 +197,9 @@ pub(super) async fn complete_reply(
                 if let Some(partial) = partial
                     && !partial.extended(&reply, chunks, outcome.content.len())
                 {
+                    // The host could not save a usable reply: its fault.
                     return Err(stalled(
+                        JudgeIncompleteKind::Provider,
                         &reply,
                         "the usable redacted continuation could not be persisted",
                     ));
@@ -199,10 +218,13 @@ fn describe(state: Document) -> &'static str {
     }
 }
 
-fn stalled(reply: &str, why: &str) -> anyhow::Error {
-    JudgeIncomplete(format!(
+fn stalled(kind: JudgeIncompleteKind, reply: &str, why: &str) -> anyhow::Error {
+    JudgeIncomplete::new(
+        kind,
+        format!(
         "{why} ({} characters held); a truncated verdict is never accepted, and a retry continues the saved reply",
-        reply.len()
-    ))
+            reply.len()
+        ),
+    )
     .into()
 }

@@ -291,7 +291,7 @@ pub(super) async fn repair_ran(
                     trigger: trigger.into(),
                     repaired: false,
                     freeze_event_id: String::new(),
-                    failure: format!("{AUTHORED_PENDING_PREFIX}{error:#}"),
+                    failure: format!("{HOST_PENDING_PREFIX}{error:#}"),
                     diagnostics: Vec::new(),
                 });
                 return Ok(Defects::new());

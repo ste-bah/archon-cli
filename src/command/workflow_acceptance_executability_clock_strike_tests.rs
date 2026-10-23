@@ -220,15 +220,15 @@ fn issue475_same_missing_setup_path_after_reauthoring_goes_to_author() {
     let trees = trees(&[("AC-X-001", "verify", TrustedCwd::ProjectRoot)]);
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
     let mut contract = trees.contract();
-    set_command(&mut contract, "verify --file ../../repo/specification.txt");
-    let first_text = "verify --file ../../repo/a/../b/";
+    set_command(&mut contract, "cd ../../repo/specification.txt && verify");
+    let first_text = "cd ../../repo/a/../b/ && verify";
     set_command(&mut contract, first_text);
     let result = failed_result("AC-X-001", "../../repo/a/../b does not exist");
     let at = Context::on_host_path(&contract).within(1, &["repo", "project"]);
     let why = super::super::verdict::no_verdict(first_text, &result, &at).expect("no verdict");
     assert!(why.contains("setup failure of its site"), "{why}");
     assert!(settle(&probe, &trees.base, &contract, &result, &why, &at,).is_none());
-    set_command(&mut contract, "verify --file ../../repo/b");
+    set_command(&mut contract, "cd ../../repo/b && verify");
     let text = check_text(&contract, "AC-X-001");
     let result = failed_result("AC-X-001", "../../repo/b does not exist");
     let why = super::super::verdict::no_verdict(text, &result, &at).expect("no verdict");
@@ -242,7 +242,7 @@ fn issue475_different_missing_path_and_commit_are_fresh_strikes() {
     let trees = trees(&[("AC-X-001", "verify", TrustedCwd::ProjectRoot)]);
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
     let mut contract = trees.contract();
-    set_command(&mut contract, "verify --file ../../repo/specification.txt");
+    set_command(&mut contract, "cd ../../repo/specification.txt && verify");
     let result = failed_result("AC-X-001", "../../repo/specification.txt does not exist");
     let at = Context::on_host_path(&contract).within(1, &["repo", "project"]);
     let text = check_text(&contract, "AC-X-001");
@@ -303,8 +303,8 @@ fn issue475_absolute_setup_paths_are_normalized_by_the_real_classifier() {
     let at = Context::on_host_path(&contract).within(1, &["repo", "project"]);
     let mut signatures = Vec::new();
     for (text, output) in [
-        ("verify --file /tmp/a/../b/", "/tmp/a/../b does not exist"),
-        ("verify --file /tmp/b", "/tmp/b does not exist"),
+        ("cd /tmp/a/../b/ && verify", "/tmp/a/../b does not exist"),
+        ("cd /tmp/b && verify", "/tmp/b does not exist"),
     ] {
         set_command(&mut contract, text);
         let result = failed_result("AC-X-001", output);
@@ -314,4 +314,49 @@ fn issue475_absolute_setup_paths_are_normalized_by_the_real_classifier() {
     }
     assert_eq!(signatures[0], signatures[1]);
     assert_eq!(normalize_path("/tmp/a/../b///"), "/tmp/b");
+}
+
+/// F6 across a resume: a site that lacks a program the host has is the
+/// site's defect, so an existing strike never makes the check its author's;
+/// it stays the host's, with no progress credit, on every attempt. A cause
+/// the strike rule is for (a crash in its own code) still goes to its
+/// author the second time.
+#[test]
+fn f6_a_site_lacking_a_program_the_host_has_stays_the_hosts_after_a_resume() {
+    let text = "sh -c true";
+    let site = trees(&[("AC-X-001", text, TrustedCwd::RepoRoot)]);
+    let contract = site.contract();
+    let empty = tempfile::tempdir().unwrap();
+    let site_path = empty.path().display().to_string();
+    let at = Context::new([("PATH".to_string(), site_path)].into(), &contract);
+    let mut result = failed_result("AC-X-001", "sh: command not found");
+    result.exit_code = Some(127);
+    let (why, cause) =
+        super::super::verdict::no_verdict_cause(text, &result, &at).expect("no verdict");
+    assert_ne!(cause, UnprovenCause::ProgramAbsent, "the host has it");
+    for attempt in 1..=3 {
+        // A fresh probe per attempt: each is a resume of the run.
+        let probe = HostProbe::for_task_set(site.set.project.path(), &site.set.tasks);
+        let finding = settle_as(&probe, &site.base, &contract, &result, (&why, cause), &at);
+        assert!(finding.is_none(), "attempt {attempt}: {finding:?}");
+        let unproven = probe.take_unproven_causes();
+        let (reason, recorded) = unproven.get("AC-X-001").expect("unproven");
+        assert_eq!(*recorded, cause, "attempt {attempt}");
+        assert!(!reason.contains("goes to its author"), "{reason}");
+        if attempt > 1 {
+            assert_eq!(probe.resume.progress.saved_count(), 0, "no credit");
+        }
+    }
+    let crash = ("it crashed in its own shell code", UnprovenCause::Host);
+    let other = trees(&[("AC-X-001", "sh -c 'exit 3'", TrustedCwd::RepoRoot)]);
+    let contract = other.contract();
+    let result = failed_result("AC-X-001", "syntax error");
+    let first = HostProbe::for_task_set(other.set.project.path(), &other.set.tasks);
+    assert!(settle_as(&first, &other.base, &contract, &result, crash, &at).is_none());
+    let resumed = HostProbe::for_task_set(other.set.project.path(), &other.set.tasks);
+    assert!(
+        settle_as(&resumed, &other.base, &contract, &result, crash, &at)
+            .is_some_and(|finding| finding.contains("It failed so again")),
+        "the strike rule still applies to its own causes"
+    );
 }

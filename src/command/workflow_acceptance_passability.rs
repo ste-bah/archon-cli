@@ -219,17 +219,31 @@ async fn assess(
         // `ask` handles all pending candidates in one request, so this is the
         // only batch and its index/count are intentionally omitted.
         eprintln!("acceptance judge batch started checks={}", pending.len());
-        let mut judged = ask(client, model, contract, &pending, resume).await?;
+        let (mut judged, incomplete) = ask(client, model, contract, &pending).await?;
+        // Issue 497: a judge that could not complete hands back what it did
+        // decide; those verdicts are kept, and only the rest stay pending.
+        let mut saved = BTreeSet::new();
         for candidate in &pending {
-            let mut decision = judged.remove(&candidate.id).expect("one decision per id");
+            let Some(mut decision) = judged.remove(&candidate.id) else {
+                assert!(incomplete.is_some(), "one decision per id");
+                continue;
+            };
             // The judge's prose is model output: what it repeats of a
             // credential is never kept.
             decision.reason = evidence::prose(&decision.reason, redactor);
             decision.counterexample = evidence::prose(&decision.counterexample, redactor);
             if store.is_some_and(|store| store.save(&candidate.key, &decision)) {
                 resume.progress.saved(true);
+                saved.insert(candidate.id.clone());
             }
             decided.insert(candidate.id.clone(), decision);
+        }
+        if let Some(error) = incomplete {
+            let deferred = (pending.iter())
+                .map(|candidate| candidate.id.clone())
+                .filter(|id| !saved.contains(id))
+                .collect();
+            return Err(incomplete_judge_error(error, resume, deferred));
         }
         eprintln!("acceptance judge batch completed checks={}", pending.len());
     }
@@ -424,19 +438,19 @@ pub(crate) async fn cannot_pass_findings(
 }
 
 /// One batch over `pending`, within the freeze's budget: too little left to
-/// start, or a call the budget cuts off, ends the freeze resumable.
+/// start, or a call the budget cuts off, ends the freeze resumable. A judge
+/// that could not complete gives what it decided and its error, which the
+/// caller makes the freeze's incomplete over the checks still undecided.
 async fn ask(
     client: &dyn WorkflowLlmClient,
     model: &str,
     contract: &AcceptanceContract,
     pending: &[&Candidate],
-    resume: &FreezeResume,
-) -> Result<BTreeMap<String, Decision>> {
+) -> Result<(BTreeMap<String, Decision>, Option<anyhow::Error>)> {
     let ids: BTreeSet<&str> = pending
         .iter()
         .map(|candidate| candidate.id.as_str())
         .collect();
-    let deferred = ids.iter().map(|id| id.to_string()).collect();
     let mut subset = contract.clone();
     subset
         .acceptance
@@ -445,24 +459,29 @@ async fn ask(
     let checks: Vec<&serde_json::Value> =
         pending.iter().map(|candidate| &candidate.shown).collect();
     let task = format!("{INSTRUCTION} Checks: {}", serde_json::to_string(&checks)?);
-    let judged = judge_prompted(client, subset, &task, model, require_judged_prose, None)
-        .await
-        .map_err(|error| {
-            if super::judge::JudgeIncomplete::caused(&error).is_some() {
-                incomplete_judge_error(error, resume, deferred)
-            } else {
-                error
+    let decision = |entry: &AcceptanceCriterion| {
+        let decision = Decision {
+            verdict: entry.judgment.verdict,
+            counterexample: entry.judgment.counterexample.clone(),
+            reason: entry.judgment.reason.clone(),
+            sampling: entry.judgment.sampling.clone(),
+        };
+        (entry.id.clone(), decision)
+    };
+    match judge_prompted(client, subset, &task, model, require_judged_prose, None).await {
+        Ok(judged) => Ok((entries(&judged).map(decision).collect(), None)),
+        Err(error) => match super::judge::JudgeIncomplete::caused(&error) {
+            Some(incomplete) => {
+                let decided = (incomplete.decided.iter())
+                    .filter(|entry| ids.contains(entry.id.as_str()))
+                    .map(decision)
+                    .collect();
+                Ok((decided, Some(error)))
             }
-        })?;
-    Ok(entries(&judged)
-        .map(|entry| {
-            let decision = Decision {
-                verdict: entry.judgment.verdict,
-                counterexample: entry.judgment.counterexample.clone(),
-                reason: entry.judgment.reason.clone(),
-                sampling: entry.judgment.sampling.clone(),
-            };
-            (entry.id.clone(), decision)
-        })
-        .collect())
+            None => Err(error),
+        },
+    }
 }
+#[cfg(test)]
+#[path = "workflow_acceptance_passability_partial_tests.rs"]
+mod partial_tests;

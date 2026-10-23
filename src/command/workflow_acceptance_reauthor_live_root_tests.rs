@@ -46,6 +46,10 @@ async fn the_reauthor_prompt_states_where_a_check_runs_and_the_relative_path_rul
         "{prompt}"
     );
     assert!(
+        !prompt.contains("The host proves the guard by moving the literally named input aside"),
+        "the move-aside proof is never stated for every input: {prompt}"
+    );
+    assert!(
         !prompt.contains("never runs a check in the live"),
         "{prompt}"
     );
@@ -54,6 +58,9 @@ async fn the_reauthor_prompt_states_where_a_check_runs_and_the_relative_path_rul
         "movable inputs must exist under the check's selected root before the run",
         "select the root that contains the existing implementation or test dependency",
         "the check must still fail on its own assertion",
+        "The move-aside proof applies only to inputs the host actually moves",
+        "A named deciding input that is absent is behaviour not implemented yet and is judged by the general rules",
+        "a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content",
     ] {
         assert!(
             prompt.contains(fact),

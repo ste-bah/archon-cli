@@ -24,14 +24,12 @@ use crate::command::workflow_task_set::executability::ExecutabilityProbe;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
 
+#[path = "workflow_decompose_launch_repair_pending.rs"]
+mod pending;
 #[cfg(test)]
-static AFTER_REAUTHOR_PUBLISHED_HOOK: std::sync::Mutex<Option<fn(&Path)>> =
-    std::sync::Mutex::new(None);
-
+pub(super) use pending::set_after_reauthor_published_hook;
 #[cfg(test)]
-pub(super) fn set_after_reauthor_published_hook(hook: fn(&Path)) {
-    *AFTER_REAUTHOR_PUBLISHED_HOOK.lock().unwrap() = Some(hook);
-}
+use pending::take_after_reauthor_published_hook;
 
 /// The event detail that records a launch repair once the run exists.
 pub(crate) const REAUTHORED_EVENT: &str = "frozen_acceptance_checks_reauthored";
@@ -227,7 +225,11 @@ pub(crate) async fn reauthor_refused(
         eprintln!("{diagnostic}");
     }
     for (id, reason) in &result.unproven {
-        eprintln!("acceptance check {id} remains pending for its author: {reason}");
+        let owner = match result.authored_pending.contains_key(id) {
+            true => "its author",
+            false => "the host",
+        };
+        eprintln!("acceptance check {id} remains pending for {owner}: {reason}");
     }
     let published = ids
         .iter()
@@ -235,6 +237,10 @@ pub(crate) async fn reauthor_refused(
         .cloned()
         .collect::<Vec<_>>();
     let pending = result.unproven.keys().cloned().collect::<Vec<_>>();
+    let authored_pending = (pending.iter())
+        .filter(|id| result.authored_pending.contains_key(*id))
+        .cloned()
+        .collect::<Vec<_>>();
     let line = format!(
         "frozen_chain_launch acceptance=reauthored published_ids={} pending_ids={} acceptance_digest={} freeze_event={} skeleton_digest={}",
         published.join(","),
@@ -248,6 +254,7 @@ pub(crate) async fn reauthor_refused(
         "ids": ids,
         "published_ids": published,
         "pending_ids": pending,
+        "authored_pending_ids": authored_pending,
         "refusals": decision.reauthor,
         "recorded_logic": decision.recorded,
         "acceptance_digest": result.acceptance_digest,
@@ -382,7 +389,7 @@ pub(crate) async fn after_claim(
         )?;
         lines.push(line);
         #[cfg(test)]
-        if let Some(hook) = AFTER_REAUTHOR_PUBLISHED_HOOK.lock().unwrap().take() {
+        if let Some(hook) = take_after_reauthor_published_hook(task_root) {
             hook(task_root);
         }
         // Validate the published chain before clearing the launch snapshot for
@@ -428,35 +435,43 @@ pub(crate) async fn after_claim(
                 task_root.display(),
             ));
         }
-        if let Some((ids, reasons)) = detail
-            .get("pending_ids")
-            .and_then(serde_json::Value::as_array)
-            .filter(|pending| !pending.is_empty())
-            .map(|pending| {
-                let ids = pending
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>();
-                let reasons = detail
-                    .get("unproven")
-                    .and_then(serde_json::Value::as_object)
-                    .map(|unproven| {
-                        ids.iter()
-                            .filter_map(|id| {
-                                unproven.get(id).map(|reason| format!("{id}: {reason}"))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" | ")
-                    })
-                    .unwrap_or_default();
-                (ids, reasons)
-            })
-        {
+        let pending = pending::Pending::of(&detail);
+        // R7: a check the host could not prove is the host's: the launch
+        // stops resumably with the host-unproven report, as a freeze does
+        // (`unproven_incomplete`), and no author is asked to change it.
+        if !pending.host.is_empty() {
+            let line = format!(
+                "frozen_chain_launch acceptance=reauthor_host_pending ids={} detail={}",
+                pending.host.keys().cloned().collect::<Vec<_>>().join(","),
+                crate::command::workflow_decompose_events::log_field(&pending::Pending::reasons(
+                    &pending.host
+                ))
+            );
+            log(&line)?;
+            lines.push(line);
+            for line in &lines {
+                ui.emit(archon_workflow::WorkflowUiEvent::Text(format!("{line}\n")))
+                    .await
+                    .map_err(|error| anyhow!("reporting {line}: {error}"))?;
+            }
+            let unproven =
+                crate::command::workflow_task_set::executability::HostUnproven(pending.host);
+            return Err(crate::command::workflow_task_set::unproven_incomplete(
+                anyhow::Error::new(unproven),
+            ));
+        }
+        if !pending.authored.is_empty() {
             let routed = format!(
                 "frozen_chain_launch acceptance=reauthor_refuted_routed ids={} detail={}",
-                ids.join(","),
-                crate::command::workflow_decompose_events::log_field(&reasons)
+                pending
+                    .authored
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(","),
+                crate::command::workflow_decompose_events::log_field(&pending::Pending::reasons(
+                    &pending.authored
+                ))
             );
             log(&routed)?;
             lines.push(routed);

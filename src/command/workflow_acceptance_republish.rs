@@ -203,21 +203,22 @@ fn publish_chain_owned(
     let tasks_root = request.tasks_root;
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let contract_bytes = serde_json::to_vec_pretty(&repaired)?;
-    let mut findings = findings::acceptance_findings(
+    let findings = findings::acceptance_findings(
         request.prd_path,
         &verified.prd_text,
         &contract_path,
         &repaired,
     );
     // M4: an extension answers for the PRD as it is now, so its gate holds
-    // the coverage a whole-set freeze holds: every requirement covered.
-    if extension.is_some() {
-        findings.extend(super::coverage_gate::acceptance_coverage_findings(
+    // the coverage a whole-set freeze holds, whatever ids it publishes.
+    let coverage = match extension {
+        Some(_) => super::coverage_gate::acceptance_coverage_findings(
             &verified.prd_text,
             &contract_path,
             &repaired,
-        ));
-    }
+        ),
+        None => Vec::new(),
+    };
     // The freeze metadata and gate evaluate only the entries being published.
     // Findings for a still-pending refused entry stay in `findings` for the
     // returned repair report, while its non-accepted judgment remains on the
@@ -229,6 +230,7 @@ fn publish_chain_owned(
                 || publish_ids.contains(&finding.subject)
         })
         .cloned()
+        .chain(coverage)
         .collect::<Vec<_>>();
     let (lock, mut pin) = findings::acceptance_lock_and_pin(
         tasks_root,

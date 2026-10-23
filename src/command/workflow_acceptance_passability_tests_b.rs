@@ -6,12 +6,13 @@ use super::*;
 use archon_workflow::task_set_contract::AcceptanceCriterion;
 use std::collections::BTreeMap;
 
-#[test]
-fn provider_authentication_failure_survives_the_freeze_incomplete_message() {
+#[tokio::test]
+async fn provider_authentication_failure_survives_the_freeze_incomplete_message() {
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
-    let error = anyhow::Error::new(super::super::judge::JudgeIncomplete(
-        "the provider gave no reply: authentication_error: invalid API key".into(),
-    ));
+    let error = super::super::judge::produced_incomplete(vec![Err(
+        "authentication_error: invalid API key",
+    )])
+    .await;
     let error =
         super::super::passability::incomplete_judge_error(error, &resume, vec!["AC-X-001".into()]);
     assert!(
@@ -25,12 +26,11 @@ fn provider_authentication_failure_survives_the_freeze_incomplete_message() {
     assert!(message.contains("invalid API key"), "{message}");
 }
 
-#[test]
-fn authored_incomplete_freeze_judge_is_typed_for_the_fixed_script_retry() {
+#[tokio::test]
+async fn authored_incomplete_freeze_judge_is_typed_for_the_fixed_script_retry() {
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
-    let error = anyhow::Error::new(super::super::judge::JudgeIncomplete(
-        "3 replies; malformed batched JSON".into(),
-    ));
+    let error =
+        super::super::judge::produced_incomplete(vec![Ok(("no json", Some("end_turn"))); 4]).await;
     let error =
         super::super::passability::incomplete_judge_error(error, &resume, vec!["AC-X-001".into()]);
     let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)

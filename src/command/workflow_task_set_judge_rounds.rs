@@ -1,3 +1,4 @@
+use super::incomplete::JudgeIncompleteKind;
 use super::*;
 
 /// Copy every entry `answered` judged into `contract`, matched by id.
@@ -34,12 +35,17 @@ pub(super) async fn judge_prompted_with_roots(
     let mut no_progress = 0usize;
     let mut attempts = 0usize;
     let mut last: String;
+    // Whose the last unusable reply was, typed where it was produced.
+    let mut last_kind: JudgeIncompleteKind;
+    // The ids this call decided, so an incomplete end hands them back.
+    let mut decided = BTreeSet::new();
     loop {
         attempts += 1;
         let content = match complete_reply(client, &messages, model, partial).await? {
             Ok(content) => content,
-            Err(unusable) => {
+            Err((unusable, kind)) => {
                 last = unusable.clone();
+                last_kind = kind;
                 let class = judge_error_class(&unusable);
                 if seen.insert(class) {
                     no_progress = 0;
@@ -86,6 +92,12 @@ pub(super) async fn judge_prompted_with_roots(
         match judged {
             Ok((missing, answered)) => {
                 merge_judged_entries(&mut judged_contract, &answered);
+                decided.extend(
+                    (answered.acceptance.iter())
+                        .chain(&answered.supplementary)
+                        .map(|entry| entry.id.clone()),
+                );
+                last_kind = JudgeIncompleteKind::AuthoredReply;
                 if missing.is_empty() {
                     for entry in judged_contract
                         .acceptance
@@ -120,6 +132,7 @@ pub(super) async fn judge_prompted_with_roots(
             }
             Err(error) => {
                 last = format!("{error:#}");
+                last_kind = JudgeIncompleteKind::AuthoredReply;
                 let class = judge_error_class(&last);
                 if seen.insert(class) {
                     no_progress = 0;
@@ -142,8 +155,15 @@ pub(super) async fn judge_prompted_with_roots(
             }
         }
     }
-    Err(JudgeIncomplete(format!(
-        "{attempts} replies; the last {JUDGE_NO_PROGRESS_WINDOW} gave no new first-error class or usable verdict; the last: {last}"
-    ))
-    .into())
+    let mut incomplete = JudgeIncomplete::new(
+        last_kind,
+        format!(
+            "{attempts} replies; the last {JUDGE_NO_PROGRESS_WINDOW} gave no new first-error class or usable verdict; the last: {last}"
+        ),
+    );
+    incomplete.decided = (judged_contract.acceptance.into_iter())
+        .chain(judged_contract.supplementary)
+        .filter(|entry| decided.contains(&entry.id))
+        .collect();
+    Err(incomplete.into())
 }

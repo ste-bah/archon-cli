@@ -121,7 +121,8 @@ pub(super) fn host_path() -> Option<String> {
 /// Its cause (F6): only the cell where no program anywhere provides the
 /// word is [`UnprovenCause::ProgramAbsent`], its author's at once; every
 /// other no-verdict cell is the host's (the site lacks what the host has,
-/// or the host could not tell), so it stays unproven under the strike rule.
+/// or the host could not tell): [`UnprovenCause::SiteLacks`], unproven on
+/// every attempt, which no strike makes its author's.
 pub(super) fn missing(
     commands: &[Simple],
     output: &str,
@@ -163,7 +164,7 @@ pub(super) fn missing(
             );
             let depends = depends(&tool, name);
             let host = plugin(&tool, name, at);
-            let site = |why: String| Some((why, UnprovenCause::Host));
+            let site = |why: String| Some((why, UnprovenCause::SiteLacks));
             match (listing(&program, at), host) {
                 (Listing::Commands(builtins), _) if builtins.contains(name) => site(format!(
                     "{lacks}; the host lists `{name}` as built into `{tool}`, yet `{tool}` rejected it at the check's site, so that site lacks it (for example a toolchain its tree pins, which the host does not read). {depends}"

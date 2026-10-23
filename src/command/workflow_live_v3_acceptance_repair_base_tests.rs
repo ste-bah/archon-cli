@@ -3,6 +3,7 @@
 //! to its author before it may be republished.
 
 use super::super::repair_tests::{run_fixture_with, stage};
+use crate::command::workflow_task_set::executability::HOST_UNPROVEN;
 use crate::command::workflow_task_set::executability::tests::{CRASHING, FIXED};
 use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
@@ -98,9 +99,25 @@ async fn repair_without_a_base(accepted: bool) {
             record
                 .operational_errors
                 .iter()
-                .any(|error| error.contains("no pre-implementation tree")),
+                .any(|error| error.contains("no pre-implementation tree")
+                    && error.contains(HOST_UNPROVEN)),
             "{record:?}"
         );
+        // R1/R2: the host's pending check carries the host label, and its
+        // reason is the check's operational error; it never ran.
+        let repair = (record.contract_repairs.iter())
+            .find(|repair| !repair.repaired && repair.check_ids.contains(&"AC-F-001".into()))
+            .unwrap_or_else(|| panic!("{record:?}"));
+        assert!(repair.failure.starts_with("host pending:"), "{repair:?}");
+        let pending = (record.checks.iter())
+            .find(|check| check.check_id == "AC-F-001")
+            .unwrap();
+        assert!(
+            (pending.operational_error.as_deref())
+                .is_some_and(|error| error.contains("no pre-implementation tree")),
+            "{pending:?}"
+        );
+        assert!(pending.owning_tasks.is_empty(), "never ran: {pending:?}");
         assert_eq!(std::fs::read(run.set.pin_path()).unwrap(), before);
     }
 }

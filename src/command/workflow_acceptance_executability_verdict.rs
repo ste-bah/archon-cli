@@ -227,6 +227,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
 
 /// [`no_verdict`] with its cause: [`UnprovenCause::ProgramAbsent`] only for
 /// a program (or a tool's subcommand) that neither the site nor the host
+/// has, [`UnprovenCause::SiteLacks`] for one the site lacks and the host
 /// has; every other run without a verdict is the host's.
 pub(crate) fn no_verdict_cause(
     command: &str,
@@ -254,7 +255,7 @@ pub(crate) fn no_verdict_cause(
         && let Some(name) = missing_program(&commands, &output(result), at)
     {
         let cause = match at.host_has(&name) {
-            true => UnprovenCause::Host,
+            true => UnprovenCause::SiteLacks,
             false => UnprovenCause::ProgramAbsent,
         };
         return Some((

@@ -14,7 +14,7 @@ use async_trait::async_trait;
 
 use super::*;
 
-fn contract() -> AcceptanceContract {
+pub(crate) fn contract() -> AcceptanceContract {
     AcceptanceContract {
         schema_version: 1,
         prd: PrdIdentity {

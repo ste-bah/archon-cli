@@ -58,7 +58,12 @@ async fn repair_unaccepted_detailed(
                 });
             }
             let defects = Defects::new();
-            for (pending, failure_prefix) in [(true, AUTHORED_PENDING_PREFIX), (false, "")] {
+            // A check the host could not prove stays pending as the host's,
+            // never run as an ordinary check the judge did not accept.
+            for (pending, failure_prefix) in [
+                (true, AUTHORED_PENDING_PREFIX),
+                (false, HOST_PENDING_PREFIX),
+            ] {
                 let group: Vec<_> = unresolved
                     .iter()
                     .filter(|(id, _)| authored_pending.contains(*id) == pending)
@@ -103,7 +108,7 @@ async fn repair_unaccepted_detailed(
                     .collect()
             };
             let failure = if host_unproven {
-                format!("{AUTHORED_PENDING_PREFIX}{text}")
+                format!("{HOST_PENDING_PREFIX}{text}")
             } else {
                 text
             };
@@ -140,9 +145,19 @@ pub async fn apply(
         return Ok(Some(Defects::new()));
     };
     let repaired = repairs.iter().any(|repair| repair.repaired);
+    // Only a host-pending repair is an operational error; a provider's or
+    // the author's failure keeps its own category.
     for repair in &repairs {
-        if !repair.repaired && repair.failure.contains(HOST_UNPROVEN) {
-            record.operational_errors.push(repair.failure.clone());
+        if let Some(reason) = (!repair.repaired)
+            .then(|| repair.failure.strip_prefix(HOST_PENDING_PREFIX))
+            .flatten()
+        {
+            record
+                .operational_errors
+                .push(match reason.contains(HOST_UNPROVEN) {
+                    true => reason.to_string(),
+                    false => format!("{HOST_UNPROVEN} {reason}"),
+                });
         }
     }
     record.contract_repairs.extend(repairs);

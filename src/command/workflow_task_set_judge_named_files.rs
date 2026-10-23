@@ -101,37 +101,22 @@ pub(super) fn named_files_with_budget(
                         &path,
                     ));
                 };
-                let bytes = content_bytes;
-                let take = bytes.len().min(*remaining);
-                let take = utf8_prefix_len(&bytes, take);
-                let truncated = take < bytes.len();
-                let shown = &bytes[..take];
-                *remaining -= take;
-                let content = archon_observability::redaction::redact_secret_values(
-                    &String::from_utf8_lossy(shown),
-                );
-                if truncated {
-                    return Some(serde_json::json!({
-                        "path": path_text,
-                        "status": "not_supplied",
-                        "content": content,
-                        "detail": "[truncated at the existing judged-source byte limit]"
-                    }));
-                }
-                return Some(
-                    serde_json::json!({"path": path_text, "status": "supplied", "content": content}),
-                );
+                return Some(supplied(&path_text, &content_bytes, remaining));
             } else {
                 match absolute.symlink_metadata() {
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                         return Some(serde_json::json!({"path": path_text, "status": "absent"}));
                     }
                     Err(_) => {
-                        return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                        return Some(
+                            serde_json::json!({"path": path_text, "status": "not_supplied"}),
+                        );
                     }
                     Ok(_) => {}
                 }
-                let relative = absolute.strip_prefix(&project).ok()?;
+                let Ok(relative) = absolute.strip_prefix(&project) else {
+                    return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                };
                 if project_input_excludes.as_ref().is_none_or(|excludes| {
                     archon_workflow::acceptance_scratch::acceptance_input_excluded(
                         relative,
@@ -151,35 +136,39 @@ pub(super) fn named_files_with_budget(
             }
             let canonical = match absolute.canonicalize() {
                 Ok(canonical) => canonical,
-                Err(_) => return Some(serde_json::json!({"path": path_text, "status": "not_supplied"})),
+                Err(_) => {
+                    return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                }
             };
             if !canonical.starts_with(&root) || !canonical.is_file() {
                 return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
             }
-            let bytes = std::fs::read(&canonical).ok()?;
-            let take = bytes.len().min(*remaining);
-            let take = utf8_prefix_len(&bytes, take);
-            let truncated = take < bytes.len();
-            let shown = &bytes[..take];
-            *remaining -= take;
-            let content = archon_observability::redaction::redact_secret_values(
-                &String::from_utf8_lossy(shown),
-            );
-            if truncated {
-                return Some(serde_json::json!({
-                    "path": path_text,
-                    "status": "not_supplied",
-                    "content": content,
-                    "detail": "[truncated at the existing judged-source byte limit]"
-                }));
-            }
-            Some(serde_json::json!({
-                "path": path_text,
-                "status": "supplied",
-                "content": content,
-            }))
+            // A file the host cannot read is reported, never dropped.
+            let Ok(bytes) = std::fs::read(&canonical) else {
+                return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+            };
+            Some(supplied(&path_text, &bytes, remaining))
         })
         .collect()
+}
+
+/// The entry for a named file whose `bytes` the host read: supplied whole
+/// within the batch's `remaining` budget. A file the budget would cut is
+/// not supplied and carries no partial content: a not_supplied input's
+/// assertions are unknown to the judge, so none of them is shown, and it
+/// spends none of the budget.
+fn supplied(path: &str, bytes: &[u8], remaining: &mut usize) -> serde_json::Value {
+    if bytes.len() > *remaining {
+        return serde_json::json!({
+            "path": path,
+            "status": "not_supplied",
+            "detail": "[not supplied: larger than the judged-source byte limit left for this batch]"
+        });
+    }
+    *remaining -= bytes.len();
+    let content =
+        archon_observability::redaction::redact_secret_values(&String::from_utf8_lossy(bytes));
+    serde_json::json!({"path": path, "status": "supplied", "content": content})
 }
 
 fn repository_missing_entry(
@@ -256,15 +245,6 @@ fn normalize_named_path(path: &Path) -> Option<PathBuf> {
         }
     }
     (!normalized.as_os_str().is_empty()).then_some(normalized)
-}
-
-fn utf8_prefix_len(bytes: &[u8], limit: usize) -> usize {
-    let limit = limit.min(bytes.len());
-    match std::str::from_utf8(&bytes[..limit]) {
-        Ok(_) => limit,
-        Err(error) if error.error_len().is_none() => error.valid_up_to(),
-        Err(_) => limit,
-    }
 }
 
 fn repository_regular_blob(repository: &Path, commit: &str, path: &str) -> Option<Vec<u8>> {
