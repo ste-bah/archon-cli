@@ -96,7 +96,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 57: #498 a named regression guard is valid only when its result
         // depends on the deciding test or implementation; moved-aside host
         // proof and file naming alone cannot establish that dependency.
-        version: 57,
+        // 58: review of #491-#498: the judge sees each named input's status
+        // and applies guard rules only to an existing deciding test; Enforce
+        // partial republish, first-stall and typed missing-program routing,
+        // stale-base rebuild and authored judge-reply retries change freeze
+        // outcomes.
+        version: 58,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -134,7 +139,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "1fc20c2760f7354907b0741244588bec49ff1076409822c311356fc5db838c1c",
+        sources_digest: "983c821922f5fb8df18b7c35d3c1d0fa1200073aa786a11357231a3682b7cca6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -142,7 +147,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
-        version: 4,
+        // 5: review of #491: an attempt with open findings stays open when its logic is stale, and a recorded skeleton without its lock stays acceptance-only.
+        version: 5,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -162,7 +168,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "1fc20c2760f7354907b0741244588bec49ff1076409822c311356fc5db838c1c",
+        sources_digest: "983c821922f5fb8df18b7c35d3c1d0fa1200073aa786a11357231a3682b7cca6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -220,7 +226,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "84b0c708201740ef7ce8b0ad014fd3d73381c1d82ca25c95540a748bb3ac22e4",
+        sources_digest: "81f2a17d495bab79d0c084f3a244ea7b1b43664fc34149a6671210be95271610",
         build_bound: false,
     },
     CapabilityLogic {
@@ -266,7 +272,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "84b0c708201740ef7ce8b0ad014fd3d73381c1d82ca25c95540a748bb3ac22e4",
+        sources_digest: "81f2a17d495bab79d0c084f3a244ea7b1b43664fc34149a6671210be95271610",
         build_bound: false,
     },
     CapabilityLogic {
@@ -300,7 +306,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // build target during frozen acceptance reverify.
         // 13: #489 scanned sibling paths drop argument/list separators, so an
         // existing sibling is no longer reported missing; this can change verdicts.
-        version: 14,
+        // 15: review of #489/#495/#491: non-ASCII path ends are kept, sibling
+        // discovery sees every lexical path position, and open findings keep a
+        // stale-logic stage open.
+        version: 15,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -322,7 +331,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
-        sources_digest: "08590df9cfa0c6464c17ceda28b4ac703615e6914b58f4d7bf05ce60236d483a",
+        sources_digest: "cbebeaec3cb725602daa459d664c79ec48e32586846726e1af3c52a1a0ad5d9f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -330,7 +339,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: #491 a skeleton bound to the prior acceptance is pending and skipped by the frozen snapshot.
-        version: 5,
+        // 6: review of #491: a recorded skeleton without its lock stays acceptance-only, and open findings keep a stale-logic stage open.
+        version: 6,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -349,7 +359,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
-        sources_digest: "08590df9cfa0c6464c17ceda28b4ac703615e6914b58f4d7bf05ce60236d483a",
+        sources_digest: "cbebeaec3cb725602daa459d664c79ec48e32586846726e1af3c52a1a0ad5d9f",
         build_bound: true,
     },
 ];
