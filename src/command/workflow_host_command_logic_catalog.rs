@@ -118,7 +118,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned for #487: acceptance judge source changed with version 44.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // 50: canonical symlink resolution refuses checks that escape the selected root into the other root.
-        sources_digest: "15f3009dc072f6427c2303636d06486cb4da1509d9b98fbda2e6a343c79e0870",
+        sources_digest: "6a296396d7dee914d8a18274315a621e65e1fbbd9e642e60047c84fe21ed6916",
         build_bound: false,
     },
     CapabilityLogic {
@@ -145,7 +145,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #493 re-pin only: shared freeze sources changed; these acceptance
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
-        sources_digest: "15f3009dc072f6427c2303636d06486cb4da1509d9b98fbda2e6a343c79e0870",
+        sources_digest: "6a296396d7dee914d8a18274315a621e65e1fbbd9e642e60047c84fe21ed6916",
         build_bound: false,
     },
     CapabilityLogic {
@@ -301,7 +301,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 14: #491 an intact skeleton from an older acceptance no longer makes acceptance verification fail.
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
-        sources_digest: "efc6f495327bf49cb2f4d67b18be1e7a2cd97196bd3c7b8411cf89089f51be34",
+        sources_digest: "394f78cbd8c91d206e769deb76b5c70fe44db25ae974279d0ee4c09c62874c5e",
         build_bound: true,
     },
     CapabilityLogic {
@@ -326,7 +326,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #490 re-pin only: resume snapshot recovery does not change frozen verification verdicts.
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
-        sources_digest: "efc6f495327bf49cb2f4d67b18be1e7a2cd97196bd3c7b8411cf89089f51be34",
+        sources_digest: "394f78cbd8c91d206e769deb76b5c70fe44db25ae974279d0ee4c09c62874c5e",
         build_bound: true,
     },
 ];

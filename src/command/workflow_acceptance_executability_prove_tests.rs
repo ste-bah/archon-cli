@@ -21,6 +21,28 @@ fn persisted_output_evidence_is_bounded_utf8_safe_and_redacted() {
 }
 
 #[test]
+fn a_long_secret_across_the_excerpt_budget_is_fully_redacted_and_the_tail_kept() {
+    // The secret starts inside the stderr budget and runs far past it; the
+    // final line after it is what the excerpt must keep.
+    let secret = format!("sk-proj-{}", "b".repeat(900));
+    let stderr = format!("{}\n{secret}\nfinal assertion failed", "x".repeat(1_900));
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "AC-EVIDENCE".into(),
+        exit_code: Some(1),
+        quota_walk_count: 0,
+        stdout: Vec::new(),
+        stderr: stderr.into_bytes(),
+        environment_note: None,
+        operational_error: None,
+        classification: None,
+    };
+    let evidence = output_evidence(&result);
+    assert!(!evidence.contains("sk-proj-bbbb"), "{evidence}");
+    assert!(!evidence.contains(&"b".repeat(64)), "{evidence}");
+    assert!(evidence.contains("final assertion failed"), "{evidence}");
+}
+
+#[test]
 fn recreated_inputs_route_to_author_action_with_the_named_path() {
     let states = std::collections::BTreeMap::from([
         (
