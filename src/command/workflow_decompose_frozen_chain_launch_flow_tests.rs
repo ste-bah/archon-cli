@@ -121,7 +121,7 @@ async fn a_launch_re_authors_a_frozen_check_this_builds_rules_refuse_and_goes_on
         "{log}"
     );
     assert!(
-        log.contains("frozen_chain_launch acceptance=reauthored ids=AC-X-001 acceptance_digest="),
+        log.contains("frozen_chain_launch acceptance=reauthored published_ids=AC-X-001 pending_ids= acceptance_digest="),
         "{log}"
     );
     let run = fixture.store.list_runs().unwrap().pop().unwrap();
