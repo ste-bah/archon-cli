@@ -108,14 +108,21 @@ pub(crate) fn unpublished(
 
 /// A staged acceptance commit whose source contract changed after preparation
 /// is a completed, actionable result: the acceptance author loop refreshes and
-/// re-runs the freeze from the current contract.
+/// re-runs the freeze from the current contract, which the envelope's report
+/// carries as `current_acceptance_contract` (the gate's own report beside it
+/// as `gate_report`).
 pub(crate) fn stale_acceptance_contract(
     exit_code: Option<i32>,
     stdout: String,
     stderr: String,
     byte_counts: (u64, u64),
     mut envelope: GateEnvelopeV1,
+    current_contract: serde_json::Value,
 ) -> HostCommandResult {
+    envelope.report = serde_json::json!({
+        "gate_report": std::mem::take(&mut envelope.report),
+        "current_acceptance_contract": current_contract,
+    });
     envelope.policy_findings.push(archon_workflow::GatePolicyFinding {
         deterministic_defect: Some(archon_workflow::defect::DeterministicDefect::new(
             "stale_acceptance_contract",
@@ -231,11 +238,17 @@ mod tests {
             String::new(),
             (0, 0),
             policy_finding(RemediationScope::CandidateArtifact),
+            serde_json::json!({"acceptance": [{"id": "AC-X-001"}], "supplementary": []}),
         );
         assert_eq!(outcome.exit_code, Some(0));
         assert!(outcome.publication_receipt.is_none());
         assert!(!outcome.postcondition.unwrap().satisfied);
-        let finding = &outcome.gate_envelope.unwrap().policy_findings[1];
+        let envelope = outcome.gate_envelope.unwrap();
+        assert_eq!(
+            envelope.report["current_acceptance_contract"]["acceptance"][0]["id"], "AC-X-001",
+            "the loop rebuilds from the contract the stale outcome carries"
+        );
+        let finding = &envelope.policy_findings[1];
         assert_eq!(
             finding.remediation_scope,
             RemediationScope::CandidateArtifact

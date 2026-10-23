@@ -80,6 +80,17 @@ fn probe_check_cap_secs(site: &Site) -> u64 {
     }
 }
 
+/// Why the host could not prove a check (F6). Only a program that neither
+/// the check's site nor the host has is the author's to replace; a site
+/// that lacks what the host has is a defect of the site the host built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UnprovenCause {
+    /// The host's: its site, its environment or its run.
+    Host,
+    /// The check runs a program neither its site nor the host provides.
+    ProgramAbsent,
+}
+
 /// Runs accepted checks once and reports which crashed in their own code.
 #[async_trait]
 pub(crate) trait ExecutabilityProbe: Send + Sync {
@@ -112,6 +123,13 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
     /// by id: never published, never the author's. Drained by the caller.
     fn take_unproven(&self) -> BTreeMap<String, String> {
         BTreeMap::new()
+    }
+
+    /// [`Self::take_unproven`], with why each could not be proven.
+    fn take_unproven_causes(&self) -> BTreeMap<String, (String, UnprovenCause)> {
+        (self.take_unproven().into_iter())
+            .map(|(id, why)| (id, (why, UnprovenCause::Host)))
+            .collect()
     }
 
     /// How each check that failed on the probe's pre-implementation tree
@@ -189,7 +207,7 @@ pub(crate) struct HostProbe {
     /// Stored judge verdicts that supplied the regression-guard basis.
     regression_guards: Mutex<BTreeMap<String, String>>,
     /// What the host could not run, after its environment repairs.
-    unproven: Mutex<BTreeMap<String, String>>,
+    unproven: Mutex<BTreeMap<String, (String, UnprovenCause)>>,
     /// The pre-implementation tree every probed check must fail on.
     baseline: Option<baseline::Baseline>,
     /// How each check that failed there failed (Issue 275).

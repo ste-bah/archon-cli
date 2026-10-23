@@ -351,13 +351,35 @@ impl FixedHostCommandExecutor {
                 Ok(Some((receipt, subjects, postcondition)))
             })?;
             let Some((receipt, subjects, postcondition)) = committed else {
-                return Ok(stale_acceptance_contract(
+                // Read whole under the chain's read lock: the loop rebuilds
+                // its candidate from exactly the contract now published
+                // (`null` when none is).
+                let current = {
+                    let _read = crate::command::workflow_task_set::ChainRead::workflow(
+                        &context.project_root,
+                        &context.task_root,
+                    )?;
+                    let path = context
+                        .task_root
+                        .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+                    match std::fs::read(&path) {
+                        Ok(bytes) => serde_json::from_slice(&bytes)?,
+                        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                            serde_json::Value::Null
+                        }
+                        Err(source) => return Err(WorkflowError::Io { path, source }),
+                    }
+                };
+                let mut stale = stale_acceptance_contract(
                     observed.exit_code,
                     stdout,
                     stderr,
                     (observed.stdout_bytes, observed.stderr_bytes),
                     envelope,
-                ));
+                    current,
+                );
+                stale.gate_envelope = stale.gate_envelope.map(|envelope| secrets.envelope(envelope));
+                return Ok(stale);
             };
             // Through the anchor, after the lock: a failure is recorded.
             finish::remove_published(&staging, &receipt, &pause, &secrets);

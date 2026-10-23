@@ -210,3 +210,24 @@ fn truncate(text: &str) -> String {
     out.push_str(suffix);
     out
 }
+
+/// One round error per owed check still unauthored, with its last finding.
+pub(in super::super) fn owed_errors(
+    owed: &[AcceptanceCriterion],
+    staged: &Staged,
+    how: &str,
+) -> Vec<String> {
+    (owed.iter())
+        .filter(|entry| !staged.entries.contains_key(&entry.id))
+        .map(|entry| {
+            format!(
+                "acceptance check {} is owed ({how}) and not yet authored and accepted; the host authors it again next round{}",
+                entry.id,
+                staged
+                    .feedback
+                    .get(&entry.id)
+                    .map_or(String::new(), |why| format!(": {why}"))
+            )
+        })
+        .collect()
+}

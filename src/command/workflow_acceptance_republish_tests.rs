@@ -30,6 +30,10 @@ mod cache_tests;
 #[path = "workflow_acceptance_republish_replay_tests.rs"]
 mod replay_tests;
 
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_reauthor_site_program_tests.rs"]
+mod site_program_tests;
+
 pub(super) fn ids(list: &[&str]) -> BTreeSet<String> {
     list.iter().map(|id| id.to_string()).collect()
 }
@@ -345,6 +349,9 @@ mod safety;
 
 #[path = "workflow_acceptance_reauthor_stall_tests.rs"]
 mod stall;
+
+#[path = "workflow_acceptance_reauthor_passability_tests.rs"]
+mod passability_pending;
 
 async fn gc_refused_publication(case: u8) {
     use archon_workflow::{

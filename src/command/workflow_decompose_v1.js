@@ -376,7 +376,23 @@ async function authorCandidate(w, policy) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = (outcome.gateEnvelope?.policy_findings || [])
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
-      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+      const stale = repair.find(finding => finding?.deterministic_defect?.code === "stale_acceptance_contract");
+      if (stale) {
+        // The contract changed after this freeze was prepared: rebuild the
+        // candidate from the current published contract the host returned.
+        // With nothing else to repair the rebuilt candidate is frozen again at
+        // once, inside the ordinary no-progress window.
+        const rebuilt = refreshFromCurrentContract(authorState, outcome.gateEnvelope.report,
+          repair.filter(finding => finding !== stale), ids, JSON.parse(authored.content));
+        if (rebuilt !== null) {
+          recordAnswered(progress, call, "stale_acceptance_contract", advanced, !measuredReplies, round);
+          lastFindings = [String(stale.text)];
+          carried = rebuilt;
+          continue;
+        }
+      } else {
+        authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+      }
     }
     // A committed artifact is not the finished one: repairable findings are
     // still fed back below in either mode, and a loop that stalls on them

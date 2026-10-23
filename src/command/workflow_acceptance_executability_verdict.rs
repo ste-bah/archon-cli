@@ -61,8 +61,12 @@ use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::{AcceptanceCheck, AcceptanceContract};
 use regex::Regex;
 
+use super::UnprovenCause;
 use super::verdict_shell::{Simple, expands, simple_commands};
 
+#[path = "workflow_acceptance_executability_verdict_printed.rs"]
+mod printed;
+use printed::printed_by;
 #[path = "workflow_acceptance_executability_verdict_setup_path.rs"]
 pub(super) mod setup_path;
 #[path = "workflow_acceptance_executability_verdict_shell_setup.rs"]
@@ -196,6 +200,17 @@ impl Context {
         which::find_on(path, self.pathext.as_deref(), name, self.windows)
     }
 
+    /// Whether the host has the program `name` the site lacks: an absolute
+    /// path that exists, or a name on the host's own search path.
+    fn host_has(&self, name: &str) -> bool {
+        match which::is_path(name) {
+            true => which::is_absolute(name) && Path::new(name).exists(),
+            false => {
+                (self.host_path.as_deref()).is_some_and(|path| which::find(path, name).is_some())
+            }
+        }
+    }
+
     /// `name` without the executable extension the site's `PATHEXT` adds.
     fn bare_name(&self, name: &str) -> String {
         which::bare_name(name, self.pathext.as_deref(), self.windows)
@@ -205,28 +220,48 @@ impl Context {
 /// Why the failed run `result` of the check text `command` gave no verdict
 /// (see the module docs); `None` when it passed, could not run at all (an
 /// operational error, reported as such), or its failure is a verdict.
+#[cfg(test)]
 pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> Option<String> {
+    no_verdict_cause(command, result, at).map(|(why, _)| why)
+}
+
+/// [`no_verdict`] with its cause: [`UnprovenCause::ProgramAbsent`] only for
+/// a program (or a tool's subcommand) that neither the site nor the host
+/// has; every other run without a verdict is the host's.
+pub(crate) fn no_verdict_cause(
+    command: &str,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<(String, UnprovenCause)> {
+    let host = |why: String| Some((why, UnprovenCause::Host));
     if result.operational_error.is_some() || super::baseline::passed(result) {
         return None;
     }
     let Some(code) = result.exit_code else {
-        return Some(
+        return host(
             "it ended without an exit status (killed by a signal) before it reported anything"
                 .to_string(),
         );
     };
     let commands = simple_commands(command);
     if let Some(reason) = shell_setup::refusal(code, command, &commands, &output(result)) {
-        return Some(reason);
+        return host(reason);
     }
     if let Some(reason) = setup_path::failure(command, result, at) {
-        return Some(reason);
+        return host(reason);
     }
     if matches!(code, 126 | 127)
         && let Some(name) = missing_program(&commands, &output(result), at)
     {
-        return Some(format!(
-            "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks"
+        let cause = match at.host_has(&name) {
+            true => UnprovenCause::Host,
+            false => UnprovenCause::ProgramAbsent,
+        };
+        return Some((
+            format!(
+                "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks"
+            ),
+            cause,
         ));
     }
     if code != 0
@@ -235,7 +270,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
         return Some(why);
     }
     if let CheckRunClass::ScriptDefect(defect) = classify_check_run(command, result) {
-        return Some(format!(
+        return host(format!(
             "it crashed in its own {} code ({}) before it asserted anything",
             defect.interpreter, defect.rule
         ));
@@ -250,7 +285,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     let foreign =
         !locations.is_empty() && (locations.iter()).all(|location| !owned(location, &commands, at));
     (builds && foreign && !build_is_assertion(&commands)).then(|| {
-        "the tree it ran on did not build: it stopped at a compiler error outside its own files and the deliverables, before any assertion ran".to_string()
+        ("the tree it ran on did not build: it stopped at a compiler error outside its own files and the deliverables, before any assertion ran".to_string(), UnprovenCause::Host)
     })
 }
 
@@ -294,83 +329,6 @@ fn missing_program(commands: &[Simple], output: &str, at: &Context) -> Option<St
             false => !at.on_path(program),
         })
         .map(str::to_string)
-}
-
-/// Whether a line of `output` is the program `program`'s own message, so
-/// it ran: the line starts with the program's name (by any path to it,
-/// with or without its executable extension), then `:`, and the rest --
-/// after a shell's `line N: ` or `N: ` -- is not a report that the program
-/// itself was not found. The shell that runs a check may have the
-/// program's own name (`/bin/sh: line 1: sh: command not found` for the
-/// check `sh x.sh`), and its report that `sh` was not found is no proof.
-fn printed_by(output: &str, program: &str, at: &Context) -> bool {
-    let name = |text: &str| {
-        let file = text.rsplit(['/', '\\']).next().unwrap_or(text);
-        at.bare_name(file)
-    };
-    let same = |a: &str, b: &str| match at.windows {
-        true => a.eq_ignore_ascii_case(b),
-        false => a == b,
-    };
-    let wanted = name(program);
-    (output.lines()).any(|line| {
-        let line = line.trim_start();
-        // A drive's colon (`C:\Git\bin\bash.exe: ...`) is not the speaker's.
-        let bytes = line.as_bytes();
-        let drive = bytes.len() > 2
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && matches!(bytes[2], b'\\' | b'/');
-        let skip = if drive { 2 } else { 0 };
-        let Some(colon) = line[skip..].find(':').map(|at| at + skip) else {
-            return false;
-        };
-        let (speaker, said) = (&line[..colon], &line[colon + 1..]);
-        let speaker = speaker.trim();
-        if speaker.is_empty()
-            || speaker.contains(char::is_whitespace)
-            || !same(&name(speaker), &wanted)
-        {
-            return false;
-        }
-        // The program a report names, by its file name without extension
-        // (`/opt/x/sh`, `bash.exe`) or as the check gave it.
-        let itself = |named: &str| same(named, program) || same(&name(named), &wanted);
-        !not_found(said, &itself)
-    })
-}
-
-/// Whether `said`, the rest of a line after its speaker, reports that a
-/// program `itself` names was not found: `[line N: ]prog: command not
-/// found`, `[N: ]prog: not found` or `prog: No such file or directory`.
-/// A rest that starts with `command not found` or `not found` -- tcsh's
-/// `foo: Command not found.`, zsh's `command not found: foo` -- is never a
-/// program's own message either, whatever it names.
-fn not_found(said: &str, itself: &dyn Fn(&str) -> bool) -> bool {
-    let mut rest = said.trim_start();
-    if let Some(after) = rest.strip_prefix("line ") {
-        rest = after;
-    }
-    if let Some((number, after)) = rest.split_once(": ")
-        && !number.is_empty()
-        && number.chars().all(|c| c.is_ascii_digit())
-    {
-        rest = after;
-    }
-    const REPORTS: [&str; 3] = [
-        "command not found",
-        "not found",
-        "no such file or directory",
-    ];
-    let lower = rest.to_ascii_lowercase();
-    if REPORTS[..2].iter().any(|report| lower.starts_with(report)) {
-        return true;
-    }
-    let Some((named, report)) = rest.split_once(": ") else {
-        return false;
-    };
-    let report = report.trim().to_ascii_lowercase();
-    itself(named.trim()) && REPORTS.iter().any(|known| report.starts_with(known))
 }
 
 /// The program's own name: a build tool whatever directory it is run from.

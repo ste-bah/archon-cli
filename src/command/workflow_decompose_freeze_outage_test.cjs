@@ -83,7 +83,60 @@ async function persistingOutagePausesThenResumes() {
   assert.equal(out.pauses[0].reason, 'operational_no_progress');
 }
 
+// C4: the contract changed after the staged freeze was prepared (a newer
+// per-check repair was published). The host returns the current contract;
+// the loop rebuilds its candidate from it -- the newer published entry wins --
+// re-authors nothing, and freezes the rebuilt candidate at once.
+const stale = (current) => () => ({postcondition:{satisfied:false}, gateEnvelope:{
+  report:{gate_report:'prepared', current_acceptance_contract:current},
+  policy_findings:[{subject:'acceptance', remediation_scope:'candidate_artifact',
+    text:'the acceptance contract changed after this freeze was prepared; refresh the current contract and re-run the acceptance freeze',
+    deterministic_defect:{code:'stale_acceptance_contract', subject:'acceptance', provenance:'host'}}]}});
+const published = {acceptance:[{id:'B', version:'published', criterion:'b'}], supplementary:[]};
+
+async function staleContractRebuildsFromTheCurrentContract() {
+  const out = await run([stale(published), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C'], 'a stale freeze re-authors nothing');
+  assert.equal(out.stdins.length, 2, 'the rebuilt candidate is frozen again');
+  const [first, retried] = out.stdins.map(stdin => JSON.parse(stdin));
+  assert.deepEqual(retried.entries.map(entry => entry.id), ['A', 'B', 'C']);
+  assert.equal(retried.entries[1].version, 'published', 'the newer published entry wins');
+  assert.deepEqual(retried.entries[0], first.entries[0]);
+  assert.deepEqual(retried.entries[2], first.entries[2]);
+  assert.equal(out.pauses.length, 0);
+}
+
+// A finding of the stale outcome judged the older candidate: it sends back
+// only an entry the current contract does not supply.
+async function staleContractReauthorsOnlyUnsuppliedFlaggedEntries() {
+  const refutedBoth = () => {
+    const outcome = stale(published)();
+    outcome.gateEnvelope.policy_findings.push(...['B', 'C'].map(id => ({
+      text:`check '${id}' was refuted by the host judge; reason: "repair"`, subject:id,
+      remediation_scope:'candidate_artifact'})));
+    return outcome;
+  };
+  const out = await run([refutedBoth, clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'C'], 'only the unsupplied flagged entry is re-authored');
+  assert.equal(JSON.parse(out.stdins[1]).entries[1].version, 'published');
+}
+
+// A contract that keeps changing under the freeze counts in the ordinary
+// no-progress window: the loop pauses with evidence, never retries forever.
+async function persistingStaleContractPausesOnNoProgress() {
+  const out = await run([stale(published), stale(published), stale(published), stale(published), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C']);
+  assert.equal(out.pauses.length, 1);
+  assert.equal(out.pauses[0].reason, 'no_progress');
+}
+
 const tests = [
+  ['a stale freeze rebuilds from the current contract', staleContractRebuildsFromTheCurrentContract],
+  ['a stale freeze re-authors only flagged entries it does not supply', staleContractReauthorsOnlyUnsuppliedFlaggedEntries],
+  ['a persisting stale contract pauses on no progress', persistingStaleContractPausesOnNoProgress],
   ['outage right after the first pass', outageAfterFirstPass],
   ['outage after a partial repair', outageAfterPartialRepair],
   ['two outages in a row', twoOutagesInARow],

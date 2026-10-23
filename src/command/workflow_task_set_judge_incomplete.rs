@@ -32,9 +32,25 @@ impl JudgeIncomplete {
     /// A judge-authored reply can be retried with the affected checks. A
     /// stalled provider call or provider error remains a host outcome.
     pub(crate) fn is_authored_reply(&self) -> bool {
-        !self.0.contains("provider gave no reply")
-            && !self.0.contains("judge call stalled")
-            && !self.0.contains("could not be persisted")
+        [
+            "malformed batched JSON",
+            "duplicated decision",
+            "decision ids do not match",
+            "left decisions missing",
+            "extra decision",
+            "unknown verdict",
+            "invalid verdict",
+            "left 'counterexample' empty",
+            "left 'reason' empty",
+            "continuation ended normally with the document",
+            "reply was truncated",
+            "reply grew past",
+            "continuation added no token",
+            "continuation contradicts",
+            "replies; the last",
+        ]
+        .iter()
+        .any(|defect| self.0.contains(defect))
     }
 }
 
@@ -72,5 +88,31 @@ mod tests {
             !JudgeIncomplete("usable redacted continuation could not be persisted".into())
                 .is_authored_reply()
         );
+        for provider_fault in [
+            "unsupported stop reason 'lengthy'",
+            "returned no finish reason",
+            "the provider gave no reply: disconnected",
+            "a judge call stalled with no provider progress",
+            "the usable redacted continuation could not be persisted",
+        ] {
+            assert!(
+                !JudgeIncomplete(provider_fault.into()).is_authored_reply(),
+                "provider or adapter fault was classified as authored: {provider_fault}"
+            );
+        }
+        for authored_reply in [
+            "malformed batched JSON",
+            "duplicated decision id",
+            "decision ids do not match",
+            "left decisions missing",
+            "left 'counterexample' empty",
+            "left 'reason' empty",
+            "unknown verdict value",
+        ] {
+            assert!(
+                JudgeIncomplete(authored_reply.into()).is_authored_reply(),
+                "judge-authored defect was not retryable: {authored_reply}"
+            );
+        }
     }
 }

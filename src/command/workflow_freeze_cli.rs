@@ -167,6 +167,23 @@ async fn stage_acceptance(
         })
         .await
         .context("building the staged acceptance judge client")?;
+    let paths = (tasks_root.as_path(), prd_path.as_path());
+    stage_acceptance_candidate(cwd, paths, config, client, &resume, staged, &candidate).await
+}
+
+/// The staged acceptance freeze of `candidate` (read from stdin) under
+/// `client`, after the judge client is built: a refusal, an incomplete
+/// freeze or the prepared freeze, each through the gate envelope, except
+/// an operational incomplete freeze, which exits resumable.
+async fn stage_acceptance_candidate(
+    cwd: &Path,
+    (tasks_root, prd_path): (&Path, &Path),
+    config: &ArchonConfig,
+    client: std::sync::Arc<dyn archon_workflow::WorkflowLlmClient>,
+    resume: &crate::command::workflow_freeze_budget::FreezeResume,
+    staged: StagedArgs<'_>,
+    candidate: &[u8],
+) -> Result<()> {
     let gate = (
         "freeze-acceptance",
         crate::command::workflow_gate::GateId::FreezeAcceptance,
@@ -174,12 +191,12 @@ async fn stage_acceptance(
     );
     // Every entry's fields first: assembly reads the entries vector whole.
     let shape = &defects::ENTRY_SHAPE;
-    if let Some(refused) = defects::refuse_element_shapes(cwd, staged, gate, &candidate, shape) {
+    if let Some(refused) = defects::refuse_element_shapes(cwd, staged, gate, candidate, shape) {
         return refused;
     }
     let candidate =
         match crate::command::workflow_freeze_candidate::acceptance_candidate_for_validation(
-            &candidate,
+            candidate,
         ) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -209,12 +226,12 @@ async fn stage_acceptance(
     let prepared =
         match crate::command::workflow_task_set::prepare_acceptance_freeze_resumable_with_limits(
             cwd,
-            &tasks_root,
-            &prd_path,
+            tasks_root,
+            prd_path,
             config.workflow.gate_mode,
             candidate_document(&candidate).into_owned(),
             client,
-            &resume,
+            resume,
             config.tools.cargo.to_limits(),
         )
         .await
@@ -234,6 +251,14 @@ async fn stage_acceptance(
                 if let Some(incomplete) =
                     crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
                 {
+                    if incomplete.is_authored_judge_reply() {
+                        return report_authored_judge_incomplete(
+                            cwd,
+                            staged,
+                            "freeze-acceptance",
+                            incomplete,
+                        );
+                    }
                     exit_incomplete_resumable(incomplete);
                 }
                 return report_operational_failure(cwd, staged, "freeze-acceptance", &error);
@@ -348,8 +373,8 @@ pub(crate) use defects::{entry_defects, install_entry_validator, refusal_text, s
 #[path = "workflow_freeze_staged_output.rs"]
 mod staged_output;
 use staged_output::{
-    read_bounded_stdin, refuse_candidate_artifact, report_operational_failure,
-    write_staged_manifest,
+    read_bounded_stdin, refuse_candidate_artifact, report_authored_judge_incomplete,
+    report_operational_failure, write_staged_manifest,
 };
 
 fn freeze_skeleton(cwd: &Path, tasks: &Path, prd: &Path, config: &ArchonConfig) -> Result<()> {

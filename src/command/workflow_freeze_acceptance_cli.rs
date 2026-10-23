@@ -198,18 +198,27 @@ pub(super) async fn reauthor_acceptance(
         result.freeze_event_id,
         result.skeleton_digest.as_deref().unwrap_or("none"),
     );
-    if let Some(error) = unpublished_repair_error(result.published, &pending) {
+    if let Some(error) = unpublished_repair_error(&published, &pending) {
         return Err(exit_if_incomplete(error));
     }
     Ok(())
 }
 
-fn unpublished_repair_error(published: bool, pending: &[String]) -> Option<anyhow::Error> {
-    (!published).then(|| {
+fn unpublished_repair_error(published: &[String], pending: &[String]) -> Option<anyhow::Error> {
+    (published.is_empty() || !pending.is_empty()).then(|| {
         crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
             format!(
-                "no acceptance checks were published; pending checks: {}",
-                pending.join(", ")
+                "acceptance repair incomplete; published check ids: {}; pending check ids: {}",
+                if published.is_empty() {
+                    "none".to_string()
+                } else {
+                    published.join(", ")
+                },
+                if pending.is_empty() {
+                    "none".to_string()
+                } else {
+                    pending.join(", ")
+                }
             ),
             &crate::command::workflow_freeze_budget::FreezeProgress::default(),
         )
@@ -220,11 +229,16 @@ fn unpublished_repair_error(published: bool, pending: &[String]) -> Option<anyho
 #[cfg(test)]
 #[test]
 fn an_all_unproven_cli_repair_is_incomplete_and_names_pending_checks() {
-    let error = unpublished_repair_error(false, &["AC-F-001".into()]).unwrap();
+    let error = unpublished_repair_error(&[], &["AC-F-001".into()]).unwrap();
     let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
         .expect("the CLI reports an incomplete resumable repair");
     assert!(incomplete.report().contains("AC-F-001"));
-    assert!(unpublished_repair_error(true, &["AC-F-001".into()]).is_none());
+    let partial = unpublished_repair_error(&["AC-F-001".into()], &["AC-F-002".into()]).unwrap();
+    let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&partial)
+        .expect("a partial re-author must finish resumably");
+    assert!(incomplete.report().contains("AC-F-001"));
+    assert!(incomplete.report().contains("AC-F-002"));
+    assert!(unpublished_repair_error(&["AC-F-001".into()], &[]).is_none());
 }
 
 /// An incomplete, resumable freeze ends by the operational contract (Issue

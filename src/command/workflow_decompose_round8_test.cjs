@@ -135,13 +135,41 @@ async function persistentAuthoredFreezeJudgeReplyPausesOnNoProgress() {
   assert.equal(pauses.length, 1, `expected one pause, got ${JSON.stringify(pauses)}`);
   assert.equal(pauses[0].reason, 'no_progress');
 }
+async function pauseKeepsCallerRecovery() {
+  const ctx = {};
+  vm.createContext(withAuthorContext(ctx));
+  vm.runInContext(source, ctx);
+  let evidence;
+  await ctx.pauseLoop({ pause: async (_id, value) => { evidence = value; } }, 'authored-pending', {
+    reason: 'authored_pending', recovery: 'Keep retrying the authored pending check.'
+  });
+  assert.equal(evidence.recovery, 'Keep retrying the authored pending check.');
+}
+async function pendingBodyKeepsSkeletonReauthorNote() {
+  const ctx = { args: { gateMode: 'enforce' } };
+  vm.createContext(withAuthorContext(ctx));
+  vm.runInContext(source, ctx);
+  const feedback = [];
+  let calls = 0;
+  ctx.authorCandidate = async (_w, policy) => {
+    feedback.push(policy.initialFeedback);
+    calls++;
+    return calls === 1 ? { pendingAuthor: true, findings: ['body remains pending'] }
+      : { publicationReceipt: { call_id: 'body' }, postcondition: { satisfied: true } };
+  };
+  await ctx.authorBodies({ pause: async () => {} }, [[{ taskId: 'TASK-X-001', fileName: 'TASK-X-001.md' }, ['Keep the skeleton re-author note.']]], new Map());
+  assert.equal(calls, 2);
+  assert.deepEqual(Array.from(feedback[1]), ['Keep the skeleton re-author note.', 'body remains pending']);
+}
 (async () => {
   let failed = 0;
   for (const [name, test] of [['finding 2 later-stage repairs', laterStageRepairs],
     ['finding 1 ownership identities', ownership], ['finding 3 element shapes', shapes],
     ['same-stage total must fall', sameStageTotalMustFall], ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings],
     ['authored incomplete freeze judge retry', authoredFreezeJudgeReplyRetriesWithoutOperationalStrike],
-    ['persistent authored judge reply pauses on no progress', persistentAuthoredFreezeJudgeReplyPausesOnNoProgress]]) {
+    ['persistent authored judge reply pauses on no progress', persistentAuthoredFreezeJudgeReplyPausesOnNoProgress],
+    ['pause keeps caller recovery', pauseKeepsCallerRecovery],
+    ['pending body keeps skeleton re-author note', pendingBodyKeepsSkeletonReauthorNote]]) {
     try { await test(); console.log(`PASS ${name}`); }
     catch (error) { failed++; console.error(`FAIL ${name}: ${error.message}`); }
   }

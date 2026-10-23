@@ -456,6 +456,12 @@ impl ExecutabilityProbe for HostProbe {
     }
 
     fn take_unproven(&self) -> BTreeMap<String, String> {
+        (self.take_unproven_causes().into_iter())
+            .map(|(id, (why, _))| (id, why))
+            .collect()
+    }
+
+    fn take_unproven_causes(&self) -> BTreeMap<String, (String, UnprovenCause)> {
         std::mem::take(&mut *self.unproven.lock().expect("unproven lock"))
     }
 
