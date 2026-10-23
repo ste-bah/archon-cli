@@ -1,6 +1,6 @@
 //! Durable remediation ledger handling for fixed decomposition resumes.
 use anyhow::{Context, Result, anyhow};
-use std::{collections::HashSet, io::Write, path::Path};
+use std::{collections::HashSet, path::Path};
 
 pub(crate) fn resume_author_scope(
     project_root: &Path,
@@ -74,31 +74,21 @@ pub(crate) fn read(run_dir: &Path, report_id: &str) -> Result<Option<Ledger>> {
     Ok(Some(ledger))
 }
 
-pub(crate) fn is_consumed(run_dir: &Path, report_id: &str) -> Result<bool> {
-    let path = run_dir.join("decomposition/reverify/consumed.jsonl");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
-    };
-    for row in resolved::resolved_rows(&text, &path)? {
-        if row["report_id"].as_str() == Some(report_id) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 #[path = "workflow_decompose_remediation_resolved.rs"]
 mod resolved;
 pub(crate) use resolved::{
-    append_resolved, entry_digest, reconcile_pending_from_lineage, resolved_publications,
+    ENTRY_IDENTITY, append_resolved, authored_entry_digest, contract_entry, entry_digest,
+    reconcile_pending_from_lineage, recorded_digest_names, resolved_publications,
     unresolved_pending_subjects,
 };
 
+#[path = "workflow_decompose_remediation_consumed.rs"]
+mod consumed;
+pub(crate) use consumed::{append_consumed, is_consumed};
+
 #[path = "workflow_decompose_remediation_lineage.rs"]
 mod lineage;
-use lineage::consumed_ledger_findings;
+use lineage::{consumed_ledger_findings, consumed_ledger_review};
 
 fn validate_subjects(
     run_dir: &Path,
@@ -382,8 +372,9 @@ pub(crate) fn prepare(
             }
             exists
         });
-        let findings =
-            consumed_ledger_findings(Path::new(&runtime.task_root_identity), run_dir, &ledger)?;
+        let (findings, skipped) =
+            consumed_ledger_review(Path::new(&runtime.task_root_identity), run_dir, &ledger)?;
+        skipped.iter().for_each(|line| eprintln!("{line}"));
         if !findings.is_empty() {
             selected.extend(findings.keys().cloned());
             consumed.push(ledger);
@@ -445,29 +436,6 @@ pub(crate) fn prepare(
         consumed,
         pending,
     }))
-}
-
-pub(crate) fn append_consumed(run_dir: &Path, ledger: &Ledger) -> Result<()> {
-    let path = run_dir.join("decomposition/reverify/consumed.jsonl");
-    std::fs::create_dir_all(path.parent().expect("ledger parent"))?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("opening {}", path.display()))?;
-    let mut row = Vec::new();
-    serde_json::to_writer(
-        &mut row,
-        &serde_json::json!({
-            "report_id": ledger.report_id,
-            "subjects": ledger.subjects,
-            "consumed_at": chrono::Utc::now(),
-        }),
-    )?;
-    row.push(b'\n');
-    file.write_all(&row)?;
-    file.sync_all()?;
-    Ok(())
 }
 
 pub(crate) fn finish_resume(

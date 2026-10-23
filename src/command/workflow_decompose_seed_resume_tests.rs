@@ -27,26 +27,80 @@ fn authored_digest(entry: &serde_json::Value) -> String {
     )
 }
 
+use super::publications::tests::{freeze, lock, publish};
+
+/// The evidence for the contract published under `root`.
+fn publications(
+    root: &std::path::Path,
+    records: &[archon_workflow::WorkflowV2CallRecord],
+) -> (
+    super::publications::Publications,
+    archon_workflow::task_set_contract::AcceptanceContract,
+) {
+    let bytes =
+        std::fs::read(root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE))
+            .unwrap();
+    let contract: archon_workflow::task_set_contract::AcceptanceContract =
+        serde_json::from_slice(&bytes).unwrap();
+    let digest = archon_workflow::task_set_contract::content_digest(&bytes);
+    let read =
+        super::publications::Publications::read(root, root, (&contract, &digest), records).unwrap();
+    (read, contract)
+}
+
+/// Whether a reply started at `reply_at` may overlay entry `id`.
+fn overlays(
+    (read, contract): &(
+        super::publications::Publications,
+        archon_workflow::task_set_contract::AcceptanceContract,
+    ),
+    id: &str,
+    reply_at: &str,
+) -> bool {
+    let entry = contract
+        .acceptance
+        .iter()
+        .find(|entry| entry.id == id)
+        .unwrap();
+    read.unchanged_since(entry)
+        .is_some_and(|since| since <= at(reply_at))
+}
+
 #[test]
 fn live_shaped_candidate_filters_only_five_later_republished_replies() {
-    // A real freeze candidate has complete authored entry records under
-    // entries/supplementary; each committed receipt is associated with its
-    // candidate by call id and committed_at.
+    // Eighty entries this run froze before the replies; the heal then
+    // republished five of them (its resolved rows and the lock it rewrote).
     let repaired = ["CHK-002", "CHK-009", "CHK-010", "CHK-011", "CHK-012"];
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("decomposition/reverify")).unwrap();
-    std::fs::write(
-        temp.path().join("events.jsonl"),
-        r#"{"ts":"2026-10-22T01:39:00Z","kind":"decomposition_reverified","detail":{"outcome":"needs_remediation","report_id":"reverify-7126-report"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        temp.path()
-            .join("decomposition/reverify/remediation-reverify-7126-report.json"),
-        serde_json::to_vec(&json!({ "report_id":"reverify-7126-report", "subjects":repaired }))
-            .unwrap(),
-    )
-    .unwrap();
+    let ids = (0..80)
+        .map(|index| {
+            repaired
+                .get(index)
+                .map(|id| (*id).to_string())
+                .unwrap_or_else(|| format!("SUP-REQ-FIXTURE-{index:03}"))
+        })
+        .collect::<Vec<_>>();
+    let before = ids
+        .iter()
+        .map(|id| entry(id, "old check"))
+        .collect::<Vec<_>>();
+    let frozen = publish(temp.path(), &before);
+    let after = ids
+        .iter()
+        .map(|id| {
+            entry(
+                id,
+                if repaired.contains(&id.as_str()) {
+                    "repaired check"
+                } else {
+                    "old check"
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let healed = publish(temp.path(), &after);
+    lock(temp.path(), &healed, "01:39:00");
     let resolved = repaired
         .iter()
         .map(|id| {
@@ -56,85 +110,41 @@ fn live_shaped_candidate_filters_only_five_later_republished_replies() {
             )
         })
         .collect::<serde_json::Map<_, _>>();
-    std::fs::write(temp.path().join("decomposition/reverify/resolved.jsonl"), serde_json::to_vec(&json!({"report_id":"reverify-7126-report","subjects":resolved,"published_at":"2026-10-22T01:39:00Z"})).unwrap()).unwrap();
-    let lineage = super::reverify_report_publications(temp.path()).unwrap();
-    let lineage_ids: std::collections::BTreeSet<_> =
-        lineage.iter().map(|(id, _, _)| id.as_str()).collect();
-    let mut kept = 0;
-    let mut dropped = 0;
-    for index in 0..80 {
-        let id = repaired
-            .get(index)
-            .map(|id| (*id).to_string())
-            .unwrap_or_else(|| format!("SUP-REQ-FIXTURE-{index:03}"));
-        let prior = entry(&id, "old check");
-        let current = entry(
-            &id,
-            if index < repaired.len() {
-                "repaired check"
-            } else {
-                "old check"
-            },
-        );
-        let reply_at = at("2026-10-21T01:00:00Z");
-        let versions = lineage
-            .iter()
-            .find(|(published_id, _, _)| published_id == &id)
-            .map(|(_, published_at, digest)| vec![(*published_at, digest.clone())]);
-        if super::reply_was_published_after(versions.as_ref(), reply_at, &current) {
-            dropped += 1;
-        } else {
-            kept += 1;
-        }
-        if lineage_ids.contains(id.as_str()) {
-            assert_ne!(prior["check"], current["check"]);
-            assert_eq!(current["check"]["command"], "repaired check");
-        }
-    }
-    assert_eq!(dropped, 5);
+    std::fs::write(temp.path().join("decomposition/reverify/resolved.jsonl"), serde_json::to_vec(&json!({"report_id":"reverify-7126-report","subjects":resolved,"published_at":"2026-10-06T01:39:00Z"})).unwrap()).unwrap();
+    let evidence = publications(temp.path(), &[freeze("00:30:00", &before, &frozen)]);
+    let kept = ids
+        .iter()
+        .filter(|id| overlays(&evidence, id, "2026-10-06T01:00:00Z"))
+        .count();
     assert_eq!(kept, 75);
+    for id in repaired {
+        assert!(!overlays(&evidence, id, "2026-10-06T01:00:00Z"));
+    }
 }
 
 #[test]
 fn a_reply_newer_than_the_publication_remains_an_overlay() {
-    let current = entry("AC-NEWER", "published check");
-    let versions = vec![(at("2026-10-22T01:39:00Z"), authored_digest(&current))];
-    assert!(!super::reply_was_published_after(
-        Some(&versions),
-        at("2026-10-22T01:40:00Z"),
-        &current,
-    ));
+    let temp = tempfile::tempdir().unwrap();
+    let digest = publish(temp.path(), &[entry("AC-NEWER", "published check")]);
+    lock(temp.path(), &digest, "01:39:00");
+    let evidence = publications(temp.path(), &[]);
+    assert!(overlays(&evidence, "AC-NEWER", "2026-10-06T01:40:00Z"));
+    assert!(!overlays(&evidence, "AC-NEWER", "2026-10-06T01:38:00Z"));
 }
 
 #[test]
 fn per_check_publication_time_drops_only_replies_started_before_republish() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("decomposition/reverify")).unwrap();
-    std::fs::write(
-        temp.path().join("events.jsonl"),
-        r#"{"ts":"2026-10-22T01:00:00Z","kind":"decomposition_reverified","detail":{"outcome":"needs_remediation","report_id":"reverify-report"}}"#,
-    ).unwrap();
     let published_digest = authored_digest(&entry("AC-X-001", "repaired"));
     std::fs::write(
         temp.path().join("decomposition/reverify/resolved.jsonl"),
-        serde_json::to_vec(&json!({"report_id":"reverify-report","subjects":{"AC-X-001":published_digest},"published_at":"2026-10-22T03:00:00Z"})).unwrap(),
+        serde_json::to_vec(&json!({"report_id":"reverify-report","subjects":{"AC-X-001":published_digest},"entry_identity":"authored-fields-v1","published_at":"2026-10-22T03:00:00Z"})).unwrap(),
     ).unwrap();
-
-    let current = entry("AC-X-001", "repaired");
-    let publications = super::reverify_report_publications(temp.path()).unwrap();
-    assert_eq!(publications.len(), 1);
-    let published_at = publications[0].1;
-    let published_digest = publications[0].2.clone();
-    assert!(super::reply_was_published_after(
-        Some(&vec![(published_at, published_digest.clone())]),
-        at("2026-10-22T02:00:00Z"),
-        &current,
-    ));
-    assert!(!super::reply_was_published_after(
-        Some(&vec![(published_at, published_digest)]),
-        at("2026-10-22T04:00:00Z"),
-        &current,
-    ));
+    publish(temp.path(), &[entry("AC-X-001", "repaired")]);
+    let evidence = publications(temp.path(), &[]);
+    assert!(!overlays(&evidence, "AC-X-001", "2026-10-22T02:00:00Z"));
+    assert!(overlays(&evidence, "AC-X-001", "2026-10-22T04:00:00Z"));
 }
 
 #[test]
@@ -291,7 +301,21 @@ fn acceptance_seed_refreshes_old_carried_entries_but_keeps_reauthored_reply_over
         resume_frozen_chain: None, pause_generation_floor: 0, history_attempts: BTreeMap::new(), event_id: None,
     };
 
-    let digest = refresh_acceptance_carried_entries(temp.path(), temp.path(), &mut seed, &[])
+    // The contract was published before the reply was authored, so the
+    // reply is the entry's newer version.
+    lock(
+        temp.path(),
+        &archon_workflow::task_set_contract::content_digest(&bytes),
+        "01:00:00",
+    );
+    let records = [
+        crate::command::workflow_decompose_seed::derive::tests::reply(
+            "acceptance-author-AC-1-2",
+            "02:00:00",
+            "reply",
+        ),
+    ];
+    let digest = refresh_acceptance_carried_entries(temp.path(), temp.path(), &mut seed, &records)
         .unwrap()
         .unwrap();
     let Some(SubjectSeed::Entries {
@@ -346,6 +370,23 @@ fn consumed_publications_filter_old_replies_but_unpublished_pending_replies_rema
         })
         .collect::<serde_json::Map<_, _>>();
     std::fs::write(reverify.join("resolved.jsonl"), serde_json::to_vec(&json!({"report_id":"reverify-7126-report","subjects":published,"published_at":"2026-10-22T01:39:00Z"})).unwrap()).unwrap();
+    // This run froze every entry before the replies; the heal later
+    // republished only the consumed report's five.
+    let before = ids
+        .iter()
+        .map(|id| {
+            entry(
+                id,
+                if repaired_consumed.contains(id) {
+                    "old check"
+                } else {
+                    "repaired check"
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let before_digest = publish(temp.path(), &before);
+    let frozen = freeze("15:00:00", &before, &before_digest);
     let contract = json!({
         "schema_version": 1, "prd":{"path":"PRD.md","digest":"prd"},
         "gap_policy":{"permitted_acceptance_ids":[],"forbidden_phrases":[],"required_fields":[]},
@@ -387,6 +428,7 @@ fn consumed_publications_filter_old_replies_but_unpublished_pending_replies_rema
             record.started_at = "2026-10-21T16:00:00Z".into();
             record
         })
+        .chain([frozen])
         .collect::<Vec<_>>();
     let mut seed = PhaseSeed {
         schema_version: 1,

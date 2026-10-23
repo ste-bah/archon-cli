@@ -13,7 +13,7 @@
 // equal by test).
 function checkPathRule() {
   return [
-    "Where a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; never reach one root from the other with ..: the roots do not sit the same way in every copy. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The host proves the guard by moving the literally named input aside and requiring the check to fail; that proof is never a counterexample.",
+    "Where a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; never reach one root from the other with ..: the roots do not sit the same way in every copy. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The host proves a guard by moving aside a literally named input it actually moves (never the check's own script, a program it runs, a directory it changes into or a build manifest) and requiring the check to fail; that proof is never a counterexample. A named deciding input that is absent is behaviour not implemented yet; a deciding input whose content is not supplied to the judge has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.",
     `In every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (${args.repositoryRoot}, ${args.projectRoot}) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.`
   ].join("\n");
 }
@@ -346,7 +346,8 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   // Each entry reads only its own shape refusal: a sibling's names another
   // entry and is not this entry's repair.
   const refused = state.refusals && state.refusals.get(id);
-  const own = refused ? `\nThe host refused this entry's last answered reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "";
+  const own = (refused ? `\nThe host refused this entry's last answered reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "")
+    + supersededDraftText(state, id);
   // Issue 288: the catalogue and the completed entries are bounded records
   // that name host-written files (workflow_decompose_v1_context.js). A file
   // the host could not write is an outage of this entry's call, made before
@@ -479,6 +480,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
       // back is only novelty until the judge accepts it (Issue 261).
       if (!state.entries.has(entry.id)) state.added += 1;
       else if (acceptanceEntryKey(state.entries.get(entry.id)) !== acceptanceEntryKey(entry)) state.replaced += 1;
+      recordDraft(state, entry.id, entry);
       state.entries.set(entry.id, entry);
     }
   }
@@ -618,8 +620,21 @@ function refreshFromCurrentContract(state, report, others, ids, candidate) {
     if (sup && !owed.has(entry.id)) owed.set(entry.id, { requirement: sup[1], text: currentRequirementText(sup[1]) });
   }
   const supplied = new Set();
+  const drafts = state.drafts || new Map();
   for (const entry of current.acceptance.concat(current.supplementary)) {
-    if (entry && typeof entry.id === "string") { state.entries.set(entry.id, entry); supplied.add(entry.id); }
+    if (!entry || typeof entry.id !== "string") continue;
+    supplied.add(entry.id);
+    const draft = drafts.get(entry.id);
+    // This loop's unpublished draft is newer than the published entry it was
+    // drafted from. A published entry that changed since that base is newer
+    // still: it wins, and the draft is shown to the entry's next author.
+    if (draft && draft.base && authoredEntryKey(draft.base) === authoredEntryKey(entry)) continue;
+    if (draft) {
+      state.superseded = state.superseded || new Map();
+      state.superseded.set(entry.id, draft.draft);
+      drafts.delete(entry.id);
+    }
+    state.entries.set(entry.id, entry);
   }
   const all = [...ids].sort().concat([...owed.keys()].sort());
   const attributed = acceptanceRepairIds(others, ids, false, candidate, state.entries);
@@ -634,6 +649,34 @@ function refreshFromCurrentContract(state, report, others, ids, candidate) {
   }
   state.retryIds = flagged === null ? null : new Set([...flagged, ...missing]);
   return null;
+}
+
+// An entry's authored fields: what the author wrote, without the judgment
+// the host adds when it publishes it (the host's `authored_entry_digest`).
+function authoredEntryKey(entry) {
+  return acceptanceEntryKey({ id: entry.id, criterion: entry.criterion, check: entry.check,
+    covers: Array.isArray(entry.covers) ? entry.covers : [], gap_permitted: entry.gap_permitted === true });
+}
+
+// This loop's drafts not yet published, each with the entry it replaced:
+// the base a stale freeze's current contract is compared with. A publication
+// clears them (`clearPublishedDrafts`).
+function recordDraft(state, id, entry) {
+  state.drafts = state.drafts || new Map();
+  if (!state.drafts.has(id)) state.drafts.set(id, { base: state.entries.get(id) || null });
+  state.drafts.get(id).draft = entry;
+}
+
+function clearPublishedDrafts(state) {
+  state.drafts = new Map();
+}
+
+// The draft a newer published entry replaced, shown once to its next author.
+function supersededDraftText(state, id) {
+  const draft = state.superseded && state.superseded.get(id);
+  if (!draft) return "";
+  state.superseded.delete(id);
+  return `\nA newer published version of this entry replaced your previous draft before it was published. Your previous draft was:\n${JSON.stringify(draft)}`;
 }
 
 function currentRequirementText(requirement) {

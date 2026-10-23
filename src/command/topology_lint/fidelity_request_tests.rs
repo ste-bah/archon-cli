@@ -123,10 +123,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // an unusable freeze judge reply retries inside the ordinary no-progress window.
     // F8b: a pause keeps its caller's recovery and a pending body its earlier note;
     // C4: a stale acceptance freeze rebuilds its candidate from the current contract.
+    // R3b: a stale rebuild keeps the loop's unpublished drafts (seed path too); guard-proof text.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "2012e30746818f8d3d1d53ca55ba432a9a1851f7aa92912f18bd18aaab2b67f8"
+        "5ec052a2aefc4a8c4c7542357a48e387f051da3d4aa8f6dc7c591946ef97f6d8"
     );
 }

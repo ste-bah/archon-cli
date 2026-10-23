@@ -476,3 +476,7 @@ mod prepared_write_path_tests {
         assert!(!resolved_path_is_within_root_using(root, outside, resolve).unwrap());
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_host_command_exec_inner_stale_tests.rs"]
+mod stale_tests;

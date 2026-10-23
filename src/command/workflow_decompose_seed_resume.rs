@@ -195,8 +195,11 @@ pub(crate) fn resume_script_arguments(
 }
 
 /// Refresh the acceptance entries in the seed handed to a resumed script.
-/// Replies remain a later overlay in the script, preserving newly authored
-/// entries while removing stale carried bytes from the candidate base.
+/// Carried entries become the published ones. A reply stays an overlay only
+/// while its published entry is unchanged since the reply was authored
+/// (`publications`): a repair published after it — by a resume heal, an
+/// operator re-author, a launch repair or an in-round republish — wins over
+/// the reply's older bytes, and so does an entry with no such evidence.
 pub(crate) fn refresh_acceptance_carried_entries(
     task_root: &Path,
     run_root: &Path,
@@ -219,9 +222,8 @@ pub(crate) fn refresh_acceptance_carried_entries(
         .acceptance
         .iter()
         .chain(&contract.supplementary)
-        .map(|entry| (entry.id.clone(), serde_json::to_value(entry)))
-        .map(|(id, entry)| entry.map(|entry| (id, entry)))
-        .collect::<std::result::Result<std::collections::BTreeMap<_, _>, _>>()?;
+        .map(|entry| (entry.id.clone(), entry))
+        .collect::<BTreeMap<_, _>>();
     if let Some(SubjectSeed::Entries {
         carried_entries,
         replies,
@@ -229,18 +231,8 @@ pub(crate) fn refresh_acceptance_carried_entries(
         ..
     }) = seed.subjects.get_mut("acceptance")
     {
-        // A reply remains an overlay unless the durable resolved journal
-        // proves that its authored bytes were actually published later.
-        let mut published = std::collections::BTreeMap::<
-            String,
-            Vec<(chrono::DateTime<chrono::FixedOffset>, String)>,
-        >::new();
-        // Only the resolved journal proves that these subject bytes were
-        // actually published. Pending reports and their flagged subjects do
-        // not establish publication.
-        for (id, at, digest) in reverify_report_publications(run_root)? {
-            published.entry(id).or_default().push((at, digest));
-        }
+        let publications =
+            publications::Publications::read(task_root, run_root, (&contract, &digest), records)?;
         replies.retain(|reply| {
             let Some(current) = live.get(&reply.id) else {
                 return true;
@@ -254,10 +246,11 @@ pub(crate) fn refresh_acceptance_carried_entries(
                 .iter()
                 .find(|record| record.call.id == reply.call_id)
                 .and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.started_at).ok());
-            let Some(reply_at) = reply_at else {
-                return true;
-            };
-            !reply_was_published_after(published.get(&reply.id), reply_at, current)
+            reply_at.is_some_and(|reply_at| {
+                publications
+                    .unchanged_since(current)
+                    .is_some_and(|since| since <= reply_at)
+            })
         });
         let mut refreshed = Vec::with_capacity(carried_entries.len());
         for old in carried_entries.drain(..) {
@@ -266,7 +259,7 @@ pub(crate) fn refresh_acceptance_carried_entries(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
             if let Some(current) = live.get(id) {
-                refreshed.push(current.clone());
+                refreshed.push(serde_json::to_value(current)?);
             } else if !id.is_empty() {
                 // Existing seed rules route invalid carried entries back to
                 // authoring; preserving the id here records why it was dropped.
@@ -282,8 +275,13 @@ pub(crate) fn refresh_acceptance_carried_entries(
     Ok(Some(digest))
 }
 
+#[path = "workflow_decompose_seed_publications.rs"]
+mod publications;
+
 /// Refresh the arguments that will run after resume checks may have healed
-/// the acceptance contract.
+/// the acceptance contract. The refresh owns only the acceptance subject:
+/// every other phase-seed field the resume already set (the remediation's
+/// advanced author ordinals among them) is kept as it is.
 pub(crate) fn refresh_after_resume_heal(
     task_root: &Path,
     run_root: &Path,
@@ -299,43 +297,22 @@ pub(crate) fn refresh_after_resume_heal(
             expected_arguments,
             Some(seed),
         );
-        arguments["phaseSeed"] = refreshed["phaseSeed"].clone();
+        let acceptance = refreshed["phaseSeed"]["subjects"]
+            .get("acceptance")
+            .cloned();
+        match arguments["phaseSeed"]["subjects"].as_object_mut() {
+            Some(subjects) => match acceptance {
+                Some(acceptance) => {
+                    subjects.insert("acceptance".into(), acceptance);
+                }
+                None => {
+                    subjects.remove("acceptance");
+                }
+            },
+            None => arguments["phaseSeed"] = refreshed["phaseSeed"].clone(),
+        }
     }
     Ok(())
-}
-
-/// Replies and published entries may carry host-owned judgment metadata.
-/// Compare only the authored fields to recognize the bytes a publication
-/// committed, even when the reply itself is byte-identical to those fields.
-fn reply_was_published_after(
-    publications: Option<&Vec<(chrono::DateTime<chrono::FixedOffset>, String)>>,
-    reply_at: chrono::DateTime<chrono::FixedOffset>,
-    current: &serde_json::Value,
-) -> bool {
-    publications.is_some_and(|versions| {
-        versions.iter().any(|(at, digest)| {
-            *at > reply_at && authored_entry_digest(current).as_deref() == Some(digest)
-        })
-    })
-}
-
-fn authored_entry_digest(entry: &serde_json::Value) -> Option<String> {
-    let authored = serde_json::json!({
-        "id": entry.get("id"),
-        "criterion": entry.get("criterion"),
-        "check": entry.get("check"),
-        "covers": entry.get("covers").cloned().unwrap_or_else(|| serde_json::json!([])),
-        "gap_permitted": entry.get("gap_permitted").cloned().unwrap_or(serde_json::Value::Bool(false)),
-    });
-    serde_json::to_vec(&authored)
-        .ok()
-        .map(|bytes| archon_workflow::task_set_contract::content_digest(&bytes))
-}
-
-fn reverify_report_publications(
-    run_root: &Path,
-) -> Result<Vec<(String, chrono::DateTime<chrono::FixedOffset>, String)>> {
-    crate::command::workflow_decompose_remediation::resolved_publications(run_root)
 }
 
 #[cfg(test)]

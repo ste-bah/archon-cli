@@ -399,6 +399,7 @@ pub(crate) async fn reverify(
         checks,
         contract_digest: Some(contract_digest),
         judged_check_digests,
+        judged_check_identity: Some(report_digests::IDENTITY.to_string()),
         operational_failure_cause: None,
     };
     let report_bytes = serde_json::to_vec_pretty(&report)?;

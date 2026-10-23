@@ -104,6 +104,24 @@ async function unattributableRefusalReauthorsAsTheLoopDoes() {
   assert.deepEqual(run.seen.agents, ['acceptance-author-B-28']);
 }
 
+// A stale freeze's finding names no entry: the seed reads it as the live
+// loop does, so the carried published entries are submitted again and
+// nothing is re-authored; its other findings send back only an id the
+// carried contract does not supply.
+async function staleFreezeSeedReauthorsAsTheLoopDoes() {
+  const candidate = JSON.stringify({ entries: [entry('A'), entry('B')], supplementary: [] });
+  const staleFinding = defectFinding('the acceptance contract changed after this freeze was prepared; refresh the current contract and re-run the acceptance freeze',
+    'stale_acceptance_contract', 'acceptance');
+  const subjects = (findings) => ({ acceptance: { kind: 'entries', candidate, replies: [], invalid: {}, carried: 2,
+    carried_entries: [entry('A', 5), entry('B', 5)], gates: [{ call_id: 'g', published: false, findings }] } });
+  let run = await seeded(subjects([staleFinding]), { A: 'a', B: 'b' });
+  assert.deepEqual(run.seen.agents, [], 'a stale finding re-authors nothing');
+  assert.deepEqual(JSON.parse(run.seen.gates[0].stdin).entries.map((e) => e.check.command), ['t A 5', 't B 5']);
+  run = await seeded(subjects([staleFinding, finding("check 'C' was refuted by the host judge; reason: weak", 'C'),
+    finding("check 'B' was refuted by the host judge; reason: weak", 'B')]), { A: 'a', B: 'b', C: 'c' });
+  assert.deepEqual(run.seen.agents, ['acceptance-author-C-28'], 'only the flagged id the carried contract does not supply');
+}
+
 async function invalidEntryOnly() {
   const candidate = JSON.stringify({ entries: [entry('A'), entry('B')], supplementary: [] });
   const { seen } = await seeded({ acceptance: { kind: 'entries', candidate, replies: [], carried: 2,
@@ -369,7 +387,7 @@ async function sample() {
 }
 
 (async () => {
-  for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, unattributableRefusalReauthorsAsTheLoopDoes, invalidEntryOnly,
+  for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, unattributableRefusalReauthorsAsTheLoopDoes, staleFreezeSeedReauthorsAsTheLoopDoes, invalidEntryOnly,
     changedSupplementaryCriterionIsReauthored, pointerRefusalRepairedSince, neverFrozen,
     heldEntriesSurviveStaleAndOmittingGates, currentSupplementaryCriterionSurvivesTwoResumes,
     supplementaryGateFindingsAreAttributedOnRestore,
