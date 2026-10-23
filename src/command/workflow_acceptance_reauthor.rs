@@ -44,63 +44,6 @@ const AUTHOR_TOOLS: [&str; 3] = HOST_READ_ONLY_TOOLS;
 /// The two entry shapes the decomposition author is shown.
 const ENTRY_SHAPES: &str = r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#;
 
-impl AuthorScope {
-    /// The paths outside the repository that the author prompt tells the
-    /// author to read: the PRD, and the project root that holds it and
-    /// that a `project_root` check resolves its data files against.
-    ///
-    /// The author is confined to the repository it runs in, so a place the
-    /// prompt names but this list omits is refused. The list is taken from
-    /// the same fields the prompt prints, and the prompt test holds the two
-    /// together.
-    ///
-    /// A field that names nothing usable is refused here, by name, before
-    /// the author is spawned. Otherwise an empty field turns into `""` or
-    /// into the directory it is joined to, and the spawn fails later with
-    /// an error that does not say which input was wrong.
-    pub(crate) fn read_roots(&self) -> Result<Vec<String>, String> {
-        for (field, path) in [
-            ("prd_path", &self.prd_path),
-            ("project_root", &self.project_root),
-            ("repository_root", &self.repository_root),
-        ] {
-            if path.as_os_str().to_string_lossy().trim().is_empty() {
-                return Err(format!("acceptance re-author scope: {field} is empty"));
-            }
-        }
-        if self.prd_path.is_dir() {
-            return Err(format!(
-                "acceptance re-author scope: prd_path {} is a directory, not a PRD file",
-                self.prd_path.display()
-            ));
-        }
-        let mut roots: Vec<String> = Vec::new();
-        for (field, path) in [
-            ("prd_path", &self.prd_path),
-            ("project_root", &self.project_root),
-        ] {
-            if path.starts_with(&self.repository_root) {
-                continue;
-            }
-            // Resolved as the host resolves it: the boundary takes absolute
-            // paths only.
-            let path = std::path::absolute(path)
-                .map_err(|error| {
-                    format!(
-                        "acceptance re-author scope: {field} {} cannot be made absolute: {error}",
-                        path.display()
-                    )
-                })?
-                .display()
-                .to_string();
-            if !roots.contains(&path) {
-                roots.push(path);
-            }
-        }
-        Ok(roots)
-    }
-}
-
 /// One line per named check: its id and what the judge said about it.
 pub(crate) fn not_accepted_lines(
     contract: &AcceptanceContract,
@@ -170,17 +113,21 @@ pub(crate) struct ReauthorGate<'a> {
     pub(crate) seeds: &'a BTreeMap<String, String>,
 }
 
-/// Accepted checks and per-check host proofs that remain pending.
+/// Accepted checks and per-check findings that remain pending, from either
+/// an authored repair or a host proof.
 #[derive(Debug, Clone)]
 pub(crate) struct ReauthorProgress {
     pub(crate) contract: AcceptanceContract,
     pub(crate) unproven: BTreeMap<String, String>,
+    /// Checks still waiting on another authored reply or judge attempt.
+    pub(crate) authored_pending: BTreeMap<String, String>,
+    pub(crate) attempts: usize,
 }
 
 /// Re-author and re-judge exactly `ids` in `contract`, bounded. Returns the
 /// contract with those entries replaced by accepted ones that did not crash
 /// in their own code when the host ran them, every other entry untouched,
-/// or the per-check report of what is still not accepted.
+/// and findings for named checks still unresolved after the bounded loop.
 pub(crate) async fn reauthor(
     client: &dyn WorkflowLlmClient,
     contract: &AcceptanceContract,
@@ -204,6 +151,20 @@ pub(crate) async fn reauthor_with_cache(
     let progress =
         reauthor_partial_with_cache(client, contract, ids, scope, judge_model, gate, state_dir)
             .await?;
+    let authored_pending: BTreeSet<_> = progress.authored_pending.keys().cloned().collect();
+    if !authored_pending.is_empty() {
+        let lines = authored_pending
+            .iter()
+            .map(|id| progress.unproven.get(id).cloned().unwrap_or_default())
+            .collect::<Vec<_>>();
+        let escalation =
+            escalation::baseline_escalation(&authored_pending, &lines, progress.attempts)
+                .unwrap_or_default();
+        return Err(ReauthorStalled {
+            report: format!("{}\nthe re-author stopped after {} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}", report(&lines, progress.attempts), progress.attempts),
+            pending: authored_pending.into_iter().collect(),
+        }.into());
+    }
     if !progress.unproven.is_empty() {
         return Err(super::executability::HostUnproven(progress.unproven).into());
     }
@@ -323,6 +284,12 @@ pub(crate) async fn reauthor_partial_with_cache(
                 .partition(|candidate| acceptance_ids.contains(&candidate.id));
             subset.acceptance = acceptance;
             subset.supplementary = supplementary;
+            let candidate_ids: Vec<String> = subset
+                .acceptance
+                .iter()
+                .chain(&subset.supplementary)
+                .map(|entry| entry.id.clone())
+                .collect();
             let judged = judge::judge_entries_with_roots(
                 client,
                 subset,
@@ -337,18 +304,40 @@ pub(crate) async fn reauthor_partial_with_cache(
                         .map(|baseline| baseline.commit.clone()),
                 },
             )
-            .await?;
-            for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
-                if candidate.judgment.verdict == JudgeDecision::Accepted {
-                    accepted.insert(candidate.id.clone());
-                    let id = candidate.id.clone();
-                    *entry_mut(&mut working, &id).expect("named id") = candidate;
-                } else if let Some(notes) = feedback.get_mut(&candidate.id) {
-                    notes.push(refuted_check_message(
-                        &candidate.id,
-                        &candidate.judgment.reason,
-                        &candidate.judgment.counterexample,
-                    ));
+            .await;
+            let judged = match judged {
+                Ok(judged) => Some(judged),
+                Err(error)
+                    if judge::JudgeIncomplete::caused(&error)
+                        .is_some_and(judge::JudgeIncomplete::is_authored_reply) =>
+                {
+                    let finding = format!(
+                        "the acceptance judge returned no usable authored verdict: {error:#}; this check remains pending for re-author and judge retry"
+                    );
+                    for id in candidate_ids {
+                        if let Some(notes) = feedback.get_mut(&id) {
+                            notes.push(finding.clone());
+                        }
+                        *entry_mut(&mut working, &id).expect("named id") =
+                            entry(contract, &id).expect("named id").clone();
+                    }
+                    None
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some(judged) = judged {
+                for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
+                    if candidate.judgment.verdict == JudgeDecision::Accepted {
+                        accepted.insert(candidate.id.clone());
+                        let id = candidate.id.clone();
+                        *entry_mut(&mut working, &id).expect("named id") = candidate;
+                    } else if let Some(notes) = feedback.get_mut(&candidate.id) {
+                        notes.push(refuted_check_message(
+                            &candidate.id,
+                            &candidate.judgment.reason,
+                            &candidate.judgment.counterexample,
+                        ));
+                    }
                 }
             }
             // Judged accepted is not yet publishable: a check that crashes in
@@ -432,31 +421,27 @@ pub(crate) async fn reauthor_partial_with_cache(
         }
         idle = if pending.len() < before { 0 } else { idle + 1 };
     }
-    if pending.is_empty() {
-        return Ok(ReauthorProgress {
-            contract: working,
-            unproven: unproven_checks,
-        });
+    // Exhausting authored repair attempts is a per-check pending result.
+    // Keep the latest finding with each original entry so a caller can
+    // publish proven siblings and retry these checks on resume.
+    let mut authored_pending = BTreeMap::new();
+    for id in &pending {
+        let finding = feedback
+            .get(id)
+            .and_then(|notes| notes.last())
+            .cloned()
+            .unwrap_or_else(|| format!("check '{id}' remains unaccepted after re-author attempts"));
+        unproven_checks
+            .entry(id.clone())
+            .or_insert_with(|| finding.clone());
+        authored_pending.insert(id.clone(), finding);
     }
-    let lines = pending
-        .iter()
-        .map(|id| {
-            feedback
-                .get(id)
-                .and_then(|notes| notes.last())
-                .cloned()
-                .unwrap_or_default()
-        })
-        .collect::<Vec<_>>();
-    let escalation = escalation::baseline_escalation(&pending, &lines, attempt).unwrap_or_default();
-    Err(ReauthorStalled {
-        report: format!(
-            "{}\nthe re-author stopped after {attempt} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}",
-            report(&lines, attempt)
-        ),
-        pending: pending.into_iter().collect(),
-    }
-    .into())
+    Ok(ReauthorProgress {
+        contract: working,
+        unproven: unproven_checks,
+        authored_pending,
+        attempts: attempt,
+    })
 }
 
 #[path = "workflow_acceptance_reauthor_author.rs"]

@@ -15,6 +15,47 @@ pub(crate) struct AuthorScope {
 }
 
 impl AuthorScope {
+    /// Resolve the paths the author prompt says it may read.
+    pub(crate) fn read_roots(&self) -> Result<Vec<String>, String> {
+        for (field, path) in [
+            ("prd_path", &self.prd_path),
+            ("project_root", &self.project_root),
+            ("repository_root", &self.repository_root),
+        ] {
+            if path.as_os_str().to_string_lossy().trim().is_empty() {
+                return Err(format!("acceptance re-author scope: {field} is empty"));
+            }
+        }
+        if self.prd_path.is_dir() {
+            return Err(format!(
+                "acceptance re-author scope: prd_path {} is a directory, not a PRD file",
+                self.prd_path.display()
+            ));
+        }
+        let mut roots: Vec<String> = Vec::new();
+        for (field, path) in [
+            ("prd_path", &self.prd_path),
+            ("project_root", &self.project_root),
+        ] {
+            if path.starts_with(&self.repository_root) {
+                continue;
+            }
+            let path = std::path::absolute(path)
+                .map_err(|error| {
+                    format!(
+                        "acceptance re-author scope: {field} {} cannot be made absolute: {error}",
+                        path.display()
+                    )
+                })?
+                .display()
+                .to_string();
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+        Ok(roots)
+    }
+
     /// Task declarations are advisory context for the re-author prompt. Keep
     /// usable declarations when one frozen task body is malformed.
     pub(crate) fn for_task_set(

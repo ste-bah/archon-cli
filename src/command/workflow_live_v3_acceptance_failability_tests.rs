@@ -7,6 +7,7 @@ use crate::command::workflow_task_set::executability::tests::FIXED;
 use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
 };
+use archon_workflow::v2::acceptance_stage::AcceptanceCheckStatus;
 
 /// Passes on any tree: it reads nothing (a replay compared with itself).
 const VACUOUS: &str = "python3 -c 'import sys; sys.exit(0)'";
@@ -44,13 +45,21 @@ async fn a_check_that_cannot_fail_and_cannot_be_repaired_blocks_the_round() {
     let (_, record) = stage(&run, &passes_unchanged()).await;
     assert!(record.blocks_completion(), "{record:?}");
     assert!(record.passed_check_ids().is_empty(), "{record:?}");
-    let check = &record.checks[0];
-    assert!(check.contract_defect, "{check:?}");
-    let defect = check.operational_error.as_deref().unwrap_or_default();
-    assert!(
-        defect.contains("passes whether or not its criterion holds"),
-        "{defect}"
-    );
+    let pending = record
+        .checks
+        .iter()
+        .find(|check| check.check_id == "AC-F-001")
+        .expect("the authored check remains a pending subject");
+    assert_eq!(pending.status, AcceptanceCheckStatus::Pending);
+    assert!(pending.owning_tasks.is_empty());
+    assert!(!pending.contract_defect);
+    assert!(record.operational_errors.is_empty(), "{record:?}");
+    assert!(record.has_remediable_failures());
+    assert!(record.contract_repairs.iter().any(|repair| {
+        !repair.repaired
+            && repair.check_ids == ["AC-F-001"]
+            && repair.failure.starts_with("authored pending:")
+    }));
 }
 
 fn round(n: u64) -> archon_workflow::WorkflowV2CallExecution {

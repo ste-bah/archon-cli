@@ -23,6 +23,9 @@ use crate::command::workflow_task_set::republish::test_fixture::{
 };
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
 
+#[path = "workflow_acceptance_executability_authored_defects_tests.rs"]
+mod authored_defects;
+
 /// Calls a helper it defines with one argument too few: never asserts.
 pub(crate) const CRASHING: &str = "python3 - <<'PY'\nimport os\ndef lane(path, d):\n    assert os.path.exists(path), 'deliverable missing: ' + path\nlane('present')\nPY\n";
 /// The same assertion, runnable: fails only when the deliverable is missing.

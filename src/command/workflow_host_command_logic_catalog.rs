@@ -85,7 +85,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 49: merge of 48 (#493 #492) and #495: cross-root parent paths are
         // refused before judging; one check's own setup-path failure goes to
         // its author after host-side integrity checks.
-        version: 53,
+        // 54: #497 authored judge reply exhaustion and non-accepted re-author
+        // checks remain per-check pending; timeout and zero-work checks route
+        // back through their author, changing freeze repair outcomes.
+        // 55: #497 leaves authored timeouts and incomplete repairs pending
+        // per check, so independent checks keep their freeze verdicts.
+        version: 55,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -123,7 +128,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "e3643299cdd4d24ba49c1bff4b3ba501837cf8f7cd9e9daaad8e66632734b620",
+        sources_digest: "4a146b42c82a5306c1644239693cab222da89a7b12bd974b79255035b1cff0eb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -151,7 +156,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "e3643299cdd4d24ba49c1bff4b3ba501837cf8f7cd9e9daaad8e66632734b620",
+        sources_digest: "4a146b42c82a5306c1644239693cab222da89a7b12bd974b79255035b1cff0eb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -185,7 +190,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 22: declared write paths that match Files Forbidden to Change are rejected by the body scope gate using the shared matcher and refutation wording.
         // 23: #464 body and set gates normalize absolute declared paths against the task set's recorded repository root, changing collision findings when project and repository roots differ.
         // 24: #491 body lint treats an intact skeleton from an older acceptance as draft input.
-        version: 24,
+        // 25: #497 stalled task-body authors persist findings per subject and resume only those subjects.
+        version: 25,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -207,7 +213,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
-        sources_digest: "f826a3abe71e99d14054e9f303a27a3153b4fe2b26f016921d21fcc54a16222c",
+        // #497 re-pin only: body stall handling does not change task-set lint verdicts.
+        sources_digest: "7742c5446e844aca6f0df12e2ea17b8b406a5205783325ba95b3139075034b97",
         build_bound: false,
     },
     CapabilityLogic {
@@ -253,7 +260,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "f826a3abe71e99d14054e9f303a27a3153b4fe2b26f016921d21fcc54a16222c",
+        sources_digest: "7742c5446e844aca6f0df12e2ea17b8b406a5205783325ba95b3139075034b97",
         build_bound: false,
     },
     CapabilityLogic {
@@ -308,7 +315,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
-        sources_digest: "f73985f6857269354824c0fcb9267ec33e4678690153efded62a2a5594214137",
+        // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
+        sources_digest: "8a561db35df53ae9d01cfc404195928f7fa3dc4d0ffbfb2ba7127196379788b6",
         build_bound: true,
     },
     CapabilityLogic {
@@ -334,7 +342,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: proof diagnostics and resume repair selection do not change frozen-chain verification.
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
-        sources_digest: "f73985f6857269354824c0fcb9267ec33e4678690153efded62a2a5594214137",
+        // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
+        sources_digest: "8a561db35df53ae9d01cfc404195928f7fa3dc4d0ffbfb2ba7127196379788b6",
         build_bound: true,
     },
 ];

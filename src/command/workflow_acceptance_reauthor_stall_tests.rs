@@ -7,6 +7,7 @@ use super::super::*;
 use super::ids;
 use crate::command::workflow_freeze_budget::{FREEZE_INCOMPLETE_RESUMABLE, FreezeIncomplete};
 use crate::command::workflow_task_set::executability::ExecutabilityProbe;
+use crate::command::workflow_task_set::reauthor::REAUTHOR_ATTEMPTS;
 use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
 };
@@ -98,6 +99,85 @@ async fn one_host_unproven_check_does_not_discard_two_proven_repairs() {
         ids(&["AC-F-002", "AC-F-003"]),
         "unproven entries are not recorded as published"
     );
+}
+
+#[tokio::test]
+async fn an_unaccepted_authored_check_stays_pending_while_accepted_siblings_publish() {
+    let set = frozen_set(&[
+        ("AC-F-001", "test -f missing-a", false),
+        ("AC-F-002", "test -f missing-b", false),
+        ("AC-F-003", "test -f missing-c", false),
+    ]);
+    let before = set.contract();
+    let named = ids(&["AC-F-001", "AC-F-002", "AC-F-003"]);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "test -s out"),
+        |id, _| id != "AC-F-001",
+    );
+    let result = reauthor_and_republish(
+        &client,
+        ReauthorRequest {
+            project_root: set.project.path(),
+            tasks_root: &set.tasks,
+            prd_path: &set.prd,
+            ids: &named,
+            gate: set.gate(),
+            trigger: "test",
+        },
+        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+    )
+    .await
+    .expect("an authored refusal remains per-check pending");
+    assert!(result.published);
+    assert!(
+        result.unproven.contains_key("AC-F-001"),
+        "{:?}",
+        result.unproven
+    );
+    assert_eq!(client.authored(), 3 + REAUTHOR_ATTEMPTS);
+    assert_eq!(
+        set.pin().lineage.last().unwrap().reauthored_ids,
+        ids(&["AC-F-002", "AC-F-003"])
+    );
+    assert_eq!(set.contract().acceptance[0], before.acceptance[0]);
+}
+
+#[tokio::test]
+async fn malformed_judge_replies_keep_each_authored_check_pending_for_retry() {
+    let set = frozen_set(&[
+        ("AC-F-001", "test -f missing-a", false),
+        ("AC-F-002", "test -f missing-b", false),
+    ]);
+    let named = ids(&["AC-F-001", "AC-F-002"]);
+    let client =
+        ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "test -s out"), |_, _| true)
+            .with_judge_reply("{ truncated");
+    let result = reauthor_and_republish(
+        &client,
+        ReauthorRequest {
+            project_root: set.project.path(),
+            tasks_root: &set.tasks,
+            prd_path: &set.prd,
+            ids: &named,
+            gate: set.gate(),
+            trigger: "test",
+        },
+        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+    )
+    .await
+    .expect("malformed judge text is a pending authored outcome");
+    assert!(!result.published);
+    assert_eq!(
+        result.unproven.keys().cloned().collect::<BTreeSet<_>>(),
+        named
+    );
+    assert!(
+        result
+            .unproven
+            .values()
+            .all(|finding| finding.contains("judge returned no usable authored verdict"))
+    );
+    assert_eq!(client.authored(), 2 * REAUTHOR_ATTEMPTS);
 }
 
 #[async_trait::async_trait]

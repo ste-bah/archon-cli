@@ -198,29 +198,29 @@ async fn issue356_elapsed_freeze_completes_and_reuses_full_closure_checks() {
 }
 
 #[tokio::test]
-async fn a_check_past_the_cap_is_unproven_timed_out_and_never_rerun() {
+async fn a_check_past_the_cap_is_authored_with_timeout_evidence_and_never_rerun() {
     let runs = tempfile::tempdir().unwrap();
     let slow = counted(runs.path(), "AC-T-001", "sleep 5; test -f feature.txt");
     let trees = trees(&[("AC-T-001", &slow, REPO)]);
     let copies = tempfile::tempdir().unwrap();
     let probe = freeze(&trees, copies.path(), &saving(FreezeBudget::unlimited())).with_check_cap(1);
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
-    assert!(findings.is_empty(), "never the author's: {findings:?}");
-    let unproven = probe.take_unproven();
     assert!(
-        unproven
-            .get("AC-T-001")
-            .is_some_and(|why| why.contains("unproven (timed out)")),
-        "{unproven:?}"
+        findings.get("AC-T-001").is_some_and(|finding| {
+            finding.contains("no-progress execution window") && finding.contains("CHECK_TIMED_OUT")
+        }),
+        "the check's own timeout is its author's: {findings:?}"
     );
+    let unproven = probe.take_unproven();
+    assert!(!unproven.contains_key("AC-T-001"), "{unproven:?}");
     assert!(
         probe.incomplete().is_none(),
         "a timeout is not a spent budget"
     );
     assert_eq!(
         runs_of(runs.path(), "AC-T-001"),
-        2,
-        "once per tree, no repair re-runs"
+        1,
+        "the first timeout is routed to its author without a baseline rerun"
     );
     let retry = freeze(&trees, copies.path(), &saving(FreezeBudget::unlimited()));
     retry
@@ -229,8 +229,8 @@ async fn a_check_past_the_cap_is_unproven_timed_out_and_never_rerun() {
         .await;
     assert_eq!(
         runs_of(runs.path(), "AC-T-001"),
-        4,
-        "a timeout is never saved"
+        2,
+        "resume retries the pending authored check once"
     );
 }
 

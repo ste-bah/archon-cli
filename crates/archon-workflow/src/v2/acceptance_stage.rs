@@ -38,12 +38,18 @@ pub const REPAIR_TRIGGER_NOT_ACCEPTED: &str = "not_accepted";
 /// A repair of checks that crashed in their own code when the round ran them
 /// (`acceptance_check_crash`).
 pub const REPAIR_TRIGGER_SCRIPT_DEFECT: &str = "script_defect";
+/// Prefix in an unrepaired contract repair's `failure` when a named check
+/// is pending another authored reply or judge retry, rather than a host fault.
+pub const AUTHORED_PENDING_PREFIX: &str = "authored pending: ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AcceptanceCheckStatus {
     Passed,
     Failed,
+    /// The check's authored repair needs another attempt. It blocks
+    /// completion, but is not a host operational error or task failure.
+    Pending,
     /// The check could not be evaluated. Counted as failing: an unevaluated
     /// check is not a passed one.
     Error,
@@ -252,6 +258,7 @@ impl AcceptanceRoundRecordV1 {
         self.failing_checks().iter().any(|check| {
             (check.ran_and_failed() && check.blocked.is_none() && check.routed())
                 || check.status == AcceptanceCheckStatus::Error
+                || check.status == AcceptanceCheckStatus::Pending
                 || check.contract_defect
         })
     }

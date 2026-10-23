@@ -119,12 +119,29 @@ function runBounded(count, cap, window, launch, failed = () => false) {
 // no failed value for a rejection to outrank.
 async function authorBodies(w, work, bodies) {
   const { settled } = await runBounded(work.length, authorBatchSize(), false,
-    (index) => authorCandidate(w, bodyPolicy(work[index][0], work[index][1])));
+    (index) => {
+      const policy = bodyPolicy(work[index][0], work[index][1]);
+      policy.deferAuthoredPending = true;
+      return authorCandidate(w, policy);
+    });
+  const pending = [];
   settled.forEach((result, index) => {
-    if (result && result.status === "fulfilled") bodies.set(work[index][0].fileName, result.value);
+    if (result && result.status === "fulfilled") {
+      if (result.value?.pendingAuthor) pending.push([work[index][0], result.value.findings]);
+      else bodies.set(work[index][0].fileName, result.value);
+    }
   });
   const failure = settled.find((result) => result && result.status === "rejected");
   if (failure) throw failure.reason;
+  if (pending.length > 0) {
+    await pauseLoop(w, "authored-pending", {
+      reason: "authored_pending",
+      pending_subjects: pending.map(([subject]) => subject.taskId),
+      last_findings: pending.flatMap(([, findings]) => findings).slice(0, PAUSE_EVIDENCE_FINDINGS),
+      recovery: "The run is paused with authored subjects pending. Resume to retry these subjects; completed independent bodies remain published."
+    });
+    await authorBodies(w, pending, bodies);
+  }
 }
 
 // `chain` is the frozen skeleton this run stands on: `{ outcome, subjects }`,

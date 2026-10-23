@@ -46,8 +46,9 @@ use anyhow::anyhow;
 use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::{AcceptanceContract, AcceptanceCriterion};
 use archon_workflow::v2::acceptance_stage::{
-    AcceptanceCheckRecordV1, AcceptanceCheckStatus, AcceptanceContractRepairV1,
-    AcceptanceRoundRecordV1, REPAIR_TRIGGER_NOT_ACCEPTED, REPAIR_TRIGGER_SCRIPT_DEFECT,
+    AUTHORED_PENDING_PREFIX, AcceptanceCheckRecordV1, AcceptanceCheckStatus,
+    AcceptanceContractRepairV1, AcceptanceRoundRecordV1, REPAIR_TRIGGER_NOT_ACCEPTED,
+    REPAIR_TRIGGER_SCRIPT_DEFECT,
 };
 use archon_workflow::{WorkflowError, WorkflowLlmClient, WorkflowResult, WorkflowStore};
 
@@ -318,6 +319,7 @@ pub(super) async fn repair_ran(
         }
     };
     let unresolved = result.unproven.clone();
+    let authored_pending: BTreeSet<_> = result.authored_pending.keys().cloned().collect();
     let published_ids: Vec<_> = ids
         .iter()
         .filter(|id| !unresolved.contains_key(*id))
@@ -333,24 +335,36 @@ pub(super) async fn repair_ran(
             diagnostics: result.diagnostics.clone(),
         });
     }
-    if !unresolved.is_empty() {
-        let failure = unresolved
+    for (pending, prefix) in [(true, AUTHORED_PENDING_PREFIX), (false, "")] {
+        let group: Vec<_> = unresolved
             .iter()
-            .map(|(id, reason)| format!("{id}: {reason}"))
-            .collect::<Vec<_>>()
-            .join(" | ");
-        record.operational_errors.extend(
-            unresolved
+            .filter(|(id, _)| authored_pending.contains(*id) == pending)
+            .collect();
+        if group.is_empty() {
+            continue;
+        }
+        if !pending {
+            record.operational_errors.extend(
+                group
+                    .iter()
+                    .map(|(id, reason)| format!("{HOST_UNPROVEN} {id}: {reason}")),
+            );
+        }
+        let failure = format!(
+            "{prefix}{}",
+            group
                 .iter()
-                .map(|(id, reason)| format!("{HOST_UNPROVEN} {id}: {reason}")),
+                .map(|(id, reason)| format!("{id}: {reason}"))
+                .collect::<Vec<_>>()
+                .join(" | ")
         );
         record.contract_repairs.push(AcceptanceContractRepairV1 {
-            check_ids: unresolved.keys().cloned().collect(),
+            check_ids: group.iter().map(|(id, _)| (*id).clone()).collect(),
             trigger: trigger.into(),
             repaired: false,
-            freeze_event_id: result.freeze_event_id,
+            freeze_event_id: result.freeze_event_id.clone(),
             failure,
-            diagnostics: result.diagnostics,
+            diagnostics: result.diagnostics.clone(),
         });
     }
     (*contract, *chain_digest) = (reloaded, digest);

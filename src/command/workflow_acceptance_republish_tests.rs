@@ -202,15 +202,14 @@ async fn a_repair_the_judge_never_accepts_fails_bounded_and_writes_nothing() {
     );
     let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
         .expect("the task set's repository record is believed");
-    let error = reauthor_and_republish(&client, request(&set, &named), &scope)
+    let result = reauthor_and_republish(&client, request(&set, &named), &scope)
         .await
-        .expect_err("still refuted")
-        .to_string();
+        .expect("a named refuted check remains pending");
     assert!(
-        error.starts_with("acceptance contract not published:"),
-        "the stop reason is the error headline: {error}"
+        result.unproven.contains_key("AC-F-001"),
+        "the named check remains pending: {result:?}"
     );
-    assert!(error.contains("after 3 re-author attempt(s)"), "{error}");
+    assert!(!result.published);
     assert_eq!(set.chain_bytes(), before);
     assert_eq!(client.authored(), reauthor::REAUTHOR_ATTEMPTS);
 }

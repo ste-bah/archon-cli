@@ -28,6 +28,14 @@ impl JudgeIncomplete {
     pub(crate) fn caused(error: &anyhow::Error) -> Option<&Self> {
         error.chain().find_map(|cause| cause.downcast_ref::<Self>())
     }
+
+    /// A judge-authored reply can be retried with the affected checks. A
+    /// stalled provider call or provider error remains a host outcome.
+    pub(crate) fn is_authored_reply(&self) -> bool {
+        !self.0.contains("provider gave no reply")
+            && !self.0.contains("judge call stalled")
+            && !self.0.contains("could not be persisted")
+    }
 }
 
 impl std::fmt::Display for JudgeIncomplete {
@@ -41,3 +49,28 @@ impl std::fmt::Display for JudgeIncomplete {
 }
 
 impl std::error::Error for JudgeIncomplete {}
+
+#[cfg(test)]
+mod tests {
+    use super::JudgeIncomplete;
+
+    #[test]
+    fn only_authored_reply_exhaustion_is_subject_retryable() {
+        assert!(JudgeIncomplete("3 replies; malformed batched JSON".into()).is_authored_reply());
+        assert!(
+            JudgeIncomplete("the continuation ended normally with the document still open".into())
+                .is_authored_reply()
+        );
+        assert!(
+            !JudgeIncomplete("the provider gave no reply: disconnected".into()).is_authored_reply()
+        );
+        assert!(
+            !JudgeIncomplete("a judge call stalled after 30s with no provider progress".into())
+                .is_authored_reply()
+        );
+        assert!(
+            !JudgeIncomplete("usable redacted continuation could not be persisted".into())
+                .is_authored_reply()
+        );
+    }
+}

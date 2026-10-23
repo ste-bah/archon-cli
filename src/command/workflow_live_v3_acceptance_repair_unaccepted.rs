@@ -1,4 +1,5 @@
 use super::*;
+use archon_workflow::v2::acceptance_stage::AUTHORED_PENDING_PREFIX;
 
 /// Repair every non-accepted check in `contract`. `None` when there is none.
 /// `ControlPaused` when the republish met a journal another publish left
@@ -39,6 +40,7 @@ async fn repair_unaccepted_detailed(
                 .filter(|id| !result.unproven.contains_key(*id))
                 .cloned()
                 .collect();
+            let authored_pending: BTreeSet<_> = result.authored_pending.keys().cloned().collect();
             let unresolved: Vec<_> = result.unproven.iter().collect();
             let mut repairs = Vec::new();
             if !proven.is_empty() || unresolved.is_empty() {
@@ -56,17 +58,27 @@ async fn repair_unaccepted_detailed(
                 });
             }
             let defects = Defects::new();
-            if !unresolved.is_empty() {
+            for (pending, failure_prefix) in [(true, AUTHORED_PENDING_PREFIX), (false, "")] {
+                let group: Vec<_> = unresolved
+                    .iter()
+                    .filter(|(id, _)| authored_pending.contains(*id) == pending)
+                    .collect();
+                if group.is_empty() {
+                    continue;
+                }
                 repairs.push(AcceptanceContractRepairV1 {
-                    check_ids: unresolved.iter().map(|(id, _)| (*id).clone()).collect(),
+                    check_ids: group.iter().map(|(id, _)| (*id).clone()).collect(),
                     trigger: REPAIR_TRIGGER_NOT_ACCEPTED.into(),
                     repaired: false,
                     freeze_event_id: result.freeze_event_id.clone(),
-                    failure: unresolved
-                        .iter()
-                        .map(|(id, reason)| format!("{id}: {reason}"))
-                        .collect::<Vec<_>>()
-                        .join(" | "),
+                    failure: format!(
+                        "{failure_prefix}{}",
+                        group
+                            .iter()
+                            .map(|(id, reason)| format!("{id}: {reason}"))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    ),
                     diagnostics: result.diagnostics.clone(),
                 });
             }
@@ -119,7 +131,10 @@ pub async fn apply(
     };
     let repaired = repairs.iter().any(|repair| repair.repaired);
     for repair in &repairs {
-        if !repair.repaired && !repair.failure.is_empty() {
+        if !repair.repaired
+            && !repair.failure.is_empty()
+            && !repair.failure.starts_with(AUTHORED_PENDING_PREFIX)
+        {
             record
                 .operational_errors
                 .push(format!("{HOST_UNPROVEN} {}", repair.failure));

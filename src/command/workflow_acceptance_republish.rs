@@ -31,16 +31,9 @@ pub(crate) struct ReauthorRequest<'a> {
     pub(crate) trigger: &'a str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReauthorResult {
-    pub(crate) acceptance_digest: String,
-    pub(crate) freeze_event_id: String,
-    pub(crate) skeleton_digest: Option<String>,
-    pub(crate) diagnostics: Vec<String>,
-    pub(crate) unproven: BTreeMap<String, String>,
-    pub(crate) published: bool,
-}
-
+#[path = "workflow_acceptance_republish_result.rs"]
+mod result;
+pub(crate) use result::ReauthorResult;
 #[path = "workflow_acceptance_republish_verify.rs"]
 pub(super) mod verify;
 use verify::verify;
@@ -126,15 +119,26 @@ pub(crate) async fn reauthor_and_republish(
             progress.unproven.entry(id.clone()).or_insert_with(|| {
                 "the run has no pre-implementation tree to prove this check able to fail".into()
             });
+            progress.authored_pending.remove(id);
         }
     }
     let mut still = non_accepted_ids(&progress.contract);
     still.retain(|id| !progress.unproven.contains_key(id));
-    if !still.is_empty() {
+    let unnamed: BTreeSet<_> = still.difference(request.ids).cloned().collect();
+    if !unnamed.is_empty() {
         return Err(anyhow!(
             "{}",
-            reauthor::not_accepted_report(&progress.contract, &still, reauthor::REAUTHOR_ATTEMPTS)
+            reauthor::not_accepted_report(&progress.contract, &unnamed, 0)
         ));
+    }
+    for id in still.intersection(request.ids) {
+        let id = id.clone();
+        let finding =
+            reauthor::not_accepted_lines(&progress.contract, &BTreeSet::from([id.clone()]))
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| format!("check '{id}' remains unaccepted"));
+        progress.unproven.insert(id, finding);
     }
     let mut publish_ids = request.ids.clone();
     for id in progress.unproven.keys() {
@@ -147,6 +151,7 @@ pub(crate) async fn reauthor_and_republish(
             skeleton_digest: verified.pin.skeleton_digest,
             diagnostics,
             unproven: progress.unproven,
+            authored_pending: progress.authored_pending,
             published: false,
         });
     }
@@ -159,6 +164,7 @@ pub(crate) async fn reauthor_and_republish(
         &publish_ids,
     )?;
     result.unproven = progress.unproven;
+    result.authored_pending = progress.authored_pending;
     if result.unproven.is_empty() {
         reauthor::cache::remove(&state_dir)
             .with_context(|| "removing consumed acceptance re-author candidates")?;
@@ -386,6 +392,7 @@ fn publish_chain_owned(
         skeleton_digest: pin.skeleton_digest,
         diagnostics,
         unproven: BTreeMap::new(),
+        authored_pending: BTreeMap::new(),
         published: true,
     })
 }
