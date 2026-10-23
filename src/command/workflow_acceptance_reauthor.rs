@@ -170,6 +170,13 @@ pub(crate) struct ReauthorGate<'a> {
     pub(crate) seeds: &'a BTreeMap<String, String>,
 }
 
+/// Accepted checks and per-check host proofs that remain pending.
+#[derive(Debug, Clone)]
+pub(crate) struct ReauthorProgress {
+    pub(crate) contract: AcceptanceContract,
+    pub(crate) unproven: BTreeMap<String, String>,
+}
+
 /// Re-author and re-judge exactly `ids` in `contract`, bounded. Returns the
 /// contract with those entries replaced by accepted ones that did not crash
 /// in their own code when the host ran them, every other entry untouched,
@@ -194,6 +201,24 @@ pub(crate) async fn reauthor_with_cache(
     gate: &ReauthorGate<'_>,
     state_dir: Option<&Path>,
 ) -> Result<AcceptanceContract> {
+    let progress =
+        reauthor_partial_with_cache(client, contract, ids, scope, judge_model, gate, state_dir)
+            .await?;
+    if !progress.unproven.is_empty() {
+        return Err(super::executability::HostUnproven(progress.unproven).into());
+    }
+    Ok(progress.contract)
+}
+
+pub(crate) async fn reauthor_partial_with_cache(
+    client: &dyn WorkflowLlmClient,
+    contract: &AcceptanceContract,
+    ids: &BTreeSet<String>,
+    scope: &AuthorScope,
+    judge_model: &str,
+    gate: &ReauthorGate<'_>,
+    state_dir: Option<&Path>,
+) -> Result<ReauthorProgress> {
     let mut feedback: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut unseeded_accepted = BTreeSet::new();
     for id in ids {
@@ -239,6 +264,7 @@ pub(crate) async fn reauthor_with_cache(
     let mut working = contract.clone();
     let mut pending = ids.clone();
     let mut reused = BTreeMap::new();
+    let mut unproven_checks = BTreeMap::new();
     if let Some(state_dir) = state_dir {
         for id in ids {
             let frozen = entry(contract, id).expect("named ids were checked above");
@@ -331,14 +357,23 @@ pub(crate) async fn reauthor_with_cache(
         }
         if !accepted.is_empty() {
             let _ = gate.probe.take_baseline_runs();
-            let crashed = gate.probe.script_defects(&working, &accepted).await;
-            // What the host could not prove is the host's: never fed back
-            // to the author, never published, and the repair stops here.
+            let mut crashed = gate.probe.script_defects(&working, &accepted).await;
             let unproven: BTreeMap<String, String> = (gate.probe.take_unproven().into_iter())
                 .filter(|(id, _)| accepted.contains(id))
                 .collect();
-            if !unproven.is_empty() {
-                return Err(super::executability::HostUnproven(unproven).into());
+            for (id, reason) in unproven {
+                if reason.contains("not on its search path") {
+                    crashed.insert(
+                        id.clone(),
+                        format!("the check invokes a program unavailable at the probe site ({reason}); choose a check using what the site provides"),
+                    );
+                    continue;
+                }
+                *entry_mut(&mut working, &id).expect("named id") =
+                    entry(contract, &id).expect("named id").clone();
+                pending.remove(&id);
+                reused.remove(&id);
+                unproven_checks.insert(id, reason);
             }
             // Issue 275: a replacement that failed on the baseline must also
             // be able to pass: one whose failure is its own setup breaking a
@@ -362,6 +397,9 @@ pub(crate) async fn reauthor_with_cache(
                 _ => BTreeMap::new(),
             };
             for id in accepted {
+                if unproven_checks.contains_key(&id) {
+                    continue;
+                }
                 if let Some(finding) = crashed.get(&id).or_else(|| cannot_pass.get(&id)) {
                     // A4/A5: a check that cannot be shown able to fail (or
                     // would weaken its original) goes back like a crash.
@@ -393,7 +431,10 @@ pub(crate) async fn reauthor_with_cache(
         idle = if pending.len() < before { 0 } else { idle + 1 };
     }
     if pending.is_empty() {
-        return Ok(working);
+        return Ok(ReauthorProgress {
+            contract: working,
+            unproven: unproven_checks,
+        });
     }
     let lines = pending
         .iter()

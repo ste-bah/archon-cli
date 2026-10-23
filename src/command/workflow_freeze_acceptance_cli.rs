@@ -181,12 +181,16 @@ pub(super) async fn reauthor_acceptance(
     for diagnostic in &result.diagnostics {
         eprintln!("{diagnostic}");
     }
+    for (id, reason) in &result.unproven {
+        eprintln!("acceptance check {id} remains pending for its author: {reason}");
+    }
     println!(
-        "acceptance checks re-authored: {} digest={} event={} skeleton_digest={}",
+        "acceptance checks re-authored: {} digest={} event={} skeleton_digest={} published={}",
         ids.iter().cloned().collect::<Vec<_>>().join(","),
         result.acceptance_digest,
         result.freeze_event_id,
-        result.skeleton_digest.as_deref().unwrap_or("none")
+        result.skeleton_digest.as_deref().unwrap_or("none"),
+        result.published
     );
     Ok(())
 }

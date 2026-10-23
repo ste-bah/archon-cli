@@ -217,6 +217,9 @@ pub(crate) async fn reauthor_refused(
     for diagnostic in &result.diagnostics {
         eprintln!("{diagnostic}");
     }
+    for (id, reason) in &result.unproven {
+        eprintln!("acceptance check {id} remains pending for its author: {reason}");
+    }
     let line = format!(
         "frozen_chain_launch acceptance=reauthored ids={named} acceptance_digest={} freeze_event={} skeleton_digest={}",
         result.acceptance_digest,
@@ -231,6 +234,7 @@ pub(crate) async fn reauthor_refused(
         "acceptance_digest": result.acceptance_digest,
         "freeze_event_id": result.freeze_event_id,
         "skeleton_digest": result.skeleton_digest,
+        "unproven": result.unproven,
     });
     Ok((line, detail))
 }

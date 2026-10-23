@@ -333,7 +333,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         )?;
     script_arguments =
         super::script_arguments_with_reply_markers(&script_arguments, &reply_leaked_markers);
-    let ledger = crate::command::workflow_decompose_remediation::prepare(
+    let mut ledger = crate::command::workflow_decompose_remediation::prepare(
         &store,
         run_id,
         &store.run_dir(run_id),
@@ -424,7 +424,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         .await
         .context("building the fixed decomposition resume provider client")?;
     super::claim::reclaim_released_task_root(&store, run_id)?;
-    crate::command::workflow_decompose_remediation::prepare_resume_checks(
+    let unproven = crate::command::workflow_decompose_remediation::prepare_resume_checks(
         (&project_root, &prd_path, &task_root, &store.run_dir(run_id)),
         run.spec.target_repository_root.as_deref().map(Path::new),
         ledger.as_ref(),
@@ -432,6 +432,12 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         config.tools.cargo.to_limits(),
     )
     .await?;
+    // Keep a report pending when any of its subjects remains unproven; the
+    // next resume retries it and consumes the ledger only after proof.
+    crate::command::workflow_decompose_remediation::withhold_pending_ledger_while_unproven(
+        &mut ledger,
+        &unproven,
+    );
     execution_lease.record_executor()?;
     upgrade::mark_started(&store, run_id)?;
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());

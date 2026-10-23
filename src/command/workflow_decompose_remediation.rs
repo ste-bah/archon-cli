@@ -32,6 +32,22 @@ pub(crate) struct ResumePlan {
     pub pending: Option<Ledger>,
 }
 
+pub(crate) fn withhold_pending_ledger_while_unproven(
+    plan: &mut Option<ResumePlan>,
+    unproven: &std::collections::BTreeMap<String, String>,
+) {
+    if let Some(plan) = plan
+        && plan.pending.as_ref().is_some_and(|pending| {
+            pending
+                .subjects
+                .iter()
+                .any(|subject| unproven.contains_key(subject))
+        })
+    {
+        plan.pending = None;
+    }
+}
+
 pub(crate) fn deduplicate_subjects(subjects: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut seen = HashSet::new();
     subjects
@@ -200,7 +216,7 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
             task_root,
             cargo_limits,
         );
-    crate::command::workflow_task_set::republish::reauthor_and_republish(
+    let result = crate::command::workflow_task_set::republish::reauthor_and_republish(
         client,
         crate::command::workflow_task_set::republish::ReauthorRequest {
             project_root,
@@ -216,6 +232,9 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
         &scope,
     )
     .await?;
+    for (id, reason) in &result.unproven {
+        eprintln!("acceptance check {id} remains pending: {reason}");
+    }
     Ok(())
 }
 
@@ -228,7 +247,7 @@ pub(crate) async fn prepare_resume_checks(
     plan: Option<&ResumePlan>,
     client: &dyn archon_workflow::WorkflowLlmClient,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
-) -> Result<()> {
+) -> Result<std::collections::BTreeMap<String, String>> {
     crate::command::workflow_read_scope::require_author_reads(
         client,
         "the decomposition authors",
@@ -244,7 +263,7 @@ pub(crate) async fn prepare_resume_checks(
         )
         .await
     } else {
-        Ok(())
+        Ok(std::collections::BTreeMap::new())
     }
 }
 

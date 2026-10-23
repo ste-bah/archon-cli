@@ -1,5 +1,25 @@
 use super::*;
 
+#[test]
+fn an_unproven_pending_subject_keeps_its_remediation_ledger_unconsumed() {
+    let run = tempfile::tempdir().unwrap();
+    let pending = Ledger {
+        report_id: "pending-report".into(),
+        subjects: vec!["AC-PENDING".into(), "TASK-OTHER".into()],
+    };
+    let mut plan = Some(ResumePlan {
+        ledger: pending.clone(),
+        consumed: Vec::new(),
+        pending: Some(pending),
+    });
+    withhold_pending_ledger_while_unproven(
+        &mut plan,
+        &std::collections::BTreeMap::from([("AC-PENDING".into(), "host reason".into())]),
+    );
+    finish_resume(run.path(), plan, "run continues".into()).unwrap();
+    assert!(!is_consumed(run.path(), "pending-report").unwrap());
+}
+
 #[tokio::test]
 async fn one_resume_skips_five_unproven_and_reauthors_seven_pending_checks() {
     let reverted = ["AC-F-001", "AC-F-002", "AC-F-003", "AC-F-004", "AC-F-005"];

@@ -166,7 +166,14 @@ fn extend_owned(request: ReauthorRequest<'_>, extension: &Extension) -> Result<R
         }
     }
     repaired.prd.digest = prd_digest;
-    super::publish_chain_owned(&request, verified, repaired, Vec::new(), Some(extension))
+    super::publish_chain_owned(
+        &request,
+        verified,
+        repaired,
+        Vec::new(),
+        Some(extension),
+        &request.ids,
+    )
 }
 
 #[cfg(test)]

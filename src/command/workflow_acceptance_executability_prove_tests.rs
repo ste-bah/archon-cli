@@ -120,6 +120,7 @@ fn baseline_passing_check_with_only_unattributed_reappearing_path_is_rejected() 
     assert!(!finding.contains("accepted as a regression guard"));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn prove_routes_a_passing_unknown_writer_reappearance_to_an_author_finding() {
     let trees = super::super::probe_tests::trees(&[(

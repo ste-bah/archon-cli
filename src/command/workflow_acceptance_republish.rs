@@ -13,6 +13,7 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_set_lineage::{ChainHistory, PinTransition};
 use archon_workflow::task_skeleton::validate_full_chain;
+use std::collections::BTreeMap;
 
 use super::reauthor::{AuthorScope, ReauthorGate};
 use super::*;
@@ -36,6 +37,8 @@ pub(crate) struct ReauthorResult {
     pub(crate) freeze_event_id: String,
     pub(crate) skeleton_digest: Option<String>,
     pub(crate) diagnostics: Vec<String>,
+    pub(crate) unproven: BTreeMap<String, String>,
+    pub(crate) published: bool,
 }
 
 #[path = "workflow_acceptance_republish_verify.rs"]
@@ -79,7 +82,7 @@ pub(crate) async fn reauthor_and_republish(
         }
     }
     let state_dir = request.tasks_root.to_path_buf();
-    let repaired = reauthor::reauthor_with_cache(
+    let progress = reauthor::reauthor_partial_with_cache(
         client,
         &verified.contract,
         request.ids,
@@ -92,8 +95,8 @@ pub(crate) async fn reauthor_and_republish(
     let diagnostics = request.gate.probe.take_diagnostics();
     // Keep the typed stop reason as the error headline. Probe diagnostics are
     // separate log lines so an unproven check still ends incomplete (Issue 288).
-    let repaired = match repaired {
-        Ok(repaired) => repaired,
+    let mut progress = match progress {
+        Ok(progress) => progress,
         Err(error) => {
             for diagnostic in diagnostics {
                 eprintln!("{diagnostic}");
@@ -101,16 +104,65 @@ pub(crate) async fn reauthor_and_republish(
             return Err(error);
         }
     };
-    let still = non_accepted_ids(&repaired);
+    if request.gate.probe.baseline_commit().is_none() {
+        for id in request.ids {
+            let original = verified
+                .contract
+                .acceptance
+                .iter()
+                .chain(&verified.contract.supplementary)
+                .find(|candidate| &candidate.id == id)
+                .expect("verified request ids are present")
+                .clone();
+            if let Some(current) = progress
+                .contract
+                .acceptance
+                .iter_mut()
+                .chain(&mut progress.contract.supplementary)
+                .find(|candidate| &candidate.id == id)
+            {
+                *current = original;
+            }
+            progress.unproven.entry(id.clone()).or_insert_with(|| {
+                "the run has no pre-implementation tree to prove this check able to fail".into()
+            });
+        }
+    }
+    let mut still = non_accepted_ids(&progress.contract);
+    still.retain(|id| !progress.unproven.contains_key(id));
     if !still.is_empty() {
         return Err(anyhow!(
             "{}",
-            reauthor::not_accepted_report(&repaired, &still, reauthor::REAUTHOR_ATTEMPTS)
+            reauthor::not_accepted_report(&progress.contract, &still, reauthor::REAUTHOR_ATTEMPTS)
         ));
     }
-    let result = publish_chain(&request, verified, repaired, diagnostics, None)?;
-    reauthor::cache::remove(&state_dir)
-        .with_context(|| "removing consumed acceptance re-author candidates")?;
+    let mut publish_ids = request.ids.clone();
+    for id in progress.unproven.keys() {
+        publish_ids.remove(id);
+    }
+    if publish_ids.is_empty() {
+        return Ok(ReauthorResult {
+            acceptance_digest: verified.pin.acceptance_digest,
+            freeze_event_id: verified.pin.freeze_event_id,
+            skeleton_digest: verified.pin.skeleton_digest,
+            diagnostics,
+            unproven: progress.unproven,
+            published: false,
+        });
+    }
+    let mut result = publish_chain(
+        &request,
+        verified,
+        progress.contract,
+        diagnostics,
+        None,
+        &publish_ids,
+    )?;
+    result.unproven = progress.unproven;
+    if result.unproven.is_empty() {
+        reauthor::cache::remove(&state_dir)
+            .with_context(|| "removing consumed acceptance re-author candidates")?;
+    }
     Ok(result)
 }
 
@@ -124,6 +176,7 @@ fn publish_chain(
     repaired: AcceptanceContract,
     diagnostics: Vec<String>,
     extension: Option<&extend::Extension>,
+    publish_ids: &BTreeSet<String>,
 ) -> Result<ReauthorResult> {
     archon_workflow::stage_write::mapped(
         || {
@@ -131,7 +184,14 @@ fn publish_chain(
                 &acceptance_pin_path(request.project_root, request.tasks_root),
                 request.tasks_root,
             )?;
-            publish_chain_owned(request, verified, repaired, diagnostics, extension)
+            publish_chain_owned(
+                request,
+                verified,
+                repaired,
+                diagnostics,
+                extension,
+                publish_ids,
+            )
         },
         anyhow::Error::from,
     )
@@ -144,6 +204,7 @@ fn publish_chain_owned(
     repaired: AcceptanceContract,
     mut diagnostics: Vec<String>,
     extension: Option<&extend::Extension>,
+    publish_ids: &BTreeSet<String>,
 ) -> Result<ReauthorResult> {
     let tasks_root = request.tasks_root;
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
@@ -186,7 +247,7 @@ fn publish_chain_owned(
         request.project_root,
         tasks_root,
         &contract_bytes,
-        Some(request.ids),
+        Some(publish_ids),
     )?;
     let sidecar_digest = content_digest(&sidecar.1);
     let mut files = vec![
@@ -324,6 +385,8 @@ fn publish_chain_owned(
         freeze_event_id: pin.freeze_event_id,
         skeleton_digest: pin.skeleton_digest,
         diagnostics,
+        unproven: BTreeMap::new(),
+        published: true,
     })
 }
 

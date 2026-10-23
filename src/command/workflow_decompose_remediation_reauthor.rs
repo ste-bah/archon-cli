@@ -7,7 +7,7 @@ pub(super) async fn reauthor_resume_plan(
     plan: &ResumePlan,
     client: &dyn archon_workflow::WorkflowLlmClient,
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
-) -> Result<()> {
+) -> Result<std::collections::BTreeMap<String, String>> {
     let contract_path =
         task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
     let contract: archon_workflow::task_set_contract::AcceptanceContract = serde_json::from_slice(
@@ -62,7 +62,7 @@ pub(super) async fn reauthor_resume_plan(
         .cloned()
         .collect::<std::collections::BTreeSet<_>>();
     if ids.is_empty() {
-        return Ok(());
+        return Ok(std::collections::BTreeMap::new());
     }
     let scope =
         resume_author_scope(project_root, task_root, prd_path).map_err(anyhow::Error::msg)?;
@@ -72,7 +72,7 @@ pub(super) async fn reauthor_resume_plan(
             task_root,
             cargo_limits,
         );
-    crate::command::workflow_task_set::republish::reauthor_and_republish(
+    let result = crate::command::workflow_task_set::republish::reauthor_and_republish(
         client,
         crate::command::workflow_task_set::republish::ReauthorRequest {
             project_root,
@@ -88,5 +88,8 @@ pub(super) async fn reauthor_resume_plan(
         &scope,
     )
     .await?;
-    Ok(())
+    for (id, reason) in &result.unproven {
+        eprintln!("acceptance check {id} remains pending: {reason}");
+    }
+    Ok(result.unproven)
 }
