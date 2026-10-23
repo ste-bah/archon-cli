@@ -124,10 +124,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // F8b: a pause keeps its caller's recovery and a pending body its earlier note;
     // C4: a stale acceptance freeze rebuilds its candidate from the current contract.
     // R3b: a stale rebuild keeps the loop's unpublished drafts (seed path too); guard-proof text.
+    // Review merge: the decomposition author gets the host re-author's check-path rule byte for byte, plus the absent/not-supplied input rule.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "5ec052a2aefc4a8c4c7542357a48e387f051da3d4aa8f6dc7c591946ef97f6d8"
+        "36d0426c20cd38a9e0853da668226abc42e5df03c4e49b64f62942083e734685"
     );
 }

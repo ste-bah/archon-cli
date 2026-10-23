@@ -101,6 +101,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // partial republish, first-stall and typed missing-program routing,
         // stale-base rebuild and authored judge-reply retries change freeze
         // outcomes.
+        // Same unreleased version 58: combined review of the merged fixes
+        // (typed judge-incomplete kinds, site-lacks cause, passability
+        // deferral, coverage gating of extensions, unaccepted host pending).
         version: 58,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -139,7 +142,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "983c821922f5fb8df18b7c35d3c1d0fa1200073aa786a11357231a3682b7cca6",
+        sources_digest: "95e5c715532006647c0131ca85503c8cd529c2894f1e12b4c77893cb2450ad4f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -168,7 +171,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "983c821922f5fb8df18b7c35d3c1d0fa1200073aa786a11357231a3682b7cca6",
+        sources_digest: "95e5c715532006647c0131ca85503c8cd529c2894f1e12b4c77893cb2450ad4f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -226,7 +229,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "81f2a17d495bab79d0c084f3a244ea7b1b43664fc34149a6671210be95271610",
+        sources_digest: "00518cbc43ee58b77edf9446f50c8172b00778a20990cfbdc34ae8b08ff67684",
         build_bound: false,
     },
     CapabilityLogic {
@@ -272,7 +275,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "81f2a17d495bab79d0c084f3a244ea7b1b43664fc34149a6671210be95271610",
+        sources_digest: "00518cbc43ee58b77edf9446f50c8172b00778a20990cfbdc34ae8b08ff67684",
         build_bound: false,
     },
     CapabilityLogic {
@@ -331,7 +334,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
-        sources_digest: "cbebeaec3cb725602daa459d664c79ec48e32586846726e1af3c52a1a0ad5d9f",
+        sources_digest: "87ec45f1e155e503ba435566b497e2d531f5262f94ba9218c266cb3a19ff5f9a",
         build_bound: true,
     },
     CapabilityLogic {
@@ -359,7 +362,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
-        sources_digest: "cbebeaec3cb725602daa459d664c79ec48e32586846726e1af3c52a1a0ad5d9f",
+        sources_digest: "87ec45f1e155e503ba435566b497e2d531f5262f94ba9218c266cb3a19ff5f9a",
         build_bound: true,
     },
 ];
