@@ -104,6 +104,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Same unreleased version 58: combined review of the merged fixes
         // (typed judge-incomplete kinds, site-lacks cause, passability
         // deferral, coverage gating of extensions, unaccepted host pending).
+        // Same unreleased version 58: exit-path audit (check-caused faults to the
+        // author or the strike, refusals authored, per-candidate judge holds,
+        // cached-candidate refusal checks, probe beside missing siblings,
+        // sibling scan of glued quoted paths).
         version: 58,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -142,7 +146,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "95e5c715532006647c0131ca85503c8cd529c2894f1e12b4c77893cb2450ad4f",
+        sources_digest: "a339caa6a67c55d1f159cee175dc4c7c933d82b23062aeca6c7a18d0a39d4284",
         build_bound: false,
     },
     CapabilityLogic {
@@ -171,7 +175,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "95e5c715532006647c0131ca85503c8cd529c2894f1e12b4c77893cb2450ad4f",
+        sources_digest: "a339caa6a67c55d1f159cee175dc4c7c933d82b23062aeca6c7a18d0a39d4284",
         build_bound: false,
     },
     CapabilityLogic {
@@ -206,7 +210,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 23: #464 body and set gates normalize absolute declared paths against the task set's recorded repository root, changing collision findings when project and repository roots differ.
         // 24: #491 body lint treats an intact skeleton from an older acceptance as draft input.
         // 25: #497 stalled task-body authors persist findings per subject and resume only those subjects.
-        version: 25,
+        // 26: exit-path audit: an unusable critic reply is typed authored_judge_reply, not gate_operational, which changes how body gate outcomes are routed.
+        version: 26,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -229,7 +234,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "00518cbc43ee58b77edf9446f50c8172b00778a20990cfbdc34ae8b08ff67684",
+        sources_digest: "02dd9bddb5d06d1c62eb836975fad2f38f07410e825b733e4574e426bb3d5825",
         build_bound: false,
     },
     CapabilityLogic {
@@ -255,7 +260,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 19: #464 absolute declared paths use the task set's recorded repository root, matching the body gate when project and repository roots differ.
         // 20: #491 an intact skeleton from an older acceptance is draft input
         // until the skeleton phase freezes it; lints no longer refuse it as partial.
-        version: 20,
+        // 21: exit-path audit: an unusable set-critic reply is typed authored_judge_reply and counts in the ordinary no-progress window.
+        version: 21,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -275,7 +281,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "00518cbc43ee58b77edf9446f50c8172b00778a20990cfbdc34ae8b08ff67684",
+        sources_digest: "02dd9bddb5d06d1c62eb836975fad2f38f07410e825b733e4574e426bb3d5825",
         build_bound: false,
     },
     CapabilityLogic {
@@ -289,9 +295,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #464 declared files forbidden by a whole-file bullet now refute the claim and name the conflicting declaration and bullet.
         sources: &[GATE, CONTRACT, TRACE],
         // #464 re-pin only: review 4's verdict change is already counted in version 6.
-        version: 6,
+        // 7: exit-path audit: shared judge and critic sources changed with the typed reply kinds; bumped so no record judged by the previous logic is replayed.
+        version: 7,
         // Re-pinned only (verdict rules unchanged): #434 #417 #438 #441 #424 #369 #383 #440 #420 #447 #446 #464 #466 #469
-        sources_digest: "d17e9ff2d30664567ebf77a992ddb326b0fc806be735d9ae789f879a12d343b6",
+        sources_digest: "96d78d76831ed71e4705bab80d3a8d65a25405802228b2c2dee6bdddafd671cd",
         build_bound: true,
     },
     CapabilityLogic {
@@ -334,7 +341,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
-        sources_digest: "87ec45f1e155e503ba435566b497e2d531f5262f94ba9218c266cb3a19ff5f9a",
+        sources_digest: "3dab0bb02892f87336fd260c4e98bda2ab67bbcfa4a4c6f0cae67588e615d4e7",
         build_bound: true,
     },
     CapabilityLogic {
@@ -362,7 +369,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
-        sources_digest: "87ec45f1e155e503ba435566b497e2d531f5262f94ba9218c266cb3a19ff5f9a",
+        sources_digest: "3dab0bb02892f87336fd260c4e98bda2ab67bbcfa4a4c6f0cae67588e615d4e7",
         build_bound: true,
     },
 ];
