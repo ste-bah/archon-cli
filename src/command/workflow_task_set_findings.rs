@@ -314,35 +314,9 @@ impl PreparedAcceptanceFreeze {
     }
 }
 
-/// Re-prepare a freeze from a contract whose checks were re-judged in place
-/// and proven on `baseline_commit`.
-pub(crate) fn prepare_from_judged(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    mode: GateMode,
-    contract: &AcceptanceContract,
-    baseline_commit: Option<String>,
-) -> Result<PreparedAcceptanceFreeze> {
-    let (prd, _, _) = validate_prd_input(prd_path)?;
-    let prd_text = String::from_utf8(prd).context("PRD is not UTF-8")?;
-    let live_bytes = std::fs::read(tasks_root.join(ACCEPTANCE_CONTRACT_FILE))?;
-    let candidate_digest = content_digest(&live_bytes);
-    let mut prepared = finish_acceptance(
-        project_root,
-        tasks_root,
-        prd_path,
-        &prd_text,
-        freeze_mode(mode)?,
-        contract,
-        Vec::new(),
-        baseline_commit,
-        candidate_digest.clone(),
-    )?;
-    prepared.live_contract_digest = Some(candidate_digest.clone());
-    prepared.result.live_contract_digest = Some(candidate_digest);
-    Ok(prepared)
-}
+#[path = "workflow_task_set_findings_prepare.rs"]
+mod prepare;
+pub(crate) use prepare::prepare_from_judged;
 
 /// Prepare a whole-set freeze, returning every check the judge did not accept
 /// to its author — with the judge's reason and counterexample — bounded, before

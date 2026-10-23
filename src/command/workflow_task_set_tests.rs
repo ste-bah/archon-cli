@@ -470,3 +470,6 @@ async fn per_entry_candidate_reaches_real_preflight_and_judge() {
 
 #[path = "workflow_judge_reuse_tests.rs"]
 mod judge_reuse_tests;
+
+#[path = "workflow_task_set_absent_contract_tests.rs"]
+mod absent_contract_tests;
