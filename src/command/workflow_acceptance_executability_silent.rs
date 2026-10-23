@@ -358,7 +358,7 @@ pub(super) fn ran(probe: &HostProbe, commit: &str, contract: &AcceptanceContract
 /// The finding when `id` already has a no-verdict strike on `commit`;
 /// otherwise save one and record `id` unproven. `texts` gives (finding,
 /// unproven reason).
-fn strike_or_unproven(
+pub(super) fn strike_or_unproven(
     probe: &HostProbe,
     commit: &str,
     contract: &AcceptanceContract,

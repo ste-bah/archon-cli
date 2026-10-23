@@ -151,3 +151,46 @@ fn diagnostic_discovery_keeps_missing_and_sibling_paths() {
         reason: SiblingExclusionReason::MissingAtRoot,
     }));
 }
+
+/// R2: the shapes a here-document's program text names a sibling path in:
+/// an assignment with spaces around `=`, a call that opens a list, and a
+/// list of quoted words. Each is seen, and each is required.
+#[test]
+fn here_document_program_text_names_its_sibling_paths() {
+    let command = "set -eu\nrunner - <<'PROGRAM'\nMANIFEST = '../sibling/package.manifest'\nresult = run(['../sibling/bin/tool', '--version'])\nother = run(['tool', '--input', '../sibling/data/input.txt'])\nPROGRAM\n";
+    let paths = scan(command);
+    for expected in [
+        "../sibling/package.manifest",
+        "../sibling/bin/tool",
+        "../sibling/data/input.txt",
+    ] {
+        let found = paths
+            .iter()
+            .find(|path| path.path == PathBuf::from(expected))
+            .unwrap_or_else(|| panic!("{expected} is not seen: {paths:?}"));
+        assert!(found.required, "{expected}: {paths:?}");
+    }
+    assert_eq!(paths.len(), 3, "{paths:?}");
+}
+
+/// R2: a quoted sibling path glued to the code around it, in a list written
+/// without spaces, is still seen in a here-document's program text.
+#[test]
+fn a_quoted_path_glued_into_a_list_without_spaces_is_seen() {
+    let command = "runner - <<'PROGRAM'\nresult = run(['tool','--input','../sibling/data/input.txt','--']+args)\nPROGRAM\n";
+    let paths = scan(command);
+    assert_eq!(paths.len(), 1, "{paths:?}");
+    assert_eq!(paths[0].path, PathBuf::from("../sibling/data/input.txt"));
+    assert!(paths[0].required, "{paths:?}");
+}
+
+/// R2: a shell comment is no shell text: an apostrophe in it opens no
+/// quote, so every path the commands after it name is still seen.
+#[test]
+fn an_apostrophe_in_a_shell_comment_hides_no_later_path() {
+    let command = "# the tool's own manifest decides\ntest -f ../sibling/package.manifest\n";
+    let paths = scan(command);
+    assert_eq!(paths.len(), 1, "{paths:?}");
+    assert_eq!(paths[0].path, PathBuf::from("../sibling/package.manifest"));
+    assert!(paths[0].required, "{paths:?}");
+}

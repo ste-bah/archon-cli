@@ -159,10 +159,15 @@ async function runSetGateLoop(w, chain, bodies) {
     const failed = gates.find((gate) => gate.routed.operational);
     if (failed) {
       // A gate that could not run judged nothing: a round without progress.
+      // A judge reply it could not use is the judge's own (D5): it counts in
+      // the ordinary no-progress window, never the host's operational one.
       const summary = `${failed.capability}: ${failed.routed.operational}`;
-      recordOperational(progress, round, summary, false, NO_ROUND, "gate");
+      const authoredReply = failed.routed.operationalKind === "authored_judge_reply";
+      if (authoredReply) recordAnswered(progress, round, "authored_judge_reply", false, true, NO_ROUND);
+      else recordOperational(progress, round, summary, false, NO_ROUND, "gate");
+      const lead = authoredReply ? "set gate judge reply unusable" : "host gate operational failure";
       const stall = stallReason(progress);
-      if (stall) await pauseAuthorLoop(w, "set-gates", progress, stall, [`host gate operational failure: ${summary}`], { rounds: round });
+      if (stall) await pauseAuthorLoop(w, "set-gates", progress, stall, [`${lead}: ${summary}`], { rounds: round });
       continue;
     }
     const open = gates.flatMap((gate) => gate.routed.all);

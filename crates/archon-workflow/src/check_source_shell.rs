@@ -10,7 +10,7 @@ pub(super) fn has_heredoc(command: &str) -> bool {
     stripped(command).1
 }
 
-fn without_heredocs(command: &str) -> String {
+pub(crate) fn without_heredocs(command: &str) -> String {
     stripped(command).0
 }
 

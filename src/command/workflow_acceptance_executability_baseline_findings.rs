@@ -49,12 +49,16 @@ pub async fn cannot_fail_findings(
             continue;
         }
         if let Some(reason) = run.unrun(id) {
-            probe.unproven(
-                id,
-                format!(
-                    "it could not be run on the pre-implementation tree at {short} ({reason}), so it is not proven able to fail"
-                ),
+            // What the check's own run caused is its author's (D1).
+            let fault = check_fault::of_error(run.operational_error(id));
+            let unproven = format!(
+                "it could not be run on the pre-implementation tree at {short} ({reason}), so it is not proven able to fail"
             );
+            let at = format!("on the pre-implementation tree at {short}");
+            let key = (Some(baseline.commit.as_str()), contract, id.as_str());
+            if let Some(finding) = check_fault::settle(probe, key, fault, &at, unproven) {
+                findings.insert(id.clone(), finding);
+            }
         } else if let Some(result) = result {
             // It ran to an end on the base: any earlier stall was not its own.
             silent::ran(probe, &baseline.commit, contract, id);
@@ -160,12 +164,15 @@ pub async fn newly_passing_findings(
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
         if let Some(reason) = run.unrun(id) {
-            probe.unproven(
-                id,
-                format!(
-                    "the repair could not be run on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
-                ),
+            let fault = check_fault::of_error(run.operational_error(id));
+            let unproven = format!(
+                "the repair could not be run on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
             );
+            let at = format!("on the tree its original failed on ({short})");
+            let key = (tree.commit.as_deref(), contract, id.as_str());
+            if let Some(finding) = check_fault::settle(probe, key, fault, &at, unproven) {
+                findings.insert(id.clone(), finding);
+            }
         } else if let Some(result) = result {
             let at = silent::baseline_context(probe, contract, result.copy_layout.as_ref());
             if let Some((reason, cause)) =

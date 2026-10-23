@@ -47,6 +47,8 @@ pub fn harness_run_state_path(path: &Path) -> bool {
 pub fn freeze_owned_path(path: &Path) -> bool {
     inputs::freeze_owned(path)
 }
+#[path = "acceptance_scratch_faults.rs"]
+pub mod faults;
 #[path = "acceptance_scratch_hooks.rs"]
 mod hooks;
 pub use hooks::{AllowanceHook, CHECK_DEFERRED, CheckAllowance, CheckHook, ObserveHooks};

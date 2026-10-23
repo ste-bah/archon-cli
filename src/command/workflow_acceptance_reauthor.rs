@@ -28,7 +28,6 @@ use reply_parse::candidate_entry_with_markers;
 mod check_defects;
 #[path = "workflow_acceptance_reauthor_passability.rs"]
 mod passability_pending;
-use passability_pending::authored_passability_pending;
 
 #[path = "workflow_acceptance_reauthor_cache.rs"]
 pub(crate) mod cache;
@@ -230,6 +229,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     let mut reused = BTreeMap::new();
     let mut unproven_checks = BTreeMap::new();
     let mut judge_retry_candidates = passability_pending::JudgeRetryCandidates::default();
+    let refused = author::refused_forms(scope, gate.probe);
     if let Some(state_dir) = state_dir {
         for id in ids {
             let frozen = entry(contract, id).expect("named ids were checked above");
@@ -241,11 +241,17 @@ pub(crate) async fn reauthor_partial_with_cache(
                 client.provider_id().as_deref(),
                 gate.probe,
             ) {
-                Ok(Some(candidate)) => {
-                    *entry_mut(&mut working, id).expect("named id") = candidate.clone();
-                    reused.insert(id.clone(), candidate);
-                    eprintln!("acceptance re-author reused check {id}");
-                }
+                // A saved candidate is held to every rule a fresh reply is.
+                Ok(Some(candidate)) => match author::live_root_refusal(candidate, &refused)
+                    .and_then(|candidate| check_defects::check_defects(&working, candidate, scope))
+                {
+                    Ok(candidate) => {
+                        *entry_mut(&mut working, id).expect("named id") = candidate.clone();
+                        reused.insert(id.clone(), candidate);
+                        eprintln!("acceptance re-author reused check {id}");
+                    }
+                    Err(reason) => feedback.get_mut(id).expect("feedback per id").push(reason),
+                },
                 Ok(None) => {}
                 Err(reason) => eprintln!("acceptance re-author ignored saved check {id}: {reason}"),
             }
@@ -254,7 +260,6 @@ pub(crate) async fn reauthor_partial_with_cache(
     // Bounded by progress: every attempt that repairs a check resets the
     // count, and with finitely many named checks the loop always ends.
     let (mut attempt, mut idle) = (0, 0);
-    let refused = author::refused_forms(scope, gate.probe);
     while (!pending.is_empty() || !reused.is_empty()) && idle < REAUTHOR_ATTEMPTS {
         attempt += 1;
         let before = pending.len();
@@ -292,7 +297,6 @@ pub(crate) async fn reauthor_partial_with_cache(
                 .partition(|candidate| acceptance_ids.contains(&candidate.id));
             subset.acceptance = acceptance;
             subset.supplementary = supplementary;
-            let candidate_ids = passability_pending::candidate_ids(&subset);
             let retry_contract = subset.clone();
             let judged = judge::judge_entries_with_roots(
                 client,
@@ -309,24 +313,20 @@ pub(crate) async fn reauthor_partial_with_cache(
                 },
             )
             .await;
+            // D2: a judge that could not complete holds the candidates of
+            // its call, by whose fault it is; every proven sibling goes on.
             let judged = match judged {
                 Ok(judged) => Some(judged),
-                Err(error)
-                    if judge::JudgeIncomplete::caused(&error)
-                        .is_some_and(judge::JudgeIncomplete::is_authored_reply) =>
-                {
-                    judge_retry_candidates.remember_contract(&retry_contract);
-                    let finding = format!(
-                        "the acceptance judge returned no usable authored verdict: {error:#}; this check remains pending for re-author and judge retry"
-                    );
-                    for id in candidate_ids {
-                        if let Some(notes) = feedback.get_mut(&id) {
-                            notes.push(finding.clone());
-                        }
-                    }
+                Err(error) => {
+                    passability_pending::hold_judge_failure(
+                        error,
+                        &retry_contract,
+                        &mut judge_retry_candidates,
+                        &mut feedback,
+                        (&mut pending, &mut reused, &mut unproven_checks),
+                    )?;
                     None
                 }
-                Err(error) => return Err(error),
             };
             if let Some(judged) = judged {
                 for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
@@ -390,23 +390,24 @@ pub(crate) async fn reauthor_partial_with_cache(
                     .await
                     {
                         Ok(findings) => findings,
+                        // D3: per check, by whose fault it is; siblings go on.
                         Err(error) => {
-                            if let Some((pending_ids, finding)) =
-                                authored_passability_pending(&error, &sound)
-                            {
-                                for id in pending_ids {
+                            let held = passability_pending::passability_failure(&error, &sound)
+                                .ok_or(error)?;
+                            for id in held.ids {
+                                *entry_mut(&mut working, &id).expect("named id") =
+                                    entry(contract, &id).expect("named id").clone();
+                                if held.authored {
                                     passability_pending.insert(id.clone());
-                                    *entry_mut(&mut working, &id).expect("named id") =
-                                        entry(contract, &id).expect("named id").clone();
-                                    feedback
-                                        .get_mut(&id)
-                                        .expect("feedback seeded per id")
-                                        .push(finding.clone());
+                                    let notes = feedback.get_mut(&id).expect("feedback per id");
+                                    notes.push(held.finding.clone());
+                                } else {
+                                    pending.remove(&id);
+                                    reused.remove(&id);
+                                    unproven_checks.insert(id, held.finding.clone());
                                 }
-                                BTreeMap::new()
-                            } else {
-                                return Err(error);
                             }
+                            BTreeMap::new()
                         }
                     }
                 }

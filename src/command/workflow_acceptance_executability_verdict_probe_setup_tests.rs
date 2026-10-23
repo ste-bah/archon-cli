@@ -252,3 +252,31 @@ async fn on_the_live_tree_a_sibling_repository_path_stays_a_held_failure() {
     let originals = super::originals(&site, &contract, vec![result]).await;
     assert_eq!(originals.get("AC-420-010"), Some(&super::Original::Failed));
 }
+
+/// R1: a check that names a missing sibling path gets its finding, and every
+/// other accepted check in the same call is still probed: none of them is
+/// published unprobed.
+#[tokio::test]
+async fn a_missing_sibling_path_never_lets_the_other_checks_publish_unprobed() {
+    let trees = trees(&[
+        ("AC-X-001", "test -f ../absent/fixture.txt", REPO),
+        ("AC-X-002", "true", REPO),
+    ]);
+    let copies = tempfile::tempdir().unwrap();
+    let probe = round_at(&trees, &trees.base, copies.path());
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    let unproven = probe.take_unproven();
+    assert!(
+        findings
+            .get("AC-X-001")
+            .is_some_and(|finding| finding.contains("../absent/fixture.txt")),
+        "{findings:?}"
+    );
+    // `true` passes on the pre-implementation tree and names no input, so
+    // the probe, once it runs, cannot show it able to fail.
+    assert!(
+        findings.contains_key("AC-X-002") || unproven.contains_key("AC-X-002"),
+        "the other check was never probed: {findings:?}; unproven={unproven:?}"
+    );
+    trees.assert_live_untouched(copies.path());
+}

@@ -11,6 +11,8 @@ pub(super) fn judge_error_class(error: &str) -> &'static str {
         "empty_counterexample"
     } else if error.contains("left 'reason' empty") {
         "empty_reason"
+    } else if error.contains("refused to judge") {
+        "refusal"
     } else if error.contains("unsupported stop reason") || error.contains("no finish reason") {
         "finish_reason"
     } else {
@@ -25,6 +27,10 @@ pub(crate) enum JudgeIncompleteKind {
     /// or empty decisions, a truncation it never completed): retried with
     /// the affected checks.
     AuthoredReply,
+    /// The judge refused to judge the checks it was shown (a content
+    /// refusal): a judge-authored outcome about the candidates of that call,
+    /// retried with them like an unusable reply, never a provider fault.
+    Refusal,
     /// The provider or the host failed (no reply, a stall, an unsupported
     /// or absent finish reason, a reply the host could not save): an
     /// operational outcome.
@@ -65,7 +71,10 @@ impl JudgeIncomplete {
     /// A judge-authored reply can be retried with the affected checks. A
     /// stalled provider call or provider error remains a host outcome.
     pub(crate) fn is_authored_reply(&self) -> bool {
-        self.kind == JudgeIncompleteKind::AuthoredReply
+        matches!(
+            self.kind,
+            JudgeIncompleteKind::AuthoredReply | JudgeIncompleteKind::Refusal
+        )
     }
 }
 

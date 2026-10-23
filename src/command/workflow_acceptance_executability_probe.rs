@@ -102,14 +102,18 @@ impl HostProbe {
 
     /// Author findings for every check of `refs` whose text names a live
     /// root by its absolute path: run in a copy, it would still read or
-    /// change the live tree, so it is never run.
+    /// change the live tree, so it is never run. A check carrying a host
+    /// policy defect is never run either
+    /// ([`check_fault::policy_refused`]).
     fn live_root_findings(
         &self,
         contract: &AcceptanceContract,
         refs: &[FrozenCommandRef],
     ) -> BTreeMap<String, String> {
         let roots = self.live_roots();
+        let refused = check_fault::policy_refused(self, contract, refs);
         (refs.iter())
+            .filter(|reference| !refused.contains(&reference.acceptance_id))
             .filter_map(|reference| {
                 let entry = (contract.acceptance.iter())
                     .chain(&contract.supplementary)
@@ -248,6 +252,7 @@ impl HostProbe {
         let mut findings = self.live_root_findings(contract, &all);
         let refs: Vec<FrozenCommandRef> = (all.into_iter())
             .filter(|reference| !findings.contains_key(&reference.acceptance_id))
+            .filter(|reference| !self.is_unproven(&reference.acceptance_id))
             .collect();
         let run = if refs.is_empty() {
             sites::SiteRun {
@@ -392,6 +397,7 @@ impl HostProbe {
         let mut findings = self.live_root_findings(contract, &all);
         let sound: Vec<FrozenCommandRef> = (all.iter())
             .filter(|reference| !findings.contains_key(&reference.acceptance_id))
+            .filter(|reference| !self.is_unproven(&reference.acceptance_id))
             .cloned()
             .collect();
         match (&self.site, &self.baseline) {
@@ -437,10 +443,19 @@ impl ExecutabilityProbe for HostProbe {
     ) -> BTreeMap<String, String> {
         let missing =
             hermetic::siblings::missing_for_checks(&self.project, &self.repository, contract, ids);
-        if !missing.is_empty() {
-            return missing;
-        }
-        self.probe(contract, ids, false).await
+        // R1: a check naming a missing sibling path is its author's; every
+        // other check of the call is still probed, so none publishes unprobed.
+        let rest: BTreeSet<String> = (ids.iter())
+            .filter(|id| !missing.contains_key(*id))
+            .cloned()
+            .collect();
+        let mut findings = if rest.is_empty() {
+            BTreeMap::new()
+        } else {
+            self.probe(contract, &rest, false).await
+        };
+        findings.extend(missing);
+        findings
     }
 
     async fn hold_originals(

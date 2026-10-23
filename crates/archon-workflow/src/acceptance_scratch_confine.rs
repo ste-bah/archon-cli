@@ -208,7 +208,8 @@ impl Confinement {
             match killed {
                 Ok(survivors) if survivors.is_empty() => Ok(()),
                 Ok(survivors) => Err(format!(
-                    "scratch process tree teardown could not be verified (still alive: {})",
+                    "{} (still alive: {})",
+                    crate::acceptance_scratch::faults::TEARDOWN_UNVERIFIED,
                     survivors
                         .iter()
                         .map(|p| p.pid.to_string())
@@ -301,7 +302,8 @@ impl Confinement {
             }
         }
         Some(format!(
-            "processes the check left behind still use the scratch: {}",
+            "{}: {}",
+            crate::acceptance_scratch::faults::LEFT_BEHIND,
             last.iter()
                 .map(|h| format!("pid {} ({})", h.pid, h.path.display()))
                 .collect::<Vec<_>>()

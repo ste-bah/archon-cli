@@ -1,5 +1,6 @@
 //! The bounded re-author loop over a scripted author and judge.
 
+use super::passability_pending::authored_passability_pending;
 use super::test_client::{ScriptedAuthorJudge, command_entry, resolve_in_bare_project};
 use super::*;
 use crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven as frozen_set;
@@ -376,4 +377,90 @@ fn the_author_key_resolves_to_a_read_only_host_agent_in_a_bare_project() {
         Some(&["Read".to_string(), "Grep".into(), "Glob".into()][..]),
         "the resolved agent reads and searches only: no Write, Edit or Bash"
     );
+}
+
+/// D1: a candidate whose own run goes past the site's output limit on the
+/// pre-implementation tree goes back to its author naming that limit; it is
+/// never left to the host as unproven.
+#[tokio::test]
+async fn a_candidate_past_the_output_limit_goes_back_to_its_author() {
+    let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
+    let client = ScriptedAuthorJudge::new(
+        |entry, attempt| {
+            let command = if attempt == 1 {
+                "head -c 400000 /dev/zero | tr '\\0' x; exit 1"
+            } else {
+                "jq -e '.b == true and .c == true' out.json"
+            };
+            command_entry(entry, command)
+        },
+        |_, _| true,
+    );
+    let after = reauthor(
+        &client,
+        &set.contract(),
+        &ids(&["AC-F-001"]),
+        &scope(&set),
+        "sonnet",
+        &set.gate(),
+    )
+    .await
+    .expect("the author repairs what its own run broke");
+    assert_eq!(
+        after.acceptance[0].judgment.verdict,
+        JudgeDecision::Accepted
+    );
+    let prompts = client.prompts.lock().unwrap();
+    assert!(
+        prompts.len() == 2 && prompts[1].contains("output limit"),
+        "{prompts:?}"
+    );
+}
+
+/// R2: a path into the other root named inside a here-document's program
+/// text -- an assignment, a call that opens a list, a list written without
+/// spaces -- or after a shell comment holding an apostrophe, is refused
+/// before judging, like the same path named on the command line.
+#[test]
+fn a_cross_root_path_in_here_document_program_text_is_refused() {
+    let set = frozen_set(&[("AC-X-001", "check", false)]);
+    let project = set.project.path().join("project");
+    let repo = set.project.path().join("repo");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(repo.join("bin")).unwrap();
+    std::fs::write(repo.join("package.manifest"), "x").unwrap();
+    std::fs::write(repo.join("bin/tool"), "x").unwrap();
+    let mut scope = scope(&set);
+    scope.project_root = project;
+    scope.repository_root = repo;
+    for (command, named) in [
+        (
+            "runner - <<'PROGRAM'\nMANIFEST = '../repo/package.manifest'\nprint(MANIFEST)\nPROGRAM",
+            "../repo/package.manifest",
+        ),
+        (
+            "runner - <<'PROGRAM'\nresult = run(['../repo/bin/tool', '--version'])\nPROGRAM",
+            "../repo/bin/tool",
+        ),
+        (
+            "runner - <<'PROGRAM'\nresult = run(['tool','--input','../repo/bin/tool']+args)\nPROGRAM",
+            "../repo/bin/tool",
+        ),
+        (
+            "# the tool's own manifest decides\ntest -f ../repo/package.manifest",
+            "../repo/package.manifest",
+        ),
+    ] {
+        let mut candidate = set.contract().acceptance[0].clone();
+        candidate.check = AcceptanceCheck::Command {
+            command: command.into(),
+            cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+        };
+        let finding = check_defects::check_defects(&set.contract(), candidate, &scope)
+            .expect_err(&format!("accepted a cross-root path: {command}"));
+        assert!(
+            finding.contains(named) && finding.contains("outside the selected root"),
+            "{command}: {finding}"
+        );
+    }
 }

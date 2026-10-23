@@ -248,6 +248,8 @@ pub(crate) struct HostProbe {
 
 #[path = "workflow_acceptance_executability_baseline.rs"]
 mod baseline;
+#[path = "workflow_acceptance_executability_check_fault.rs"]
+mod check_fault;
 #[cfg(all(test, unix))]
 pub(crate) use baseline::Original;
 #[cfg(test)]
@@ -415,6 +417,9 @@ fn contract_digest(contract: &AcceptanceContract) -> Result<String, String> {
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_baseline_tests.rs"]
 mod baseline_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_check_fault_tests.rs"]
+mod check_fault_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_probe_tests.rs"]
 pub(crate) mod probe_tests;

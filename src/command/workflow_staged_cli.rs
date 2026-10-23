@@ -318,9 +318,10 @@ async fn audit_candidate_fidelity(
         Err(error) => {
             // Issue 338: as in the set gate.
             crate::command::workflow_host_command_operational::exit_if_unsettled_publish(&error);
-            evaluation.with_operational_error(format!(
+            let evaluation = evaluation.with_operational_error(format!(
                 "obligation fidelity audit failed operationally: {error:#}"
-            ))
+            ));
+            crate::command::topology_lint::tag_unusable_critic_reply(evaluation, &error)
         }
     }
 }
