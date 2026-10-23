@@ -137,6 +137,17 @@ async fn reverify_report_contains_per_check_execution_evidence() {
         .join(format!("decomposition/reverify/reports/{}.json", latest.id));
     let report: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
+    let contract_path = fixture
+        .project
+        .join("tasks/PRD-X")
+        .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let contract_bytes = std::fs::read(&contract_path).unwrap();
+    let contract: archon_workflow::task_set_contract::AcceptanceContract =
+        serde_json::from_slice(&contract_bytes).unwrap();
+    assert_eq!(
+        report["contract_digest"],
+        archon_workflow::task_set_contract::content_digest(&contract_bytes)
+    );
     assert!(
         report["checks"].is_array(),
         "checks evidence missing: {report}"
@@ -148,6 +159,20 @@ async fn reverify_report_contains_per_check_execution_evidence() {
     );
     for check in checks {
         assert!(check["check_id"].as_str().is_some());
+        let check_id = check["check_id"].as_str().unwrap();
+        let authored_entry = contract
+            .acceptance
+            .iter()
+            .chain(&contract.supplementary)
+            .find(|entry| entry.id == check_id)
+            .unwrap();
+        assert_eq!(
+            report["judged_check_digests"][check_id],
+            archon_workflow::task_set_contract::content_digest(
+                &serde_json::to_vec(authored_entry).unwrap()
+            ),
+            "missing authored entry digest for {check_id}"
+        );
         assert!(check["verdict"].as_str().is_some());
         assert!(check["really_ran"].is_boolean());
         assert_eq!(check["really_ran"], true, "check failed to run: {check}");

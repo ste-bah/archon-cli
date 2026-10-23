@@ -125,7 +125,7 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
         return Ok(());
     };
     if is_consumed(run_dir, &ledger.report_id)?
-        && consumed_ledger_findings(project_root, task_root, ledger)?.is_empty()
+        && consumed_ledger_findings(task_root, run_dir, ledger)?.is_empty()
     {
         return Ok(());
     }
@@ -154,7 +154,7 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
     ));
     let report: serde_json::Value = serde_json::from_slice(&std::fs::read(report_path)?)?;
     let uncertain = if is_consumed(run_dir, &ledger.report_id)? {
-        consumed_ledger_findings(project_root, task_root, ledger)?
+        consumed_ledger_findings(task_root, run_dir, ledger)?
     } else {
         std::collections::BTreeMap::new()
     };
@@ -323,11 +323,8 @@ pub(crate) fn prepare(
             )
         })?;
         validate_subjects(run_dir, &ledger, &task_ids, &check_ids)?;
-        let findings = consumed_ledger_findings(
-            Path::new(&runtime.project_root_identity),
-            Path::new(&runtime.task_root_identity),
-            &ledger,
-        )?;
+        let findings =
+            consumed_ledger_findings(Path::new(&runtime.task_root_identity), run_dir, &ledger)?;
         if !findings.is_empty() {
             selected.extend(findings.keys().cloned());
             consumed.push(ledger);

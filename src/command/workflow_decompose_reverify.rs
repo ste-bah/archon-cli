@@ -17,6 +17,9 @@ use super::workflow_decompose_reverify_gates::execute_gate;
 use crate::command::workflow_host_command_catalog::HostCommandResolutionContext;
 use crate::command::workflow_host_command_exec::FixedHostCommandExecutor;
 
+#[path = "workflow_decompose_reverify_report_digests.rs"]
+mod report_digests;
+
 #[path = "workflow_decompose_reverify_eligibility.rs"]
 pub(crate) mod eligibility;
 
@@ -378,13 +381,8 @@ pub(crate) async fn reverify(
     };
     let report_event_seq = store.next_event_seq(run_id)?;
     let report_id = format!("reverify-{event_seq}-report");
-    let mut call_record_ids_at_report = v2
-        .load_call_records()?
-        .into_iter()
-        .map(|record| record.call.id)
-        .collect::<Vec<_>>();
-    call_record_ids_at_report.push(report_id.clone());
-    call_record_ids_at_report.sort();
+    let (call_record_ids_at_report, contract_digest, judged_check_digests) =
+        report_digests::for_report(&task_root, &v2, &report_id, &checks)?;
     let report = ReverifyReport {
         schema_version: 1,
         id: report_id.clone(),
@@ -398,6 +396,8 @@ pub(crate) async fn reverify(
         set_gates,
         frozen_gates,
         checks,
+        contract_digest: Some(contract_digest),
+        judged_check_digests,
         operational_failure_cause: None,
     };
     let report_bytes = serde_json::to_vec_pretty(&report)?;

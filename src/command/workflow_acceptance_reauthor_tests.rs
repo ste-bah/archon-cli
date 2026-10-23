@@ -113,6 +113,29 @@ fn nested_roots_allow_targets_that_normalize_inside_the_selected_root() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn symlink_escape_into_other_root_is_refused_despite_lexical_containment() {
+    let set = frozen_set(&[("AC-F-SYMLINK-ESCAPE", "test -f feature.txt", false)]);
+    let project = set.project.path().join("project");
+    let repo = set.project.path().join("repo");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(repo.join("subdir")).unwrap();
+    std::fs::write(repo.join("Cargo.toml"), "[package]\n").unwrap();
+    std::os::unix::fs::symlink(repo.join("subdir"), project.join("alias")).unwrap();
+    let mut author_scope = scope(&set);
+    author_scope.project_root = project;
+    author_scope.repository_root = repo;
+    let mut candidate = set.contract().acceptance[0].clone();
+    candidate.check = AcceptanceCheck::Command {
+        command: "test -f ../project/alias/../Cargo.toml".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
+        .expect_err("canonical target in the repository root must be refused");
+    assert!(finding.contains("outside the selected root"), "{finding}");
+}
+
 #[tokio::test]
 async fn a_refuted_check_is_reauthored_and_rejudged_and_nothing_else_changes() {
     let set = frozen_set(&[

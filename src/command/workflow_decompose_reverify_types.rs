@@ -20,6 +20,10 @@ pub(super) struct ReverifyReport {
     pub(super) frozen_gates: Vec<GateResult>,
     pub(super) checks: Vec<acceptance::CheckResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) contract_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub(super) judged_check_digests: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) operational_failure_cause: Option<String>,
 }
 

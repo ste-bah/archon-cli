@@ -378,14 +378,15 @@ pub(super) async fn prove(
 fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
     const STDOUT_BYTES: usize = 600;
     const STDERR_BYTES: usize = 2_000;
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stdout = archon_observability::redaction::redact_secret_values(&stdout);
-    let stdout =
-        archon_workflow::failure_evidence::failure_evidence(stdout.as_bytes(), STDOUT_BYTES);
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    let stderr = archon_observability::redaction::redact_secret_values(&stderr);
-    let stderr =
-        archon_workflow::failure_evidence::failure_evidence(stderr.as_bytes(), STDERR_BYTES);
+    const REDACTION_OVERLAP: usize = 256;
+    fn bounded_excerpt(bytes: &[u8], budget: usize) -> String {
+        let bounded = &bytes[..bytes.len().min(budget.saturating_add(REDACTION_OVERLAP))];
+        let decoded = String::from_utf8_lossy(bounded);
+        let redacted = archon_observability::redaction::redact_secret_values(&decoded);
+        archon_workflow::failure_evidence::failure_evidence(redacted.as_bytes(), budget)
+    }
+    let stdout = bounded_excerpt(&result.stdout, STDOUT_BYTES);
+    let stderr = bounded_excerpt(&result.stderr, STDERR_BYTES);
     let excerpt = format!("stdout: {stdout}\nstderr: {stderr}");
     excerpt
 }

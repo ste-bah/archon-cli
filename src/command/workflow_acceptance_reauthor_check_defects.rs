@@ -58,9 +58,10 @@ pub(super) fn check_defects(
                     canonical_target
                         .as_ref()
                         .is_some_and(|target| target.starts_with(selected))
-                        || lexical_target
-                            .as_ref()
-                            .is_some_and(|target| target.starts_with(selected))
+                        || (canonical_target.is_none()
+                            && lexical_target
+                                .as_ref()
+                                .is_some_and(|target| target.starts_with(selected)))
                 });
                 root.is_some_and(|root| {
                     !inside_selected
@@ -68,9 +69,10 @@ pub(super) fn check_defects(
                         && (canonical_target
                             .as_ref()
                             .is_some_and(|target| target.starts_with(root))
-                            || lexical_target
-                                .as_ref()
-                                .is_some_and(|target| target.starts_with(root)))
+                            || (canonical_target.is_none()
+                                && lexical_target
+                                    .as_ref()
+                                    .is_some_and(|target| target.starts_with(root))))
                 })
             });
             if let Some((_, label)) = other_root {

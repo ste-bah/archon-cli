@@ -117,6 +117,8 @@ fn publish_operational_failure(
         set_gates: Vec::new(),
         frozen_gates: Vec::new(),
         checks: Vec::new(),
+        contract_digest: None,
+        judged_check_digests: std::collections::BTreeMap::new(),
         operational_failure_cause: Some(cause.clone()),
     };
     let report_bytes = serde_json::to_vec_pretty(&report)?;

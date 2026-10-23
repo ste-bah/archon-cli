@@ -20,7 +20,7 @@ pub(super) async fn reauthor_resume_plan(
         .collect::<std::collections::BTreeSet<_>>();
     let mut seeds = std::collections::BTreeMap::new();
     for ledger in &plan.consumed {
-        let findings = consumed_ledger_findings(project_root, task_root, ledger)?;
+        let findings = consumed_ledger_findings(task_root, run_dir, ledger)?;
         for (id, finding) in findings {
             if check_ids.contains(&id) {
                 seeds.insert(id, finding);
