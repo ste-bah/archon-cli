@@ -382,16 +382,14 @@ impl WorkflowScriptHost {
         &self,
     ) -> archon_workflow::WorkflowResult<Vec<ScriptPauseRecord>> {
         let mut pauses = pause_records(&self.runner.workflow_store, &self.runner.run_id)?;
-        // Only records written before the typed property need it filled in,
-        // and only from slots that read: a slot that does not read fails the
-        // call that uses it (as a never-started stage), never every call, and
-        // a covered attempt left unknown is resolved where credit is checked.
-        let legacy =
-            (pauses.iter()).any(|pause| pause.covered.iter().any(|c| c.build_bound.is_none()));
+        // Legacy records only, from slots that read: an unreadable slot fails
+        // only the call that uses it; an unknown attempt is resolved at credit.
+        let legacy = pauses
+            .iter()
+            .flat_map(|p| &p.covered)
+            .any(|c| c.build_bound.is_none());
         if legacy && let Ok(slots) = self.runner.v2_store.load_call_records() {
-            for pause in &mut pauses {
-                enrich_build_bound(pause, &slots, &self.runner.v2_store);
-            }
+            (pauses.iter_mut()).for_each(|p| enrich_build_bound(p, &slots, &self.runner.v2_store));
         }
         if let Some(seed) = self.phase_seed() {
             let floor = seed["pause_generation_floor"]
