@@ -27,6 +27,10 @@ use named_files::named_files_with_budget;
 mod rounds;
 use rounds::judge_prompted_with_roots;
 
+#[cfg(test)]
+#[path = "workflow_task_set_judge_prompt_builder_tests.rs"]
+mod prompt_builder_tests;
+
 #[path = "workflow_task_set_judge_incomplete.rs"]
 mod incomplete;
 pub(crate) use incomplete::JudgeIncomplete;
@@ -398,32 +402,30 @@ async fn judge_batch(
     partial: Option<&PartialReply<'_>>,
     roots: &JudgeRoots,
 ) -> Result<AcceptanceContract> {
-    let task = batched_judge_prompt_with_roots(&contract, roots)?;
-    judge_prompted_with_roots(client, contract, &task, model, validate, partial, roots).await
+    judge_prompted_with_roots(
+        client,
+        contract,
+        |subset| batched_judge_prompt_with_roots(subset, roots),
+        model,
+        validate,
+        partial,
+    )
+    .await
 }
 
-/// Ask `task` of the judge about exactly the entries of `contract`, and
+/// Build the judge's prompt for exactly the entries of `contract`, and
 /// apply its decisions to them: a truncated reply is continued (and saved in
 /// `partial` when given), a reply with no usable verdict is re-asked, and a
 /// judge that cannot complete is [`JudgeIncomplete`].
-pub(super) async fn judge_prompted(
+pub(crate) async fn judge_prompted(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
-    task: &str,
+    prompt: impl Fn(&AcceptanceContract) -> Result<String>,
     model: &str,
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<AcceptanceContract> {
-    judge_prompted_with_roots(
-        client,
-        contract,
-        task,
-        model,
-        validate,
-        partial,
-        &JudgeRoots::default(),
-    )
-    .await
+    judge_prompted_with_roots(client, contract, prompt, model, validate, partial).await
 }
 
 fn subset_with_ids(contract: &AcceptanceContract, ids: &BTreeSet<String>) -> AcceptanceContract {

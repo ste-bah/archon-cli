@@ -21,16 +21,16 @@ pub(super) fn merge_judged_entries(
 pub(super) async fn judge_prompted_with_roots(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
-    task: &str,
+    prompt: impl Fn(&AcceptanceContract) -> Result<String>,
     model: &str,
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
     partial: Option<&PartialReply<'_>>,
-    roots: &JudgeRoots,
 ) -> Result<AcceptanceContract> {
+    let task = prompt(&contract)?;
     let mut messages = vec![serde_json::json!({"role":"user","content":task})];
     let mut judged_contract = contract;
     let mut pending_contract = judged_contract.clone();
-    let mut current_task = task.to_string();
+    let mut current_task = task;
     let mut seen = BTreeSet::new();
     let mut no_progress = 0usize;
     let mut attempts = 0usize;
@@ -112,7 +112,7 @@ pub(super) async fn judge_prompted_with_roots(
                     return Ok(judged_contract);
                 }
                 pending_contract = subset_with_ids(&judged_contract, &missing);
-                current_task = batched_judge_prompt_with_roots(&pending_contract, roots)?;
+                current_task = prompt(&pending_contract)?;
                 messages = vec![serde_json::json!({"role":"user","content":current_task})];
                 last = format!(
                     "acceptance judge left decisions missing={:?}; retry only those checks",

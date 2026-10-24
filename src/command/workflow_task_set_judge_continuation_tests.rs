@@ -163,7 +163,15 @@ async fn a_partial_batch_keeps_valid_decisions_and_reasks_only_missing_ids() {
     let judged = judge_prompted(
         &client,
         subject,
-        "initial prompt",
+        |pending| {
+            let ids = pending
+                .acceptance
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            Ok(format!("acceptance question Checks: {ids}"))
+        },
         "judge-model",
         require_judged_prose,
         None,
