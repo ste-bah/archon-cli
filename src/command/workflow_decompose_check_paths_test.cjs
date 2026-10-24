@@ -71,10 +71,11 @@ test('the prompt claims no isolation that may not exist', () => {
   // The rule that holds at every site: change nothing outside its own
   // temporary files.
   assert.match(prompt, /must not change, delete or reset anything outside its own temporary files/);
-  // Each site copies different project files, and places the two roots
-  // differently: a check never reaches one root from the other.
+  // Each site copies different project files, and the repository alias is
+  // linked only when a project-root check names it.
   assert.match(prompt, /project files the host is configured to copy/);
-  assert.match(prompt, /never reach one root from the other with \.\./);
+  assert.match(prompt, /project_root may reach copied repository files via \.\.\/<repository dir>\/ when the repository directory sits beside the project and the named path already exists in the live repository/);
+  assert.match(prompt, /repo_root names repository paths relative to repo_root and cannot use `\.\.` to reach project_root or rely on `\.\.\/<repository dir>`, which the site links only when a project_root check names it/);
 });
 
 test('the rule is generic: it names no PRD, project or language', () => {

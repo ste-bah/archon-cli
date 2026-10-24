@@ -27,6 +27,7 @@ pub struct SiblingSource {
 pub enum SiblingExclusionReason {
     MissingAtRoot,
     SiblingTreeFromSelectedRoot,
+    ProjectRootOrAncestor,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,10 +138,17 @@ pub fn discover_with_diagnostics(project: &std::path::Path, checks: &[String]) -
                 });
                 continue;
             }
-            if candidate.starts_with(&project)
+            if candidate == project
                 || candidate == project.parent().unwrap_or(&project)
                 || project.starts_with(&candidate)
             {
+                candidates.push(SiblingCandidate {
+                    path: named.path,
+                    reason: SiblingExclusionReason::ProjectRootOrAncestor,
+                });
+                continue;
+            }
+            if candidate.starts_with(&project) {
                 continue;
             }
             candidates.push(SiblingCandidate {
