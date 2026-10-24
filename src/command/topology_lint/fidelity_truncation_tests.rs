@@ -108,6 +108,20 @@ async fn a_reply_cut_at_the_output_limit_is_continued_and_then_judged() {
 }
 
 #[tokio::test]
+async fn a_length_stop_before_json_is_continued() {
+    let whole = document();
+    let client = scripted(vec![(String::new(), "length"), (whole, "end_turn")]);
+    let (asked, kept) = ask_once(&client).await;
+    assert!(
+        matches!(asked, Ok(Asked::Answered)),
+        "continued, then judged: {:?}",
+        asked.err()
+    );
+    assert_eq!(kept, 1);
+    assert_eq!(client.asked.lock().unwrap().len(), 2, "one continuation");
+}
+
+#[tokio::test]
 async fn a_truncation_that_never_completes_is_an_unusable_critic_reply_not_operational() {
     let whole = document();
     let head = &whole[..whole.len() / 2];

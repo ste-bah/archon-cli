@@ -3,6 +3,15 @@ use super::*;
 #[path = "acceptance_scratch_siblings_target_tests.rs"]
 mod target_tests;
 
+/// The revisions of a copy in which every named sibling was copied.
+fn copied_all(
+    copied: WorkflowResult<Copied>,
+) -> Vec<crate::acceptance_sibling_paths::SiblingRevision> {
+    let copied = copied.unwrap();
+    assert!(copied.failures.is_empty(), "{:?}", copied.failures);
+    copied.revisions
+}
+
 fn run_git(path: &Path, args: &[&str]) {
     let output = std::process::Command::new("git")
         .arg("-C")
@@ -163,7 +172,7 @@ fn configured_copy_keeps_nested_tracked_sibling_and_omits_build_output() {
     std::fs::create_dir_all(sibling.join("target/debug")).unwrap();
     std::fs::write(sibling.join("target/debug/output"), b"untracked").unwrap();
     let mut remaining = u64::MAX;
-    let evidence = copy_external(
+    let evidence = copied_all(copy_external(
         &project,
         &project,
         &copied,
@@ -173,8 +182,7 @@ fn configured_copy_keeps_nested_tracked_sibling_and_omits_build_output() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
-    )
-    .unwrap();
+    ));
     #[cfg(unix)]
     let command = std::process::Command::new("/bin/sh")
         .args(["-c", "cd ../a/b && sh check.sh"])
@@ -265,7 +273,7 @@ fn repository_sibling_alias_uses_the_scratch_tree_commit() {
     assert!(!live_check.status.success());
 
     let mut remaining = u64::MAX;
-    let evidence = copy_external(
+    let evidence = copied_all(copy_external(
         &project,
         &repository,
         &copied_project,
@@ -275,8 +283,7 @@ fn repository_sibling_alias_uses_the_scratch_tree_commit() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
-    )
-    .unwrap();
+    ));
     let alias = copied_project.join("../repo-dir");
     assert!(alias.join("Cargo.toml").is_file());
     assert_eq!(
@@ -305,7 +312,7 @@ fn a_check_without_an_outside_path_keeps_the_scratch_parent_unchanged() {
     std::fs::create_dir_all(&copied).unwrap();
     let before = std::fs::read_dir(copied.parent().unwrap()).unwrap().count();
     let mut remaining = u64::MAX;
-    copy_external(
+    copied_all(copy_external(
         &project,
         &project,
         &copied,
@@ -315,8 +322,7 @@ fn a_check_without_an_outside_path_keeps_the_scratch_parent_unchanged() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
-    )
-    .unwrap();
+    ));
     let after = std::fs::read_dir(copied.parent().unwrap()).unwrap().count();
     assert_eq!(before, after);
 }
@@ -352,7 +358,7 @@ fn copies_a_standalone_sibling_file_and_omits_nested_build_output() {
     std::fs::write(sibling.join("target/debug/output"), "build").unwrap();
     std::fs::write(sibling.join("node_modules/pkg/output"), "dependency").unwrap();
     let mut remaining = u64::MAX;
-    let evidence = copy_external(
+    let evidence = copied_all(copy_external(
         &project,
         &project,
         &copied,
@@ -362,8 +368,7 @@ fn copies_a_standalone_sibling_file_and_omits_nested_build_output() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
-    )
-    .unwrap();
+    ));
     let copied_sibling = copied.parent().unwrap().join("sibling");
     assert_eq!(
         std::fs::read_to_string(copied.parent().unwrap().join("note.txt")).unwrap(),
@@ -409,7 +414,7 @@ fn a_sibling_root_named_target_is_copied() {
     std::fs::write(sibling.join("needed.txt"), "current target root").unwrap();
     std::fs::write(sibling.join("target/debug/output"), "nested build").unwrap();
     let mut remaining = u64::MAX;
-    copy_external(
+    copied_all(copy_external(
         &project,
         &project,
         &copied,
@@ -419,8 +424,7 @@ fn a_sibling_root_named_target_is_copied() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
-    )
-    .unwrap();
+    ));
     let copied_target = copied.parent().unwrap().join("target");
     assert_eq!(
         std::fs::read_to_string(copied_target.join("needed.txt")).unwrap(),

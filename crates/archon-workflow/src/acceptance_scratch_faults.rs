@@ -27,6 +27,15 @@ pub const TARGET_MAPPING_CHANGED: &str = "native build identity changed: target 
 /// ancestor of it, which no site copies.
 pub const SIBLING_ROOT_REFUSED: &str =
     "the check names a sibling path that resolves to the project root or an ancestor of it";
+/// The check alone names a sibling path whose copy is larger than the
+/// site's scratch size limit.
+pub const SIBLING_TOO_LARGE: &str =
+    "the check names a sibling path whose copy exceeds the site's scratch size limit";
+/// The check alone names a sibling path whose shape the site cannot hold:
+/// a path that is not a directory where one is needed, or one that
+/// collides with a path the site already has.
+pub const SIBLING_SHAPE_REFUSED: &str =
+    "the check names a sibling path whose shape the site cannot copy";
 
 /// Parts of the build identity that only the check's own run can change:
 /// the host's tools and environment are not among them.
@@ -87,6 +96,18 @@ pub fn check_fault(error: &str) -> CheckFault {
         return CheckFault::Check {
             trigger: "it names a path outside its working directory that resolves to the project root or a directory above it, which the site never copies",
             remedy: "name only paths under its own working directory or a sibling directory beside it, never the project root or a directory above it",
+        };
+    }
+    if error.starts_with(SIBLING_TOO_LARGE) {
+        return CheckFault::Check {
+            trigger: "it names a path outside its working directory whose copy is larger than the site's scratch size limit",
+            remedy: "name only the sibling files or directories it reads, and keep bulky data out of them",
+        };
+    }
+    if error.starts_with(SIBLING_SHAPE_REFUSED) {
+        return CheckFault::Check {
+            trigger: "it names a path outside its working directory that is not a directory where one is needed, or that collides with a path of the site",
+            remedy: "name only existing sibling files or directories beside its working directory, by the path they have",
         };
     }
     if error.contains(TARGET_MAPPING_CHANGED) {
