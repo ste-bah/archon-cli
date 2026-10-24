@@ -45,9 +45,11 @@ fn read_missing_ledger_is_none_and_corrupt_ledger_names_its_path() {
     let temp = tempfile::tempdir().unwrap();
     assert!(read(temp.path(), "missing").unwrap().is_none());
 
-    let directory = temp.path().join("decomposition/reverify");
-    std::fs::create_dir_all(&directory).unwrap();
-    let path = directory.join("remediation-corrupt.json");
+    // Built as `read` builds it, so the separators match on every platform.
+    let path = temp
+        .path()
+        .join("decomposition/reverify/remediation-corrupt.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, b"not json").unwrap();
     let error = read(temp.path(), "corrupt").unwrap_err();
     assert!(format!("{error:#}").contains(&path.display().to_string()));

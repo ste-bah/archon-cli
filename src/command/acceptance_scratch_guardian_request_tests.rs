@@ -63,6 +63,9 @@ fn a_complete_request_line_is_read_without_its_newline() {
 fn issue356_a_slow_but_progressing_request_line_is_read_whole() {
     let (reader, mut writer) = std::io::pipe().unwrap();
     let limit = Duration::from_millis(400);
+    // The last byte is written 600ms after the feeder starts, so the stall
+    // ends at least `limit` later, measured from the same start.
+    let started = std::time::Instant::now();
     let feeder = std::thread::spawn(move || {
         for byte in b"{\"slow\":1}\n" {
             std::thread::sleep(Duration::from_millis(100));
@@ -85,6 +88,9 @@ fn issue356_a_slow_but_progressing_request_line_is_read_whole() {
 fn issue356_a_request_stall_is_measured_from_its_last_byte() {
     let (reader, mut writer) = std::io::pipe().unwrap();
     let limit = Duration::from_millis(400);
+    // The last byte is written 600ms after the feeder starts, so the stall
+    // ends at least `limit` later, measured from the same start.
+    let started = std::time::Instant::now();
     let feeder = std::thread::spawn(move || {
         for _ in 0..4 {
             std::thread::sleep(Duration::from_millis(150));
@@ -92,7 +98,8 @@ fn issue356_a_request_stall_is_measured_from_its_last_byte() {
         }
         writer
     });
-    let (result, elapsed) = read_with_limit(reader, limit, Duration::from_secs(60));
+    let (result, _) = read_with_limit(reader, limit, Duration::from_secs(60));
+    let elapsed = started.elapsed();
     drop(feeder.join().unwrap());
     assert!(
         matches!(
