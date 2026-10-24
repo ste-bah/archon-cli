@@ -47,6 +47,7 @@ fn passability_key_uses_probe_inputs_and_outcome_not_output_text() {
         "judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}
     })).unwrap();
     let result = |stdout: &[u8], exit_code| archon_workflow::acceptance_scratch::CheckResult {
+        fault: None,
         acceptance_id: "AC-X-001".into(),
         exit_code,
         quota_walk_count: 0,

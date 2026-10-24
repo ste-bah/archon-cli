@@ -18,7 +18,8 @@ const refute = id => ({...clean(), gateEnvelope:{policy_findings:[{
 // `gates` is the freeze outcome sequence. A pause is resumed (returns).
 async function run(gates) {
   const ctx = {args:{acceptanceCriteria:{A:'a', B:'b', C:'c'}, authorMaxParallelism:1, gateMode:'enforce'},
-    __archonValidateAcceptanceEntry: () => '[]'};
+    __archonValidateAcceptanceEntry: () => '[]',
+    __archonHost: (kind, payload) => { throw new Error(`${kind}: ${JSON.parse(payload).reason}`); }};
   vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   const authored = [], stdins = [], pauses = [], prompts = [];
   let error;
@@ -163,7 +164,29 @@ async function stalePublishedChangeWinsAndShowsTheDraft() {
   assert.doesNotMatch(out.prompts[3], /replaced your previous draft/);
 }
 
+// H1: a check the host could not prove (an operational finding) beside a
+// check its author can repair stops nothing: nothing is published, the
+// author repairs its own check, and the next freeze probes the unproven one
+// again. Alone, an operational finding still stops the phase.
+const unproven = {text:"check 'A': operational: the host could not prove it", subject:'A',
+  remediation_scope:'operational'};
+const unprovenBeside = id => () => ({postcondition:{satisfied:false}, gateEnvelope:{policy_findings:[
+  unproven, {text:`check '${id}': its own run gave no verdict; the check must change`, subject:id,
+    remediation_scope:'candidate_artifact'}]}});
+async function anUnprovenCheckBesideAnAuthoredFindingStopsNothing() {
+  const out = await run([unprovenBeside('B'), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'B'], 'only the authored finding is re-authored');
+  assert.equal(out.stdins.length, 2, 'the next freeze probes the unproven check again');
+}
+async function anUnprovenCheckAloneStopsThePhase() {
+  const out = await run([() => ({postcondition:{satisfied:false}, gateEnvelope:{policy_findings:[unproven]}})]);
+  assert.match(out.error || '', /^terminalStop: acceptance stopped: check 'A': operational/);
+}
+
 const tests = [
+  ['an unproven check beside an authored finding stops nothing', anUnprovenCheckBesideAnAuthoredFindingStopsNothing],
+  ['an unproven check alone stops the phase', anUnprovenCheckAloneStopsThePhase],
   ['a stale freeze keeps the round\'s unpublished repair', staleContractKeepsTheRoundsUnpublishedRepair],
   ['a published change since the draft base wins and shows the draft', stalePublishedChangeWinsAndShowsTheDraft],
   ['a stale freeze rebuilds from the current contract', staleContractRebuildsFromTheCurrentContract],

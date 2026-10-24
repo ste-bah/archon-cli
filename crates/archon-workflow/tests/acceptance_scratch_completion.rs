@@ -7,6 +7,7 @@
 
 #[path = "support/native_fixture.rs"]
 mod support;
+use archon_workflow::acceptance_scratch::faults::{CheckFault, FaultCause, classify};
 use archon_workflow::acceptance_scratch::observe_commands;
 use archon_workflow::acceptance_world::AcceptanceCommandKind;
 use archon_workflow::task_set_contract::AcceptanceCheck;
@@ -100,13 +101,28 @@ async fn replaced_target_link_voids_result_before_reuse() {
             .contains("identity")
     );
     // N1: the second check runs on a restored site (never the substituted
-    // target) and its own substitution voids its own result too.
+    // target) and its own substitution voids its own result too. Neither
+    // fault stops the batch: the observation stands, the second check ran
+    // to its own exit on the restored site, and each fault is its own.
     assert_eq!(out.checks.len(), 2);
-    assert!(out.checks.iter().all(|c| {
-        c.operational_error
-            .as_ref()
-            .is_some_and(|e| e.contains("identity"))
-    }));
+    assert!(out.operational_errors.is_empty(), "{out:?}");
+    assert!(out.teardown_verified && out.live_roots_unchanged, "{out:?}");
+    assert_eq!(out.check_evidence.len(), 2, "both checks ran on a site");
+    for check in &out.checks {
+        let error = check.operational_error.as_deref().unwrap_or_default();
+        assert!(error.contains("identity"), "{check:?}");
+        assert_eq!(check.exit_code, Some(0), "ran to its own exit: {check:?}");
+        let fault = classify(check.fault.as_ref(), error);
+        assert!(
+            matches!(fault, CheckFault::Check { .. }),
+            "its own: {check:?}"
+        );
+        assert_eq!(
+            check.fault,
+            Some(FaultCause::TargetMappingChanged),
+            "{check:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -282,7 +298,10 @@ async fn cache_configuration_change_cannot_feed_a_later_check() {
 
 #[tokio::test]
 async fn cleanup_registration_damage_cannot_report_verified_teardown() {
-    let cmd = "test -f input && rm ../repo/.git && test -f input";
+    // H5: deleting the repository copy's own link is the check's fault and
+    // the host repairs it (next test); deleting the live repository's
+    // administrative entry for the worktree is damage outside the site.
+    let cmd = "test -f input && rm -rf \"$(sed 's/^gitdir: //' ../repo/.git)\" && test -f input";
     let (t, p, commit, c, refs) = fixture(cmd);
     let out = observe_commands(
         &p,
@@ -300,6 +319,52 @@ async fn cleanup_registration_damage_cannot_report_verified_teardown() {
         "lost worktree registration was silently accepted"
     );
     assert!(out.cleanup_error.is_some());
+}
+
+/// H5: the fixture the test above used before (deleting the copy's own link,
+/// then required to fail the teardown), under its new outcome: a check that deletes its repository
+/// copy's git link removed a part of its own site. That is never silently
+/// accepted: it is the check's own fault. The host puts back the link the
+/// live repository wrote, removes the registration, and verifies it gone.
+#[tokio::test]
+async fn cleanup_registration_damage_is_the_checks_fault_and_teardown_is_verified() {
+    let cmd = "test -f input && rm ../repo/.git && test -f input";
+    let (t, p, commit, c, refs) = fixture(cmd);
+    let out = observe_commands(
+        &p,
+        &commit,
+        &c,
+        "chain",
+        &refs,
+        &t.path().join("evidence"),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+    .unwrap();
+    assert!(!out.passed(), "lost worktree link was silently accepted");
+    let removed = FaultCause::Removed {
+        part: "source".into(),
+    };
+    assert_eq!(out.checks[0].fault, Some(removed), "{out:?}");
+    assert!(
+        out.teardown_verified && out.cleanup_error.is_none(),
+        "{out:?}"
+    );
+    let listed = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&p.repository)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .unwrap();
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    assert_eq!(
+        listed
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count(),
+        1,
+        "{listed}"
+    );
 }
 
 #[tokio::test]

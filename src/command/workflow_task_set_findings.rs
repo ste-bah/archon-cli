@@ -438,15 +438,15 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
                 &contract,
                 &named,
                 scope,
-                "sonnet",
+                super::judge::JUDGE_MODEL_ALIAS,
                 &gate,
                 Some(tasks_root),
             )
             .await
         }
         false => {
-            super::reauthor::reauthor(client.as_ref(), &contract, &named, scope, "sonnet", &gate)
-                .await
+            let judge = super::judge::JUDGE_MODEL_ALIAS;
+            super::reauthor::reauthor(client.as_ref(), &contract, &named, scope, judge, &gate).await
         }
     };
     for diagnostic in probe.take_diagnostics() {

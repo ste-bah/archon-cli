@@ -18,6 +18,7 @@ fn run(command: &str) -> archon_workflow::acceptance_scratch::CheckResult {
         .output()
         .unwrap();
     archon_workflow::acceptance_scratch::CheckResult {
+        fault: None,
         acceptance_id: "AC-EVID-418".into(),
         exit_code: output.status.code(),
         quota_walk_count: 0,

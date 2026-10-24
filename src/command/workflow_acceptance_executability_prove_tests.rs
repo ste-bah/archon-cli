@@ -17,6 +17,7 @@ fn persisted_output_evidence_uses_the_shared_excerpt_limits() {
 fn persisted_output_evidence_is_bounded_utf8_safe_and_redacted() {
     let secret = format!("sk-proj-{}", "a".repeat(40));
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        fault: None,
         acceptance_id: "AC-EVIDENCE".into(),
         exit_code: Some(1),
         quota_walk_count: 0,
@@ -40,6 +41,7 @@ fn a_long_secret_across_the_excerpt_budget_is_fully_redacted_and_the_tail_kept()
     let secret = format!("sk-proj-{}", "b".repeat(900));
     let stderr = format!("{}\n{secret}\nfinal assertion failed", "x".repeat(1_900));
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        fault: None,
         acceptance_id: "AC-EVIDENCE".into(),
         exit_code: Some(1),
         quota_walk_count: 0,
@@ -150,6 +152,7 @@ async fn prove_routes_a_passing_unknown_writer_reappearance_to_an_author_finding
     };
     let markers = super::mutation::Markers::new();
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC-UNKNOWN-WRITER".into(),
         exit_code: Some(0),

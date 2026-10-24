@@ -127,10 +127,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Review merge: the decomposition author gets the host re-author's check-path rule byte for byte, plus the absent/not-supplied input rule.
     // D5: a set gate's unusable judge reply counts in the ordinary no-progress window, not the host's operational one.
     // O1/O3: a skeleton re-author re-authors only the bodies its change reaches; the dropped-task check is an assertion.
+    // H1: an operational (host-unproven) finding beside an authored finding stops nothing; alone it still stops the phase.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "cdfd19ffb17189c37fe7d1eedba7cfc75008df4a680560d2661a63c942124839"
+        "a6ebce6fe32c0841ed84dd0cab45eb2ee045bc650d4e1ce7ed61c3d81f38d8b9"
     );
 }

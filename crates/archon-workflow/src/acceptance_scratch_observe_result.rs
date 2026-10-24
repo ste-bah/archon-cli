@@ -21,6 +21,15 @@ pub(super) fn operational(id: &str, error: String) -> CheckResult {
         stdout: vec![],
         stderr: vec![],
         operational_error: Some(error),
+        fault: None,
         environment_note: None,
+    }
+}
+
+/// [`operational`], recording the fault's typed `cause` when it has one.
+pub(super) fn faulted(id: &str, error: String, cause: Option<faults::FaultCause>) -> CheckResult {
+    CheckResult {
+        fault: cause,
+        ..operational(id, error)
     }
 }

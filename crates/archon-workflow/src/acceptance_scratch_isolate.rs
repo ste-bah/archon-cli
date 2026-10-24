@@ -5,23 +5,72 @@
 //! process that may still hold it is given that fault as its own result,
 //! and the site is restored before the next check runs. Only a site that
 //! cannot be restored for anyone stops the batch, and that is the host's.
+use super::faults::{FaultCause, identity_changed};
 use super::identity::{BuildIdentity, CaptureFailure};
 use super::*;
 
-/// The operational error of a check whose own site could not be captured
-/// after its run: a part it removed is named as the identity part it
-/// changed, which `faults::check_fault` gives to the check.
-pub(super) fn capture_failed(failure: &CaptureFailure) -> String {
-    match failure {
-        CaptureFailure::Removed { part, path } => format!(
-            "{} after the check removed {}",
-            super::faults::identity_changed(&[part]),
-            path.display()
+/// Record on `check` the fault its own run left at its site, judged from
+/// `after` (the site's identity after the run) against `baseline`, with its
+/// typed cause where it is the run's; whether the site no longer verifies.
+pub(super) fn judge_site(
+    check: &mut CheckResult,
+    baseline: &BuildIdentity,
+    after: &Result<BuildIdentity, CaptureFailure>,
+) -> bool {
+    let (text, cause) = match after {
+        Ok(current) if current == baseline => return false,
+        Ok(current) => {
+            let parts = baseline.changed_parts(current);
+            let named = parts.iter().map(|part| part.to_string()).collect();
+            let cause = FaultCause::IdentityChanged { parts: named };
+            (identity_changed(&parts), Some(cause))
+        }
+        Err(CaptureFailure::Removed { part, path }) => removed(part, path),
+        Err(CaptureFailure::TargetMapping) => (
+            uncaptured(&CaptureFailure::TargetMapping.into_error()),
+            Some(FaultCause::TargetMappingChanged),
         ),
-        CaptureFailure::Other(e) => format!(
-            "native scratch source or build identity could not be captured after the check ({e}); warm target reuse refused"
-        ),
+        Err(CaptureFailure::Other(e)) => (uncaptured(e), None),
+    };
+    check.operational_error = Some(text);
+    check.fault = cause;
+    true
+}
+
+/// Record on `check` that its site could not be read after its run: a
+/// part its own run removed is its fault, a fault already recorded stays
+/// (what the run did explains the failed read), anything else the host's.
+pub(super) fn read_failed(
+    check: &mut CheckResult,
+    roots: &ScratchRoots,
+    part: &'static str,
+    error: WorkflowError,
+) {
+    if check.fault.is_some() {
+        return;
     }
+    let (text, cause) = match CaptureFailure::of(roots, part, error) {
+        CaptureFailure::Removed { part, path } => removed(part, &path),
+        other => (other.into_error().to_string(), None),
+    };
+    check.operational_error = Some(text);
+    check.fault = cause;
+}
+
+fn removed(part: &str, path: &Path) -> (String, Option<FaultCause>) {
+    let text = format!(
+        "{} after the check removed {}",
+        identity_changed(&[part]),
+        path.display()
+    );
+    let part = part.to_string();
+    (text, Some(FaultCause::Removed { part }))
+}
+
+fn uncaptured(error: &WorkflowError) -> String {
+    format!(
+        "native scratch source or build identity could not be captured after the check ({error}); warm target reuse refused"
+    )
 }
 
 /// What a batch's first site was, on every part that does not depend on
@@ -40,15 +89,36 @@ impl FirstSite {
     ) -> Self {
         Self {
             identity: identity.clone(),
-            manifest: manifest.clone(),
+            manifest: site_neutral(roots, manifest),
             root: roots.root().to_path_buf(),
             target: roots.target(),
         }
     }
 }
 
-/// Tear `roots` down and prepare a fresh site for `checks`, returning its
-/// baseline identity. The warm build output is kept only when no process
+/// `manifest`, of the project copy of `roots`, on what does not depend on
+/// where or beside what the site is laid out: its paths are named, not
+/// spelled, and a `.git` link to the site's own worktree (the combined
+/// view's) is named by what it resolves to, never by the administrative
+/// directory name the live repository picked for it.
+fn site_neutral(
+    roots: &ScratchRoots,
+    manifest: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let own_link = roots.links_own_worktree(&roots.project().join(".git"));
+    (manifest.iter())
+        .map(|(key, value)| match key.as_str() {
+            ".git" if own_link => (key.clone(), "<the site's own worktree link>".into()),
+            _ => (
+                key.clone(),
+                identity::neutral(value, roots.root(), &roots.target()),
+            ),
+        })
+        .collect()
+}
+
+/// Tear `roots` down and prepare a fresh site for `checks` under the same
+/// build cache lease (held throughout), returning its baseline identity. The warm build output is kept only when no process
 /// the last check started can still reach it (`forget_unless_idle`); else
 /// the fresh site and its build output are at paths no such process knows.
 /// The fresh site must match `first` on every part that does not depend on
@@ -63,10 +133,10 @@ pub(super) fn restore(
     checks: &[(String, crate::task_set_contract::TrustedCwd)],
     first: &FirstSite,
 ) -> WorkflowResult<BuildIdentity> {
+    let mut lease = None;
     if let Some(current) = roots.as_mut() {
-        current
-            .forget_unless_idle()
-            .and_then(|()| current.cleanup())
+        lease = (current.forget_unless_idle())
+            .and_then(|()| current.tear_down_keeping_lease())
             .map_err(|e| {
                 invalid(format!(
                     "the scratch site could not be restored for the remaining checks: {e}"
@@ -74,21 +144,14 @@ pub(super) fn restore(
             })?;
     }
     *roots = None;
-    let fresh = ScratchRoots::prepare_inner_with_checks(policy, commit, checks)?;
+    let fresh = ScratchRoots::prepare_leased(policy, commit, checks, lease)?;
     let identity = identity::capture(&fresh, policy)?;
     let at = (fresh.root().to_path_buf(), fresh.target());
     let mut changed =
         first
             .identity
             .host_parts_changed((&first.root, &first.target), &identity, (&at.0, &at.1));
-    let manifest = |map: &BTreeMap<String, String>, (root, target): (&Path, &Path)| {
-        (map.iter())
-            .map(|(key, value)| (key.clone(), identity::neutral(value, root, target)))
-            .collect::<BTreeMap<_, _>>()
-    };
-    if manifest(&first.manifest, (&first.root, &first.target))
-        != manifest(&inventory(fresh.project())?, (&at.0, &at.1))
-    {
+    if first.manifest != site_neutral(&fresh, &inventory(fresh.project())?) {
         changed.push("copied project inputs");
     }
     *roots = Some(fresh);

@@ -50,22 +50,28 @@ fn host_unproven(error: WorkflowError, cancel: &AtomicBool) -> WorkflowResult<Wo
     Ok(error)
 }
 
+/// A check's own result known before any site exists, with its typed
+/// cause when it is the check's fault.
+pub(super) type Own = (String, Option<faults::FaultCause>);
+
 /// Each check's own result before any site exists: its authorization
-/// error, or the refusal of a path it names.
+/// error, or the refusal of a path it names (that check's own fault).
 pub(super) fn pre_site<T>(
     commands: &[WorkflowResult<T>],
     refusals: &[Option<String>],
-) -> Vec<Option<String>> {
+) -> Vec<Option<Own>> {
+    let refused = |text: &String| (text.clone(), Some(faults::FaultCause::SiblingRootRefused));
     (commands.iter().zip(refusals))
-        .map(|(command, refused)| {
-            (command.as_ref().err().map(|e| e.to_string())).or_else(|| refused.clone())
+        .map(|(command, refusal)| {
+            (command.as_ref().err().map(|e| (e.to_string(), None)))
+                .or_else(|| refusal.as_ref().map(refused))
         })
         .collect()
 }
 
 /// Each check's index among the site's checks: those with no `pre_site`
 /// result, in order.
-pub(super) fn positions(pre_site: &[Option<String>]) -> Vec<Option<usize>> {
+pub(super) fn positions(pre_site: &[Option<Own>]) -> Vec<Option<usize>> {
     let mut next = 0;
     (pre_site.iter())
         .map(|own| {
@@ -80,15 +86,18 @@ pub(super) fn positions(pre_site: &[Option<String>]) -> Vec<Option<usize>> {
 /// The results of the checks `refs` still to run after a failed rebuild.
 pub(super) fn unproven(
     refs: &[crate::acceptance_world::FrozenCommandRef],
-    pre_site: &[Option<String>],
+    pre_site: &[Option<Own>],
     error: &WorkflowError,
 ) -> Vec<CheckResult> {
     (refs.iter().zip(pre_site))
         .map(|(reference, own)| {
-            let result = own
-                .clone()
-                .unwrap_or_else(|| format!("site rebuild failed; check is host-unproven: {error}"));
-            super::operational(&reference.acceptance_id, result)
+            let (result, cause) = own.clone().unwrap_or_else(|| {
+                (
+                    format!("site rebuild failed; check is host-unproven: {error}"),
+                    None,
+                )
+            });
+            super::faulted(&reference.acceptance_id, result, cause)
         })
         .collect()
 }

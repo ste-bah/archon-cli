@@ -442,7 +442,9 @@ fn native_lease_excludes_a_competing_process_until_owner_releases() {
 async fn voided_native_observation_retains_run_evidence() {
     let mut fixture = frozen_fixture(vec![criterion(
         "AC-X-001",
-        command("test -f input && rm ../repo/.git".into()),
+        // The check deletes the live repository's administrative entry
+        // for its worktree: damage outside its site the host cannot undo.
+        command("test -f input && rm -rf \"$(sed 's/^gitdir: //' ../repo/.git)\"".into()),
     )]);
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {

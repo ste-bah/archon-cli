@@ -38,6 +38,7 @@ fn real(command: &str, cwd: &Path) -> CheckResult {
         .output()
         .expect("the system shell runs the check");
     CheckResult {
+        fault: None,
         acceptance_id: "AC-420".into(),
         exit_code: output.status.code(),
         stdout: output.stdout,

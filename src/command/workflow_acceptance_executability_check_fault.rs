@@ -14,7 +14,7 @@
 //! again after a resume goes to its author. Everything else stays the
 //! host's.
 
-use archon_workflow::acceptance_scratch::faults::{CheckFault, check_fault};
+use archon_workflow::acceptance_scratch::faults::{CheckFault, classify};
 
 use super::*;
 
@@ -29,13 +29,16 @@ pub(super) enum Fault {
     Host,
 }
 
-/// Whose the operational error `error` is; no error (no result at all) is
-/// the host's.
-pub(super) fn of_error(error: Option<&str>) -> Fault {
-    let Some(error) = error else {
+/// Whose the operational error of `result` is, by the typed cause the
+/// observation recorded on it when it has one; no error (no result at all)
+/// is the host's.
+pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
+    let Some((result, error)) =
+        result.and_then(|result| Some((result, result.operational_error.as_deref()?)))
+    else {
         return Fault::Host;
     };
-    match check_fault(error) {
+    match classify(result.fault.as_ref(), error) {
         CheckFault::Check { trigger, remedy } => Fault::Check {
             trigger,
             remedy,
@@ -51,7 +54,7 @@ pub(super) fn of_error(error: Option<&str>) -> Fault {
 /// the host chose where the check ran.
 pub(super) fn of_mutation(result: &CheckResult, markers: &mutation::Markers) -> Fault {
     if result.operational_error.is_some() {
-        return of_error(result.operational_error.as_deref());
+        return of_result(Some(result));
     }
     if markers.guarded(result) {
         return Fault::Host;

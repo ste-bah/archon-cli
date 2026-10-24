@@ -35,6 +35,12 @@ use incomplete::judge_error_class;
 #[cfg(test)]
 pub(crate) use incomplete::tests::produced as produced_incomplete;
 
+/// The tier alias the whole-set freeze judge is asked for. The client's
+/// provider configuration resolves it to the model that judges
+/// (`WorkflowLlmClient::resolve_model_alias`), and that resolved model is
+/// what a judgment records and a saved repair is keyed by.
+pub(crate) const JUDGE_MODEL_ALIAS: &str = "sonnet";
+
 const NAMED_FILES_INSTRUCTION: &str = "A named-file regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails. A guard names its deciding file by its literal path relative to the check's working directory. Naming a file or asserting that it exists does not make it the deciding assertion. Judge supplied named_files content as written. These regression-guard rules apply to a check whose deciding test or implementation exists; a named deciding input marked absent is behaviour not implemented yet and is judged by the general rules; a deciding input marked not_supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Refute a check if an in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file. A duplicated or relocated implementation may be an in-bounds counterexample when the delivered path uses it while the named test checks an old copy; a speculative counterexample requiring deliberate gaming remains invalid. The host may use a move-aside proof only for named inputs it actually moves; requiring the check to fail when such an input is moved aside is proof of the guard, never a counterexample. Inputs the host does not move, including scripts run through an interpreter and build manifests, do not qualify for that proof.";
 
 #[derive(Debug, serde::Deserialize)]
@@ -292,7 +298,7 @@ pub(super) async fn judge_contract_resumable_with_roots(
     judge_batch(
         client,
         contract,
-        "sonnet",
+        JUDGE_MODEL_ALIAS,
         |attempt| {
             if expected.is_empty()
                 && attempt.acceptance.is_empty()
@@ -328,7 +334,7 @@ pub(super) async fn judge_contract_subset_resumable(
     judge_batch(
         client,
         subset,
-        "sonnet",
+        JUDGE_MODEL_ALIAS,
         require_judged_prose,
         partial,
         &JudgeRoots::default(),
@@ -345,7 +351,7 @@ pub(super) async fn judge_contract_subset_resumable_with_roots(
     judge_batch(
         client,
         subset,
-        "sonnet",
+        JUDGE_MODEL_ALIAS,
         require_judged_prose,
         partial,
         roots,

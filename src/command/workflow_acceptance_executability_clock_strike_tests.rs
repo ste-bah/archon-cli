@@ -204,6 +204,7 @@ fn set_command(contract: &mut AcceptanceContract, command: &str) {
 
 fn failed_result(id: &str, stderr: &str) -> CheckResult {
     CheckResult {
+        fault: None,
         acceptance_id: id.into(),
         exit_code: Some(101),
         quota_walk_count: 0,

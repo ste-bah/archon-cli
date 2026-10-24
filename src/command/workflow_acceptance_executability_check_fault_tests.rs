@@ -95,6 +95,7 @@ fn mutation_run(
     error: Option<&str>,
 ) -> repairs::TreeRun {
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: id.into(),
         exit_code: Some(1),
@@ -221,4 +222,30 @@ async fn a_policy_defect_of_one_check_never_leaves_its_sibling_unproven() {
         "{unproven:?}"
     );
     assert!(!unproven.contains_key("AC-X-002"), "{unproven:?}");
+}
+
+/// H5: a fault the observation recorded with its typed cause is judged by
+/// that cause, never by its message text.
+#[test]
+fn a_typed_fault_cause_is_judged_by_the_cause_not_the_text() {
+    use archon_workflow::acceptance_scratch::faults::FaultCause;
+    let markers = mutation::Markers::new();
+    let run = mutation_run(
+        "AC-X-001",
+        &markers,
+        "none",
+        Some("the site could not be read"),
+    );
+    let mut result = run.results["AC-X-001"].result.clone();
+    assert!(matches!(
+        check_fault::of_result(Some(&result)),
+        check_fault::Fault::Host
+    ));
+    result.fault = Some(FaultCause::Removed {
+        part: "source".into(),
+    });
+    assert!(matches!(
+        check_fault::of_result(Some(&result)),
+        check_fault::Fault::Check { .. }
+    ));
 }

@@ -35,6 +35,11 @@
 //! run) then leaves its warm target to the next one.
 use super::*;
 use std::time::SystemTime;
+#[path = "acceptance_scratch_cache_idle.rs"]
+mod idle;
+#[cfg(all(test, unix))]
+use idle::lsof_says_idle;
+use idle::target_idle;
 
 const RECORD: &str = "mtimes.json";
 /// In each slot: one `pending` line before every check's spawn, then the
@@ -225,17 +230,31 @@ impl Lease {
         // Only this generation's slot can have built into its target.
         let slot = lease.slot();
         let stale = slot.symlink_metadata().is_ok() && !lease.left_intact(&slot);
-        // Half the scratch limit, so this observation has room to build.
-        let oversized = super::process::scratch_size(&lease.target()).is_ok_and(|n| n > limit / 2);
+        lease.prune_siblings();
+        lease.ready(stale, limit)?;
+        Ok(lease)
+    }
+
+    /// This held lease, for the next site of the same observation: the
+    /// lock is never released between its sites (see the module docs).
+    pub(super) fn renew(mut self, limit: u64) -> WorkflowResult<Self> {
+        self.given.clear();
+        self.ready(false, limit)?;
+        Ok(self)
+    }
+
+    /// Forget every build when `stale` or the target is over half the
+    /// scratch limit (so the observation has room to build), and make the
+    /// target ready.
+    fn ready(&mut self, stale: bool, limit: u64) -> WorkflowResult<()> {
+        let oversized = super::process::scratch_size(&self.target()).is_ok_and(|n| n > limit / 2);
         if stale || oversized {
-            lease.poison()?;
+            self.poison()?;
         }
-        for old in lease.leftovers("target-") {
+        for old in self.leftovers("target-") {
             let _ = io::remove_owned_tree(&old);
         }
-        lease.prune_siblings();
-        std::fs::create_dir_all(lease.target()).map_err(|e| io_error(&lease.target(), e))?;
-        Ok(lease)
+        std::fs::create_dir_all(self.target()).map_err(|e| io_error(&self.target(), e))
     }
 
     /// The path every observation of this generation is laid out at.
@@ -436,51 +455,4 @@ fn set_mtime(path: &Path, stamp: Stamp) -> WorkflowResult<Stamp> {
         .and_then(|m| m.modified())
         .map_err(|e| io_error(path, e))?;
     Ok(Stamp::of(held))
-}
-
-/// lsof includes cwd references and open files, including detached descendants.
-/// Exit 1 with no diagnostics means no matches; any scan failure is unsafe.
-/// The guardian runs this under the policy's toolchain PATH, which need not
-/// name the directory `lsof` is in, so the shared lookup finds it.
-#[cfg(unix)]
-fn target_idle(target: &Path) -> bool {
-    lsof_says_idle(archon_shell::process_tree::lsof_program(), target)
-}
-
-/// [`target_idle`] with the `lsof` lookup's result given. No `lsof`, or one
-/// that cannot run, proves nothing: the target counts as busy.
-#[cfg(unix)]
-fn lsof_says_idle(program: std::io::Result<PathBuf>, target: &Path) -> bool {
-    let program = match program {
-        Ok(program) => program,
-        Err(error) => {
-            eprintln!(
-                "acceptance cache idle check has no lsof: {error}; {} counts as busy",
-                target.display()
-            );
-            return false;
-        }
-    };
-    match archon_shell::spawn::command(&program)
-        .args(["-nP", "-t", "+D"])
-        .arg(target)
-        .output()
-    {
-        Ok(out) => out.status.code() == Some(1) && out.stdout.is_empty() && out.stderr.is_empty(),
-        Err(error) => {
-            eprintln!(
-                "acceptance cache idle check could not run {}: {error}; {} counts as busy",
-                program.display(),
-                target.display()
-            );
-            false
-        }
-    }
-}
-
-/// Off Unix there is no holder probe, so no target is proved idle (and a
-/// shared cache is refused before any slot is checked; see `try_lock`).
-#[cfg(not(unix))]
-fn target_idle(_target: &Path) -> bool {
-    false
 }

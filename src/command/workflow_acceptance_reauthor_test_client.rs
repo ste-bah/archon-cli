@@ -36,6 +36,8 @@ pub(crate) struct ScriptedAuthorJudge {
     /// pre-implementation output), when set.
     evidence_reply: Option<String>,
     stop: Option<Box<StopFn>>,
+    /// What the provider configuration resolves every model alias to.
+    resolved_model: Option<String>,
 }
 
 /// The provider the scripted client reports, and fixtures record.
@@ -58,7 +60,15 @@ impl ScriptedAuthorJudge {
             judge_reply: None,
             evidence_reply: None,
             stop: None,
+            resolved_model: None,
         }
+    }
+
+    /// Resolve every model alias to `model`, as a provider configured for
+    /// another model would.
+    pub(crate) fn with_resolved_model(mut self, model: &str) -> Self {
+        self.resolved_model = Some(model.into());
+        self
     }
 
     /// End every judge call `stop` names: `Ok(reason)` is an empty reply
@@ -148,6 +158,12 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
 
     fn provider_id(&self) -> Option<String> {
         Some(self.provider.clone())
+    }
+
+    fn resolve_model_alias(&self, model: &str) -> String {
+        self.resolved_model
+            .clone()
+            .unwrap_or_else(|| model.to_string())
     }
 
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {

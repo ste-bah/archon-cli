@@ -235,6 +235,7 @@ pub async fn evaluate_floor_direct(
     let facts = crate::collect_declarative_floor_facts(&roots, floor)?;
     match crate::evaluate_declarative_floor(floor, &facts) {
         crate::DeclarativeFloorEvaluation::Passed => Ok(CheckResult {
+            fault: None,
             classification: None,
             acceptance_id: acceptance_id.into(),
             exit_code: Some(0),
@@ -245,6 +246,7 @@ pub async fn evaluate_floor_direct(
             environment_note: None,
         }),
         crate::DeclarativeFloorEvaluation::Failed { findings } => Ok(CheckResult {
+            fault: None,
             classification: None,
             acceptance_id: acceptance_id.into(),
             exit_code: Some(1),

@@ -230,6 +230,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     let mut unproven_checks = BTreeMap::new();
     let mut judge_retry_candidates = passability_pending::JudgeRetryCandidates::default();
     let refused = author::refused_forms(scope, gate.probe);
+    let keyed_judge = client.resolve_model_alias(judge_model); // the model that judges
     if let Some(state_dir) = state_dir {
         for id in ids {
             let frozen = entry(contract, id).expect("named ids were checked above");
@@ -237,7 +238,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                 state_dir,
                 frozen,
                 scope,
-                judge_model,
+                &keyed_judge,
                 client.provider_id().as_deref(),
                 gate.probe,
             ) {
@@ -440,7 +441,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                             candidate,
                             contract,
                             scope,
-                            judge_model,
+                            &keyed_judge,
                             client.provider_id().as_deref(),
                             gate.probe,
                         )?;
