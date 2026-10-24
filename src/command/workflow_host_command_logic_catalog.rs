@@ -146,7 +146,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "bcdc0daa5205198cf2f9863e074ca66bd4f1b14e3e5831fecd859e35962e542d",
+        sources_digest: "16aac00c7a455351526603232b00949c1c19490dc2617aaae1ae93b226844c40",
         build_bound: false,
     },
     CapabilityLogic {
@@ -175,7 +175,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "bcdc0daa5205198cf2f9863e074ca66bd4f1b14e3e5831fecd859e35962e542d",
+        sources_digest: "16aac00c7a455351526603232b00949c1c19490dc2617aaae1ae93b226844c40",
         build_bound: false,
     },
     CapabilityLogic {
@@ -234,7 +234,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "841ca2b877fb6843c2e3c8c957b0dce37edf919720d10ec9f908b0a4798a4eec",
+        sources_digest: "71dfe5cbda4bca1305c632a04fb02d3c028fd5f23de4b1fd6bc3f1c886455a0b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -281,7 +281,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "841ca2b877fb6843c2e3c8c957b0dce37edf919720d10ec9f908b0a4798a4eec",
+        sources_digest: "71dfe5cbda4bca1305c632a04fb02d3c028fd5f23de4b1fd6bc3f1c886455a0b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -298,7 +298,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: exit-path audit: shared judge and critic sources changed with the typed reply kinds; bumped so no record judged by the previous logic is replayed.
         version: 7,
         // Re-pinned only (verdict rules unchanged): #434 #417 #438 #441 #424 #369 #383 #440 #420 #447 #446 #464 #466 #469
-        sources_digest: "96d78d76831ed71e4705bab80d3a8d65a25405802228b2c2dee6bdddafd671cd",
+        sources_digest: "61bb14ffe42f957ed82665c2574d9daace88329d9387843259f4061a7bb04fae",
         build_bound: true,
     },
     CapabilityLogic {
@@ -341,7 +341,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
-        sources_digest: "54a3ac44c3053d8109b875b9718f627bd2930494a0124da57b428e85cb707273",
+        sources_digest: "8a2f86837de3841fd9447d31a62d2e3f6d134e492856c8921733d318f2831a23",
         build_bound: true,
     },
     CapabilityLogic {
@@ -369,7 +369,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
-        sources_digest: "54a3ac44c3053d8109b875b9718f627bd2930494a0124da57b428e85cb707273",
+        sources_digest: "8a2f86837de3841fd9447d31a62d2e3f6d134e492856c8921733d318f2831a23",
         build_bound: true,
     },
 ];
