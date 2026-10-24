@@ -109,6 +109,8 @@ pub enum WorkflowV2AgentError {
         .0.join("; ")
     )]
     DeclaredArtifactAbsent(Vec<String>),
+    #[error("invalid per-criterion result envelope: {0}")]
+    CriterionResultsMalformed(String),
     /// Every contract violation one result carries, in one repair turn
     /// (Issue-116). Checked one at a time, a result with two of them spent
     /// the whole bounded repair on the first: two `Contract` errors cannot

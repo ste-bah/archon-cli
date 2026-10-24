@@ -114,6 +114,51 @@ fn an_elapsed_time_does_not_make_one_answer_look_new() {
     assert_eq!(first, second, "a duration must not count as news");
 }
 
+#[test]
+fn a_timestamp_does_not_make_one_answer_look_new() {
+    let first = result_digest("completed at 2026-10-16T14:23:01.123Z");
+    let second = result_digest("completed at 2026-10-17T09:05:44.987+01:00");
+    assert_eq!(first, second, "an attempt timestamp must not count as news");
+    assert_eq!(
+        result_digest("[16/Oct/2026:14:23:01 +0000] finished"),
+        result_digest("[17/Oct/2026:09:05:44 +0000] finished")
+    );
+    assert_eq!(
+        result_digest("2026-10-16 14:23:01 completed"),
+        result_digest("2026-10-17 09:05:44 completed")
+    );
+    assert_eq!(
+        result_digest("Oct 16 14:23:01 service ready"),
+        result_digest("Nov 17 09:05:44 service ready")
+    );
+}
+
+#[test]
+fn distinct_urls_and_iso_date_paths_remain_novel() {
+    assert_ne!(
+        result_digest("requested https://example.com/a"),
+        result_digest("requested https://example.com/b"),
+        "different URL paths are different answers"
+    );
+    assert_ne!(
+        result_digest("requested https://example.com/2026-10-16T14:23:01/a"),
+        result_digest("requested https://example.com/2026-10-17T14:23:01/a"),
+        "an ISO-looking date embedded in a URL path is meaningful"
+    );
+}
+
+#[test]
+fn a_request_id_does_not_make_one_answer_look_new() {
+    assert_eq!(
+        result_digest("request_id=550e8400-e29b-41d4-a716-446655440000 completed"),
+        result_digest("request_id=6ba7b810-9dad-11d1-80b4-00c04fd430c8 completed")
+    );
+    assert_eq!(
+        result_digest("request_id: req_alpha123 completed"),
+        result_digest("request_id: req_beta456 completed")
+    );
+}
+
 /// And a genuinely different answer still reads as different — the stripping
 /// must not flatten everything into one digest, which would fire constantly.
 #[test]
@@ -125,6 +170,21 @@ fn normalisation_does_not_collapse_real_differences() {
     let one = result_digest("src/a.rs:12: match");
     let other = result_digest("src/b.rs:99: match");
     assert_ne!(one, other, "different files are different answers");
+    assert_ne!(
+        result_digest("release 2026-10-16"),
+        result_digest("release 2026-10-17"),
+        "date-only values are meaningful"
+    );
+    assert_ne!(
+        result_digest("object 550e8400-e29b-41d4-a716-446655440000"),
+        result_digest("object 6ba7b810-9dad-11d1-80b4-00c04fd430c8"),
+        "unlabelled UUIDs are meaningful"
+    );
+    assert_ne!(
+        result_digest("req_schema"),
+        result_digest("req_data"),
+        "unlabelled req words are meaningful"
+    );
 }
 
 /// The live shape: a test suite re-run whose only change is its duration.
@@ -161,6 +221,14 @@ fn counts_are_not_collapsed() {
     assert_ne!(
         result_digest("334 passed; 0 failed"),
         result_digest("330 passed; 4 failed")
+    );
+}
+
+#[test]
+fn a_changed_test_count_stays_novel() {
+    assert_ne!(
+        result_digest("test result: ok. 334 passed; 0 failed"),
+        result_digest("test result: ok. 335 passed; 0 failed")
     );
 }
 
