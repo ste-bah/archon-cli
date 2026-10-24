@@ -63,9 +63,6 @@ fn a_complete_request_line_is_read_without_its_newline() {
 fn issue356_a_slow_but_progressing_request_line_is_read_whole() {
     let (reader, mut writer) = std::io::pipe().unwrap();
     let limit = Duration::from_millis(400);
-    // The last byte is written 600ms after the feeder starts, so the stall
-    // ends at least `limit` later, measured from the same start.
-    let started = std::time::Instant::now();
     let feeder = std::thread::spawn(move || {
         for byte in b"{\"slow\":1}\n" {
             std::thread::sleep(Duration::from_millis(100));
