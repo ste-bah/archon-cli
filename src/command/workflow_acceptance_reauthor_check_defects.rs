@@ -17,6 +17,35 @@ fn lexical_normalize(path: &std::path::Path) -> std::path::PathBuf {
     normalized
 }
 
+fn leaves_selected_root(path: &std::path::Path) -> bool {
+    use std::path::Component;
+    let mut depth = 0usize;
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::ParentDir if depth > 0 => depth -= 1,
+            Component::ParentDir => return true,
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn sibling_is_provided(
+    selected: &std::path::Path,
+    path: &std::path::Path,
+    discovery: &archon_workflow::acceptance_sibling_paths::SiblingDiscovery,
+) -> bool {
+    let Ok(target) = archon_shell::paths::canonicalize(&selected.join(path)) else {
+        return false;
+    };
+    discovery
+        .siblings
+        .iter()
+        .any(|sibling| target.starts_with(&sibling.source))
+}
+
 /// A candidate with a host-verifiable defect never reaches the judge.
 pub(super) fn check_defects(
     working: &AcceptanceContract,
@@ -26,15 +55,16 @@ pub(super) fn check_defects(
     if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, cwd } =
         &candidate.check
     {
-        // This is a lexical safety scan, not shell evaluation. It covers
-        // path-like words, interpreter operands/program text, and the common
-        // `cd .. && cd child` form; dynamic path construction remains outside
-        // what a static scan can establish.
         let selected = match cwd {
             archon_workflow::task_set_contract::TrustedCwd::ProjectRoot => &scope.project_root,
             archon_workflow::task_set_contract::TrustedCwd::RepoRoot => &scope.repository_root,
         };
+        let discovery = archon_workflow::acceptance_sibling_paths::discover_with_diagnostics(
+            selected,
+            std::slice::from_ref(command),
+        );
         let selected_canonical = archon_shell::paths::canonicalize(selected).ok();
+        // This is a lexical safety scan, not shell evaluation.
         for named in archon_workflow::acceptance_sibling_paths::scan(command)
             .into_iter()
             .filter(|named| {
@@ -44,43 +74,47 @@ pub(super) fn check_defects(
                     .any(|part| part == std::path::Component::ParentDir)
             })
         {
-            let target = selected.join(&named.path);
-            let lexical_target = selected_canonical
+            let resolved = selected_canonical
                 .as_ref()
                 .map(|root| lexical_normalize(&root.join(&named.path)));
-            let canonical_target = archon_shell::paths::canonicalize(&target).ok();
-            let project_root = archon_shell::paths::canonicalize(&scope.project_root).ok();
-            let repository_root = archon_shell::paths::canonicalize(&scope.repository_root).ok();
-            let other_root = [
-                (project_root.as_ref(), "project root"),
-                (repository_root.as_ref(), "repository root"),
-            ]
-            .into_iter()
-            .find(|(root, _)| {
-                let inside_selected = selected_canonical.as_ref().is_some_and(|selected| {
-                    canonical_target
+            let returns_to_selected_root = leaves_selected_root(&named.path)
+                && selected_canonical.as_ref().is_some_and(|selected_root| {
+                    resolved
                         .as_ref()
-                        .is_some_and(|target| target.starts_with(selected))
-                        || (canonical_target.is_none()
-                            && lexical_target
-                                .as_ref()
-                                .is_some_and(|target| target.starts_with(selected)))
+                        .is_some_and(|target| target.starts_with(selected_root))
                 });
-                root.is_some_and(|root| {
-                    !inside_selected
-                        && Some(root) != selected_canonical.as_ref()
-                        && (canonical_target
-                            .as_ref()
-                            .is_some_and(|target| target.starts_with(root))
-                            || (canonical_target.is_none()
-                                && lexical_target
-                                    .as_ref()
-                                    .is_some_and(|target| target.starts_with(root))))
+            let reason = if returns_to_selected_root && selected == &scope.repository_root {
+                Some(
+                    "repo_root names repository paths relative to repo_root; the site links `../<repository dir>` only when a project_root check names it, so this path is not always provided",
+                )
+            } else if returns_to_selected_root {
+                Some(
+                    "the site names its copy of the project root differently, so `..` and the project directory name do not lead back into it; name the path relative to project_root",
+                )
+            } else {
+                None
+            };
+            let diagnostic = discovery
+                .candidates
+                .iter()
+                .find(|item| item.path == named.path);
+            let reason = reason.or_else(|| {
+                diagnostic.and_then(|item| match item.reason {
+                    archon_workflow::acceptance_sibling_paths::SiblingExclusionReason::MissingAtRoot => {
+                        Some("discovery reports the path missing at the selected root")
+                    }
+                    archon_workflow::acceptance_sibling_paths::SiblingExclusionReason::ProjectRootOrAncestor => {
+                        Some("discovery skips the project root or an ancestor")
+                    }
+                    archon_workflow::acceptance_sibling_paths::SiblingExclusionReason::SiblingTreeFromSelectedRoot => {
+                        (!sibling_is_provided(selected, &named.path, &discovery))
+                            .then_some("discovery found no copyable sibling source")
+                    }
                 })
             });
-            if let Some((_, label)) = other_root {
+            if let Some(reason) = reason {
                 return Err(format!(
-                    "check '{}': it names `{}` from the {} into the {}, which is outside the selected root and is absent from the probe copy. Never reach one root from the other with `..`: the roots do not sit the same way in every copy. Choose the root that contains the path and name it relative to that root.",
+                    "check '{}': it names `{}` from the {}; {reason}.",
                     candidate.id,
                     named.path.display(),
                     if selected == &scope.project_root {
@@ -88,7 +122,6 @@ pub(super) fn check_defects(
                     } else {
                         "repository root"
                     },
-                    label,
                 ));
             }
         }

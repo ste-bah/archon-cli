@@ -129,10 +129,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // O1/O3: a skeleton re-author re-authors only the bodies its change reaches; the dropped-task check is an assertion.
     // O3 at launch: a skeleton verified in place keys kept bodies on the launcher's frozen entries and on-disk bodies.
     // H1: an operational (host-unproven) finding beside an authored finding stops nothing; alone it still stops the phase.
+    // Issue 495: check-path guidance reflects the copied repository sibling alias.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "2d528f23d4ca21e0b863b6d2f2eaeb1bb1ea2c6aa51d72131ed40beb83215d08"
+        "b493bbdb11cf29fe4a1531e23446b6ce71863cfa80910b73ae2e1c00df723022"
     );
 }

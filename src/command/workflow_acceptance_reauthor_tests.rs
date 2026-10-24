@@ -11,6 +11,9 @@ mod parsing_tests;
 #[path = "workflow_acceptance_reauthor_fence_tests.rs"]
 mod fence_tests;
 
+#[path = "workflow_acceptance_reauthor_path_tests.rs"]
+mod path_tests;
+
 fn scope(
     set: &crate::command::workflow_task_set::republish::test_fixture::FrozenSet,
 ) -> AuthorScope {
@@ -54,147 +57,6 @@ async fn passability_authored_incomplete_keeps_only_the_affected_checks_pending(
         authored_passability_pending(&provider, &ids(&["AC-F-001"])).is_none(),
         "provider failures keep propagating through the host path"
     );
-}
-
-#[test]
-fn a_parent_path_into_the_other_root_is_an_author_finding_before_judging() {
-    let set = frozen_set(&[("AC-F-ROOT", "test -f feature.txt", false)]);
-    let project = set.project.path().join("project");
-    let repo = set.project.path().join("repo");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(&repo).unwrap();
-    std::fs::write(
-        repo.join("Cargo.toml"),
-        "[package]\nname='fixture'\nversion='0.1.0'\n",
-    )
-    .unwrap();
-    let mut scope = scope(&set);
-    scope.project_root = project;
-    scope.repository_root = repo;
-    let mut candidate = set.contract().acceptance[0].clone();
-    candidate.check = AcceptanceCheck::Command {
-        command: "cargo metadata --manifest-path ../repo/Cargo.toml".into(),
-        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
-    };
-    let finding = check_defects::check_defects(&set.contract(), candidate, &scope).unwrap_err();
-    assert!(finding.contains("../repo/Cargo.toml"), "{finding}");
-    assert!(finding.contains("Choose the root"), "{finding}");
-}
-
-#[test]
-fn a_missing_parent_path_into_the_other_root_is_still_refused() {
-    let set = frozen_set(&[("AC-F-MISSING-ROOT", "test -f feature.txt", false)]);
-    let project = set.project.path().join("project");
-    let repo = set.project.path().join("repo");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(&repo).unwrap();
-    let mut scope = scope(&set);
-    scope.project_root = project;
-    scope.repository_root = repo;
-    let mut candidate = set.contract().acceptance[0].clone();
-    candidate.check = AcceptanceCheck::Command {
-        command: "test -f ../repo/missing/Cargo.toml".into(),
-        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
-    };
-    let finding = check_defects::check_defects(&set.contract(), candidate, &scope).unwrap_err();
-    assert!(finding.contains("../repo/missing/Cargo.toml"), "{finding}");
-    assert!(finding.contains("outside the selected root"), "{finding}");
-}
-
-#[test]
-fn lexical_cross_root_paths_in_all_check_positions_are_refused() {
-    let set = frozen_set(&[("AC-X-001", "check", false)]);
-    let project = set.project.path().join("project");
-    let repo = set.project.path().join("repo");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(repo.join("src")).unwrap();
-    std::fs::write(repo.join("src/item"), "x").unwrap();
-    let mut scope = scope(&set);
-    scope.project_root = project;
-    scope.repository_root = repo;
-    for command in [
-        "runner ../repo/src/item",
-        "cat ../repo/src/item",
-        "cd ./../repo",
-        "cd .. && cd repo",
-        "cat $PWD/../repo/src/item",
-        "runner -c 'path = \"../repo/src/item\"'",
-    ] {
-        let mut candidate = set.contract().acceptance[0].clone();
-        candidate.check = AcceptanceCheck::Command {
-            command: command.into(),
-            cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
-        };
-        let finding = check_defects::check_defects(&set.contract(), candidate, &scope)
-            .expect_err(&format!("accepted lexical cross-root path: {command}"));
-        assert!(
-            finding.contains("outside the selected root"),
-            "{command}: {finding}"
-        );
-    }
-}
-
-#[test]
-fn an_existing_external_sibling_alias_is_not_a_cross_root_refusal() {
-    let set = frozen_set(&[("AC-F-ALIAS", "test -f feature.txt", false)]);
-    let alias = set.project.path().parent().unwrap().join("alias");
-    std::fs::create_dir_all(&alias).unwrap();
-    std::fs::write(alias.join("feature.txt"), "present").unwrap();
-    let candidate = AcceptanceCheck::Command {
-        command: "test -f ../alias/feature.txt".into(),
-        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
-    };
-    let mut entry = set.contract().acceptance[0].clone();
-    entry.check = candidate;
-    assert!(check_defects::check_defects(&set.contract(), entry, &scope(&set)).is_ok());
-}
-
-#[test]
-fn nested_roots_allow_targets_that_normalize_inside_the_selected_root() {
-    for repository_contains_project in [true, false] {
-        let set = frozen_set(&[("AC-F-NESTED", "test -f feature.txt", false)]);
-        let base = set.project.path().join("roots");
-        let (project, repository) = if repository_contains_project {
-            (base.join("repo/project"), base.join("repo"))
-        } else {
-            (base.join("project"), base.join("project/repo"))
-        };
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&repository).unwrap();
-        std::fs::write(project.join("b"), "present").unwrap();
-        let mut author_scope = scope(&set);
-        author_scope.project_root = project;
-        author_scope.repository_root = repository;
-        let mut candidate = set.contract().acceptance[0].clone();
-        candidate.check = AcceptanceCheck::Command {
-            command: "test -f a/../b".into(),
-            cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
-        };
-        assert!(check_defects::check_defects(&set.contract(), candidate, &author_scope).is_ok());
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn symlink_escape_into_other_root_is_refused_despite_lexical_containment() {
-    let set = frozen_set(&[("AC-F-SYMLINK-ESCAPE", "test -f feature.txt", false)]);
-    let project = set.project.path().join("project");
-    let repo = set.project.path().join("repo");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(repo.join("subdir")).unwrap();
-    std::fs::write(repo.join("Cargo.toml"), "[package]\n").unwrap();
-    std::os::unix::fs::symlink(repo.join("subdir"), project.join("alias")).unwrap();
-    let mut author_scope = scope(&set);
-    author_scope.project_root = project;
-    author_scope.repository_root = repo;
-    let mut candidate = set.contract().acceptance[0].clone();
-    candidate.check = AcceptanceCheck::Command {
-        command: "test -f ../project/alias/../Cargo.toml".into(),
-        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
-    };
-    let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
-        .expect_err("canonical target in the repository root must be refused");
-    assert!(finding.contains("outside the selected root"), "{finding}");
 }
 
 #[tokio::test]
@@ -415,52 +277,4 @@ async fn a_candidate_past_the_output_limit_goes_back_to_its_author() {
         prompts.len() == 2 && prompts[1].contains("output limit"),
         "{prompts:?}"
     );
-}
-
-/// R2: a path into the other root named inside a here-document's program
-/// text -- an assignment, a call that opens a list, a list written without
-/// spaces -- or after a shell comment holding an apostrophe, is refused
-/// before judging, like the same path named on the command line.
-#[test]
-fn a_cross_root_path_in_here_document_program_text_is_refused() {
-    let set = frozen_set(&[("AC-X-001", "check", false)]);
-    let project = set.project.path().join("project");
-    let repo = set.project.path().join("repo");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(repo.join("bin")).unwrap();
-    std::fs::write(repo.join("package.manifest"), "x").unwrap();
-    std::fs::write(repo.join("bin/tool"), "x").unwrap();
-    let mut scope = scope(&set);
-    scope.project_root = project;
-    scope.repository_root = repo;
-    for (command, named) in [
-        (
-            "runner - <<'PROGRAM'\nMANIFEST = '../repo/package.manifest'\nprint(MANIFEST)\nPROGRAM",
-            "../repo/package.manifest",
-        ),
-        (
-            "runner - <<'PROGRAM'\nresult = run(['../repo/bin/tool', '--version'])\nPROGRAM",
-            "../repo/bin/tool",
-        ),
-        (
-            "runner - <<'PROGRAM'\nresult = run(['tool','--input','../repo/bin/tool']+args)\nPROGRAM",
-            "../repo/bin/tool",
-        ),
-        (
-            "# the tool's own manifest decides\ntest -f ../repo/package.manifest",
-            "../repo/package.manifest",
-        ),
-    ] {
-        let mut candidate = set.contract().acceptance[0].clone();
-        candidate.check = AcceptanceCheck::Command {
-            command: command.into(),
-            cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
-        };
-        let finding = check_defects::check_defects(&set.contract(), candidate, &scope)
-            .expect_err(&format!("accepted a cross-root path: {command}"));
-        assert!(
-            finding.contains(named) && finding.contains("outside the selected root"),
-            "{command}: {finding}"
-        );
-    }
 }
