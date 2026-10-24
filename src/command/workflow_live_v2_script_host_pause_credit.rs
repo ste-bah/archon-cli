@@ -43,7 +43,7 @@ pub(super) struct PauseCreditVoid {
 
 #[path = "workflow_live_v2_script_host_pause_credit_build.rs"]
 mod build;
-use build::build_bound;
+use build::{build_bound, same_attempt};
 
 pub(super) fn enrich_build_bound(
     pause: &mut ScriptPauseRecord,
@@ -433,12 +433,6 @@ impl WorkflowScriptHost {
             }
         })
     }
-}
-
-fn same_attempt(left: &CoveredAttempt, right: &CoveredAttempt) -> bool {
-    left.call_id == right.call_id
-        && left.attempt == right.attempt
-        && left.input_hash == right.input_hash
 }
 
 fn malformed_seed(field: &str) -> WorkflowError {

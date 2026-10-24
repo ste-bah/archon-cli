@@ -46,3 +46,9 @@ pub(super) fn enrich_build_bound(
         }
     }
 }
+
+pub(super) fn same_attempt(left: &CoveredAttempt, right: &CoveredAttempt) -> bool {
+    left.call_id == right.call_id
+        && left.attempt == right.attempt
+        && left.input_hash == right.input_hash
+}
