@@ -11,11 +11,10 @@
 //!   landing or a failed author call too. Re-asking them would put a model or
 //!   judge's new answer into the history the script rebuilds, and the rebuilt
 //!   loop could then stall somewhere else and spend the old pause there.
-//! - **Credit.** The pause is passed only while every covered attempt still
-//!   stands (not invalidated by a restart, not replaced by a later attempt)
-//!   and the run has been resumed since (its generation moved on). Work
-//!   redone after a restart therefore never spends a credit earned by the
-//!   work it replaced: reaching the same point, it pauses again.
+//! - **Credit.** The pause is passed only while every covered work attempt
+//!   still stands and the run has been resumed since (its generation moved
+//!   on). Build-bound checks are re-derived by each binary and do not void
+//!   completed work's credit.
 //!
 //! Attempts in flight when the pause was taken (a placeholder still running,
 //! a sibling's call the pause interrupted, a cancelled call) are not covered:
@@ -29,6 +28,29 @@ pub(super) struct CoveredAttempt {
     pub(super) call_id: String,
     pub(super) attempt: u32,
     pub(super) input_hash: String,
+    /// Typed host-command metadata: this outcome is re-derived for every build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) build_bound: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) struct PauseCreditVoid {
+    pub(super) call_id: String,
+    pub(super) attempt: u32,
+    pub(super) old_input_hash: String,
+    pub(super) new_input_hash: Option<String>,
+}
+
+#[path = "workflow_live_v2_script_host_pause_credit_build.rs"]
+mod build;
+use build::build_bound;
+
+pub(super) fn enrich_build_bound(
+    pause: &mut ScriptPauseRecord,
+    slots: &[WorkflowV2CallRecord],
+    store: &WorkflowV2ResultStore,
+) {
+    build::enrich_build_bound(pause, slots, store);
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -53,6 +75,12 @@ pub(super) struct ScriptPauseRecord {
     /// `None`), kept here so the pause's cause and evidence stay in a run file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) unrecorded_event: Option<serde_json::Value>,
+    /// First authored/judged slot that changed when this pause was retaken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) voided_by: Option<PauseCreditVoid>,
+    /// Complete prior record, retained when the same pause id is taken again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) previous_record: Option<serde_json::Value>,
 }
 
 /// The attempts `records` (the store's slots) hold that a pause covers.
@@ -71,6 +99,7 @@ pub(super) fn covered_attempts(records: &[WorkflowV2CallRecord]) -> Vec<CoveredA
             call_id: record.call.id.clone(),
             attempt: record.attempt,
             input_hash: record.input_hash.clone(),
+            build_bound: Some(build_bound(record)),
         })
         .collect()
 }
@@ -85,12 +114,60 @@ fn stands(covered: &CoveredAttempt, slots: &[WorkflowV2CallRecord]) -> bool {
     })
 }
 
-/// A pause's credit holds while every attempt it covers still stands. A
-/// host-taken record is never passed: each covered attempt replays while IT
-/// stands (the replay checks that), so one changed slot voids no other.
+/// A pause's credit holds while every covered work attempt still stands.
+/// Build-bound checks are omitted because each build derives their outcomes
+/// again; their incidental re-execution does not replace covered work.
 pub(super) fn credit_holds(record: &ScriptPauseRecord, slots: &[WorkflowV2CallRecord]) -> bool {
-    record.host_taken || record.covered.iter().all(|covered| stands(covered, slots))
+    credit_void(record, slots).is_none()
 }
+
+pub(super) fn credit_void(
+    record: &ScriptPauseRecord,
+    slots: &[WorkflowV2CallRecord],
+) -> Option<PauseCreditVoid> {
+    if record.host_taken {
+        return None;
+    }
+    record.covered.iter().find_map(|covered| {
+        // Older records did not persist the typed property. Recover it from a
+        // current slot with the same deterministic call identity when present.
+        if covered.build_bound == Some(true)
+            || (covered.build_bound.is_none()
+                && slots
+                    .iter()
+                    .any(|slot| slot.call.id == covered.call_id && build_bound(slot)))
+            || stands(covered, slots)
+        {
+            return None;
+        }
+        let current = slots
+            .iter()
+            .filter(|slot| slot.call.id == covered.call_id)
+            .max_by_key(|slot| slot.attempt);
+        Some(PauseCreditVoid {
+            call_id: covered.call_id.clone(),
+            attempt: covered.attempt,
+            old_input_hash: covered.input_hash.clone(),
+            new_input_hash: current.map(|slot| slot.input_hash.clone()),
+        })
+    })
+}
+
+pub(super) fn retake_evidence(
+    record: &ScriptPauseRecord,
+    slots: &[WorkflowV2CallRecord],
+    previous_bytes: &[u8],
+) -> serde_json::Result<Option<(PauseCreditVoid, serde_json::Value)>> {
+    let Some(voided_by) = credit_void(record, slots) else {
+        return Ok(None);
+    };
+    let previous = serde_json::from_slice(previous_bytes)?;
+    Ok(Some((voided_by, previous)))
+}
+
+#[cfg(test)]
+#[path = "workflow_live_v2_script_host_pause_credit_tests.rs"]
+mod tests;
 
 /// Every pause record of the run, unreadable ones skipped (evidence only: a
 /// pause without a readable record is simply taken again).
@@ -214,6 +291,8 @@ impl HostPauseCoverage {
             host_taken: true,
             judged_at_pause,
             unrecorded_event: None,
+            voided_by: None,
+            previous_record: None,
         };
         if let Err(error) = store.write_run_json(run_id, &path, &record) {
             tracing::warn!(%error, run_id, "host pause coverage not recorded");
@@ -263,14 +342,19 @@ impl WorkflowScriptHost {
             call_id: record.call.id.clone(),
             attempt: record.attempt,
             input_hash: record.input_hash.clone(),
+            build_bound: Some(build_bound(&record)),
         };
         if !replayable_answer(&record, input_hash) {
             return Ok(None);
         }
         let slots = self.runner.v2_store.load_call_records()?;
-        let covered = pauses
-            .iter()
-            .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
+        let covered = pauses.iter().any(|pause| {
+            pause
+                .covered
+                .iter()
+                .any(|covered| same_attempt(covered, &wanted))
+                && credit_holds(pause, &slots)
+        });
         if !covered || !self.outcome_holds(&record)? {
             return Ok(None);
         }
@@ -298,6 +382,10 @@ impl WorkflowScriptHost {
         &self,
     ) -> archon_workflow::WorkflowResult<Vec<ScriptPauseRecord>> {
         let mut pauses = pause_records(&self.runner.workflow_store, &self.runner.run_id)?;
+        let slots = self.runner.v2_store.load_call_records()?;
+        for pause in &mut pauses {
+            enrich_build_bound(pause, &slots, &self.runner.v2_store);
+        }
         if let Some(seed) = self.phase_seed() {
             let floor = seed["pause_generation_floor"]
                 .as_u64()
@@ -342,6 +430,12 @@ impl WorkflowScriptHost {
     }
 }
 
+fn same_attempt(left: &CoveredAttempt, right: &CoveredAttempt) -> bool {
+    left.call_id == right.call_id
+        && left.attempt == right.attempt
+        && left.input_hash == right.input_hash
+}
+
 fn malformed_seed(field: &str) -> WorkflowError {
     WorkflowError::SpecInvalid(format!(
         "the phaseSeed argument has no readable {field}; the resume that seeds the run sets it"
@@ -369,7 +463,12 @@ impl WorkflowScriptHost {
         slots: &[WorkflowV2CallRecord],
     ) -> archon_workflow::WorkflowResult<bool> {
         if pauses.iter().any(|pause| {
-            !pause.host_taken && pause.covered.contains(wanted) && credit_holds(pause, slots)
+            !pause.host_taken
+                && pause
+                    .covered
+                    .iter()
+                    .any(|covered| same_attempt(covered, wanted))
+                && credit_holds(pause, slots)
         }) {
             return Ok(true);
         }
