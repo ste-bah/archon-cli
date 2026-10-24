@@ -333,28 +333,37 @@ async fn handle_legacy_resume_with_user_home(
         .join("checkpoint.json");
     let data = std::fs::read_to_string(&checkpoint_path)?;
     let saved: archon_pipeline::session::PipelineCheckpoint = serde_json::from_str(&data)?;
+    // Validate-then-commit: every fallible precondition runs before the
+    // checkpoint is marked Running, in the same order as the audited path.
     crate::command::pipeline_agents::preflight_with_user_home(
         cwd,
         saved.pipeline_type.clone(),
         user_home,
     )?;
+    let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
+    let (capability, research) = match saved.pipeline_type {
+        archon_pipeline::runner::PipelineType::Coding => (
+            archon_llm::providers::ProviderCapability::PipelineCoding,
+            false,
+        ),
+        archon_pipeline::runner::PipelineType::Research => (
+            archon_llm::providers::ProviderCapability::PipelineResearch,
+            true,
+        ),
+        other => {
+            eprintln!("Unknown pipeline type: {other:?}");
+            std::process::exit(1);
+        }
+    };
+    ensure_active_provider_supports(config, capability, "archon pipeline resume")?;
     match archon_pipeline::session::resume(session_id, cwd) {
         Ok(session) => {
-            ensure_active_provider_supports(
-                config,
-                archon_llm::providers::ProviderCapability::PipelineCoding,
-                "archon pipeline resume",
-            )?;
             println!("Resumed session: {}", session.session_id);
             println!("Completed agents: {}", session.completed_agents.len());
-            let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
-            match format!("{:?}", session.pipeline_type).as_str() {
-                "Coding" => legacy_resume_coding(cwd, config, &adapter, &session.task).await?,
-                "Research" => legacy_resume_research(cwd, config, &adapter, &session.task).await?,
-                other => {
-                    eprintln!("Unknown pipeline type: {other}");
-                    std::process::exit(1);
-                }
+            if research {
+                legacy_resume_research(cwd, config, &adapter, &session.task).await?;
+            } else {
+                legacy_resume_coding(cwd, config, &adapter, &session.task).await?;
             }
         }
         Err(e) => {
