@@ -10,7 +10,7 @@ pub(crate) fn archon_binary() -> PathBuf {
 #[test]
 fn launched_binary_exposes_its_build_identity() {
     let binary = resolve_archon_binary();
-    let output = std::process::Command::new(&binary)
+    let output = archon_shell::spawn::command(&binary)
         .arg("--build-identity")
         .output()
         .unwrap();
@@ -56,7 +56,7 @@ fn resolve_archon_binary() -> PathBuf {
 }
 
 fn verify_binary_identity(binary: &Path, expected: &str) -> Result<(), String> {
-    let output = std::process::Command::new(binary)
+    let output = archon_shell::spawn::command(binary)
         .arg("--build-identity")
         .output()
         .map_err(|error| {

@@ -79,7 +79,9 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 /// - C1, version 2 unchanged: a length stop before the first JSON token is
 ///   continued with the same reply, under the same checks; verdict meaning
 ///   does not change.
-pub const SOURCES_DIGEST: &str = "33fc80f034ce7fc7b23ff62026a6311cb6338e93e3515214c90c33bbc9b89a0b";
+/// - G3 review, version 2 unchanged: a first cut reply that is not JSON is
+///   asked again; how a whole reply is obtained changes, not what it means.
+pub const SOURCES_DIGEST: &str = "ac3f9d2a278cc52bd4a4b69fa875a3a52fe1450940f5b1c9e3c33bf58d0a9cad";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.
