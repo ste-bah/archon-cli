@@ -234,7 +234,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "71dfe5cbda4bca1305c632a04fb02d3c028fd5f23de4b1fd6bc3f1c886455a0b",
+        sources_digest: "86aae39539795c3ea7e67b53172526c8bc4ec6daea04aab04244743a519d4a34",
         build_bound: false,
     },
     CapabilityLogic {
@@ -281,7 +281,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "71dfe5cbda4bca1305c632a04fb02d3c028fd5f23de4b1fd6bc3f1c886455a0b",
+        sources_digest: "86aae39539795c3ea7e67b53172526c8bc4ec6daea04aab04244743a519d4a34",
         build_bound: false,
     },
     CapabilityLogic {
