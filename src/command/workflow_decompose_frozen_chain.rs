@@ -94,6 +94,9 @@ mod resume_chain;
 #[cfg(test)]
 pub(crate) use resume_chain::resume_chain_argument;
 pub(crate) use resume_chain::resume_chain_decision;
+#[path = "workflow_decompose_frozen_chain_stage.rs"]
+mod stage;
+pub(crate) use stage::FrozenStage;
 
 /// The frozen chain the launcher found and verified under a task root. Read
 /// strictly on resume: a new field follows the rule of
@@ -112,44 +115,26 @@ pub(crate) struct FrozenChainSnapshot {
     /// Frozen artifacts the acceptance repair is not allowed to republish.
     #[serde(default)]
     pub(crate) preserved_digests: Vec<(String, String)>,
+    /// The frozen skeleton's task entries as published: a skeleton re-author
+    /// re-authors only the bodies whose entry it changes (O3).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) tasks: Vec<archon_workflow::task_skeleton::FrozenTask>,
 }
 
 impl FrozenChainSnapshot {
     /// The script argument: camelCase subjects, exactly as `HostCommandSubject`
-    /// serialises for a host outcome.
+    /// serialises for a host outcome, and a frozen skeleton's task entries.
     pub(crate) fn to_argument(&self) -> serde_json::Value {
-        serde_json::json!({
+        let mut argument = serde_json::json!({
             "acceptance": self.acceptance,
             "skeleton": self.skeleton,
             "subjects": self.subjects,
             "bodies": self.bodies,
-        })
-    }
-}
-
-/// The stage a `verify-frozen-chain` call re-verifies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FrozenStage {
-    Acceptance,
-    Skeleton,
-}
-
-impl FrozenStage {
-    pub(crate) fn parse(text: &str) -> Result<Self> {
-        match text {
-            "acceptance" => Ok(Self::Acceptance),
-            "skeleton" => Ok(Self::Skeleton),
-            other => Err(anyhow!(
-                "verify-frozen-chain stage must be acceptance or skeleton, found '{other}'"
-            )),
+        });
+        if self.skeleton && !self.tasks.is_empty() {
+            argument["tasks"] = serde_json::json!(self.tasks);
         }
-    }
-
-    pub(crate) fn command_id(self) -> &'static str {
-        match self {
-            Self::Acceptance => "verify-frozen-acceptance",
-            Self::Skeleton => "verify-frozen-skeleton",
-        }
+        argument
     }
 }
 
@@ -298,6 +283,7 @@ pub(crate) fn snapshot_locked(
             file_name: task.file_name.clone(),
         });
     }
+    snapshot.tasks = skeleton.tasks;
     Ok(snapshot)
 }
 

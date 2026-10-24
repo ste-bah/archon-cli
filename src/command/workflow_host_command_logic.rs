@@ -161,7 +161,10 @@ const TRACE: &[&str] = &[
 ];
 
 /// `workflow verify-frozen-chain`.
-const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
+const VERIFY: &[&str] = &[
+    "src/command/workflow_decompose_frozen_chain.rs",
+    "src/command/workflow_decompose_frozen_chain_stage.rs",
+];
 
 /// Every capability of the fixed catalog, and nothing else
 /// (`logic_361_every_catalog_capability_has_a_logic_version`).

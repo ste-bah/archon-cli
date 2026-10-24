@@ -69,6 +69,13 @@ async fn a_launch_on_a_frozen_task_root_binds_the_frozen_chain_into_its_argument
                 {"taskId": "TASK-X-020", "fileName": "TASK-X-020.md"},
             ],
             "bodies": ["TASK-X-010.md"],
+            // The published skeleton's entries, defaults spelled out (O3).
+            "tasks": [
+                {"task_id": "TASK-X-010", "file_name": "TASK-X-010.md", "depends_on": [],
+                 "blocks": [], "implements": ["AC-X-001"], "deliverable_contracts": []},
+                {"task_id": "TASK-X-020", "file_name": "TASK-X-020.md", "depends_on": [],
+                 "blocks": [], "implements": ["AC-X-001"], "deliverable_contracts": []},
+            ],
         })
     );
 }

@@ -61,7 +61,7 @@ mod refusal_progress;
 #[path = "workflow_decompose_set_gate_tests.rs"]
 mod set_gate;
 #[path = "workflow_decompose_set_gate_skeleton_tests.rs"]
-mod set_gate_skeleton;
+pub(crate) mod set_gate_skeleton;
 
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
