@@ -9,8 +9,13 @@ mod fidelity_logic_digest;
 
 fn main() {
     embed_git_hash();
+    println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
+    println!("cargo:rerun-if-env-changed=PROFILE");
     let fingerprint = build_fingerprint::build_fingerprint(Path::new("."));
     println!("cargo:rustc-env=ARCHON_BUILD_FINGERPRINT={fingerprint}");
+    for file in build_fingerprint::embedded_files(Path::new(".")) {
+        println!("cargo:rerun-if-changed={}", file.display());
+    }
     let fidelity_sources = fidelity_sources_digest(Path::new("."));
     println!("cargo:rustc-env=ARCHON_FIDELITY_SOURCES_DIGEST={fidelity_sources}");
     // A directory makes cargo rerun this script when any file under it
