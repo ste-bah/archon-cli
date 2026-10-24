@@ -78,3 +78,7 @@ docs/generated/** text eol=lf
 # Reply fixtures embedded via include_str! are compared by byte length with
 # recorded live replies; a CRLF checkout would add one byte per line.
 src/command/fixtures/** text eol=lf
+
+# #485: RocksDB 9.8.4 fixtures are binary databases; never convert line endings.
+tests/fixtures/rocksdb-9.8.4/** -text
+tests/fixtures/rocksdb-9.8.4/generator/** text

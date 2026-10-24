@@ -6,6 +6,7 @@ publish = false
 
 [workspace]
 members = ["crates/*"]
+exclude = ["tests/fixtures/rocksdb-9.8.4/generator"]
 
 [workspace.package]
 version = "1.9.3"
