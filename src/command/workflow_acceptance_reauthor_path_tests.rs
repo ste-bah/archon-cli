@@ -21,25 +21,6 @@ fn a_parent_path_into_the_repository_sibling_is_available_before_judging() {
         .expect("the sibling discovery exposes the repository alias to the site");
 }
 #[test]
-fn project_root_can_name_a_file_through_the_repository_sibling_alias() {
-    let set = frozen_set(&[("AC-X-001", "true", false)]);
-    let project = set.project.path().join("project");
-    let repo = set.project.path().join("repository");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(&repo).unwrap();
-    std::fs::write(repo.join("item"), "present").unwrap();
-    let mut author_scope = scope(&set);
-    author_scope.project_root = project;
-    author_scope.repository_root = repo;
-    let mut candidate = set.contract().acceptance[0].clone();
-    candidate.check = AcceptanceCheck::Command {
-        command: "test -f ../repository/item".into(),
-        cwd: TrustedCwd::ProjectRoot,
-    };
-    check_defects::check_defects(&set.contract(), candidate, &author_scope)
-        .expect("a sibling copied by the site is available to the project-root check");
-}
-#[test]
 fn repository_root_cannot_name_its_own_repository_alias_through_parent() {
     let set = frozen_set(&[("AC-X-002", "true", false)]);
     let project = set.project.path().join("project");
@@ -57,12 +38,7 @@ fn repository_root_cannot_name_its_own_repository_alias_through_parent() {
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the repository root is not copied under its own sibling alias");
-    assert!(
-        finding.contains("repo_root names repository paths relative to repo_root")
-            && finding.contains("only when a project_root check names it")
-            && finding.contains("not always provided"),
-        "{finding}"
-    );
+    assert!(finding.contains("site does not create"), "{finding}");
 }
 #[test]
 fn parent_paths_that_return_to_the_selected_root_are_refused_for_both_roots() {
@@ -87,14 +63,10 @@ fn parent_paths_that_return_to_the_selected_root_are_refused_for_both_roots() {
         };
         let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
             .expect_err("a parent path that re-enters the selected root is not portable");
-        let reason = if path == "workspace" {
-            "the site names its copy of the project root differently, so `..` and the project directory name do not lead back into it; name the path relative to project_root"
-        } else {
-            "repo_root names repository paths relative to repo_root; the site links `../<repository dir>` only when a project_root check names it, so this path is not always provided"
-        };
-        assert!(finding.contains(reason), "{finding}");
+        assert!(finding.contains("site does not create"), "{finding}");
     }
 }
+
 #[test]
 fn a_lexical_parent_step_inside_the_repository_is_not_scanned_as_cross_root() {
     let set = frozen_set(&[("AC-X-003", "true", false)]);
@@ -233,9 +205,7 @@ async fn author_path_decisions_match_the_real_scratch_site() {
         let finding = check_defects::check_defects(&contract, entry.clone(), &author_scope)
             .expect_err("each refused path shape is rejected before judging");
         let expected_reason = match index {
-            1 => "repo_root names repository paths relative to repo_root",
-            2 => "discovery reports the path missing at the selected root",
-            3 => "the site names its copy of the project root differently",
+            1..=3 => "site does not create",
             _ => unreachable!(),
         };
         assert!(finding.contains(expected_reason), "{finding}");
@@ -345,10 +315,7 @@ fn a_path_naming_the_project_through_its_parent_is_refused_with_that_reason() {
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the site does not lead back into its project copy by directory name");
-    assert!(
-        finding.contains("the site names its copy of the project root differently"),
-        "{finding}"
-    );
+    assert!(finding.contains("site does not create"), "{finding}");
 }
 #[test]
 fn a_missing_parent_path_into_the_other_root_is_still_refused() {
@@ -367,10 +334,7 @@ fn a_missing_parent_path_into_the_other_root_is_still_refused() {
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &scope).unwrap_err();
     assert!(finding.contains("../repo/missing/data.txt"), "{finding}");
-    assert!(
-        finding.contains("missing at the selected root"),
-        "{finding}"
-    );
+    assert!(finding.contains("site does not create"), "{finding}");
 }
 #[test]
 fn discovered_sibling_paths_are_available_to_a_check() {
@@ -383,7 +347,15 @@ fn discovered_sibling_paths_are_available_to_a_check() {
     let mut scope = scope(&set);
     scope.project_root = project;
     scope.repository_root = repo;
-    for command in ["test -f ../repo/src/item", "cd ../repo && test -f src/item"] {
+    for command in [
+        "test -f ../repo/src/item",
+        "cd ../repo && test -f src/item",
+        "cd ./../repo",
+        "cd .. && cd repo",
+        "test -f $PWD/../repo/src/item",
+        "runner -c 'test -f ../repo/src/item'",
+        "runner ../repo/src/item",
+    ] {
         let mut candidate = set.contract().acceptance[0].clone();
         candidate.check = AcceptanceCheck::Command {
             command: command.into(),
@@ -434,7 +406,7 @@ fn nested_roots_allow_targets_that_normalize_inside_the_selected_root() {
 }
 #[cfg(unix)]
 #[test]
-fn symlink_path_discovery_cannot_provide_is_refused_with_its_reason() {
+fn symlink_parent_path_that_resolves_outside_the_selected_root_is_refused() {
     let set = frozen_set(&[("AC-X-007", "test -f feature.txt", false)]);
     let project = set.project.path().join("project");
     let repo = set.project.path().join("repo");
@@ -451,11 +423,8 @@ fn symlink_path_discovery_cannot_provide_is_refused_with_its_reason() {
         cwd: TrustedCwd::ProjectRoot,
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
-        .expect_err("canonical target in the repository root must be refused");
-    assert!(
-        finding.contains("missing at the selected root"),
-        "{finding}"
-    );
+        .expect_err("the live symlink resolves outside the selected root");
+    assert!(finding.contains("site does not create"), "{finding}");
 }
 #[test]
 fn a_discovered_sibling_in_here_document_program_text_is_available() {

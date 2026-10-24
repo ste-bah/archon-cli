@@ -376,7 +376,7 @@ fn link_repository_copy(target: &Path, destination: &Path) -> WorkflowResult<()>
 /// sites of the checks beside it (each check analysed as its own target).
 /// `None` when it names none, or the roots cannot be read
 /// (preparing the site then reports that).
-pub(super) fn refused_sibling(
+pub(crate) fn refused_sibling(
     project: &Path,
     repository: &Path,
     check: &str,
@@ -425,7 +425,7 @@ fn git_head(path: &Path) -> WorkflowResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn relative(from: &Path, to: &Path) -> PathBuf {
+pub(crate) fn relative(from: &Path, to: &Path) -> PathBuf {
     let left = from.components().collect::<Vec<_>>();
     let right = to.components().collect::<Vec<_>>();
     let common = left.iter().zip(&right).take_while(|(a, b)| a == b).count();

@@ -14,6 +14,9 @@ mod fence_tests;
 #[path = "workflow_acceptance_reauthor_path_tests.rs"]
 mod path_tests;
 
+#[path = "workflow_acceptance_reauthor_path_agreement_tests.rs"]
+mod path_agreement_tests;
+
 fn scope(
     set: &crate::command::workflow_task_set::republish::test_fixture::FrozenSet,
 ) -> AuthorScope {
