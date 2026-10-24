@@ -206,9 +206,46 @@ fn decide_locked(
     if !effective.skeleton {
         effective.subjects.clear();
     }
+    // The verified skeleton's entries come from the published skeleton on
+    // every resume, never from the record: a record an older build wrote
+    // carries none, and the record itself is never rewritten.
+    effective.tasks = if effective.skeleton {
+        published_tasks(task_root, &effective)?
+    } else {
+        Vec::new()
+    };
     Ok(ResumeChainDecision {
         argument: effective.to_argument(),
         lines,
+    })
+}
+
+/// The published skeleton's task entries when it is the skeleton `snapshot`
+/// records: the same digest where the record has one, and the same frozen
+/// subjects in order. Another skeleton yields none, so the script re-authors
+/// every body a skeleton re-author could reach, as without entries.
+fn published_tasks(
+    task_root: &Path,
+    snapshot: &FrozenChainSnapshot,
+) -> Result<Vec<archon_workflow::task_skeleton::FrozenTask>> {
+    use archon_workflow::task_set_contract::{TASK_SKELETON_FILE, content_digest};
+    let path = task_root.join(TASK_SKELETON_FILE);
+    let bytes = std::fs::read(&path)
+        .with_context(|| format!("reading published task skeleton {}", path.display()))?;
+    let recorded = (snapshot.preserved_digests.iter()).find(|(file, _)| file == TASK_SKELETON_FILE);
+    if recorded.is_some_and(|(_, digest)| *digest != content_digest(&bytes)) {
+        return Ok(Vec::new());
+    }
+    let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parsing published task skeleton {}", path.display()))?;
+    let same_subjects = skeleton.tasks.len() == snapshot.subjects.len()
+        && (skeleton.tasks.iter().zip(&snapshot.subjects)).all(|(task, subject)| {
+            task.task_id == subject.task_id && task.file_name == subject.file_name
+        });
+    Ok(if same_subjects {
+        skeleton.tasks
+    } else {
+        Vec::new()
     })
 }
 

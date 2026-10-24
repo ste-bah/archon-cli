@@ -465,6 +465,8 @@ async fn revision_only_resume_persists_live_frozen_chain_without_a_phase_seed() 
     );
 }
 
+#[path = "workflow_decomposition_upgrade_live_frozen_tasks_tests.rs"]
+mod frozen_tasks;
 #[path = "workflow_decomposition_upgrade_live_frozen_receipt_tests.rs"]
 mod receipt_chain;
 

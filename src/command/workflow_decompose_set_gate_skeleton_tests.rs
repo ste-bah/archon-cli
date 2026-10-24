@@ -17,7 +17,7 @@ fn task(id: &str, implements: &[&str]) -> serde_json::Value {
     })
 }
 
-fn skeleton(tasks: Vec<serde_json::Value>) -> String {
+pub(crate) fn skeleton(tasks: Vec<serde_json::Value>) -> String {
     serde_json::json!({"schema_version": 1, "acceptance_digest": "", "tasks": tasks}).to_string()
 }
 
@@ -25,6 +25,19 @@ fn skeleton(tasks: Vec<serde_json::Value>) -> String {
 /// `refused`: freeze-skeleton call ordinals the host refuses with `refusal`;
 /// `trace`: requirements-trace finding rounds (the last repeats).
 fn driver(skeletons: &[String], refused: &[usize], refusal: &str, trace: &str) -> String {
+    driver_on(skeletons, refused, refusal, trace, "undefined")
+}
+
+/// [`driver`] on a task root the launcher found frozen: `frozen` is the
+/// `frozenChain` argument (a JS expression), and the host verifies each
+/// frozen stage in place, answering with the launch-bound subjects.
+pub(crate) fn driver_on(
+    skeletons: &[String],
+    refused: &[usize],
+    refusal: &str,
+    trace: &str,
+    frozen: &str,
+) -> String {
     let skeletons = serde_json::to_string(skeletons).unwrap();
     let refused = serde_json::to_string(refused).unwrap();
     format!(
@@ -35,7 +48,7 @@ const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.
 globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({{ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) }});
 globalThis.args = {{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "{TASK_ROOT}",
-  gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
+  gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }}, frozenChain: {frozen},
 }};
 const skeletons = {skeletons};
 const refused = {refused};
@@ -73,6 +86,7 @@ const w = {{
       }}
       committed.subjects = JSON.parse(options.stdin).tasks.map((t) => ({{ taskId: t.task_id, fileName: t.file_name }}));
     }}
+    if (capability === "verify-frozen-skeleton") committed.subjects = args.frozenChain.subjects;
     if (capability === "land-task-body") landed.push(options.target.taskId + "=" + callId);
     if (capability === "requirements-trace") {{
       committed.gateEnvelope.policy_findings = traceRounds[Math.min(traceCalls++, traceRounds.length - 1)];
@@ -89,7 +103,7 @@ workflow(w).then(
     )
 }
 
-fn run(script: &str) -> serde_json::Value {
+pub(crate) fn run(script: &str) -> serde_json::Value {
     let dir = tempfile::tempdir().expect("tmp");
     let path = dir.path().join("set-gate-skeleton.cjs");
     std::fs::write(&path, script).expect("write driver");
@@ -105,9 +119,9 @@ fn run(script: &str) -> serde_json::Value {
     serde_json::from_slice(&out.stdout).expect("driver json")
 }
 
-const UNCLAIMED: &str = r#"[[{ "text": "PRD obligation 'REQ-X-009' is claimed by no task; add it to at least one TASK file's implements list", "subject": "REQ-X-009", "source_path": "/p/prd.md", "remediation_scope": "skeleton" }], []]"#;
+pub(crate) const UNCLAIMED: &str = r#"[[{ "text": "PRD obligation 'REQ-X-009' is claimed by no task; add it to at least one TASK file's implements list", "subject": "REQ-X-009", "source_path": "/p/prd.md", "remediation_scope": "skeleton" }], []]"#;
 
-fn calls(out: &serde_json::Value, key: &str) -> Vec<String> {
+pub(crate) fn calls(out: &serde_json::Value, key: &str) -> Vec<String> {
     (out[key].as_array().expect(key).iter())
         .map(|v| v.as_str().unwrap().to_string())
         .collect()
@@ -200,3 +214,6 @@ fn a_skeleton_the_host_refuses_for_dropping_a_frozen_task_is_re_authored_with_th
         "{out}"
     );
 }
+
+#[path = "workflow_decompose_set_gate_skeleton_launch_tests.rs"]
+mod launch;

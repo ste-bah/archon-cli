@@ -217,9 +217,11 @@ async function runSetGateLoop(w, chain, bodies) {
 // whose frozen fields differ from the skeleton its body was authored
 // against, a task the skeleton added, and a body a finding names. Every
 // other body keeps its published bytes, and the set gates that follow judge
-// the whole set again, kept bodies included. When either skeleton's frozen
-// fields are unknown to the script (a skeleton verified in place, or a
-// candidate it cannot read), every body is re-authored as before.
+// the whole set again, kept bodies included. A skeleton verified in place
+// carries the frozen entries the launcher read, and a body the launcher
+// found on disk is one on hand like a body this run authored. When either
+// skeleton's frozen fields are unknown to the script (a launch argument
+// without them, or a candidate it cannot read), every body is re-authored.
 async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
   const prior = SKELETON_TASKS.get(chain.outcome);
   const outcome = await authorCandidate(w, skeletonPolicy(findings.map((finding) => findingText(finding))));
@@ -239,7 +241,9 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
   chain.subjects = outcome.subjects;
   const next = SKELETON_TASKS.get(outcome);
   const grouped = new Map(groupFindingsBySubject(bodyFindings, chain.subjects));
-  const reached = (subject) => !prior || !next || !bodies.has(subject.fileName)
+  const onDisk = frozenChain().bodies;
+  const reached = (subject) => !prior || !next
+    || !(bodies.has(subject.fileName) || onDisk.has(subject.fileName))
     || grouped.has(subject.fileName) || !prior.has(subject.taskId)
     || prior.get(subject.taskId) !== next.get(subject.taskId);
   const note = "The frozen skeleton was re-authored to repair set-gate findings; copy this task's frozen fields from the current skeleton exactly.";
@@ -250,9 +254,10 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
 }
 
 // Each committed skeleton outcome's frozen fields per task id, read from
-// the candidate it froze: the host stamps every body's frozen fields from
-// them (BODY_SHAPE). Kept beside the outcome, never on it, so the evidence
-// the run reports is the host's alone.
+// the candidate it froze, or for a skeleton verified in place from the
+// launcher's frozenChain.tasks: the host stamps every body's frozen fields
+// from them (BODY_SHAPE). Kept beside the outcome, never on it, so the
+// evidence the run reports is the host's alone.
 const SKELETON_TASKS = new WeakMap();
 
 function recordSkeletonTasks(outcome, content) {
@@ -273,18 +278,38 @@ function skeletonCandidateTasks(content) {
   } catch (_) {
     return null;
   }
-  if (!skeleton || !Array.isArray(skeleton.tasks)) return null;
+  return skeleton ? frozenTaskEntries(skeleton.tasks) : null;
+}
+
+// `taskId -> canonical JSON of its frozen entry`, or null when `tasks` is
+// not a list of entries. A field at its default (null, false, 0, an empty
+// list or object) reads as absent, as the host's skeleton reader takes it:
+// the published form spells defaults out and an author's candidate may not.
+function frozenTaskEntries(tasks) {
+  if (!Array.isArray(tasks)) return null;
+  const normal = (value) => {
+    if (Array.isArray(value)) return value.map(normal);
+    if (!value || typeof value !== "object") return value;
+    const kept = {};
+    for (const [key, field] of Object.entries(value)) {
+      const read = normal(field);
+      if (read === null || read === false || read === 0) continue;
+      if (typeof read === "object" && Object.keys(read).length === 0) continue;
+      kept[key] = read;
+    }
+    return kept;
+  };
   const canonical = (value) => Array.isArray(value)
     ? `[${value.map(canonical).join(",")}]`
     : value && typeof value === "object"
       ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
       : JSON.stringify(value);
-  const tasks = new Map();
-  for (const task of skeleton.tasks) {
+  const entries = new Map();
+  for (const task of tasks) {
     if (!task || typeof task.task_id !== "string") return null;
-    tasks.set(task.task_id, canonical(task));
+    entries.set(task.task_id, canonical(normal(task)));
   }
-  return tasks;
+  return entries;
 }
 
 function committed(outcome) {
@@ -353,10 +378,12 @@ function bodyEvidence(subjects, bodies) {
 // The launcher's reading of the task root: which frozen stages exist and
 // verify, and which frozen bodies are already on disk. Absent means nothing
 // is frozen. A skeleton without an acceptance contract, or bodies without a
-// skeleton, is a chain the host would never have reported.
+// skeleton, is a chain the host would never have reported. `tasks` is the
+// frozen skeleton's entries as published, one per subject, or null when the
+// launch argument does not carry them.
 function frozenChain() {
   const raw = args.frozenChain;
-  const none = { acceptance: false, skeleton: false, subjects: [], bodies: new Set() };
+  const none = { acceptance: false, skeleton: false, subjects: [], bodies: new Set(), tasks: null };
   if (raw === undefined || raw === null) return none;
   if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("fixed decomposition frozenChain argument is malformed");
   const acceptance = raw.acceptance === true;
@@ -369,7 +396,12 @@ function frozenChain() {
   for (const fileName of bodies) {
     if (!subjects.some((subject) => subject.fileName === fileName)) throw new Error(`frozenChain body ${fileName} names no frozen subject`);
   }
-  return { acceptance, skeleton, subjects, bodies };
+  const tasks = raw.tasks === undefined ? null : frozenTaskEntries(raw.tasks);
+  if (raw.tasks !== undefined && (!skeleton || !tasks || tasks.size !== subjects.length
+    || subjects.some((subject) => !tasks.has(subject.taskId)))) {
+    throw new Error("frozenChain tasks are not one frozen entry per frozen subject");
+  }
+  return { acceptance, skeleton, subjects, bodies, tasks };
 }
 
 // A committed outcome for a stage the launcher found frozen: the host
@@ -385,6 +417,8 @@ async function verifyFrozenStage(w, capability) {
     if (!routed.operational) {
       if (routed.fatal.length > 0) await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
       requireCommitted(outcome, capability);
+      const tasks = capability === "verify-frozen-skeleton" ? frozenChain().tasks : null;
+      if (tasks) SKELETON_TASKS.set(outcome, tasks);
       return outcome;
     }
     progress.calls = attempt;

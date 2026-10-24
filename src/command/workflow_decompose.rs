@@ -488,7 +488,7 @@ use claim::{read_fixed_state, read_run_json};
 
 #[cfg(test)]
 #[path = "workflow_decompose_repair_tests.rs"]
-mod repair_tests;
+pub(crate) mod repair_tests;
 
 #[cfg(test)]
 #[path = "workflow_decompose_progress_tests.rs"]
