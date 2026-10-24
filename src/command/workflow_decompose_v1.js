@@ -397,9 +397,15 @@ async function authorCandidate(w, policy) {
     }
     // A committed artifact is not the finished one: repairable findings are
     // still fed back below in either mode, and a loop that stalls on them
-    // pauses (resumable) in either mode.
-    if (routed.fatal.length > 0) {
-      await stopFixed(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
+    // pauses (resumable) in either mode. A check the host could not prove
+    // (an operational finding) beside findings the author can repair stops
+    // nothing: it blocks publication, the author repairs its own, and the
+    // next freeze probes the unproven check again.
+    const fatal = routed.retry.length > 0
+      ? routed.fatal.filter((text, index) => !routed.fatalOperational[index])
+      : routed.fatal;
+    if (fatal.length > 0) {
+      await stopFixed(`${policy.phase} stopped: ${fatal.join(" | ")}`);
     }
     if (routed.retry.length === 0) {
       requireCommitted(outcome, policy.phase);
@@ -457,7 +463,8 @@ function routeFindings(outcome, retryScopes, shadowScopes) {
   if (!outcome || typeof outcome !== "object") throw new Error("host command returned no typed outcome");
   const routed = {
     retry: [], retryFindings: [], fatal: [], inherited: [], inheritedFindings: [],
-    shadow: [], shadowFindings: [], all: [], allFindings: [], operational: null
+    shadow: [], shadowFindings: [], all: [], allFindings: [], operational: null,
+    fatalOperational: []
   };
   if (outcome.gateEnvelope?.operational_error) {
     routed.operational = String(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
@@ -473,7 +480,10 @@ function routeFindings(outcome, retryScopes, shadowScopes) {
     const scope = finding.remediation_scope;
     routed.all.push(text);
     routed.allFindings.push(finding);
-    if (scope === "prd_input" || scope === "operational") routed.fatal.push(text);
+    if (scope === "prd_input" || scope === "operational") {
+      routed.fatal.push(text);
+      routed.fatalOperational[routed.fatal.length - 1] = scope === "operational";
+    }
     else if (scope === "inherited_predecessor") { routed.inherited.push(text); routed.inheritedFindings.push(finding); }
     else if (retryScopes.has(scope)) { routed.retry.push(text); routed.retryFindings.push(finding); }
     else if (shadows.has(scope)) { routed.shadow.push(text); routed.shadowFindings.push(finding); }

@@ -3,6 +3,7 @@ use archon_workflow::acceptance_scratch::{CHECK_TIMED_OUT, CheckResult};
 
 fn result(id: &str, stdout: &[u8], operational_error: Option<&str>) -> CheckResult {
     CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: id.into(),
         exit_code: if operational_error.is_some() {

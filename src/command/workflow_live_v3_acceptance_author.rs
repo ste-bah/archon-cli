@@ -62,7 +62,7 @@ pub(super) use staging::{Staged, owed_errors};
 /// Why a repair record says the host authored checks.
 pub(super) const REPAIR_TRIGGER_AUTHORED: &str = "authored_in_run";
 /// The judge a fresh in-run freeze authors against: the whole-set freeze's.
-const FRESH_JUDGE_MODEL: &str = "sonnet";
+const FRESH_JUDGE_MODEL: &str = crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS;
 
 /// Where the round authors: its roots, the author client, the base commit
 /// every authored check must fail on, and the run control it polls.

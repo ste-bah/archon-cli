@@ -27,6 +27,11 @@ pub struct CheckResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment_note: Option<String>,
     pub operational_error: Option<String>,
+    /// Why the check's own run gave no verdict, where the observation
+    /// detected it ([`super::faults::classify`] judges by it). Absent on
+    /// results that carry none, stored ones included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault: Option<super::faults::FaultCause>,
     /// Classification of raw output, never recomputed from redacted evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::acceptance_check_crash::CheckClassification>,
@@ -431,6 +436,7 @@ pub async fn run_at(
         error = Some(evidence);
     }
     let mut result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: id.into(),
         exit_code: status.and_then(|status| status.code()),

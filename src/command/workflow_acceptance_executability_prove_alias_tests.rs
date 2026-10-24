@@ -77,6 +77,7 @@ fn recreated_input_with_operational_failure_is_host_unproven() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string(), "data/other.txt".to_string()];
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
         exit_code: None,
@@ -150,6 +151,7 @@ fn run_real_wrapper_with_inputs(
     let output = super::super::mutation::run_with_host_mutation(project.path(), &wrapped);
     let evidence = CheckEvidence {
         result: CheckResult {
+            fault: None,
             classification: None,
             acceptance_id: "AC-1".into(),
             exit_code: output.status.code(),
@@ -289,6 +291,7 @@ fn timeout_diagnostics_keep_known_states_and_report_unavailable_inputs() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string(), "data/other.txt".to_string()];
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
         exit_code: None,
@@ -319,6 +322,7 @@ fn operational_error_mutation_diagnostics_keep_input_states_and_exit_signal() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string(), "data/other.txt".to_string()];
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
         exit_code: None,
@@ -345,6 +349,7 @@ fn recreated_input_is_not_marked_restored_for_cache_reuse() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string()];
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
         exit_code: Some(1),
@@ -384,6 +389,7 @@ fn unrelated_sibling_touch_keeps_the_parent_metadata_signal_on_legacy_path() {
     );
     let output = super::super::mutation::run_with_host_mutation(project.path(), &wrapped);
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
         exit_code: output.status.code(),

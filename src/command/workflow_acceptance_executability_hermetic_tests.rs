@@ -147,6 +147,7 @@ fn a_separate_project_copy_keeps_its_real_top_level_path_inside_the_tree() {
         }))
         .unwrap();
     let result = CheckResult {
+        fault: None,
         acceptance_id: "AC-446".into(),
         exit_code: output.status.code(),
         stdout: output.stdout,

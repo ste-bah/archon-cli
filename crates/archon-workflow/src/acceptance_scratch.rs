@@ -66,6 +66,8 @@ mod observe;
 mod process;
 #[path = "acceptance_scratch_seal.rs"]
 mod seal;
+#[path = "acceptance_scratch_teardown.rs"]
+mod teardown;
 pub use control::{OBSERVATION_STALLED, observation_stall};
 pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
@@ -152,6 +154,8 @@ pub struct ScratchRoots {
     project: PathBuf,
     live_repository: PathBuf,
     registered: bool,
+    /// The repository copy's `.git` link as the live repository wrote it.
+    worktree_link: Option<Vec<u8>>,
     cleaned: bool,
     cleanup_timeout_secs: u64,
     host_environment: BTreeMap<String, String>,
@@ -172,6 +176,16 @@ impl ScratchRoots {
         policy: &ScratchPolicy,
         commit: &str,
         checks: &[(String, crate::task_set_contract::TrustedCwd)],
+    ) -> WorkflowResult<Self> {
+        Self::prepare_leased(policy, commit, checks, None)
+    }
+    /// [`Self::prepare_inner_with_checks`] under `held`, the build cache
+    /// lease an earlier site of the same observation kept (`teardown`).
+    fn prepare_leased(
+        policy: &ScratchPolicy,
+        commit: &str,
+        checks: &[(String, crate::task_set_contract::TrustedCwd)],
+        held: Option<cache::Lease>,
     ) -> WorkflowResult<Self> {
         policy.validate()?;
         // Issue 345: the one check-environment rule's forwarded values.
@@ -213,9 +227,10 @@ impl ScratchRoots {
         }
         std::fs::create_dir_all(&policy.scratch_parent)
             .map_err(|e| WorkflowError::io(&policy.scratch_parent, e))?;
-        let lease = match &policy.build_cache {
-            Some(dir) => Some(cache::Lease::acquire(dir, policy.scratch_bytes)?),
-            None => None,
+        let lease = match (held, &policy.build_cache) {
+            (Some(held), _) => Some(held.renew(policy.scratch_bytes)?),
+            (None, Some(dir)) => Some(cache::Lease::acquire(dir, policy.scratch_bytes)?),
+            (None, None) => None,
         };
         let root = match &lease {
             // Keep Cargo paths stable; reclaim slots left by holders that did not tear down.
@@ -250,6 +265,7 @@ impl ScratchRoots {
             mutation_root,
             live_repository,
             registered: false,
+            worktree_link: None,
             cleaned: false,
             cleanup_timeout_secs: policy.timeout_secs.max(5),
             host_environment,
@@ -272,6 +288,9 @@ impl ScratchRoots {
                 &[&roots.repository, Path::new(commit)],
             )?;
             roots.registered = true;
+            let link = roots.repository.join(".git");
+            roots.worktree_link =
+                Some(std::fs::read(&link).map_err(|e| WorkflowError::io(&link, e))?);
             let head = git(&roots.repository, &["rev-parse", "HEAD"], &[])?;
             if head.trim() != commit {
                 return Err(invalid("scratch worktree revision mismatch"));
@@ -445,55 +464,5 @@ impl ScratchRoots {
     }
     pub(super) fn redact_output(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
         io::redact(&self.host_environment, bytes, truncated)
-    }
-    pub fn cleanup(&mut self) -> WorkflowResult<()> {
-        let control = control::Control::new(
-            self.cleanup_timeout_secs,
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        );
-        control.run(|| self.cleanup_inner())
-    }
-    fn cleanup_inner(&mut self) -> WorkflowResult<()> {
-        if self.cleaned {
-            return Ok(());
-        }
-        // Before the slot goes: a check that touched a tracked file forgets
-        // the cache's builds. Should that fail, the slot stays, and the next
-        // holder, finding it, forgets them instead.
-        if let Some(lease) = &mut self.lease
-            && self.registered
-        {
-            lease.audit(&[("repo", &self.repository), ("project", &self.project)])?;
-        }
-        if self.registered {
-            git(
-                &self.live_repository,
-                &["worktree", "remove", "--force"],
-                &[&self.repository],
-            )?;
-            let listed = git(
-                &self.live_repository,
-                &["worktree", "list", "--porcelain"],
-                &[],
-            )?;
-            let expected = format!("worktree {}", self.repository.display());
-            if listed.lines().any(|line| line == expected) {
-                return Err(invalid(
-                    "owned scratch worktree remains registered after removal",
-                ));
-            }
-            self.registered = false;
-        }
-        io::remove_owned_tree(&self.root)?;
-        self.cleaned = true;
-        self.lease = None;
-        Ok(())
-    }
-}
-impl Drop for ScratchRoots {
-    fn drop(&mut self) {
-        if !self.cleaned {
-            let _ = self.cleanup();
-        }
     }
 }

@@ -131,22 +131,27 @@ pub(super) enum CaptureFailure {
     /// run used the site between the two (classified by the typed error,
     /// never by its text).
     Removed { part: &'static str, path: PathBuf },
+    /// A cwd's build output link no longer names the site's build output.
+    TargetMapping,
     /// Anything else.
     Other(WorkflowError),
 }
 impl CaptureFailure {
-    fn of(roots: &ScratchRoots, part: &'static str, error: WorkflowError) -> Self {
-        match &error {
+    pub(super) fn of(roots: &ScratchRoots, part: &'static str, error: WorkflowError) -> Self {
+        let path = match &error {
             WorkflowError::Io { path, source }
                 if source.kind() == std::io::ErrorKind::NotFound
                     && (path.starts_with(roots.root()) || path.starts_with(roots.target())) =>
             {
-                Self::Removed {
-                    part,
-                    path: path.clone(),
-                }
+                Some(path.clone())
             }
-            _ => Self::Other(error),
+            // A tool reading the site (git) fails on a part it lost
+            // without saying which: the site names it.
+            _ => removed_part(roots),
+        };
+        match path {
+            Some(path) => Self::Removed { part, path },
+            None => Self::Other(error),
         }
     }
     pub(super) fn into_error(self) -> WorkflowError {
@@ -155,9 +160,26 @@ impl CaptureFailure {
                 "native scratch {part} missing at {}",
                 path.display()
             )),
+            Self::TargetMapping => invalid(super::faults::TARGET_MAPPING_CHANGED),
             Self::Other(error) => error,
         }
     }
+}
+/// The first part every site has (its root, repository copy and that
+/// copy's git metadata, project copy, build output) that is gone.
+pub(super) fn removed_part(roots: &ScratchRoots) -> Option<PathBuf> {
+    [
+        roots.root().to_path_buf(),
+        roots.repository().to_path_buf(),
+        roots.repository().join(".git"),
+        roots.project().to_path_buf(),
+        roots.target(),
+    ]
+    .into_iter()
+    .find(|path| {
+        path.symlink_metadata()
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    })
 }
 pub(super) fn capture(
     roots: &ScratchRoots,
@@ -180,9 +202,7 @@ pub(super) fn capture_site(
         if !meta.file_type().is_symlink()
             || path.canonicalize().map(archon_shell::paths::plain).ok() != Some(roots.target())
         {
-            return Err(CaptureFailure::Other(invalid(
-                "native build identity changed: target mapping",
-            )));
+            return Err(CaptureFailure::TargetMapping);
         }
         targets.push(object(&path).map_err(site("target links"))?);
     }

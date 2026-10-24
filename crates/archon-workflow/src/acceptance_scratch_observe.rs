@@ -13,7 +13,7 @@ mod rebuild;
 #[path = "acceptance_scratch_observe_result.rs"]
 mod result_helpers;
 use rebuild::Rebuild;
-use result_helpers::{operational, redacted};
+use result_helpers::{faulted, operational, redacted};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObservationResult {
@@ -236,9 +236,9 @@ pub async fn observe_commands_hooked(
                 }
             };
             if let Some(refused) = refused {
-                result
-                    .checks
-                    .push(operational(&reference.acceptance_id, refused.clone()));
+                let cause = Some(faults::FaultCause::SiblingRootRefused);
+                let own = faulted(&reference.acceptance_id, refused.clone(), cause);
+                result.checks.push(own);
                 continue;
             }
             // A check's fault, or what a check left that no fault named, is
@@ -274,10 +274,10 @@ pub async fn observe_commands_hooked(
             };
             let roots = roots.as_ref().expect("prepared");
             // A sibling this site could not copy for this check (`siblings`).
-            if let Some(failed) = positions[index].and_then(|at| roots.sibling_failure(at)) {
-                result
-                    .checks
-                    .push(operational(&reference.acceptance_id, failed.clone()));
+            if let Some((failed, cause)) = positions[index].and_then(|at| roots.sibling_failure(at))
+            {
+                let own = faulted(&reference.acceptance_id, failed.clone(), cause.clone());
+                result.checks.push(own);
                 dirty = false;
                 continue;
             }
@@ -302,36 +302,26 @@ pub async fn observe_commands_hooked(
             if deferred {
                 check.operational_error = Some(CHECK_DEFERRED.into());
             }
-            // The check's own site after its own run: a part it removed is
-            // the check's doing (`CaptureFailure::Removed`).
+            // The check's own site after its own run: what it changed or
+            // removed there is its own fault, recorded with its typed cause.
             let after_identity = phase()
                 .run(|| Ok(identity::capture_site(roots, policy)))
                 .unwrap_or_else(|e| Err(identity::CaptureFailure::Other(e)));
-            let mut integrity_failed = after_identity
-                .as_ref()
-                .map_or(true, |current| current != &baseline);
-            match &after_identity {
-                Ok(current) if current == &baseline => {}
-                Ok(current) => {
-                    let parts = baseline.changed_parts(current);
-                    check.operational_error = Some(super::faults::identity_changed(&parts));
-                }
-                Err(failure) => check.operational_error = Some(isolate::capture_failed(failure)),
-            }
+            let mut integrity_failed = isolate::judge_site(&mut check, &baseline, &after_identity);
             let project_after = phase().run(|| inventory(roots.project()));
             let cache_after = phase().run(|| cargo_home.digest(&cargo_home_path));
             let changed_paths = match project_after {
                 Ok(after) => identity::changed(&project_before, &after),
                 Err(e) => {
                     integrity_failed = true;
-                    check.operational_error = Some(e.to_string());
+                    isolate::read_failed(&mut check, roots, "project", e);
                     vec![]
                 }
             };
-            if let Err(e) = &cache_after {
+            let cache_after = cache_after.map_err(|e| {
                 integrity_failed = true;
-                check.operational_error = Some(e.to_string());
-            }
+                isolate::read_failed(&mut check, roots, "build tool home", e);
+            });
             result.check_evidence.push(CheckEvidence {
                 acceptance_id: reference.acceptance_id.clone(),
                 sibling_revisions: roots.sibling_revisions().to_vec(),
@@ -460,6 +450,7 @@ pub async fn execute_check_at(
                 crate::DeclarativeFloorEvaluation::Passed => {}
                 crate::DeclarativeFloorEvaluation::Failed { findings } => {
                     return Ok(CheckResult {
+                        fault: None,
                         classification: None,
                         acceptance_id: reference.acceptance_id.clone(),
                         exit_code: Some(1),

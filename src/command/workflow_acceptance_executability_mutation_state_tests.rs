@@ -8,6 +8,7 @@ fn names_of(list: &[&str]) -> Vec<String> {
 fn sh(dir: &Path, script: &str) -> CheckResult {
     let out = super::test_helpers::run_with_host_mutation(dir, script);
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC".into(),
         exit_code: out.status.code(),
@@ -277,6 +278,7 @@ fn mutation_wrapper_records_a_signal_it_receives() {
     assert!(signal.success());
     let output = child.wait_with_output().unwrap();
     let result = CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC".into(),
         exit_code: output.status.code(),

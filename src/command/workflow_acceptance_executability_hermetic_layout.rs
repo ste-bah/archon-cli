@@ -94,6 +94,7 @@ pub fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
 
 pub fn deferred(id: &str) -> CheckResult {
     CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: id.to_string(),
         exit_code: None,

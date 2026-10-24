@@ -124,6 +124,7 @@ impl Bin {
 
 pub(super) fn result(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> CheckResult {
     CheckResult {
+        fault: None,
         acceptance_id: "AC-331".into(),
         exit_code: code,
         stdout: stdout.to_vec(),

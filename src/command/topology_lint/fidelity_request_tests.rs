@@ -128,10 +128,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // D5: a set gate's unusable judge reply counts in the ordinary no-progress window, not the host's operational one.
     // O1/O3: a skeleton re-author re-authors only the bodies its change reaches; the dropped-task check is an assertion.
     // O3 at launch: a skeleton verified in place keys kept bodies on the launcher's frozen entries and on-disk bodies.
+    // H1: an operational (host-unproven) finding beside an authored finding stops nothing; alone it still stops the phase.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "a9d8d503a3413a0137ae84921ca8e22c0aab24ba169282cd3b2578f96c3f7b0b"
+        "a6ebce6fe32c0841ed84dd0cab45eb2ee045bc650d4e1ce7ed61c3d81f38d8b9"
     );
 }

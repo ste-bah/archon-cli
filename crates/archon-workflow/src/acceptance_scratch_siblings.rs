@@ -50,7 +50,10 @@ impl super::ScratchRoots {
 
     /// Why the check at `index` of this site's checks has no copy of a
     /// sibling it names (`copy_external`), if it has none.
-    pub(super) fn sibling_failure(&self, index: usize) -> Option<&String> {
+    pub(super) fn sibling_failure(
+        &self,
+        index: usize,
+    ) -> Option<&(String, Option<super::faults::FaultCause>)> {
         self.siblings.failures.get(&index)
     }
 
@@ -72,7 +75,7 @@ impl super::ScratchRoots {
 #[derive(Default)]
 pub(super) struct Copied {
     pub(super) revisions: Vec<crate::acceptance_sibling_paths::SiblingRevision>,
-    pub(super) failures: BTreeMap<usize, String>,
+    pub(super) failures: BTreeMap<usize, (String, Option<super::faults::FaultCause>)>,
 }
 
 /// Copy each sibling the checks name. Siblings are copied one by one: a
@@ -174,25 +177,36 @@ struct Sibling<'a> {
 
 /// The result of the checks naming a sibling at `relative` whose copy failed
 /// with `error`: the check's own fault when it alone names it and the cause
-/// is in its path, else host-unproven.
-fn sibling_failure(error: &WorkflowError, relative: &Path, alone: bool) -> String {
+/// is in its path (with its typed cause), else host-unproven.
+fn sibling_failure(
+    error: &WorkflowError,
+    relative: &Path,
+    alone: bool,
+) -> (String, Option<super::faults::FaultCause>) {
+    use super::faults::{FaultCause, SIBLING_SHAPE_REFUSED, SIBLING_TOO_LARGE};
     let text = error.to_string();
     let own = if text.contains("exceeds configured size limit") {
-        Some(super::faults::SIBLING_TOO_LARGE)
+        Some((SIBLING_TOO_LARGE, FaultCause::SiblingTooLarge))
     } else if text.contains("collision")
         || text.contains("already exists outside the repository copy")
         || matches!(error, WorkflowError::Io { source, .. }
             if matches!(source.kind(), std::io::ErrorKind::NotADirectory | std::io::ErrorKind::IsADirectory))
     {
-        Some(super::faults::SIBLING_SHAPE_REFUSED)
+        Some((SIBLING_SHAPE_REFUSED, FaultCause::SiblingShapeRefused))
     } else {
         None
     };
     match own {
-        Some(fault) if alone => format!("{fault}: {} ({text})", relative.display()),
-        _ => format!(
-            "sibling {} could not be copied; check is host-unproven: {text}",
-            relative.display()
+        Some((fault, cause)) if alone => (
+            format!("{fault}: {} ({text})", relative.display()),
+            Some(cause),
+        ),
+        _ => (
+            format!(
+                "sibling {} could not be copied; check is host-unproven: {text}",
+                relative.display()
+            ),
+            None,
         ),
     }
 }

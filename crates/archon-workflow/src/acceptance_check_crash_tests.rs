@@ -4,6 +4,7 @@ use super::*;
 
 fn result(exit: Option<i32>, stderr: &str) -> CheckResult {
     CheckResult {
+        fault: None,
         classification: None,
         acceptance_id: "AC-X".into(),
         exit_code: exit,

@@ -66,8 +66,12 @@ async fn a_check_that_breaks_its_own_site_is_its_finding_and_its_siblings_are_pr
     );
 }
 
+/// H1 (renamed from `a_staged_freeze_routes_an_authored_finding_while_another_check_is_unproven`,
+/// whose result held the authored finding alone): the check the host could
+/// not prove stays an operational finding beside the authored one, so
+/// nothing is published in any gate mode, observe included.
 #[tokio::test]
-async fn a_staged_freeze_routes_an_authored_finding_while_another_check_is_unproven() {
+async fn a_staged_freeze_routes_an_authored_finding_and_keeps_the_unproven_check_operational() {
     let trees = trees(&[
         ("AC-I-001", STALLS, REPO),
         ("AC-I-002", UNLINKS, REPO),
@@ -91,13 +95,37 @@ async fn a_staged_freeze_routes_an_authored_finding_while_another_check_is_unpro
         .collect();
     assert_eq!(
         routed,
-        vec![(
-            "AC-I-002",
-            archon_workflow::RemediationScope::CandidateArtifact
-        )],
+        vec![
+            (
+                "AC-I-002",
+                archon_workflow::RemediationScope::CandidateArtifact
+            ),
+            ("AC-I-001", archon_workflow::RemediationScope::Operational),
+        ],
         "{:?}",
         probed.findings.iter().map(|f| &f.text).collect::<Vec<_>>()
     );
+    let text = &probed.findings[1].text;
+    assert!(
+        text.starts_with("check 'AC-I-001': operational: the host could not prove it"),
+        "the host's, named as such: {text}"
+    );
+    let envelope = crate::command::workflow_gate::GateEvaluation::new("freeze", probed.findings)
+        .into_envelope()
+        .unwrap();
+    for mode in [
+        archon_core::config::GateMode::Observe,
+        archon_core::config::GateMode::Enforce,
+    ] {
+        assert!(
+            crate::command::workflow_host_command_decision::candidate_findings_prevent_publication(
+                "freeze-acceptance",
+                mode,
+                &envelope
+            ),
+            "a contract with a never-proven check is not published under {mode:?}"
+        );
+    }
     // R5-4: the freeze after the repair probes the unproven check again --
     // no saved verdict, saved progress or stored judgment counts it as
     // passed -- and it is not accepted without that probe.
