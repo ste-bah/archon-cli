@@ -38,7 +38,7 @@ pub(super) const SCRIPT_PAUSE_DIR: &str = "v2/script-pauses";
 const MAX_PAUSE_EVIDENCE_BYTES: usize = 64 * 1024;
 
 use super::workflow_live_v2_script_host_pause_credit::{
-    ScriptPauseRecord, covered_attempts, credit_holds,
+    PauseCreditVoid, ScriptPauseRecord, covered_attempts, retake_evidence,
 };
 
 /// Keep sibling pause requests in the order they enter the async host. The
@@ -162,7 +162,13 @@ impl WorkflowScriptHost {
                 )?;
                 // Coverage and the grant share the lock with run control and
                 // generation-owned persistence: no slot may change between them.
-                let credit = Self::pause_credit(&lock_store, &lock_v2_store, &lock_run_id, &record_path, &lock_pause_id)?;
+                let (credit, voided_by, previous_record) = Self::pause_credit(
+                    &lock_store,
+                    &lock_v2_store,
+                    &lock_run_id,
+                    &record_path,
+                    &lock_pause_id,
+                )?;
                 // Run control first: a pause already taken passes only a run that
                 // executes and was resumed since; a cancel outranks everything.
                 let joined = match (pause_disposition(&run.status), &credit) {
@@ -220,6 +226,8 @@ impl WorkflowScriptHost {
                 host_taken: false,
                 judged_at_pause: Default::default(),
                 unrecorded_event: event.is_err().then_some(detail),
+                voided_by,
+                previous_record,
             };
             let event = match event {
                 Ok(event) => {
@@ -338,27 +346,41 @@ impl WorkflowScriptHost {
 
 impl WorkflowScriptHost {
     /// The record of `pause_id` taken by an earlier execution, while every
-    /// attempt it covers still stands; `None` when there is none or a restart
-    /// (or a later attempt) has voided it.
-    fn pause_credit(
+    /// covered work attempt still stands; build-bound check slots are re-derived
+    /// after a build change. `None` when there is no record or work voided it.
+    pub(super) fn pause_credit(
         store: &WorkflowStore,
         v2_store: &WorkflowV2ResultStore,
         run_id: &str,
         record_path: &str,
         pause_id: &str,
-    ) -> archon_workflow::WorkflowResult<Option<ScriptPauseRecord>> {
+    ) -> archon_workflow::WorkflowResult<(
+        Option<ScriptPauseRecord>,
+        Option<PauseCreditVoid>,
+        Option<serde_json::Value>,
+    )> {
         let path = store.run_dir(run_id).join(record_path);
         let raw = match std::fs::read(&path) {
             Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((None, None, None));
+            }
             Err(source) => return Err(WorkflowError::Io { path, source }),
         };
-        let record: ScriptPauseRecord = serde_json::from_slice(&raw)?;
+        let mut record: ScriptPauseRecord = serde_json::from_slice(&raw)?;
         if record.pause_id != pause_id {
-            return Ok(None);
+            return Ok((None, None, None));
         }
         let slots = v2_store.load_call_records()?;
-        Ok(credit_holds(&record, &slots).then_some(record))
+        super::workflow_live_v2_script_host_pause_credit::enrich_build_bound(
+            &mut record,
+            &slots,
+            v2_store,
+        );
+        match retake_evidence(&record, &slots, &raw)? {
+            Some((voided_by, previous)) => Ok((None, Some(voided_by), Some(previous))),
+            None => Ok((Some(record), None, None)),
+        }
     }
 }
 
