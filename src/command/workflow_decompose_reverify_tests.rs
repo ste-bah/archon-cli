@@ -1,11 +1,14 @@
 //! End-to-end tests for the reverify command. Expected state is recorded
 //! before invoking the real entry point; assertions read its persisted output.
+#[path = "workflow_decompose_reverify_binary.rs"]
+mod binary;
 #[path = "workflow_decompose_reverify_eligibility_tests.rs"]
 mod eligibility_tests;
 #[path = "workflow_decompose_reverify_failure_tests.rs"]
 mod failure_tests;
 #[path = "workflow_decompose_reverify_fixture_repository.rs"]
 mod fixture_repository;
+pub(super) use binary::archon_binary;
 #[path = "workflow_decompose_reverify_resume_recovery_tests.rs"]
 mod resume_recovery_tests;
 use super::*;
@@ -260,26 +263,6 @@ pub(super) fn fixture() -> Fixture {
         bodies,
         prior_record,
     }
-}
-
-pub(super) fn archon_binary() -> std::path::PathBuf {
-    let binary = std::env::var_os("CARGO_BIN_EXE_archon")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join(format!("archon{}", std::env::consts::EXE_SUFFIX))
-        });
-    assert!(
-        binary.is_file(),
-        "built archon executable missing: {}",
-        binary.display()
-    );
-    binary
 }
 
 pub(super) fn invoke_reverify(binary: &std::path::Path, fixture: &Fixture) -> std::process::Output {
