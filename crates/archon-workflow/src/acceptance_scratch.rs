@@ -18,6 +18,8 @@ pub use direct::{
 mod inputs;
 #[path = "acceptance_scratch_siblings.rs"]
 mod siblings;
+#[path = "acceptance_scratch_site_path.rs"]
+mod site_path;
 use control::git;
 
 #[path = "acceptance_scratch_paths.rs"]
@@ -73,6 +75,9 @@ pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
 pub(crate) use process::drain_counted;
 pub use process::{CHECK_TIMED_OUT, CheckResult, MutationInputPlan, MutationPlan};
+pub use site_path::{
+    SITE_PROJECT_DIRECTORY, SITE_REPOSITORY_DIRECTORY, SitePathRefusal, site_path_alone,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -240,7 +245,7 @@ impl ScratchRoots {
                     let _ = git(
                         &live_repository,
                         &["worktree", "remove", "--force"],
-                        &[&stale.join("repo")],
+                        &[&stale.join(site_path::SITE_REPOSITORY_DIRECTORY)],
                     );
                     let _ = io::remove_owned_tree(&stale);
                 }
@@ -255,8 +260,8 @@ impl ScratchRoots {
         let mutation_root =
             mutation_fd::SiteRoot::capture(&root).map_err(|e| WorkflowError::io(&root, e))?;
         let mut roots = Self {
-            repository: root.join("repo"),
-            project: root.join("project"),
+            repository: root.join(site_path::SITE_REPOSITORY_DIRECTORY),
+            project: root.join(site_path::SITE_PROJECT_DIRECTORY),
             target: lease
                 .as_ref()
                 .map_or_else(|| root.join("target"), cache::Lease::target),
@@ -376,9 +381,12 @@ impl ScratchRoots {
                 let names: Vec<&str> = (listed.split('\0'))
                     .filter(|name| relative(Path::new(name)))
                     .collect();
-                let mut sources = vec![("repo", roots.repository.as_path())];
+                let mut sources = vec![(
+                    site_path::SITE_REPOSITORY_DIRECTORY,
+                    roots.repository.as_path(),
+                )];
                 if policy.combined {
-                    sources.push(("project", roots.project.as_path()));
+                    sources.push((site_path::SITE_PROJECT_DIRECTORY, roots.project.as_path()));
                 }
                 lease.stabilize(&sources, &names)?;
             }
@@ -426,9 +434,12 @@ impl ScratchRoots {
             if !relative(path) {
                 return Err(invalid("recorded source contains an unsafe path"));
             }
-            for (label, root) in [("repo", &self.repository), ("project", &self.project)] {
+            for (label, root) in [
+                (site_path::SITE_REPOSITORY_DIRECTORY, &self.repository),
+                (site_path::SITE_PROJECT_DIRECTORY, &self.project),
+            ] {
                 let file = root.join(path);
-                if label == "project" && !file.exists() {
+                if label == site_path::SITE_PROJECT_DIRECTORY && !file.exists() {
                     continue;
                 }
                 for (suffix, digest) in inventory(&file)? {
