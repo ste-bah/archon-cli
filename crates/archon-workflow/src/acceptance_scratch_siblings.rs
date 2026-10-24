@@ -45,7 +45,13 @@ impl super::ScratchRoots {
     }
 
     pub(crate) fn sibling_revisions(&self) -> &[crate::acceptance_sibling_paths::SiblingRevision] {
-        &self.sibling_revisions
+        &self.siblings.revisions
+    }
+
+    /// Why the check at `index` of this site's checks has no copy of a
+    /// sibling it names (`copy_external`), if it has none.
+    pub(super) fn sibling_failure(&self, index: usize) -> Option<&String> {
+        self.siblings.failures.get(&index)
     }
 
     /// Before this site is restored for another check (`isolate`): see
@@ -60,6 +66,24 @@ impl super::ScratchRoots {
     }
 }
 
+/// What one site copied of the siblings its checks name: the copied
+/// siblings' revisions, and the result of each check (by its index in the
+/// site's checks) whose sibling could not be copied.
+#[derive(Default)]
+pub(super) struct Copied {
+    pub(super) revisions: Vec<crate::acceptance_sibling_paths::SiblingRevision>,
+    pub(super) failures: BTreeMap<usize, String>,
+}
+
+/// Copy each sibling the checks name. Siblings are copied one by one: a
+/// sibling that cannot be copied is removed from the site and is the result
+/// of the checks that name it, never of the batch (a keep-going build fails
+/// only the targets that depend on what failed). A sibling only one check
+/// names, whose copy failed on its own path (too large, not a directory, a
+/// collision with the site), is that check's fault; any other failure, or
+/// a sibling several checks share, leaves those checks host-unproven. Only
+/// a failure to undo a partial copy, a stall or a cancellation is the
+/// batch's.
 pub(super) fn copy_external(
     project: &Path,
     repository: &Path,
@@ -67,13 +91,13 @@ pub(super) fn copy_external(
     copied_repository: &Path,
     checks: &[(String, crate::task_set_contract::TrustedCwd)],
     remaining: &mut u64,
-) -> WorkflowResult<Vec<crate::acceptance_sibling_paths::SiblingRevision>> {
+) -> WorkflowResult<Copied> {
     let project = archon_shell::paths::canonicalize(project)
         .map_err(|error| WorkflowError::io(project, error))?;
     let repository = archon_shell::paths::canonicalize(repository)
         .map_err(|error| WorkflowError::io(repository, error))?;
     let mut siblings = Vec::new();
-    for (check, cwd) in checks {
+    for (index, (check, cwd)) in checks.iter().enumerate() {
         let (root, copied_root) = match cwd {
             crate::task_set_contract::TrustedCwd::ProjectRoot => (&project, copied_project),
             crate::task_set_contract::TrustedCwd::RepoRoot => (&repository, copied_repository),
@@ -89,128 +113,204 @@ pub(super) fn copy_external(
                 )));
             }
             let path = relative(root, &sibling.alias);
-            siblings.push((copied_root.join(&path), path, sibling.source, *cwd));
+            siblings.push((copied_root.join(&path), path, sibling.source, *cwd, index));
         }
     }
-    siblings.sort_by(|left, right| left.0.cmp(&right.0));
-    siblings.dedup_by(|left, right| left.0 == right.0);
-    let mut evidence = Vec::new();
-    for (destination, relative, source, cwd) in siblings {
-        let repository_relative = source.strip_prefix(&repository).ok();
+    siblings.sort_by(|left, right| left.0.cmp(&right.0).then(left.4.cmp(&right.4)));
+    let mut copied = Copied::default();
+    let mut siblings = siblings.into_iter().peekable();
+    while let Some((destination, relative, source, cwd, index)) = siblings.next() {
+        let mut named_by = vec![index];
+        while let Some(next) = siblings.next_if(|next| next.0 == destination) {
+            if !named_by.contains(&next.4) {
+                named_by.push(next.4);
+            }
+        }
         let existed = destination.exists();
-        let commit = if let Some(repository_relative) = repository_relative {
-            let target = copied_repository.join(repository_relative);
-            if destination != target {
-                let already_points_to_target = existed
-                    && destination
-                        .canonicalize()
-                        .ok()
-                        .zip(target.canonicalize().ok())
-                        .is_some_and(|(destination, target)| destination == target);
-                if existed && !already_points_to_target {
-                    return Err(invalid(format!(
-                        "sibling alias {} already exists outside the repository copy",
-                        destination.display()
-                    )));
+        let budget = *remaining;
+        let sibling = Sibling {
+            destination: &destination,
+            relative: &relative,
+            source: &source,
+            existed,
+        };
+        let copy = copy_one(&sibling, &repository, copied_repository, remaining);
+        match copy {
+            Ok(commit) => copied
+                .revisions
+                .push(crate::acceptance_sibling_paths::SiblingRevision {
+                    path: relative,
+                    commit,
+                    cwd: Some(cwd),
+                }),
+            Err(error) => {
+                if matches!(
+                    error,
+                    WorkflowError::ControlPaused(_) | WorkflowError::ControlCancelled(_)
+                ) {
+                    return Err(error);
                 }
-                // A previously materialized sibling alias can make this
-                // nested destination resolve to the repository copy itself.
-                // In that case the alias already works; creating its parent
-                // would manufacture repository/target before the build link
-                // guard gets to validate it.
-                let destination_is_target = resolves_to_same_path(&destination, &target);
-                if !already_points_to_target && !destination_is_target {
-                    if let Some(parent) = destination.parent() {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|error| WorkflowError::io(parent, error))?;
-                    }
-                    link_repository_copy(&target, &destination)?;
+                super::control::check()?;
+                *remaining = budget;
+                if !existed {
+                    super::io::remove_owned_tree(&destination)?;
+                }
+                let result = sibling_failure(&error, &relative, named_by.len() == 1);
+                for index in named_by {
+                    copied.failures.insert(index, result.clone());
                 }
             }
-            Some(git_head(copied_repository)?)
-        } else if source.join(".git").exists() {
-            let head = git_head(&source)?;
-            if existed {
-                let copied_head = git_head(&destination)?;
-                let current_head = git_head(&source)?;
-                if copied_head != head || current_head != head {
-                    return Err(invalid(format!(
-                        "sibling revision mismatch at {} (expected {head}, copied {copied_head}, current {current_head})",
-                        relative.display()
-                    )));
-                }
-                Some(head)
-            } else {
+        }
+    }
+    Ok(copied)
+}
+
+struct Sibling<'a> {
+    destination: &'a Path,
+    relative: &'a Path,
+    source: &'a Path,
+    existed: bool,
+}
+
+/// The result of the checks naming a sibling at `relative` whose copy failed
+/// with `error`: the check's own fault when it alone names it and the cause
+/// is in its path, else host-unproven.
+fn sibling_failure(error: &WorkflowError, relative: &Path, alone: bool) -> String {
+    let text = error.to_string();
+    let own = if text.contains("exceeds configured size limit") {
+        Some(super::faults::SIBLING_TOO_LARGE)
+    } else if text.contains("collision")
+        || text.contains("already exists outside the repository copy")
+        || matches!(error, WorkflowError::Io { source, .. }
+            if matches!(source.kind(), std::io::ErrorKind::NotADirectory | std::io::ErrorKind::IsADirectory))
+    {
+        Some(super::faults::SIBLING_SHAPE_REFUSED)
+    } else {
+        None
+    };
+    match own {
+        Some(fault) if alone => format!("{fault}: {} ({text})", relative.display()),
+        _ => format!(
+            "sibling {} could not be copied; check is host-unproven: {text}",
+            relative.display()
+        ),
+    }
+}
+
+/// Copy one sibling to its destination, returning its recorded revision.
+fn copy_one(
+    sibling: &Sibling<'_>,
+    repository: &Path,
+    copied_repository: &Path,
+    remaining: &mut u64,
+) -> WorkflowResult<Option<String>> {
+    let Sibling {
+        destination,
+        relative,
+        source,
+        existed,
+    } = *sibling;
+    let repository_relative = source.strip_prefix(repository).ok();
+    let commit = if let Some(repository_relative) = repository_relative {
+        let target = copied_repository.join(repository_relative);
+        if destination != target {
+            let already_points_to_target = existed
+                && destination
+                    .canonicalize()
+                    .ok()
+                    .zip(target.canonicalize().ok())
+                    .is_some_and(|(destination, target)| destination == target);
+            if existed && !already_points_to_target {
+                return Err(invalid(format!(
+                    "sibling alias {} already exists outside the repository copy",
+                    destination.display()
+                )));
+            }
+            // A previously materialized sibling alias can make this
+            // nested destination resolve to the repository copy itself.
+            // In that case the alias already works; creating its parent
+            // would manufacture repository/target before the build link
+            // guard gets to validate it.
+            let destination_is_target = resolves_to_same_path(destination, &target);
+            if !already_points_to_target && !destination_is_target {
                 if let Some(parent) = destination.parent() {
                     std::fs::create_dir_all(parent)
                         .map_err(|error| WorkflowError::io(parent, error))?;
                 }
-                let output = archon_shell::spawn::command("git")
-                    .args([
-                        "-c",
-                        "core.hooksPath=/dev/null",
-                        "clone",
-                        "--quiet",
-                        "--shared",
-                        "--",
-                    ])
-                    .arg(
-                        archon_shell::paths::try_plain(source.clone())
-                            .map_err(|e| WorkflowError::io(&source, e))?,
-                    )
-                    .arg(
-                        archon_shell::paths::try_plain(destination.clone())
-                            .map_err(|e| WorkflowError::io(&destination, e))?,
-                    )
-                    .output()
-                    .map_err(|error| WorkflowError::io(&source, error))?;
-                if !output.status.success() {
-                    return Err(invalid(format!(
-                        "git clone {}: {}",
-                        source.display(),
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    )));
-                }
-                let copied_head = git_head(&destination)?;
-                let current_head = git_head(&source)?;
-                if copied_head != head || current_head != head {
-                    return Err(invalid(format!(
-                        "sibling revision changed while copying {} (expected {head}, copied {copied_head}, current {current_head})",
-                        relative.display()
-                    )));
-                }
-                Some(head)
+                link_repository_copy(&target, destination)?;
             }
-        } else if existed {
-            None
+        }
+        Some(git_head(copied_repository)?)
+    } else if source.join(".git").exists() {
+        let head = git_head(source)?;
+        if existed {
+            let copied_head = git_head(destination)?;
+            let current_head = git_head(source)?;
+            if copied_head != head || current_head != head {
+                return Err(invalid(format!(
+                    "sibling revision mismatch at {} (expected {head}, copied {copied_head}, current {current_head})",
+                    relative.display()
+                )));
+            }
+            Some(head)
         } else {
             if let Some(parent) = destination.parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|error| WorkflowError::io(parent, error))?;
             }
-            if source.is_file() {
-                if let Some(parent) = destination.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|error| WorkflowError::io(parent, error))?;
-                }
-                super::io::copy_tree(&source, &destination, remaining, true)?;
-            } else {
-                copy_directory(&source, &source, &destination, remaining)?;
+            let output = archon_shell::spawn::command("git")
+                .args([
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "clone",
+                    "--quiet",
+                    "--shared",
+                    "--",
+                ])
+                .arg(
+                    archon_shell::paths::try_plain(source.to_path_buf())
+                        .map_err(|e| WorkflowError::io(source, e))?,
+                )
+                .arg(
+                    archon_shell::paths::try_plain(destination.to_path_buf())
+                        .map_err(|e| WorkflowError::io(destination, e))?,
+                )
+                .output()
+                .map_err(|error| WorkflowError::io(source, error))?;
+            if !output.status.success() {
+                return Err(invalid(format!(
+                    "git clone {}: {}",
+                    source.display(),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
             }
-            None
-        };
-        evidence.push(crate::acceptance_sibling_paths::SiblingRevision {
-            path: relative,
-            commit,
-            cwd: Some(cwd),
-        });
-        if repository_relative.is_none() && !existed && source.join(".git").exists() {
+            let copied_head = git_head(destination)?;
+            let current_head = git_head(source)?;
+            if copied_head != head || current_head != head {
+                return Err(invalid(format!(
+                    "sibling revision changed while copying {} (expected {head}, copied {copied_head}, current {current_head})",
+                    relative.display()
+                )));
+            }
             *remaining = remaining
-                .checked_sub(tree_bytes(&destination)?)
+                .checked_sub(tree_bytes(destination)?)
                 .ok_or_else(|| invalid("scratch copy exceeds configured size limit"))?;
+            Some(head)
         }
-    }
-    Ok(evidence)
+    } else if existed {
+        None
+    } else {
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| WorkflowError::io(parent, error))?;
+        }
+        if source.is_file() {
+            super::io::copy_tree(source, destination, remaining, true)?;
+        } else {
+            copy_directory(source, source, destination, remaining)?;
+        }
+        None
+    };
+    Ok(commit)
 }
 
 fn resolves_to_same_path(left: &Path, right: &Path) -> bool {

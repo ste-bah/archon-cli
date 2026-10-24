@@ -155,7 +155,7 @@ pub struct ScratchRoots {
     cleaned: bool,
     cleanup_timeout_secs: u64,
     host_environment: BTreeMap<String, String>,
-    sibling_revisions: Vec<crate::acceptance_sibling_paths::SiblingRevision>,
+    siblings: siblings::Copied,
 }
 impl ScratchRoots {
     pub fn prepare(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
@@ -253,7 +253,7 @@ impl ScratchRoots {
             cleaned: false,
             cleanup_timeout_secs: policy.timeout_secs.max(5),
             host_environment,
-            sibling_revisions: Vec::new(),
+            siblings: siblings::Copied::default(),
         };
         let setup = (|| {
             roots.registered = true;
@@ -326,7 +326,7 @@ impl ScratchRoots {
                 (&project_excludes, nested.as_deref()),
                 &mut remaining,
             )?;
-            roots.sibling_revisions = siblings::copy_external(
+            roots.siblings = siblings::copy_external(
                 &project,
                 &policy.repository,
                 &roots.project,

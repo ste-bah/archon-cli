@@ -2,19 +2,21 @@
 //! limit cuts it off, its continuations.
 //!
 //! A truncated reply is never parsed as it stands. It is continued only
-//! while its JSON document is open: each continuation must extend the
+//! while its JSON document is open, or when a length stop comes before its
+//! first token: each continuation must extend the
 //! document so that it stays a valid JSON prefix, and a resumed freeze
 //! continues the reply saved by an earlier attempt instead of asking again.
 //! Progress is the document's parse position moving over at least one token
 //! that is not whitespace, never a count of continuations and never two
 //! chunks being unequal (a long string repeats text legitimately); a reply
-//! past `MAX_PARTIAL_REPLY_BYTES` is no progress. A truncated reply with no
-//! document begun (prose only) is not continued: the judge is asked again. A continuation that adds nothing, contradicts the
+//! past `MAX_PARTIAL_REPLY_BYTES` is no progress. A continuation that adds
+//! nothing, contradicts the
 //! document (restarts it, breaks its syntax) or ends normally with the
 //! document still open is no progress: the judge is [`JudgeIncomplete`],
 //! resumable. A reply whose document is already complete when it is cut off
 //! is not continued (a continuation could restart with another document);
-//! it is no usable verdict, and the judge is asked again.
+//! it is no usable verdict, and the judge is asked again. So is a first
+//! reply cut off whose text already contradicts a JSON document.
 
 use std::time::Duration;
 
@@ -143,10 +145,17 @@ pub(crate) fn step(reply: &str, continuing: bool, outcome: &WorkflowAgentOutcome
             JudgeIncompleteKind::AuthoredReply,
             true,
         ),
-        // No document begun (prose only), or not a JSON prefix: nothing to
-        // continue, and no usable verdict.
-        Ending::Truncated(reason) if !continuing && state != Document::Open => unusable(
-            format!("the reply was truncated by stop reason '{reason}' before any JSON document"),
+        // The provider's stop reason takes precedence over the parser: a
+        // length stop may happen before it has emitted the opening brace.
+        Ending::Truncated(_) if !continuing && state == Document::NotStarted => {
+            Step::Continue(grown)
+        }
+        // A first reply that already contradicts a JSON document cannot be
+        // extended into one: no usable verdict, asked afresh.
+        Ending::Truncated(reason) if !continuing && state == Document::Invalid => unusable(
+            format!(
+                "the reply was truncated by stop reason '{reason}' with text that is not a JSON document"
+            ),
             JudgeIncompleteKind::AuthoredReply,
             false,
         ),

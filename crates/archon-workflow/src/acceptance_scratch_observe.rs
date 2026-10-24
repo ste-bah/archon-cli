@@ -8,6 +8,12 @@ use crate::acceptance_world::{FrozenCommandRef, resolve_command};
 use crate::task_set_contract::{AcceptanceContract, content_digest};
 use isolate::normalized;
 use std::sync::{Arc, atomic::AtomicBool};
+#[path = "acceptance_scratch_observe_rebuild.rs"]
+mod rebuild;
+#[path = "acceptance_scratch_observe_result.rs"]
+mod result_helpers;
+use rebuild::Rebuild;
+use result_helpers::{operational, redacted};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObservationResult {
@@ -176,6 +182,10 @@ pub async fn observe_commands_hooked(
                 )
             })
             .collect();
+        // Each check's own result before any site exists, and its index
+        // among the site's checks when it has none.
+        let pre_site = rebuild::pre_site(&commands, &refusals);
+        let positions = rebuild::positions(&pre_site);
         let checks = (commands.iter().zip(&refusals))
             .filter(|(_, refused)| refused.is_none())
             .filter_map(|(command, _)| command.as_ref().ok())
@@ -203,7 +213,8 @@ pub async fn observe_commands_hooked(
         let mut dirty = false;
         let first = isolate::FirstSite::of(prepared, &baseline, &result.copied_project_manifest);
         let restore = |roots: &mut Option<ScratchRoots>| {
-            phase().run(|| isolate::restore(roots, policy, commit, &checks, &first))
+            let rebuilt = phase().run(|| isolate::restore(roots, policy, commit, &checks, &first));
+            rebuild::classify(rebuilt, &cancel)
         };
         for (index, ((reference, command), refused)) in
             refs.iter().zip(commands).zip(&refusals).enumerate()
@@ -230,31 +241,46 @@ pub async fn observe_commands_hooked(
                     .push(operational(&reference.acceptance_id, refused.clone()));
                 continue;
             }
-            if dirty {
-                baseline = restore(&mut roots)?;
-                cargo_home = seal::TreeSeal::default();
-            }
-            let mut restored = dirty;
+            // A check's fault, or what a check left that no fault named, is
+            // followed by a site rebuilt once; a rebuilt site that still does
+            // not verify is the host's, for the checks still to run.
+            let mut restored = false;
             let before_identity = loop {
                 let current = roots.as_ref().expect("prepared");
-                let verified = phase()
-                    .run(|| current.reset_project())
-                    .and_then(|()| phase().run(|| identity::capture(current, policy)));
-                match verified {
-                    Ok(identity) if identity == baseline => break identity,
-                    // What a check left that no fault named: re-copied once.
-                    _ if !restored => {
-                        baseline = restore(&mut roots)?;
+                let verified = (!dirty || restored).then(|| {
+                    (phase().run(|| current.reset_project()))
+                        .and_then(|()| phase().run(|| identity::capture(current, policy)))
+                });
+                let rebuilt = match verified {
+                    Some(Ok(identity)) if identity == baseline => break Ok(identity),
+                    _ if !restored => restore(&mut roots)?,
+                    verified => Rebuild::HostUnproven(rebuild::unverified(verified, &cancel)?),
+                };
+                match rebuilt {
+                    Rebuild::Verified(identity) => {
+                        (baseline, restored) = (identity, true);
                         cargo_home = seal::TreeSeal::default();
-                        restored = true;
                     }
-                    Ok(_) => {
-                        return Err(invalid("native build identity changed before cache reuse"));
-                    }
-                    Err(error) => return Err(error),
+                    Rebuild::HostUnproven(error) => break Err(error),
+                }
+            };
+            let before_identity = match before_identity {
+                Ok(identity) => identity,
+                Err(error) => {
+                    let later = rebuild::unproven(&refs[index..], &pre_site[index..], &error);
+                    result.checks.extend(later);
+                    break;
                 }
             };
             let roots = roots.as_ref().expect("prepared");
+            // A sibling this site could not copy for this check (`siblings`).
+            if let Some(failed) = positions[index].and_then(|at| roots.sibling_failure(at)) {
+                result
+                    .checks
+                    .push(operational(&reference.acceptance_id, failed.clone()));
+                dirty = false;
+                continue;
+            }
             let cargo_home_path = roots.root().join("cargo-home");
             let project_before = phase().run(|| inventory(roots.project()))?;
             let cache_before = phase().run(|| cargo_home.digest(&cargo_home_path))?;
@@ -401,27 +427,6 @@ pub async fn observe_commands_hooked(
     std::fs::write(&path, serde_json::to_vec_pretty(&result)?)
         .map_err(|e| WorkflowError::io(&path, e))?;
     Ok(result)
-}
-fn redacted(roots: &ScratchRoots, check: &CheckResult) -> CheckResult {
-    let mut check = check.clone();
-    check.stdout = roots.redact(&check.stdout);
-    check.stderr = roots.redact(&check.stderr);
-    if let Some(error) = &mut check.operational_error {
-        *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
-    }
-    check
-}
-fn operational(id: &str, error: String) -> CheckResult {
-    CheckResult {
-        classification: None,
-        acceptance_id: id.into(),
-        exit_code: None,
-        quota_walk_count: 0,
-        stdout: vec![],
-        stderr: vec![],
-        operational_error: Some(error),
-        environment_note: None,
-    }
 }
 /// One authorized check at a site: a nested verifier's declarative
 /// prerequisites first (evaluated in-process, or as the generated predicate

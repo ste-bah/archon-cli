@@ -419,30 +419,6 @@ async fn a_whitespace_only_continuation_is_no_progress() {
     assert_eq!(client.calls().len(), 2);
 }
 
-/// Round 3 (decision D): prose with no document is not continued; the
-/// judge is asked afresh.
-#[tokio::test]
-async fn a_truncated_reply_with_no_document_is_re_asked_never_continued() {
-    let client = Scripted::new(vec![
-        Ok(("Let me weigh each check in turn", Some("max_tokens"))),
-        Ok((ACCEPTED, Some("end_turn"))),
-    ]);
-
-    let judged = judge_contract(&client, contract(), &expected())
-        .await
-        .expect("the fresh reply is complete");
-
-    assert_eq!(
-        judged.acceptance[0].judgment.verdict,
-        JudgeDecision::Accepted
-    );
-    assert_eq!(
-        client.calls()[1].len(),
-        1,
-        "a fresh ask, not a continuation"
-    );
-}
-
 /// Round 3 (decision D): a partial reply past the byte cap is no progress.
 #[tokio::test]
 async fn a_reply_past_the_byte_cap_is_incomplete() {
@@ -497,3 +473,6 @@ mod idle;
 
 #[path = "workflow_task_set_judge_transport_tests.rs"]
 mod transport;
+
+#[path = "workflow_task_set_judge_truncated_first_tests.rs"]
+mod truncated_first;
