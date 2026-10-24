@@ -38,6 +38,10 @@ use clap::Parser;
 use cli_args::Cli;
 
 fn main() -> Result<()> {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--build-identity")) {
+        println!("{}", env!("ARCHON_BUILD_FINGERPRINT"));
+        return Ok(());
+    }
     // SAFETY: no runtime or application threads exist yet. A limit that
     // cannot be lowered is reported once logging runs; it never stops startup.
     #[cfg(unix)]
