@@ -13,6 +13,10 @@ use archon_workflow::task_set_contract::{AcceptanceContract, AcceptanceCriterion
 use crate::command::workflow_freeze_budget::FreezeIncomplete;
 use crate::command::workflow_task_set::judge::JudgeIncomplete;
 
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_judge_partial_tests.rs"]
+mod judge_partial_tests;
+
 #[derive(Default)]
 pub(super) struct JudgeRetryCandidates(BTreeMap<String, AcceptanceCriterion>);
 
@@ -30,17 +34,17 @@ pub(super) type Pending<'a> = (
     &'a mut BTreeMap<String, String>,
 );
 
-/// Hold every candidate of `asked`, the judge call `error` ended: for its
+/// Hold undecided entries of `asked`, the judge call `error` ended: for its
 /// author's next judge attempt when the judge itself gave no usable verdict
-/// (each note in `feedback`), else for the host (`pending`). An error that
-/// is no incomplete judge is returned unchanged.
+/// (each note in `feedback`), else for the host (`pending`). Return decided
+/// entries for normal verdict handling. A non-incomplete error is unchanged.
 pub(super) fn hold_judge_failure(
     error: anyhow::Error,
     asked: &AcceptanceContract,
     retry: &mut JudgeRetryCandidates,
     feedback: &mut BTreeMap<String, Vec<String>>,
     (pending, reused, unproven): Pending<'_>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<AcceptanceContract> {
     let Some(incomplete) = JudgeIncomplete::caused(&error) else {
         return Err(error);
     };
@@ -54,7 +58,32 @@ pub(super) fn hold_judge_failure(
             "the acceptance judge could not complete for a provider or host fault: {error:#}; this check remains pending for the host and is judged again on resume"
         )
     };
+    let decided_ids: BTreeSet<String> = incomplete
+        .decided
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect();
+    let mut decided = asked.clone();
+    decided
+        .acceptance
+        .retain(|entry| decided_ids.contains(&entry.id));
+    decided
+        .supplementary
+        .retain(|entry| decided_ids.contains(&entry.id));
+    for judged_entry in &incomplete.decided {
+        if let Some(entry) = decided
+            .acceptance
+            .iter_mut()
+            .chain(&mut decided.supplementary)
+            .find(|entry| entry.id == judged_entry.id)
+        {
+            *entry = judged_entry.clone();
+        }
+    }
     for entry in asked.acceptance.iter().chain(&asked.supplementary) {
+        if decided_ids.contains(&entry.id) {
+            continue;
+        }
         if authored {
             retry.0.insert(entry.id.clone(), entry.clone());
             if let Some(notes) = feedback.get_mut(&entry.id) {
@@ -66,7 +95,7 @@ pub(super) fn hold_judge_failure(
             unproven.insert(entry.id.clone(), finding.clone());
         }
     }
-    Ok(())
+    Ok(decided)
 }
 
 /// The checks of `ids` a passability judge that could not complete left

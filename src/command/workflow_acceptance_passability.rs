@@ -456,9 +456,18 @@ async fn ask(
         .acceptance
         .retain(|entry| ids.contains(entry.id.as_str()));
     (subset.supplementary).retain(|entry| ids.contains(entry.id.as_str()));
-    let checks: Vec<&serde_json::Value> =
-        pending.iter().map(|candidate| &candidate.shown).collect();
-    let task = format!("{INSTRUCTION} Checks: {}", serde_json::to_string(&checks)?);
+    let prompt = |subset: &AcceptanceContract| {
+        let subset_ids: BTreeSet<&str> = entries(subset).map(|entry| entry.id.as_str()).collect();
+        let checks: Vec<&serde_json::Value> = pending
+            .iter()
+            .filter(|candidate| subset_ids.contains(candidate.id.as_str()))
+            .map(|candidate| &candidate.shown)
+            .collect();
+        Ok(format!(
+            "{INSTRUCTION} Checks: {}",
+            serde_json::to_string(&checks)?
+        ))
+    };
     let decision = |entry: &AcceptanceCriterion| {
         let decision = Decision {
             verdict: entry.judgment.verdict,
@@ -468,7 +477,7 @@ async fn ask(
         };
         (entry.id.clone(), decision)
     };
-    match judge_prompted(client, subset, &task, model, require_judged_prose, None).await {
+    match judge_prompted(client, subset, prompt, model, require_judged_prose, None).await {
         Ok(judged) => Ok((entries(&judged).map(decision).collect(), None)),
         Err(error) => match super::judge::JudgeIncomplete::caused(&error) {
             Some(incomplete) => {
@@ -485,3 +494,7 @@ async fn ask(
 #[cfg(test)]
 #[path = "workflow_acceptance_passability_partial_tests.rs"]
 mod partial_tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_passability_prompt_tests.rs"]
+mod prompt_tests;

@@ -318,16 +318,13 @@ pub(crate) async fn reauthor_partial_with_cache(
             // its call, by whose fault it is; every proven sibling goes on.
             let judged = match judged {
                 Ok(judged) => Some(judged),
-                Err(error) => {
-                    passability_pending::hold_judge_failure(
-                        error,
-                        &retry_contract,
-                        &mut judge_retry_candidates,
-                        &mut feedback,
-                        (&mut pending, &mut reused, &mut unproven_checks),
-                    )?;
-                    None
-                }
+                Err(error) => Some(passability_pending::hold_judge_failure(
+                    error,
+                    &retry_contract,
+                    &mut judge_retry_candidates,
+                    &mut feedback,
+                    (&mut pending, &mut reused, &mut unproven_checks),
+                )?),
             };
             if let Some(judged) = judged {
                 for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
