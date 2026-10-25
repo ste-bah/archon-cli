@@ -1,6 +1,6 @@
 //! Issue 333 round 5: a listing runs only with its site's own context,
 //! never the host's environment (Issue 282), and originals are judged at
-//! their site; each cell of `missing`'s table says what its author does;
+//! their site; each cell of the table says what its author does;
 //! a listing is "none" only when the tool says it has none; and a
 //! rejection is the tool's only when no other program of the check is
 //! named instead.
@@ -13,7 +13,7 @@ use archon_workflow::acceptance_scratch::ScratchPolicy;
 use super::super::super::{HostProbe, Original};
 use super::super::no_verdict;
 use super::tests::{Bin, SIBLING, host_cargo, result};
-use super::tests_333::{rustup_proxy, warm};
+use super::tests_333::warm;
 use super::tests_333b::contract;
 
 macro_rules! or_skip {
@@ -255,7 +255,7 @@ fn a_listing_is_none_only_when_the_tool_says_so() {
 
 #[test]
 fn a_toolchain_proxy_that_could_not_choose_a_toolchain_is_no_answer() {
-    let (proxy, _) = or_skip!(rustup_proxy(), "rustup");
+    let proxy = super::tests::host_toolchain::fake_rustup_proxy();
     // No `cargo-nextest` on the host: only the listing could have said.
     let bin = Bin::new(&proxy, &[SIBLING]);
     let empty = tempfile::tempdir().unwrap();
