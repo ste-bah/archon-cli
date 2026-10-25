@@ -39,7 +39,57 @@ foreach ($case in $cases) {
     Write-Output "PASS specifier '$($case.Specifier)' with Python $($case.Version) => $actual"
 }
 
+# Get-PythonCandidates must parse both py.exe -0p listing formats. The fake
+# launcher reports real fake interpreter paths so this exercises discovery.
+$candidateRoot = Join-Path $root 'py launcher candidates'
+$candidateBin = Join-Path $candidateRoot 'bin'
+New-Item -ItemType Directory -Force -Path $candidateBin | Out-Null
+$python315 = Join-Path $candidateBin 'python315.cmd'
+$python312 = Join-Path $candidateBin 'python312.cmd'
+Set-Content -LiteralPath $python315 -Value @('@echo off', 'echo Python 3.15.0')
+Set-Content -LiteralPath $python312 -Value @('@echo off', 'echo Python 3.12.0')
+$pyLauncher = Join-Path $candidateBin 'py.cmd'
+Set-Content -LiteralPath $pyLauncher -Value @(
+    '@echo off',
+    "echo  -V:3.15 *        $python315",
+    "echo  -3.12-64        $python312"
+)
+$savedCandidatePath = $env:Path
+$savedCandidatePathExt = $env:PATHEXT
+try {
+    $env:Path = "$candidateBin$([IO.Path]::PathSeparator)$savedCandidatePath"
+    $env:PATHEXT = '.CMD;.BAT;.EXE;.COM'
+    $foundCandidates = @(Get-PythonCandidates)
+} finally {
+    $env:Path = $savedCandidatePath
+    $env:PATHEXT = $savedCandidatePathExt
+}
+if (-not ($foundCandidates.Program -contains $python315) -or -not ($foundCandidates.Program -contains $python312)) {
+    throw "py.exe candidate parsing failed; expected both launcher formats, got: $($foundCandidates.Program -join ', ')"
+}
+Write-Output 'PASS py.exe candidate discovery parses -V and architecture launcher formats'
+
 $root = Join-Path $env:RUNNER_TEMP 'trading setup safety checks'
+$candidateBin = Join-Path $root 'wheel probe candidates'
+New-Item -ItemType Directory -Force -Path $candidateBin | Out-Null
+$failingCandidate = Join-Path $candidateBin 'newer-python.cmd'
+$workingCandidate = Join-Path $candidateBin 'older-python.cmd'
+Set-Content -LiteralPath $failingCandidate -Value @('@echo off', 'echo no wheel for dependency >&2', 'echo complete resolver diagnostic >&2', 'exit /b 1')
+Set-Content -LiteralPath $workingCandidate -Value @('@echo off', 'exit /b 0')
+$candidates = @(
+    @{ Program = $failingCandidate; FixedArguments = [string[]]@() },
+    @{ Program = $workingCandidate; FixedArguments = [string[]]@() }
+)
+$selected = Resolve-BasePython '>=3.10,<4' $candidates
+if ($selected.Program -ne $workingCandidate) { throw "Wheel resolution selected '$($selected.Program)' instead of '$workingCandidate'" }
+try {
+    Resolve-BasePython '>=3.10,<4' @($candidates[0]) | Out-Null
+    throw 'Wheel resolution assertion failed: all failed candidates were accepted'
+} catch {
+    if ($_.Exception.Message -notmatch 'no wheel for dependency' -or $_.Exception.Message -notmatch 'complete resolver diagnostic') { throw }
+}
+Write-Output 'PASS wheel-only resolution skips a failing candidate and retains its full pip error'
+
 $junctionTarget = Join-Path $root 'junction target'
 $junctionProject = Join-Path $root 'junction project'
 $junctionVenv = Join-Path $junctionProject '.archon/tools/openbb-venv'
