@@ -22,6 +22,7 @@ fn an_oversized_sibling_copy_has_the_typed_check_fault() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
+        false,
     )
     .unwrap();
 
@@ -59,6 +60,7 @@ fn an_unavailable_sibling_shape_has_the_typed_check_fault() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
+        false,
     )
     .unwrap();
 
