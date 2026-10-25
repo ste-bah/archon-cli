@@ -14,6 +14,7 @@ fn an_unresolvable_root_is_refused_with_its_actual_reason() {
         "test -f ../input",
         TrustedCwd::ProjectRoot,
         std::path::Path::new("../input"),
+        false,
     )
     .expect_err("an unavailable root cannot model a prepared site");
     assert!(refusal.site_target == std::path::Path::new("<site>"));
@@ -103,6 +104,30 @@ fn a_cross_root_path_in_here_document_finding_names_the_path() {
         .expect_err("the here-document path has no site copy");
     assert!(finding.contains(named), "{finding}");
     assert!(finding.contains("<site>/external/item"), "{finding}");
+}
+
+#[test]
+fn repository_root_path_cannot_leave_and_reenter_a_directory_named_repo() {
+    let set = frozen_set(&[("AC-X-001", "true", false)]);
+    let base = set.project.path().join("roots");
+    for (index, repository_name) in ["repository", "repo"].into_iter().enumerate() {
+        let project = base.join(format!("workspace-{index}"));
+        let repository = base.join(repository_name);
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&repository).unwrap();
+        std::fs::write(repository.join("item"), "present").unwrap();
+        let mut author_scope = scope(&set);
+        author_scope.project_root = project;
+        author_scope.repository_root = repository;
+        let mut candidate = set.contract().acceptance[0].clone();
+        candidate.check = AcceptanceCheck::Command {
+            command: "test -f ../repo/item".into(),
+            cwd: TrustedCwd::RepoRoot,
+        };
+        let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
+            .expect_err("the named path leaves the live repository root");
+        assert!(finding.contains("leaves the repository root"), "{finding}");
+    }
 }
 
 #[cfg(unix)]
@@ -202,7 +227,7 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
         std::fs::write(repository.join("src/uncommitted.rs"), "uncommitted input").unwrap();
         let loose_file = project.parent().unwrap().join("loose.txt");
         std::fs::write(&loose_file, "sibling file").unwrap();
-        let collision_paths = ["target", "home", "tmp"];
+        let collision_paths = ["target", "home", "tmp", "process-groups"];
         for name in collision_paths {
             let collision = project.parent().unwrap().join(name);
             std::fs::create_dir_all(&collision).unwrap();
@@ -266,6 +291,7 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
             "project": project,
             "task_root": project.join("tasks"),
             "scratch_parent": set.project.path().join("sites"),
+            "build_cache": set.project.path().join("sites/cache"),
             "project_inputs": ["item"],
             "project_input_excludes": [],
             "combined": false,
@@ -281,6 +307,7 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
         let mut scope = scope(&set);
         scope.project_root = policy.project.clone();
         scope.repository_root = policy.repository.clone();
+        scope.build_cache = true;
         let repo_name = repository.file_name().unwrap().to_string_lossy();
         let project_name = project.file_name().unwrap().to_string_lossy();
         let mut commands = vec![
@@ -288,7 +315,10 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
             // A single file beside the selected root is copied at its alias.
             ("test -f ../loose.txt".into(), TrustedCwd::ProjectRoot),
             // These names already belong to the one-check site.
-            ("test -f ../target/item".into(), TrustedCwd::ProjectRoot),
+            (
+                "test -d ../target && test ! -e ../target/out/bin".into(),
+                TrustedCwd::ProjectRoot,
+            ),
             ("test -f ../home/item".into(), TrustedCwd::ProjectRoot),
             ("test -f ../tmp/item".into(), TrustedCwd::ProjectRoot),
         ];
@@ -312,6 +342,14 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
             }
             "same_path" => {}
             _ => {
+                commands.push((format!("test -e ../{repo_name}/item"), TrustedCwd::RepoRoot));
+                commands.push((
+                    format!("test -e ../{project_name}/item"),
+                    TrustedCwd::ProjectRoot,
+                ));
+                commands.push((format!("cd ../{project_name}"), TrustedCwd::RepoRoot));
+                commands.push(("test -e ../external/item".into(), TrustedCwd::ProjectRoot));
+                commands.push(("test -e ../missing/item".into(), TrustedCwd::ProjectRoot));
                 // This Git sibling is not the declared repository.
                 commands.push(("test -f ../othergit/item".into(), TrustedCwd::ProjectRoot));
                 commands.push((

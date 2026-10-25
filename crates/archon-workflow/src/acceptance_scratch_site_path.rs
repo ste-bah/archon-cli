@@ -2,6 +2,22 @@ use std::path::{Path, PathBuf};
 
 pub const SITE_REPOSITORY_DIRECTORY: &str = "repo";
 pub const SITE_PROJECT_DIRECTORY: &str = "project";
+pub const SITE_INTERNAL_DIRECTORIES: &[&str] = &[
+    SITE_REPOSITORY_DIRECTORY,
+    SITE_PROJECT_DIRECTORY,
+    "home",
+    "tmp",
+    "cargo-home",
+    "project-baseline",
+    "process-groups",
+    "target",
+];
+pub const SITE_HOME_DIRECTORY: &str = SITE_INTERNAL_DIRECTORIES[2];
+pub const SITE_TEMP_DIRECTORY: &str = SITE_INTERNAL_DIRECTORIES[3];
+pub const SITE_CARGO_HOME_DIRECTORY: &str = SITE_INTERNAL_DIRECTORIES[4];
+pub const SITE_BASELINE_DIRECTORY: &str = SITE_INTERNAL_DIRECTORIES[5];
+pub const SITE_PROCESS_GROUPS_DIRECTORY: &str = SITE_INTERNAL_DIRECTORIES[6];
+pub const SITE_TARGET_DIRECTORY: &str = SITE_INTERNAL_DIRECTORIES[7];
 
 /// Facts about a path that the real one-check site would not make available.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +35,7 @@ pub fn site_path_alone(
     check: &str,
     cwd: crate::task_set_contract::TrustedCwd,
     named: &Path,
+    build_cache: bool,
 ) -> Result<(), SitePathRefusal> {
     let project = archon_shell::paths::canonicalize(project).map_err(|error| SitePathRefusal {
         site_target: PathBuf::from("<site>"),
@@ -49,24 +66,41 @@ pub fn site_path_alone(
             reason: Some(reason),
         });
     }
-    if !site_target.starts_with(&site_cwd)
-        && is_site_internal_target(&site_target)
-        && !repository_copy_target(&site_target, root, &site_cwd, &discovered, &repository)
+    let internal_target =
+        !site_target.starts_with(&site_cwd) && is_site_internal_target(&site_target, build_cache);
+    if internal_target
+        && repository_copy_target(
+            &site_target,
+            root,
+            &site_cwd,
+            &discovered,
+            &repository,
+            named,
+        )
     {
+        return Ok(());
+    }
+    if internal_target {
         return Err(SitePathRefusal {
+            reason: Some(format!(
+                "the site uses `{}` for its own files and does not copy the sibling there",
+                site_target
+                    .components()
+                    .nth(1)
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .unwrap_or_default()
+            )),
             site_target,
-            reason: None,
         });
     }
     if site_target.starts_with(&site_cwd) {
-        let live_target = root.join(named);
-        return match archon_shell::paths::canonicalize(&live_target) {
-            Ok(target) if target.starts_with(root) => Ok(()),
-            Ok(_) => Err(SitePathRefusal {
+        return if lexical_target_stays_inside(root, named) {
+            Ok(())
+        } else {
+            Err(SitePathRefusal {
                 site_target,
-                reason: None,
-            }),
-            Err(_) => Ok(()),
+                reason: Some(format!("the path leaves the {}", root_name(cwd))),
+            })
         };
     }
     for sibling in &discovered {
@@ -88,15 +122,22 @@ fn repository_copy_target(
     site_cwd: &Path,
     discovered: &[crate::acceptance_sibling_paths::SiblingSource],
     repository: &Path,
+    named: &Path,
 ) -> bool {
     let site_repository = PathBuf::from("<site>").join(SITE_REPOSITORY_DIRECTORY);
-    site_target.starts_with(&site_repository)
-        && discovered.iter().any(|sibling| {
-            let alias =
-                lexical_site_path(&site_cwd.join(super::siblings::relative(root, &sibling.alias)));
-            (site_target == alias || site_target.starts_with(&alias))
-                && sibling.source.starts_with(repository)
-        })
+    let discovered_copy = discovered.iter().any(|sibling| {
+        let alias =
+            lexical_site_path(&site_cwd.join(super::siblings::relative(root, &sibling.alias)));
+        sibling.source.starts_with(repository)
+            && alias == site_repository.join(sibling.source.strip_prefix(repository).unwrap())
+            && site_target.starts_with(&alias)
+    });
+    let live_target = lexical_site_path(&root.join(named));
+    let repository_copy = live_target
+        .strip_prefix(repository)
+        .ok()
+        .is_some_and(|relative| site_target.starts_with(&site_repository.join(relative)));
+    discovered_copy || repository_copy
 }
 
 fn refused_named_path(check: &str, reason: &str) -> Option<PathBuf> {
@@ -108,23 +149,64 @@ fn refused_named_path(check: &str, reason: &str) -> Option<PathBuf> {
         .find(|path| path.starts_with(alias))
 }
 
-fn is_site_internal_target(target: &Path) -> bool {
+fn root_name(cwd: crate::task_set_contract::TrustedCwd) -> &'static str {
+    match cwd {
+        crate::task_set_contract::TrustedCwd::ProjectRoot => "project root",
+        crate::task_set_contract::TrustedCwd::RepoRoot => "repository root",
+    }
+}
+
+pub(crate) fn is_site_internal_directory(name: &str, build_cache: bool) -> bool {
+    SITE_INTERNAL_DIRECTORIES
+        .iter()
+        .filter(|directory| !(build_cache && **directory == SITE_TARGET_DIRECTORY))
+        .any(|directory| *directory == name)
+}
+
+fn is_site_internal_target(target: &Path, build_cache: bool) -> bool {
     let Some(mut components) = target.strip_prefix("<site>").ok().map(Path::components) else {
         return false;
     };
     let Some(std::path::Component::Normal(name)) = components.next() else {
         return false;
     };
-    [
-        SITE_REPOSITORY_DIRECTORY,
-        SITE_PROJECT_DIRECTORY,
-        "home",
-        "tmp",
-        "cargo-home",
-        "target",
-        "project-baseline",
-    ]
-    .contains(&name.to_string_lossy().as_ref())
+    is_site_internal_directory(&name.to_string_lossy(), build_cache)
+}
+
+fn lexical_target_stays_inside(root: &Path, named: &Path) -> bool {
+    let mut current = root.to_path_buf();
+    let root = lexical_site_path(root);
+    for component in named.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if current == root {
+                    return false;
+                }
+                current.pop();
+            }
+            std::path::Component::Normal(part) => current.push(part),
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return false,
+        }
+        if !lexical_site_path(&current).starts_with(&root) {
+            return false;
+        }
+    }
+    true
+}
+
+pub(crate) fn site_alias_leaves_live_root(
+    root: &Path,
+    cwd: crate::task_set_contract::TrustedCwd,
+    named: &Path,
+) -> bool {
+    let site_root = match cwd {
+        crate::task_set_contract::TrustedCwd::ProjectRoot => SITE_PROJECT_DIRECTORY,
+        crate::task_set_contract::TrustedCwd::RepoRoot => SITE_REPOSITORY_DIRECTORY,
+    };
+    let site_cwd = PathBuf::from("<site>").join(site_root);
+    lexical_site_path(&site_cwd.join(named)).starts_with(&site_cwd)
+        && !lexical_target_stays_inside(root, named)
 }
 
 fn lexical_site_path(path: &Path) -> PathBuf {

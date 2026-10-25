@@ -8,6 +8,11 @@ use super::*;
 
 const OMIT: &[&str] = &[".git", "target", "node_modules"];
 
+#[path = "acceptance_scratch_sibling_helpers.rs"]
+mod helpers;
+pub(crate) use helpers::relative;
+use helpers::{git_head, is_project_or_ancestor};
+
 impl super::ScratchRoots {
     pub(super) fn command_environment(
         &self,
@@ -94,17 +99,35 @@ pub(super) fn copy_external(
     copied_repository: &Path,
     checks: &[(String, crate::task_set_contract::TrustedCwd)],
     remaining: &mut u64,
+    build_cache: bool,
 ) -> WorkflowResult<Copied> {
     let project = archon_shell::paths::canonicalize(project)
         .map_err(|error| WorkflowError::io(project, error))?;
     let repository = archon_shell::paths::canonicalize(repository)
         .map_err(|error| WorkflowError::io(repository, error))?;
     let mut siblings = Vec::new();
-    for (index, (check, cwd)) in checks.iter().enumerate() {
+    let mut internal_failures = BTreeMap::new();
+    'checks: for (index, (check, cwd)) in checks.iter().enumerate() {
         let (root, copied_root) = match cwd {
             crate::task_set_contract::TrustedCwd::ProjectRoot => (&project, copied_project),
             crate::task_set_contract::TrustedCwd::RepoRoot => (&repository, copied_repository),
         };
+        for named in crate::acceptance_sibling_paths::scan(check) {
+            if super::site_path::site_alias_leaves_live_root(root, *cwd, &named.path) {
+                let reason = match cwd {
+                    crate::task_set_contract::TrustedCwd::ProjectRoot => "project root",
+                    crate::task_set_contract::TrustedCwd::RepoRoot => "repository root",
+                };
+                internal_failures.insert(
+                    index,
+                    (
+                        format!("the path leaves the {reason}: {}", named.path.display()),
+                        Some(super::faults::FaultCause::SiblingRootRefused),
+                    ),
+                );
+                continue 'checks;
+            }
+        }
         for sibling in crate::acceptance_sibling_paths::discover(root, std::slice::from_ref(check))
         {
             // Callers resolve each check first (`refused_sibling`); this
@@ -116,11 +139,35 @@ pub(super) fn copy_external(
                 )));
             }
             let path = relative(root, &sibling.alias);
+            if let Some(std::path::Component::Normal(name)) = path.components().next()
+                && super::site_path::is_site_internal_directory(
+                    &name.to_string_lossy(),
+                    build_cache,
+                )
+            {
+                let name = name.to_string_lossy();
+                let message = format!(
+                    "{}: {} (the site uses `{name}` for its own files and does not copy the sibling there)",
+                    super::faults::SIBLING_SHAPE_REFUSED,
+                    path.display(),
+                );
+                internal_failures.insert(
+                    index,
+                    (
+                        message,
+                        Some(super::faults::FaultCause::SiblingShapeRefused),
+                    ),
+                );
+                continue;
+            }
             siblings.push((copied_root.join(&path), path, sibling.source, *cwd, index));
         }
     }
     siblings.sort_by(|left, right| left.0.cmp(&right.0).then(left.4.cmp(&right.4)));
-    let mut copied = Copied::default();
+    let mut copied = Copied {
+        failures: internal_failures,
+        ..Copied::default()
+    };
     let mut siblings = siblings.into_iter().peekable();
     while let Some((destination, relative, source, cwd, index)) = siblings.next() {
         let mut named_by = vec![index];
@@ -399,44 +446,6 @@ pub(crate) fn refused_sibling(
                 sibling.source.display()
             )
         })
-}
-
-fn is_project_or_ancestor(source: &Path, project: &Path) -> bool {
-    project.starts_with(source)
-}
-
-fn git_head(path: &Path) -> WorkflowResult<String> {
-    let output = archon_shell::spawn::command("git")
-        .args(["-C"])
-        .arg(
-            archon_shell::paths::try_plain(path.to_path_buf())
-                .map_err(|e| WorkflowError::io(path, e))?,
-        )
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .map_err(|error| WorkflowError::io(path, error))?;
-    if !output.status.success() {
-        return Err(invalid(format!(
-            "git rev-parse HEAD in {}: {}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-pub(crate) fn relative(from: &Path, to: &Path) -> PathBuf {
-    let left = from.components().collect::<Vec<_>>();
-    let right = to.components().collect::<Vec<_>>();
-    let common = left.iter().zip(&right).take_while(|(a, b)| a == b).count();
-    let mut path = PathBuf::new();
-    for _ in common..left.len() {
-        path.push("..");
-    }
-    for component in &right[common..] {
-        path.push(component.as_os_str());
-    }
-    path
 }
 
 fn copy_directory(

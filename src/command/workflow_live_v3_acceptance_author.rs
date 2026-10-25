@@ -227,6 +227,7 @@ pub(super) async fn author_owed(
     scope.baseline = baseline_of(site);
     if let Some(binding) = &site.context.binding {
         scope.project_input_excludes = binding.policy.project_input_excludes.clone();
+        scope.build_cache = binding.policy.build_cache.is_some();
     }
     let probe = match probe(site) {
         Ok(probe) => probe,

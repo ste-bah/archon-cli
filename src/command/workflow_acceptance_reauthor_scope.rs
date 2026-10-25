@@ -12,6 +12,7 @@ pub(crate) struct AuthorScope {
     pub(crate) task_root: PathBuf,
     pub(crate) baseline: Option<super::super::executability::Baseline>,
     pub(crate) project_input_excludes: Vec<PathBuf>,
+    pub(crate) build_cache: bool,
 }
 
 impl AuthorScope {
@@ -106,6 +107,7 @@ impl AuthorScope {
             // a baseline-pass prompt. Load its policy there, not while
             // constructing the scope used by refusal paths.
             project_input_excludes: Vec::new(),
+            build_cache: false,
         })
     }
 }

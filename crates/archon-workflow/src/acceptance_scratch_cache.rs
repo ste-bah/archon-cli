@@ -44,7 +44,7 @@ use idle::target_idle;
 const RECORD: &str = "mtimes.json";
 /// In each slot: one `pending` line before every check's spawn, then the
 /// spawned process group's id.
-pub(super) const GROUP_REGISTRY: &str = "process-groups";
+pub(super) const GROUP_REGISTRY: &str = super::SITE_PROCESS_GROUPS_DIRECTORY;
 
 /// Create an observation's root with its empty group registry: a slot
 /// without one is never reused.

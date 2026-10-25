@@ -219,7 +219,7 @@ pub(super) fn snapshot_project(
     Ok(())
 }
 pub(super) fn reset_project(roots: &ScratchRoots) -> WorkflowResult<()> {
-    let baseline = roots.root().join("project-baseline");
+    let baseline = roots.root().join(super::SITE_BASELINE_DIRECTORY);
     let before = inventory(&baseline)?;
     let current = inventory(roots.project())?;
     // Remove new/changed paths deepest first, but never replace source files
@@ -245,7 +245,7 @@ pub(super) fn reset_project(roots: &ScratchRoots) -> WorkflowResult<()> {
             true,
         )?;
     }
-    for name in ["tmp", "home"] {
+    for name in [super::SITE_TEMP_DIRECTORY, super::SITE_HOME_DIRECTORY] {
         let path = roots.root().join(name);
         io::remove_owned_tree(&path)?;
         std::fs::create_dir(&path).map_err(|e| WorkflowError::io(&path, e))?;

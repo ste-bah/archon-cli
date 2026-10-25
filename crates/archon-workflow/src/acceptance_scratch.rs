@@ -76,7 +76,10 @@ pub use observe::{ObservationResult, observe_commands, observe_commands_cancella
 pub(crate) use process::drain_counted;
 pub use process::{CHECK_TIMED_OUT, CheckResult, MutationInputPlan, MutationPlan};
 pub use site_path::{
-    SITE_PROJECT_DIRECTORY, SITE_REPOSITORY_DIRECTORY, SitePathRefusal, site_path_alone,
+    SITE_BASELINE_DIRECTORY, SITE_CARGO_HOME_DIRECTORY, SITE_HOME_DIRECTORY,
+    SITE_INTERNAL_DIRECTORIES, SITE_PROCESS_GROUPS_DIRECTORY, SITE_PROJECT_DIRECTORY,
+    SITE_REPOSITORY_DIRECTORY, SITE_TARGET_DIRECTORY, SITE_TEMP_DIRECTORY, SitePathRefusal,
+    site_path_alone,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -262,9 +265,10 @@ impl ScratchRoots {
         let mut roots = Self {
             repository: root.join(site_path::SITE_REPOSITORY_DIRECTORY),
             project: root.join(site_path::SITE_PROJECT_DIRECTORY),
-            target: lease
-                .as_ref()
-                .map_or_else(|| root.join("target"), cache::Lease::target),
+            target: lease.as_ref().map_or_else(
+                || root.join(site_path::SITE_TARGET_DIRECTORY),
+                cache::Lease::target,
+            ),
             lease,
             root,
             mutation_root,
@@ -300,7 +304,12 @@ impl ScratchRoots {
             if head.trim() != commit {
                 return Err(invalid("scratch worktree revision mismatch"));
             }
-            for name in [SITE_PROJECT_DIRECTORY, "home", "tmp", "cargo-home"] {
+            for name in [
+                SITE_PROJECT_DIRECTORY,
+                site_path::SITE_HOME_DIRECTORY,
+                site_path::SITE_TEMP_DIRECTORY,
+                site_path::SITE_CARGO_HOME_DIRECTORY,
+            ] {
                 let path = roots.root.join(name);
                 std::fs::create_dir_all(&path).map_err(|e| WorkflowError::io(&path, e))?;
             }
@@ -357,6 +366,7 @@ impl ScratchRoots {
                 &roots.repository,
                 checks,
                 &mut remaining,
+                roots.lease.is_some(),
             )?;
             io::readonly(&roots.project.join(task_relative))?;
             if let Some(seed) = &policy.cargo_seed {
@@ -366,7 +376,10 @@ impl ScratchRoots {
                     if source.exists() {
                         io::copy_cache(
                             &source,
-                            &roots.root.join("cargo-home").join(name),
+                            &roots
+                                .root
+                                .join(site_path::SITE_CARGO_HOME_DIRECTORY)
+                                .join(name),
                             &mut remaining,
                         )?;
                     }
@@ -391,7 +404,7 @@ impl ScratchRoots {
                 lease.stabilize(&sources, &names)?;
             }
             for cwd in [&roots.project, &roots.repository] {
-                let target = cwd.join("target");
+                let target = cwd.join(site_path::SITE_TARGET_DIRECTORY);
                 if target.symlink_metadata().is_ok() {
                     return Err(invalid(
                         "source/project target path conflicts with scratch build target",
@@ -405,7 +418,7 @@ impl ScratchRoots {
                     "native scratch target links require a supported Unix host",
                 ));
             }
-            let snapshot = roots.root.join("project-baseline");
+            let snapshot = roots.root.join(site_path::SITE_BASELINE_DIRECTORY);
             inputs::snapshot_project(&roots.project, &snapshot, &mut remaining)?;
             Ok(())
         })();
@@ -455,9 +468,9 @@ impl ScratchRoots {
     pub fn environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
         use crate::acceptance_check_environment as rule;
         let (home, tmp, cargo) = (
-            self.root.join("home"),
-            self.root.join("tmp"),
-            self.root.join("cargo-home"),
+            self.root.join(site_path::SITE_HOME_DIRECTORY),
+            self.root.join(site_path::SITE_TEMP_DIRECTORY),
+            self.root.join(site_path::SITE_CARGO_HOME_DIRECTORY),
         );
         // Windows: the profile variables point at this scratch's home too.
         let profile = rule::profile_bindings(&home);
