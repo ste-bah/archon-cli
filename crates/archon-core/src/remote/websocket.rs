@@ -139,7 +139,11 @@ impl WsTransport {
             config.session_id.clone()
         };
 
-        tracing::info!("ws: connected to '{}' session_id={}", shown_url, session_id);
+        tracing::info!(
+            "ws: connected to '{}' session_tag={}",
+            shown_url,
+            super::session_tag(&session_id)
+        );
 
         let inner = WsSessionInner {
             stream: Mutex::new(ws_stream),

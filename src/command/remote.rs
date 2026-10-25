@@ -35,7 +35,8 @@ pub async fn handle_remote_command(
                     .clone()
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 tracing::info!(
-                    "remote ssh: user={user} host={host} port={port} session_id={remote_session_id}"
+                    "remote ssh: user={user} host={host} port={port} session_tag={}",
+                    archon_core::remote::session_tag(&remote_session_id)
                 );
                 println!(
                     "Remote SSH: connecting to {user}@{host}:{port} (session {remote_session_id})"
@@ -110,9 +111,7 @@ pub async fn handle_remote_command(
                 };
                 // `url` may carry `?token=`; print only its origin.
                 let shown_url = archon_core::url_redact::redact_url(url);
-                tracing::info!(
-                    "remote ws: connecting to {shown_url} session_id={remote_session_id}"
-                );
+                trace_ws_connect(&shown_url, &remote_session_id);
                 println!(
                     "Remote WebSocket: connecting to {shown_url} (session {remote_session_id})"
                 );
@@ -175,4 +174,54 @@ pub async fn handle_remote_command(
     }
 
     Ok(())
+}
+
+fn trace_ws_connect(shown_url: &str, session_id: &str) {
+    tracing::info!(
+        "remote ws: connecting to {shown_url} session_tag={}",
+        archon_core::remote::session_tag(session_id)
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{self, Write};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CaptureWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn websocket_connection_log_hides_id_and_includes_tag() {
+        let raw_id = "AC-X-001";
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer_output = Arc::clone(&output);
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || CaptureWriter(Arc::clone(&writer_output)))
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            super::trace_ws_connect("wss://example.invalid", raw_id);
+        });
+
+        let output = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+        assert!(
+            !output.contains(raw_id),
+            "captured log exposed raw id: {output}"
+        );
+        assert!(output.contains("session_tag="), "captured log: {output}");
+    }
 }
