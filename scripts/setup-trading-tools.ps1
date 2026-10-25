@@ -222,7 +222,7 @@ function Compare-OpenBBVersions([hashtable]$Candidate, [string]$Left, [string]$R
     $compareArguments = @($Candidate.FixedArguments) + @((Join-Path $PSScriptRoot 'setup-trading-tools-python-probe.py'), '--compare', $Left, $Right)
     $previousErrorAction = $ErrorActionPreference
     try { $ErrorActionPreference = 'Continue'; $comparisonText = (Invoke-PythonUtf8 $Candidate.Program $compareArguments 2>&1 | Out-String).Trim(); $comparisonExit = $LASTEXITCODE } finally { $ErrorActionPreference = $previousErrorAction }
-    if ($comparisonExit -ne 0 -or $comparisonText -notmatch '^-?\d+$') {
+    if ($comparisonExit -ne 0 -or $comparisonText -notmatch '^(?:-1|0|1)$') {
         throw "Could not compare OpenBB versions '$Left' and '$Right': $comparisonText"
     }
     return [int]$comparisonText
@@ -378,11 +378,16 @@ function Resolve-BasePython([string]$Specifier, [object[]]$Candidates = @()) {
 }
 function Assert-SafeVenvRebuild {
     if (Test-Path -LiteralPath $Venv) {
-        $item = Get-Item -Force -LiteralPath $Venv
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            $linkTarget = if ($item.Target) { $item.Target -join ', ' } else { 'unknown target' }
+        $attributes = [IO.File]::GetAttributes($Venv)
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $linkTarget = 'unknown target'
+            try {
+                $item = Get-Item -Force -LiteralPath $Venv
+                if ($item.Target) { $linkTarget = $item.Target -join ', ' }
+            } catch { }
             throw "Refusing to rebuild symlinked or reparse-point OpenBB venv: $Venv -> $linkTarget"
         }
+        $item = Get-Item -Force -LiteralPath $Venv
         if (-not $item.PSIsContainer) { throw "Refusing to rebuild non-venv file path: $Venv (missing pyvenv.cfg)" }
         if (-not (Test-Path -LiteralPath (Join-Path $Venv 'pyvenv.cfg') -PathType Leaf)) {
             $contents = @(Get-ChildItem -Force -LiteralPath $Venv -ErrorAction SilentlyContinue)
@@ -390,7 +395,6 @@ function Assert-SafeVenvRebuild {
         }
     }
 }
-
 if ($LoadFunctionsOnly) { return }
 if ($Check -or $DryRun) { Show-Status; exit 0 }
 New-Item -ItemType Directory -Force -Path $ToolsDir, (Join-Path $Target 'scripts') | Out-Null

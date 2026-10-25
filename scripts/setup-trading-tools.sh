@@ -221,7 +221,7 @@ find_python() {
             printf 'OpenBB wheel probe: %s resolves openbb %s\n' "$candidate" "$resolved"
             if [ -z "$selected_version" ]; then higher=1; else
                 if higher=$(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ARCHON_SETUP_PYTHON_COMPARE=1 "$candidate" "$SCRIPT_DIR/setup-trading-tools-python-probe.py" --compare "$resolved" "$selected_version" </dev/null 2>&1); then
-                    case "$higher" in 1|0) ;; *) echo "setup-trading-tools.sh: could not compare OpenBB versions '$resolved' and '$selected_version': $higher" >&2; return 1 ;; esac
+                    case "$higher" in -1|0|1) ;; *) echo "setup-trading-tools.sh: could not compare OpenBB versions '$resolved' and '$selected_version': $higher" >&2; return 1 ;; esac
                 else echo "setup-trading-tools.sh: could not compare OpenBB versions '$resolved' and '$selected_version': $higher" >&2; return 1; fi
             fi
             if [ "$higher" = 1 ]; then

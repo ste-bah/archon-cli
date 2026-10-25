@@ -99,6 +99,8 @@ function Invoke-MockBaseCandidate([string]$ResolvedVersion, [string[]]$Arguments
 }
 function MockCandidateNewer { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '4.7.2' -Arguments $args }
 function MockCandidateOlder { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '5.0.0' -Arguments $args }
+function MockCandidateBest { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '5.0.0' -Arguments $args }
+function MockCandidateLower { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '4.7.2' -Arguments $args }
 function MockCandidateFail { $script:MockWheelFails = $true; Invoke-MockBaseCandidate '5.1.0' -Arguments $args }
 function MockCandidateWorking { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '5.0.0' -Arguments $args }
 function MockVenvPython {
@@ -129,6 +131,17 @@ if ($selected.Program -ne 'MockCandidateOlder' -or $selected.ResolvedOpenBBVersi
 }
 if (-not (Test-Path -LiteralPath (Join-Path $script:Venv 'Scripts/python.exe') -PathType Leaf)) { throw 'Wheel fake did not create the venv Scripts/python.exe layout' }
 Write-Output 'PASS wheel resolution chooses older Python when its pip report resolves openbb 5.0.0'
+$bestCandidates = @(
+    @{ Program = 'MockCandidateBest'; FixedArguments = [string[]]@(); Order = 0 },
+    @{ Program = 'MockCandidateLower'; FixedArguments = [string[]]@(); Order = 1 }
+)
+Push-Location $root
+try { $bestSelected = Resolve-BasePython '>=3.10,<4' $bestCandidates }
+finally { Pop-Location }
+if ($bestSelected.Program -ne 'MockCandidateBest' -or $bestSelected.ResolvedOpenBBVersion -ne '5.0.0') {
+    throw "Wheel resolution selected '$($bestSelected.Program)' / '$($bestSelected.ResolvedOpenBBVersion)' instead of retaining the earlier openbb 5.0.0 candidate"
+}
+Write-Output 'PASS wheel resolution retains the best version when a later candidate resolves lower'
 $fallbackCandidates = @(
     @{ Program = 'MockCandidateFail'; FixedArguments = [string[]]@(); Order = 0 },
     @{ Program = 'MockCandidateWorking'; FixedArguments = [string[]]@(); Order = 1 }

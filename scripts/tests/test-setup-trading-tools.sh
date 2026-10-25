@@ -427,30 +427,18 @@ if printf '%s\n' "$wheel_output" | grep -F 'OpenBB Python: ' | grep -F 'python3.
     echo 'wheel resolution selected the candidate whose pip probe failed' >&2
     exit 1
 fi
-# A newer interpreter can resolve an older OpenBB major. Choose the candidate
-# with the highest OpenBB version even when its interpreter is older.
-RESOLUTION_BIN="$TEMP_ROOT/wheel version candidates"
-mkdir -p "$RESOLUTION_BIN"
-for candidate in python3.17 python3.16; do cp "$SPEC_BIN/python-mock" "$RESOLUTION_BIN/$candidate"; chmod +x "$RESOLUTION_BIN/$candidate"; done
-RESOLUTION_TARGET="$TEMP_ROOT/wheel version target"
-mkdir -p "$RESOLUTION_TARGET"
-TEST_CASE='highest resolved OpenBB version wins'
-if resolution_output=$(PATH="$RESOLUTION_BIN:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' \
-    "$SETUP_SCRIPT" --target "$RESOLUTION_TARGET" --skip-tradingview </dev/null 2>&1); then
-    :
-else
-    printf 'wheel version resolution command failed:\n%s\n' "$resolution_output" >&2
-    exit 1
-fi
-printf '%s\n' "$resolution_output" | grep -F 'resolves openbb 4.7.2' >/dev/null
-printf '%s\n' "$resolution_output" | grep -F 'resolves openbb 5.0.0' >/dev/null
-if ! printf '%s\n' "$resolution_output" | grep -F 'OpenBB Python: ' | grep -F 'python3.16' >/dev/null; then
-    printf 'wheel resolution expected the older interpreter with OpenBB 5.0.0 to win:\n%s\n' "$resolution_output" >&2
-    exit 1
-fi
-printf '%s\n' "$resolution_output" | grep -F 'chosen because it resolves the highest OpenBB version, 5.0.0' >/dev/null
+run_version_resolution_case() {
+    TEST_CASE=$1; bin="$TEMP_ROOT/$2 candidates"; target="$TEMP_ROOT/$2 target"; expected=$3; shift 3; mkdir -p "$bin" "$target"
+    for candidate do cp "$SPEC_BIN/python-mock" "$bin/$candidate"; chmod +x "$bin/$candidate"; done
+    if output=$(PATH="$bin:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' "$SETUP_SCRIPT" --target "$target" --skip-tradingview </dev/null 2>&1); then :; else printf '%s resolution command failed:\n%s\n' "$TEST_CASE" "$output" >&2; exit 1; fi
+    printf '%s\n' "$output" | grep -F 'resolves openbb 4.7.2' >/dev/null; printf '%s\n' "$output" | grep -F 'resolves openbb 5.0.0' >/dev/null
+    if ! printf '%s\n' "$output" | grep -F 'OpenBB Python: ' | grep -F "$expected" >/dev/null; then printf '%s resolution chose the wrong interpreter:\n%s\n' "$TEST_CASE" "$output" >&2; exit 1; fi
+    printf '%s\n' "$output" | grep -F 'chosen because it resolves the highest OpenBB version, 5.0.0' >/dev/null; printf 'PASS %s\n' "$TEST_CASE"
+}
+run_version_resolution_case 'wheel resolution chooses older Python when its pip report resolves openbb 5.0.0' 'wheel version' python3.16 python3.17 python3.16
+run_version_resolution_case 'wheel resolution retains the best version when a later candidate resolves lower' 'best version' python3.16 python3.16 python3.15
 TEST_CASE='OpenBB version comparison failure is fatal'; compare_target="$TEMP_ROOT/compare failure target"; mkdir -p "$compare_target"
-if compare_output=$(PATH="$RESOLUTION_BIN:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' MOCK_COMPARE_FAIL=1 "$SETUP_SCRIPT" --target "$compare_target" --skip-tradingview </dev/null 2>&1); then printf 'expected OpenBB version comparison failure:\n%s\n' "$compare_output" >&2; exit 1; fi
+if compare_output=$(PATH="$TEMP_ROOT/wheel version candidates:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' MOCK_COMPARE_FAIL=1 "$SETUP_SCRIPT" --target "$compare_target" --skip-tradingview </dev/null 2>&1); then printf 'expected OpenBB version comparison failure:\n%s\n' "$compare_output" >&2; exit 1; fi
 printf '%s\n' "$compare_output" | grep -F 'comparison host defect' >/dev/null
 cat > "$FAKE_BIN/git" <<'EOF'
 #!/bin/sh
