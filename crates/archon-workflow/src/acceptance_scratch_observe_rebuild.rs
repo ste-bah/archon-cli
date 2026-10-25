@@ -13,6 +13,7 @@ use super::*;
 pub(super) enum Rebuild {
     Verified(identity::BuildIdentity),
     HostUnproven(WorkflowError),
+    CheckTeardown(WorkflowError),
 }
 
 /// `rebuilt`, as the checks still to run see it.
@@ -100,4 +101,26 @@ pub(super) fn unproven(
             super::faulted(&reference.acceptance_id, result, cause)
         })
         .collect()
+}
+
+/// Record a teardown failure against the check that alone used the verified
+/// site, preserving every other result already recorded for the batch.
+pub(super) fn attribute_teardown_failure(
+    checks: &mut [super::process::CheckResult],
+    owner: &str,
+    error: &WorkflowError,
+) {
+    let check = checks
+        .iter_mut()
+        .rev()
+        .find(|check| check.acceptance_id == owner)
+        .expect("the check owning teardown was already recorded");
+    let note = format!("the scratch site could not be removed after this check: {error}");
+    check.operational_error = Some(match check.operational_error.take() {
+        Some(existing) => format!("{existing}; {note}"),
+        None => note,
+    });
+    if check.fault.is_none() {
+        check.fault = Some(faults::FaultCause::SiteTeardownFailed);
+    }
 }

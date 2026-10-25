@@ -110,8 +110,10 @@ async fn scratch_check_receives_archon_resource_defaults() {
         "chain",
         &refs,
         &t.path().join("evidence"),
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        &hooks,
+        archon_workflow::acceptance_scratch::ObserveControl::new(
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            hooks,
+        ),
     )
     .await
     .unwrap();
@@ -159,8 +161,10 @@ async fn a_check_command_can_override_the_archon_cargo_default() {
         "chain",
         &refs,
         &t.path().join("evidence"),
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        &hooks,
+        archon_workflow::acceptance_scratch::ObserveControl::new(
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            hooks,
+        ),
     )
     .await
     .unwrap();

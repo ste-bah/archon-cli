@@ -43,11 +43,32 @@ impl ScratchRoots {
         }
         if self.registered {
             self.relink()?;
-            git(
+            if let Err(error) = git(
                 &self.live_repository,
                 &["worktree", "remove", "--force"],
                 &[&self.repository],
-            )?;
+            ) {
+                let text = error.to_string();
+                let path = self.repository.to_string_lossy();
+                let check_removal = text.contains("failed to delete")
+                    && text.contains(path.as_ref())
+                    && (text.contains("Operation not permitted")
+                        || text.contains("Permission denied"));
+                if check_removal {
+                    if let Ok(listed) = git(
+                        &self.live_repository,
+                        &["worktree", "list", "--porcelain"],
+                        &[],
+                    ) {
+                        let expected = format!("worktree {}", self.repository.display());
+                        self.registered = listed.lines().any(|line| line == expected);
+                    }
+                    if !self.registered {
+                        return Err(WorkflowError::ScratchSiteRemoval(text));
+                    }
+                }
+                return Err(error);
+            }
             let listed = git(
                 &self.live_repository,
                 &["worktree", "list", "--porcelain"],
@@ -61,7 +82,15 @@ impl ScratchRoots {
             }
             self.registered = false;
         }
-        io::remove_owned_tree(&self.root)?;
+        if let Err(error) = io::remove_owned_tree(&self.root) {
+            if let WorkflowError::Io { path, source } = &error
+                && path.starts_with(&self.root)
+                && source.kind() == std::io::ErrorKind::PermissionDenied
+            {
+                return Err(WorkflowError::ScratchSiteRemoval(error.to_string()));
+            }
+            return Err(error);
+        }
         self.cleaned = true;
         Ok(())
     }

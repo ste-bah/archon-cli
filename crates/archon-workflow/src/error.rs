@@ -110,6 +110,12 @@ pub enum WorkflowError {
     /// cross staged gate boundaries as findings.
     #[error("invalid task body: {0}")]
     TaskBodyInvalid(String),
+    #[error("scratch copy exceeds configured size limit")]
+    ScratchCopyTooLarge,
+    #[error("scratch copy shape refused: {0}")]
+    ScratchCopyShape(String),
+    #[error("scratch site contains an unremovable path: {0}")]
+    ScratchSiteRemoval(String),
     #[error("unknown dependency '{dependency}' referenced by stage '{stage}'")]
     UnknownDependency { stage: String, dependency: String },
     #[error("dependency cycle detected: {0:?}")]

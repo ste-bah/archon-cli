@@ -6,7 +6,7 @@
 
 #[path = "support/isolation_fixture.rs"]
 mod support;
-use archon_workflow::acceptance_scratch::{CheckResult, ObserveHooks};
+use archon_workflow::acceptance_scratch::{CheckAllowance, CheckResult, ObserveHooks};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -30,6 +30,205 @@ fn assert_all_ran_but_the_first(result: &archon_workflow::acceptance_scratch::Ob
         assert_eq!(check.exit_code, Some(0), "{check:?}");
         assert!(check.operational_error.is_none(), "{check:?}");
     }
+}
+
+fn assert_one_attributed_teardown(result: &archon_workflow::acceptance_scratch::ObservationResult) {
+    let attribution_notes = result
+        .checks
+        .iter()
+        .filter_map(|check| check.operational_error.as_deref())
+        .map(|message| {
+            message
+                .matches("the scratch site could not be removed after this check:")
+                .count()
+        })
+        .sum::<usize>();
+    assert_eq!(attribution_notes, 1, "{result:?}");
+    // D-A: attribution belongs to the owning check and is not a batch
+    // operational error; this field deliberately changes that behavior.
+    assert!(result.operational_errors.is_empty(), "{result:?}");
+    assert!(
+        result.teardown_verified,
+        "attributed teardown does not void the observation: {result:?}"
+    );
+}
+
+fn hooks_with_short_checks() -> ObserveHooks {
+    let mut hooks = ObserveHooks::for_resource_limits(Default::default());
+    hooks.allowance = Some(Arc::new(move || CheckAllowance::Run {
+        timeout_secs: 1,
+        cut: false,
+    }));
+    hooks
+}
+
+/// F1: the site was clean before one check used it. An immutable file
+/// left by that check belongs to its author; an earlier verdict stays and the
+/// next check is host-unproven because the site could not be rebuilt.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn an_unremovable_site_is_attributed_once() {
+    let mut clear_immutable = None;
+    let (_temp, result) = observe_hooked(
+        &[
+            ("sleep 30", "repo_root"),
+            (
+                "mkdir data/blocked && touch data/blocked/keep && chflags uchg data/blocked/keep && sleep 30",
+                "project_root",
+            ),
+            ("rm data/value && true", "project_root"),
+        ],
+        |root, _| clear_immutable = Some(ClearImmutable(root.join("scratch"))),
+        &hooks_with_short_checks(),
+    )
+    .await;
+    let _clear = clear_immutable.unwrap();
+    // D-A moves the attributed teardown note out of operational_errors.
+    assert_one_attributed_teardown(&result);
+    assert!(result.teardown_verified, "{result:?}");
+    assert_eq!(
+        result.checks.len(),
+        3,
+        "one result per planned check: {result:?}"
+    );
+    assert!(
+        result.checks[0]
+            .operational_error
+            .as_deref()
+            .is_some_and(|error| error.contains("timed out")),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.checks[1].fault,
+        Some(archon_workflow::acceptance_scratch::faults::FaultCause::SiteTeardownFailed),
+        "{result:?}"
+    );
+    assert!(
+        result.checks[2]
+            .operational_error
+            .as_deref()
+            .is_some_and(|error| error.contains("host-unproven")),
+        "{result:?}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn an_unattributed_restore_failure_uses_a_scratch_error_label() {
+    let mut clear_immutable = None;
+    let (_temp, result) = observe_hooked(
+        &[
+            ("test -f data/value", "project_root"),
+            (
+                "mkdir data/blocked && touch data/blocked/keep && chflags uchg data/blocked/keep && sleep 30",
+                "project_root",
+            ),
+            ("test -f data/value", "project_root"),
+        ],
+        |root, _| clear_immutable = Some(ClearImmutable(root.join("scratch"))),
+        &hooks_with_short_checks(),
+    )
+    .await;
+    let _clear = clear_immutable.unwrap();
+    let later = result.checks.last().unwrap();
+    let error = later.operational_error.as_deref().unwrap_or_default();
+    assert!(error.contains("host-unproven"), "{later:?}");
+    assert!(
+        error.contains("scratch site could not be restored for the remaining checks"),
+        "{later:?}"
+    );
+    assert!(!error.contains("invalid workflow spec"), "{later:?}");
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn a_leaked_cached_site_does_not_block_the_next_observation() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut clear_immutable = None;
+    let (_temp, first) = observe_hooked(
+        &[(
+            "mkdir blocked && touch blocked/keep && chflags uchg blocked/keep && sleep 30",
+            "project_root",
+        )],
+        |_, policy| {
+            policy.build_cache = Some(cache.path().to_path_buf());
+            clear_immutable = Some(ClearImmutable(cache.path().join("scratch-0")));
+        },
+        &hooks_with_short_checks(),
+    )
+    .await;
+    assert!(first.attributed_teardown.is_some(), "{first:?}");
+    assert!(cache.path().join("scratch-0").exists());
+    let guard = clear_immutable.expect("guard was installed before observation");
+
+    let (_next_temp, next) = observe_hooked(
+        &[("test -f data/value", "project_root")],
+        |_, policy| policy.build_cache = Some(cache.path().to_path_buf()),
+        &hooks_with_short_checks(),
+    )
+    .await;
+    assert!(next.operational_errors.is_empty(), "{next:?}");
+    assert!(next.teardown_verified, "{next:?}");
+    drop(guard);
+}
+
+#[cfg(target_os = "macos")]
+struct ClearImmutable(PathBuf);
+
+#[cfg(target_os = "macos")]
+impl Drop for ClearImmutable {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("chflags")
+            .args(["-R", "nouchg"])
+            .arg(&self.0)
+            .status();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn an_unremovable_repository_path_is_attributed_once() {
+    let mut clear_immutable = None;
+    let (_temp, result) = observe_hooked(
+        &[
+            ("sleep 30", "repo_root"),
+            (
+                "mkdir blocked && touch blocked/keep && chflags uchg blocked/keep && sleep 30",
+                "repo_root",
+            ),
+            ("test -f data/value", "project_root"),
+        ],
+        |root, _| clear_immutable = Some(ClearImmutable(root.join("scratch"))),
+        &hooks_with_short_checks(),
+    )
+    .await;
+    let _clear = clear_immutable.unwrap();
+    // D-A moves the attributed teardown note out of operational_errors.
+    assert_eq!(
+        result.checks.len(),
+        3,
+        "one result per planned check: {result:?}"
+    );
+    assert!(
+        result.checks[0]
+            .operational_error
+            .as_deref()
+            .is_some_and(|error| error.contains("timed out")),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.checks[1].fault,
+        Some(archon_workflow::acceptance_scratch::faults::FaultCause::SiteTeardownFailed),
+        "{result:?}"
+    );
+    assert_one_attributed_teardown(&result);
+    assert!(
+        result.checks[2]
+            .operational_error
+            .as_deref()
+            .is_some_and(|e| e.contains("host-unproven")),
+        "{result:?}"
+    );
 }
 
 /// H3: in the combined view the project copy's `.git` links the site's own

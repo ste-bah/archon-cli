@@ -1,6 +1,6 @@
 //! Owned observation subprocess. Parent keeps stdin open as a liveness pipe.
 use archon_workflow::acceptance_scratch::{
-    OBSERVATION_STALLED, ObservationResult, ObserveHooks, ScratchPolicy, observation_stall,
+    OBSERVATION_STALLED, ObservationResult, ObserveControl, ScratchPolicy, observation_stall,
     observe_commands_hooked,
 };
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
@@ -163,7 +163,6 @@ async fn serve() -> WorkflowResult<()> {
             request.pin_path.display()
         ))
     })?;
-    let hooks = ObserveHooks::for_resource_limits(limits);
     let result = observe_commands_hooked(
         &request.policy,
         &request.source_commit,
@@ -171,8 +170,7 @@ async fn serve() -> WorkflowResult<()> {
         &digest,
         &refs,
         &request.evidence,
-        cancel,
-        &hooks,
+        ObserveControl::for_resource_limits(cancel, limits),
     )
     .await?;
     // #356: a phase or git child that made no progress is the host's, and
@@ -185,15 +183,24 @@ async fn serve() -> WorkflowResult<()> {
     ) {
         return Err(WorkflowError::ControlPaused(stall.clone()));
     }
-    if !result.teardown_verified || !result.live_roots_unchanged {
+    ensure_observation_usable(&result)?;
+    // Revalidate after command completion; live pin changes are never adopted.
+    validate_selected(&request, &selection)?;
+    Ok(())
+}
+
+fn ensure_observation_usable(result: &ObservationResult) -> WorkflowResult<()> {
+    if observation_voided(result) {
         return Err(WorkflowError::ArtifactInvalid(
             "native observation void: live-root audit or teardown failed; inspect scratch evidence"
                 .into(),
         ));
     }
-    // Revalidate after command completion; live pin changes are never adopted.
-    validate_selected(&request, &selection)?;
     Ok(())
+}
+
+fn observation_voided(result: &ObservationResult) -> bool {
+    !result.teardown_verified || !result.live_roots_unchanged
 }
 pub(crate) fn parse_request_line(line: &str) -> WorkflowResult<(Request, CheckSelection)> {
     let mut value: serde_json::Value = serde_json::from_str(line)?;
@@ -368,6 +375,29 @@ mod request_tests;
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn attributed_teardown_keeps_the_guardian_observation_usable() {
+        let (_temp, _clear, result) =
+            crate::command::acceptance_scratch_attributed_tests::attributed_observation().await;
+        assert!(result.attributed_teardown.is_some(), "{result:?}");
+        crate::command::acceptance_scratch_attributed_tests::assert_owner_finding(&result);
+        super::ensure_observation_usable(&result).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn unattributed_teardown_still_voids_the_guardian_observation() {
+        let (_temp, _clear, result) =
+            crate::command::acceptance_scratch_attributed_tests::unattributed_observation().await;
+        assert!(result.attributed_teardown.is_none(), "{result:?}");
+        assert!(!result.operational_errors.is_empty(), "{result:?}");
+        assert!(
+            super::ensure_observation_usable(&result).is_err(),
+            "{result:?}"
+        );
+    }
+
     #[tokio::test]
     #[ignore = "internal subprocess entry"]
     async fn guardian_entry() {

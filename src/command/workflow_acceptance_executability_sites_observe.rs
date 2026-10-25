@@ -42,21 +42,12 @@ pub(super) async fn observe(
         &digest,
         &refs,
         &evidence,
-        cancel,
-        &hooks,
+        archon_workflow::acceptance_scratch::ObserveControl::new(cancel, hooks),
     )
     .await;
     let _ = std::fs::remove_dir_all(&evidence);
     let observed = observed?;
-    if !observed.operational_errors.is_empty()
-        || !observed.teardown_verified
-        || !observed.live_roots_unchanged
-    {
-        anyhow::bail!(
-            "scratch observation void: {}",
-            observed.operational_errors.join("; ")
-        );
-    }
+    ensure_observation_usable(&observed)?;
     let entries = contract
         .acceptance
         .iter()
@@ -151,6 +142,122 @@ pub(super) async fn observe(
     }
     let siblings = all_siblings.into_values().collect();
     Ok((observed.checks, siblings, check_siblings, evidence))
+}
+
+fn ensure_observation_usable(
+    observed: &archon_workflow::acceptance_scratch::ObservationResult,
+) -> anyhow::Result<()> {
+    if observation_voided(observed) {
+        anyhow::bail!(
+            "scratch observation void: {}",
+            observed.operational_errors.join("; ")
+        );
+    }
+    Ok(())
+}
+
+fn observation_voided(observed: &archon_workflow::acceptance_scratch::ObservationResult) -> bool {
+    !observed.operational_errors.is_empty()
+        || !observed.teardown_verified
+        || !observed.live_roots_unchanged
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod attributed_teardown_tests {
+    use archon_workflow::acceptance_scratch::{CheckAllowance, ObserveHooks};
+    use std::sync::{Arc, atomic::AtomicBool};
+
+    async fn observe_real(
+        command: &str,
+        leave_unowned_path: bool,
+    ) -> (
+        tempfile::TempDir,
+        crate::command::acceptance_scratch_attributed_tests::ClearImmutable,
+        anyhow::Result<Vec<archon_workflow::acceptance_scratch::CheckResult>>,
+    ) {
+        let (temp, policy, commit, contract, refs) =
+            crate::command::acceptance_scratch_attributed_tests::support::fixture(&[(
+                command,
+                "project_root",
+            )]);
+        let scratch_parent = policy.scratch_parent.clone();
+        let clear = crate::command::acceptance_scratch_attributed_tests::ClearImmutable(
+            scratch_parent.clone(),
+        );
+        let binding = crate::command::acceptance_scratch_policy::NativeBinding {
+            policy,
+            source_commit: commit.clone(),
+            external_data_roots: vec![],
+        };
+        let mut hooks = ObserveHooks::for_resource_limits(Default::default());
+        hooks.allowance = Some(Arc::new(|| CheckAllowance::Run {
+            timeout_secs: 1,
+            cut: false,
+        }));
+        if leave_unowned_path {
+            hooks.on_check = Some(Arc::new(move |_| {
+                let site = std::fs::read_dir(&scratch_parent)
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .find(|path| {
+                        path.file_name()
+                            .is_some_and(|name| name.to_string_lossy().starts_with("observation-"))
+                    })
+                    .expect("the sites observer prepared a site");
+                let leftover = site.join("host-leftover");
+                std::fs::write(&leftover, b"unowned").unwrap();
+                assert!(
+                    std::process::Command::new("chflags")
+                        .arg("uchg")
+                        .arg(leftover)
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+            }));
+        }
+        let observed = super::observe(
+            binding,
+            Some(commit),
+            contract,
+            "chain".into(),
+            refs,
+            Arc::new(AtomicBool::new(false)),
+            hooks,
+        )
+        .await
+        .map(|(checks, _, _, _)| checks);
+        (temp, clear, observed)
+    }
+
+    #[tokio::test]
+    async fn attributed_teardown_keeps_the_sites_observation_usable() {
+        let (_temp, _clear, observed) = observe_real(
+            "mkdir blocked && touch blocked/keep && chflags uchg blocked/keep && sleep 30",
+            false,
+        )
+        .await;
+        let checks = observed.expect("an attributed teardown keeps the sites observation");
+        assert!(
+            checks.iter().any(|check| {
+                check.fault
+                    == Some(
+                        archon_workflow::acceptance_scratch::faults::FaultCause::SiteTeardownFailed,
+                    )
+            }),
+            "{checks:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unattributed_teardown_still_voids_the_sites_observation() {
+        let (_temp, _clear, observed) = observe_real("test -f data/value", true).await;
+        assert!(
+            observed.is_err(),
+            "an unattributed teardown voids the sites observation"
+        );
+    }
 }
 
 fn relative_path(from: &std::path::Path, to: &std::path::Path) -> PathBuf {

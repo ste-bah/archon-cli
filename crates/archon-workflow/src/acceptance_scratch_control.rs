@@ -146,6 +146,8 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         .arg(root)
         .args(args)
         .args(paths)
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

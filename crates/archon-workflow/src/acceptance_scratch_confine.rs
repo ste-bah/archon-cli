@@ -33,6 +33,12 @@ const REAP_BOUND: Duration = Duration::from_secs(3);
 #[cfg(unix)]
 const HOLDER_PROBES: u32 = 10;
 
+#[cfg(unix)]
+pub(super) enum HolderAudit {
+    Escaped(String),
+    HostFailure(String),
+}
+
 #[cfg(test)]
 thread_local! {
     /// Test seam: while set on the thread that runs a check, its periodic
@@ -260,7 +266,7 @@ impl Confinement {
         &self,
         root: &Path,
         target: Option<&Path>,
-    ) -> Option<String> {
+    ) -> Option<HolderAudit> {
         use archon_shell::process_tree::{HOLDER_PROBE_DEADLINE, Holder, holders_within};
         let roots: Vec<PathBuf> = std::iter::once(root)
             .chain(target)
@@ -277,15 +283,27 @@ impl Confinement {
             let found = match tokio::time::timeout(HOLDER_PROBE_DEADLINE * 2, probe).await {
                 Ok(Ok(Ok(found))) => found,
                 Ok(Ok(Err(e))) => {
-                    return Some(format!("scratch holder probe could not finish: {e}"));
+                    return Some(HolderAudit::HostFailure(format!(
+                        "scratch holder probe could not finish: {e}"
+                    )));
                 }
-                Ok(Err(e)) => return Some(format!("scratch holder probe task failed: {e}")),
-                Err(_) => return Some("scratch holder probe could not finish in time".into()),
+                Ok(Err(e)) => {
+                    return Some(HolderAudit::HostFailure(format!(
+                        "scratch holder probe task failed: {e}"
+                    )));
+                }
+                Err(_) => {
+                    return Some(HolderAudit::HostFailure(
+                        "scratch holder probe could not finish in time".into(),
+                    ));
+                }
             };
             // In a block of its own, so no lock guard lives across an await.
             last = {
                 let Ok(tracker) = self.tracker.try_lock() else {
-                    return Some("scratch holder identities are unknown: tracker busy".into());
+                    return Some(HolderAudit::HostFailure(
+                        "scratch holder identities are unknown: tracker busy".into(),
+                    ));
                 };
                 found
                     .into_iter()
@@ -301,25 +319,14 @@ impl Confinement {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
-        Some(format!(
+        Some(HolderAudit::Escaped(format!(
             "{}: {}",
             crate::acceptance_scratch::faults::LEFT_BEHIND,
             last.iter()
                 .map(|h| format!("pid {} ({})", h.pid, h.path.display()))
                 .collect::<Vec<_>>()
                 .join(", ")
-        ))
-    }
-
-    /// Windows confines a check to its Job Object; there is nothing outside
-    /// it to find.
-    #[cfg(not(unix))]
-    pub(super) async fn detached_holders(
-        &self,
-        _root: &Path,
-        _target: Option<&Path>,
-    ) -> Option<String> {
-        None
+        )))
     }
 }
 

@@ -5,7 +5,8 @@
 
 pub use archon_workflow::acceptance_scratch::faults::{CheckFault, check_fault};
 use archon_workflow::acceptance_scratch::{
-    ObservationResult, ObserveHooks, ScratchPolicy, observe_commands, observe_commands_hooked,
+    ObservationResult, ObserveControl, ObserveHooks, ScratchPolicy, observe_commands,
+    observe_commands_hooked,
 };
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{AcceptanceContract, content_digest};
@@ -147,8 +148,10 @@ pub async fn observe_hooked(
         "chain",
         &refs,
         &t.path().join("evidence"),
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        hooks,
+        ObserveControl::new(
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            hooks.clone(),
+        ),
     )
     .await
     .unwrap();

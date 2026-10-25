@@ -8,6 +8,8 @@ use std::sync::{
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
+#[path = "acceptance_scratch_process_finish.rs"]
+mod finish;
 #[path = "acceptance_scratch_process_mutation.rs"]
 mod mutation;
 
@@ -322,6 +324,7 @@ pub async fn run_at(
     // never an overflow that panics the host.
     let window = Duration::from_secs(site.timeout_secs);
     let mut error = None;
+    let mut fault = None;
     let mut quota_walk_count = 0;
     // A site with no audit root never walks a quota; the branch below stays
     // dormant by never being scheduled rather than by a flag it could forget.
@@ -344,7 +347,7 @@ pub async fn run_at(
 
             _=tokio::time::sleep(Duration::from_millis(25))=>{
                 if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break Some(terminate(child,confinement,&mut stall).await);}
-                if overflow.load(Ordering::SeqCst) {error=Some(super::faults::OUTPUT_LIMIT_EXCEEDED.into());break Some(terminate(child,confinement,&mut stall).await);}
+                if overflow.load(Ordering::SeqCst) {error=Some(super::faults::OUTPUT_LIMIT_EXCEEDED.into()); fault=Some(super::faults::FaultCause::OutputLimitExceeded); break Some(terminate(child,confinement,&mut stall).await);}
                 if progress.stalled(window) {error=Some(CHECK_TIMED_OUT.into());break Some(terminate(child,confinement,&mut stall).await);}
                 ticks += 1;
                 if ticks.is_multiple_of(SCAN_TICKS) { confinement.scan(); }
@@ -353,8 +356,8 @@ pub async fn run_at(
                 quota_walk_count += 1;
                 if let Some(root) = site.audit_root {
                     match site.audited_size(root) {
-                        Ok(size) if size>site.scratch_bytes=>{error=Some(super::faults::SCRATCH_LIMIT_EXCEEDED.into());break Some(terminate(child,confinement,&mut stall).await);}
-                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break Some(terminate(child,confinement,&mut stall).await);}
+                        Ok(size) if size>site.scratch_bytes=>{error=Some(super::faults::SCRATCH_LIMIT_EXCEEDED.into()); fault=Some(super::faults::FaultCause::ScratchLimitExceeded); break Some(terminate(child,confinement,&mut stall).await);}
+                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}")); fault=None; break Some(terminate(child,confinement,&mut stall).await);}
                         _=>{}
                     }
                 }
@@ -377,7 +380,7 @@ pub async fn run_at(
         None => reap(child, &mut stall).await,
     };
     confinement.leader_reaped();
-    let pipes = match tokio::time::timeout(Duration::from_secs(3), async {
+    let mut pipes = match tokio::time::timeout(Duration::from_secs(3), async {
         let out = (&mut stdout)
             .await
             .map_err(|e| invalid(e.to_string()))?
@@ -395,6 +398,7 @@ pub async fn run_at(
             stdout.abort();
             stderr.abort();
             error = Some(super::faults::PIPES_HELD.into());
+            fault = Some(super::faults::FaultCause::PipesHeld);
             ((Vec::new(), false), (Vec::new(), false))
         }
     };
@@ -412,68 +416,74 @@ pub async fn run_at(
     };
     // A scratch is private to the observation: what still holds it after
     // the tree is gone may be a descendant nothing else names any more.
+    #[cfg(unix)]
     if let Some(root) = site.audit_root
-        && let Some(escape) = confinement.detached_holders(root, site.audit_target).await
+        && let Some(audit) = confinement.detached_holders(root, site.audit_target).await
     {
-        error = Some(escape);
+        record_holder_audit(audit, &mut error, &mut fault);
     }
     if overflow.load(Ordering::SeqCst) {
         error = Some(super::faults::OUTPUT_LIMIT_EXCEEDED.into());
+        fault = Some(super::faults::FaultCause::OutputLimitExceeded);
     }
     if let Some(root) = site.audit_root {
         quota_walk_count += 1;
         match site.audited_size(root) {
             Ok(size) if size > site.scratch_bytes => {
-                error = Some(super::faults::SCRATCH_LIMIT_EXCEEDED.into())
+                error = Some(super::faults::SCRATCH_LIMIT_EXCEEDED.into());
+                fault = Some(super::faults::FaultCause::ScratchLimitExceeded);
             }
-            Err(e) => error = Some(format!("scratch size audit failed: {e}")),
+            Err(e) => {
+                error = Some(format!("scratch size audit failed: {e}"));
+                fault = None;
+            }
             _ => {}
         }
     }
     // A stall outranks every other ending: the check could not be torn down,
     // and that is what a resume has to know.
     if let Some(evidence) = stall {
+        fault = finish::teardown_fault(&evidence);
         error = Some(evidence);
     }
-    let mut result = CheckResult {
-        fault: None,
+    let result = CheckResult {
+        fault,
         classification: None,
         acceptance_id: id.into(),
         exit_code: status.and_then(|status| status.code()),
         quota_walk_count,
-        stdout: pipes.0.0,
-        stderr: pipes.1.0,
+        stdout: std::mem::take(&mut pipes.0.0),
+        stderr: std::mem::take(&mut pipes.1.0),
         operational_error: error,
         environment_note: None,
     };
-    if let (Some(plan), Some(moved)) = (site.mutation_plan, moved.as_ref()) {
-        mutation::record_move_outcomes(&mut result, plan, moved);
+    finish::finish(
+        result,
+        site,
+        command,
+        &pipes,
+        process_tree_gone,
+        moved.as_deref(),
+        parent_snapshots.as_deref(),
+    )
+}
+
+#[cfg(unix)]
+fn record_holder_audit(
+    audit: confine::HolderAudit,
+    error: &mut Option<String>,
+    fault: &mut Option<super::faults::FaultCause>,
+) {
+    match audit {
+        confine::HolderAudit::Escaped(escape) => {
+            *error = Some(escape);
+            *fault = Some(super::faults::FaultCause::LeftBehind);
+        }
+        confine::HolderAudit::HostFailure(message) => {
+            *error = Some(message);
+            *fault = None;
+        }
     }
-    if process_tree_gone {
-        if let (Some(plan), Some(moved), Some(root)) = (
-            site.mutation_plan,
-            moved.as_ref(),
-            site.mutation_root.as_ref(),
-        ) {
-            mutation::record_check_recreated(&mut result, plan, moved, root);
-        }
-        if let (Some(plan), Some(moved), Some(parent_snapshots), Some(root)) = (
-            site.mutation_plan,
-            moved.as_ref(),
-            parent_snapshots.as_ref(),
-            site.mutation_root.as_ref(),
-        ) {
-            mutation::restore_plan(&mut result, plan, moved, parent_snapshots, root);
-        }
-    } else {
-        if let Some((plan, moved)) = site.mutation_plan.zip(moved.as_ref()) {
-            mutation::mark_plan_unsafe(&mut result, plan, moved);
-        }
-    }
-    result.classify_raw(&String::from_utf8_lossy(command.bytes()));
-    result.stdout = site.redact(&result.stdout, pipes.0.1);
-    result.stderr = site.redact(&result.stderr, pipes.1.1);
-    Ok(result)
 }
 
 #[cfg(all(test, unix))]
