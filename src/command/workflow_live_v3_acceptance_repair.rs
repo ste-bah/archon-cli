@@ -70,9 +70,10 @@ pub(super) fn repair_author_scope(
     repository: &Path,
     prd_path: &Path,
     base: Option<&str>,
+    build_cache: bool,
 ) -> anyhow::Result<AuthorScope> {
-    let mut scope =
-        AuthorScope::for_task_set(project, task_root, prd_path).map_err(anyhow::Error::msg)?;
+    let mut scope = AuthorScope::for_task_set(project, task_root, prd_path, build_cache)
+        .map_err(anyhow::Error::msg)?;
     scope.repository_root = repository.to_path_buf();
     if let Some(commit) = base {
         scope.baseline = Some(Baseline {
@@ -134,6 +135,10 @@ pub(super) async fn republish(
         &context.repository,
         &prd_path,
         base,
+        context
+            .binding
+            .as_ref()
+            .is_some_and(|binding| binding.policy.build_cache.is_some()),
     )?;
     reauthor_and_republish(
         llm,

@@ -63,6 +63,7 @@ impl AuthorScope {
         project_root: &Path,
         tasks_root: &Path,
         prd_path: &Path,
+        build_cache: bool,
     ) -> std::result::Result<Self, String> {
         let task_files =
             archon_workflow::task_universe::task_files_under(tasks_root).map_err(|error| {
@@ -107,7 +108,23 @@ impl AuthorScope {
             // a baseline-pass prompt. Load its policy there, not while
             // constructing the scope used by refusal paths.
             project_input_excludes: Vec::new(),
-            build_cache: false,
+            build_cache,
         })
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_task_set_without_cache(
+        project_root: &Path,
+        tasks_root: &Path,
+        prd_path: &Path,
+    ) -> std::result::Result<Self, String> {
+        Self::for_task_set(project_root, tasks_root, prd_path, false)
+    }
+}
+
+pub(crate) fn site_uses_build_cache(project_root: &Path, tasks_root: &Path) -> bool {
+    crate::command::acceptance_scratch_policy::capture(project_root, tasks_root)
+        .ok()
+        .flatten()
+        .is_some()
 }

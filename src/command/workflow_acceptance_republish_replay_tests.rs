@@ -200,8 +200,9 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
         },
         |_, _| true,
     );
-    let scope = AuthorScope::for_task_set(&fixture.project, &fixture.tasks, &fixture.prd)
-        .expect("repository record identifies the sibling repository");
+    let scope =
+        AuthorScope::for_task_set_without_cache(&fixture.project, &fixture.tasks, &fixture.prd)
+            .expect("repository record identifies the sibling repository");
     let result = reauthor_and_republish(
         &client,
         ReauthorRequest {
@@ -226,7 +227,7 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
     assert_eq!(prompts.len(), 3, "both drafts were shown back as findings");
     assert!(
         prompts[1].contains("../archon-cli/Cargo.toml")
-            && prompts[1].contains("outside the tree it ran in"),
+            && prompts[1].contains("which the site does not create"),
         "{}",
         prompts[1]
     );
@@ -238,7 +239,7 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
         prompts[2]
     );
     for (label, prompt, needle) in [
-        ("path", &prompts[1], "outside the tree it ran in"),
+        ("path", &prompts[1], "which the site does not create"),
         (
             "site-program",
             &prompts[2],

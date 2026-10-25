@@ -17,7 +17,7 @@ fn ids(list: &[&str]) -> BTreeSet<String> {
 #[tokio::test]
 async fn the_reauthor_prompt_states_where_a_check_runs_and_the_relative_path_rule() {
     let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+    let scope = AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd)
         .expect("the task set's repository record is believed");
     let client = ScriptedAuthorJudge::new(
         |entry, _| command_entry(entry, "jq -e '.a == 1' out.json"),
@@ -76,7 +76,7 @@ async fn the_reauthor_prompt_states_where_a_check_runs_and_the_relative_path_rul
 async fn a_reply_naming_a_live_root_is_refused_before_the_judge_in_the_freeze_words() {
     const REPAIR: &str = "jq -e '.a == 1' out.json";
     let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+    let scope = AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd)
         .expect("the task set's repository record is believed");
     let root = set.project.path().canonicalize().unwrap();
     for live in [
@@ -138,7 +138,7 @@ fn a_repository_lock_that_cannot_be_believed_gives_no_author_scope() {
         let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
         let path = archon_workflow::repository_record::repository_record_path(&set.tasks);
         std::fs::write(&path, lock).unwrap();
-        let why = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        let why = AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd)
             .err()
             .unwrap_or_else(|| panic!("{case}: a scope was built from a guessed root"));
         assert!(why.contains(&path.display().to_string()), "{case}: {why}");

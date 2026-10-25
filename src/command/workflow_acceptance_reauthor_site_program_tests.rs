@@ -165,7 +165,8 @@ async fn reauthor(
             },
             trigger: "site program",
         },
-        &AuthorScope::for_task_set(&fixture.project, &fixture.tasks, &fixture.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(&fixture.project, &fixture.tasks, &fixture.prd)
+            .unwrap(),
     )
     .await;
     HOST_PATH.with(|path| *path.borrow_mut() = None);

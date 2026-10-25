@@ -158,12 +158,13 @@ async fn changed_check_refutation_is_retained_for_the_acceptance_author() {
         next.findings
     );
 
-    let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
-        temp.path(),
-        &tasks,
-        &prd,
-    )
-    .unwrap();
+    let scope =
+        crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set_without_cache(
+            temp.path(),
+            &tasks,
+            &prd,
+        )
+        .unwrap();
     let author = Arc::new(
         crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
             |entry, _| {

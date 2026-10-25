@@ -18,7 +18,7 @@ use super::executability::ExecutabilityProbe;
 use super::*;
 #[path = "workflow_acceptance_reauthor_scope.rs"]
 mod scope;
-pub(crate) use scope::AuthorScope;
+pub(crate) use scope::{AuthorScope, site_uses_build_cache};
 #[path = "workflow_acceptance_reauthor_parse.rs"]
 mod reply_parse;
 #[cfg(test)]

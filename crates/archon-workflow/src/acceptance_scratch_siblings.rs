@@ -11,7 +11,7 @@ const OMIT: &[&str] = &[".git", "target", "node_modules"];
 #[path = "acceptance_scratch_sibling_helpers.rs"]
 mod helpers;
 pub(crate) use helpers::relative;
-use helpers::{git_head, is_project_or_ancestor};
+use helpers::{git_head, is_project_or_ancestor, site_destination_first_component};
 
 impl super::ScratchRoots {
     pub(super) fn command_environment(
@@ -122,7 +122,7 @@ pub(super) fn copy_external(
                     index,
                     (
                         format!("the path leaves the {reason}: {}", named.path.display()),
-                        Some(super::faults::FaultCause::SiblingRootRefused),
+                        Some(super::faults::FaultCause::SiteAliasRefused),
                     ),
                 );
                 continue 'checks;
@@ -139,13 +139,11 @@ pub(super) fn copy_external(
                 )));
             }
             let path = relative(root, &sibling.alias);
-            if let Some(std::path::Component::Normal(name)) = path.components().next()
-                && super::site_path::is_site_internal_directory(
-                    &name.to_string_lossy(),
-                    build_cache,
-                )
+            if let Some(name) = site_destination_first_component(copied_root, &path)
+                && !(name == super::site_path::SITE_REPOSITORY_DIRECTORY
+                    && sibling.source.starts_with(&repository))
+                && super::site_path::is_site_internal_directory(&name, build_cache)
             {
-                let name = name.to_string_lossy();
                 let message = format!(
                     "{}: {} (the site uses `{name}` for its own files and does not copy the sibling there)",
                     super::faults::SIBLING_SHAPE_REFUSED,

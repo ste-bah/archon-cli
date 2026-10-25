@@ -22,7 +22,7 @@ fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest
 }
 
 fn scope(set: &FrozenSet) -> AuthorScope {
-    AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+    AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd)
         .expect("the task set's repository record is believed")
 }
 

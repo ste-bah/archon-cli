@@ -403,10 +403,15 @@ pub(super) async fn reverify_checks(
             "reverify judge phase started checks={}",
             baseline_failures.len()
         );
+        let build_cache = crate::command::workflow_task_set::reauthor::site_uses_build_cache(
+            project_root,
+            task_root,
+        );
         let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
             project_root,
             task_root,
             prd_path,
+            build_cache,
         )
         .map_err(|error| anyhow!(error))?;
         let client = crate::command::workflow::reverify_acceptance_client(

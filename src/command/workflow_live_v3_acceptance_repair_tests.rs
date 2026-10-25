@@ -30,6 +30,7 @@ fn in_round_repair_scope_builder_carries_frozen_task_candidates() {
         set.project.path(),
         &set.prd,
         None,
+        false,
     )
     .unwrap();
     assert_eq!(

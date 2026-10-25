@@ -84,7 +84,7 @@ async fn an_unusable_passability_reply_keeps_its_check_pending_while_a_sibling_p
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
     )
     .await
     .expect("an unusable authored passability reply is a pending outcome, not an error");

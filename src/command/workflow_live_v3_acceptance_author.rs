@@ -218,16 +218,24 @@ pub(super) async fn author_owed(
             "this acceptance stage has no author client to author checks with".into(),
         ));
     };
-    let mut scope =
-        match AuthorScope::for_task_set(&site.context.project, &site.context.task_root, prd_path) {
-            Ok(scope) => scope,
-            Err(error) => return Ok(Err(error)),
-        };
+    let build_cache = site
+        .context
+        .binding
+        .as_ref()
+        .is_some_and(|binding| binding.policy.build_cache.is_some());
+    let mut scope = match AuthorScope::for_task_set(
+        &site.context.project,
+        &site.context.task_root,
+        prd_path,
+        build_cache,
+    ) {
+        Ok(scope) => scope,
+        Err(error) => return Ok(Err(error)),
+    };
     scope.repository_root = site.context.repository.clone();
     scope.baseline = baseline_of(site);
     if let Some(binding) = &site.context.binding {
         scope.project_input_excludes = binding.policy.project_input_excludes.clone();
-        scope.build_cache = binding.policy.build_cache.is_some();
     }
     let probe = match probe(site) {
         Ok(probe) => probe,

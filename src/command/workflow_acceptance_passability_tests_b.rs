@@ -140,7 +140,7 @@ async fn a_reauthored_replacement_is_judged_on_its_own_baseline_output() {
         .lock()
         .unwrap()
         .push_back(UNPASSABLE_2.into());
-    let scope = reauthor::AuthorScope::for_task_set(project.path(), &tasks, &prd)
+    let scope = reauthor::AuthorScope::for_task_set_without_cache(project.path(), &tasks, &prd)
         .expect("the task set's repository record is believed");
     let prepared = prepare_acceptance_freeze_reauthoring(
         project.path(),
