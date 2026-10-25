@@ -227,7 +227,7 @@ find_python() {
             if [ "$higher" = 1 ]; then
                 selected_version=$resolved
                 selected_candidate=$candidate
-                selected_python_version=$version
+                selected_python_version="$major.$minor.$patch"
             fi
             continue
         fi

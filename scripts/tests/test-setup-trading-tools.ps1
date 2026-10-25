@@ -41,7 +41,7 @@ foreach ($case in $cases) {
 
 # Get-PythonCandidates must parse both py.exe -0p listing formats. The fake
 # launcher reports real fake interpreter paths so this exercises discovery.
-$root = Join-Path ([IO.Path]::GetTempPath()) 'trading setup safety checks'
+$root = Join-Path ([IO.Path]::GetTempPath()) "trading setup safety checks $($PSVersionTable.PSVersion.Major) $([guid]::NewGuid().ToString('N'))"
 $candidateRoot = Join-Path $root 'py launcher candidates'
 $candidateBin = Join-Path $candidateRoot 'bin'
 New-Item -ItemType Directory -Force -Path $candidateBin | Out-Null
@@ -177,15 +177,19 @@ $junctionSentinel = Join-Path $junctionTarget 'sentinel.txt'
 Set-Content -LiteralPath $junctionSentinel -Value 'preserve'
 New-Item -ItemType Junction -Path $junctionVenv -Target $junctionTarget | Out-Null
 try {
-    & $scriptPath -Target $junctionProject -SkipTradingView
-    throw 'Refusal assertion failed: junctioned venv was accepted'
-} catch {
-    if ($_.Exception.Message -notmatch 'reparse-point OpenBB venv') { throw }
+    try {
+        & $scriptPath -Target $junctionProject -SkipTradingView
+        throw 'Refusal assertion failed: junctioned venv was accepted'
+    } catch {
+        if ($_.Exception.Message -notmatch 'reparse-point OpenBB venv') { throw }
+    }
+    if ((Get-Content -LiteralPath $junctionSentinel -Raw).Trim() -ne 'preserve') {
+        throw 'Refusal assertion failed: junction target sentinel changed'
+    }
+    Write-Output 'PASS junctioned venv refused with sentinel intact'
+} finally {
+    if (Test-Path -LiteralPath $junctionVenv) { [System.IO.Directory]::Delete($junctionVenv, $false) }
 }
-if ((Get-Content -LiteralPath $junctionSentinel -Raw).Trim() -ne 'preserve') {
-    throw 'Refusal assertion failed: junction target sentinel changed'
-}
-Write-Output 'PASS junctioned venv refused with sentinel intact'
 
 $nonVenvProject = Join-Path $root 'non-venv project'
 $nonVenv = Join-Path $nonVenvProject '.archon/tools/openbb-venv'

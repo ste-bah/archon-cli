@@ -76,7 +76,11 @@ cat > "$FAKE_BIN/python3" <<'EOF'
 if [ -n "${FAKE_SETUP_LOG:-}" ]; then
     printf '%s %s\n' "$(basename "$0")" "$*" >> "$FAKE_SETUP_LOG"
 fi
-if [ "$1" = --version ]; then echo 'Python 3.12.1'; exit 0; fi
+if [ "$1" = --version ]; then
+    if [ "${MOCK_VERSION_BY_NAME:-}" = 1 ]; then candidate_name=$(basename "$0"); echo "Python 3.${candidate_name#python3.}.0";
+    else echo 'Python 3.12.1'; fi
+    exit 0
+fi
 if [ "$1" = -c ]; then
     fake_name=${0##*/}
     case "$fake_name" in python3.[0-9]*) echo "${fake_name#python3.}.0" ;; *) echo '3.12.1' ;; esac
@@ -254,6 +258,14 @@ if [ -n "${FAKE_SETUP_LOG:-}" ] && [ "$1" = -m ] && [ "$2" = venv ]; then
 fi
 if [ "$1" = --version ]; then echo 'Python 3.12.1'; exit 0; fi
 if [ "$1" = -c ]; then
+    if [ "${MOCK_VERSION_BY_NAME:-}" = 1 ]; then
+        candidate_name=$(basename "$0")
+        case "$candidate_name" in
+            python3.[0-9]*) echo "3.${candidate_name#python3.}.0" ;;
+            *) echo '3.12.0' ;;
+        esac
+        exit 0
+    fi
     case "$2" in
       *realpath*) exec "$REAL_PYTHON" "$@" ;;
       *importlib.metadata*) printf '%s\n' "${MOCK_INSTALLED_OPENBB_VERSION:-5.0.0}" ;;
@@ -280,7 +292,7 @@ if [ "\$1" = -m ] && [ "\$2" = pip ]; then
             printf 'wheel probe failed for %s\\nsecond diagnostic line\\n' "\$BASE_NAME" >&2
             exit 1
         fi
-        case "\$BASE_NAME" in python3.14|python3.16) version=5.0.0 ;; *) version=4.7.2 ;; esac
+        case "\$BASE_NAME" in python3.13|python3.14|python3.16) version=5.0.0 ;; *) version=4.7.2 ;; esac
         report=''; previous=''; for argument in "\$@"; do if [ "\$previous" = --report ]; then report=\$argument; fi; previous=\$argument; done; printf '{"install":[{"metadata":{"name":"openbb","version":"%s","summary":"café"}}]}' "\$version" > "\$report"
         echo 'pip warning on stderr' >&2
         ;;
@@ -437,6 +449,24 @@ run_version_resolution_case() {
 }
 run_version_resolution_case 'wheel resolution chooses older Python when its pip report resolves openbb 5.0.0' 'wheel version' python3.16 python3.17 python3.16
 run_version_resolution_case 'wheel resolution retains the best version when a later candidate resolves lower' 'best version' python3.16 python3.16 python3.15
+TEST_CASE='selected Python report uses the chosen candidate version'
+VERSION_BIN_HIGH="$TEMP_ROOT/selected Python version high candidate"
+VERSION_BIN_LOW="$TEMP_ROOT/selected Python version low candidate"
+VERSION_TARGET="$TEMP_ROOT/selected Python version target"
+mkdir -p "$VERSION_BIN_HIGH" "$VERSION_BIN_LOW" "$VERSION_TARGET"
+cp "$SPEC_BIN/python-mock" "$VERSION_BIN_HIGH/python3.13"
+cp "$SPEC_BIN/python-mock" "$VERSION_BIN_LOW/python3.12"
+chmod +x "$VERSION_BIN_HIGH/python3.13" "$VERSION_BIN_LOW/python3.12"
+if version_output=$(PATH="$VERSION_BIN_HIGH:$VERSION_BIN_LOW:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_VERSION_BY_NAME=1 \
+    "$SETUP_SCRIPT" --target "$VERSION_TARGET" --skip-tradingview </dev/null 2>&1); then :; else
+    printf 'selected Python version command failed:\n%s\n' "$version_output" >&2
+    exit 1
+fi
+if ! printf '%s\n' "$version_output" | grep -F 'python3.13 (Python 3.13.0) chosen because it resolves the highest OpenBB version' >/dev/null; then
+    printf 'expected selected Python 3.13.0 in output with two candidates:\n%s\n' "$version_output" >&2
+    exit 1
+fi
+printf 'PASS %s\n' "$TEST_CASE"
 TEST_CASE='OpenBB version comparison failure is fatal'; compare_target="$TEMP_ROOT/compare failure target"; mkdir -p "$compare_target"
 if compare_output=$(PATH="$TEMP_ROOT/wheel version candidates:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' MOCK_COMPARE_FAIL=1 "$SETUP_SCRIPT" --target "$compare_target" --skip-tradingview </dev/null 2>&1); then printf 'expected OpenBB version comparison failure:\n%s\n' "$compare_output" >&2; exit 1; fi
 printf '%s\n' "$compare_output" | grep -F 'comparison host defect' >/dev/null
