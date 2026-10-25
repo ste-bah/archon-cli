@@ -23,6 +23,9 @@
 
 use std::collections::VecDeque;
 
+#[path = "repeat_tool_novelty_json.rs"]
+mod json;
+
 /// Calls to weigh together. Long enough that ordinary work — read, edit, test,
 /// read — is not mistaken for a loop, short enough to notice within a stage.
 pub(crate) const NOVELTY_WINDOW: usize = 8;
@@ -131,6 +134,8 @@ pub fn oscillation_stop_message(returns: u32) -> String {
 /// exists to fix, moved to the other side of the call. A temporary directory
 /// carries a fresh id per run; a duration or a timestamp changes by itself.
 fn strip_per_attempt_entropy(text: &str) -> String {
+    let json_normalised = normalise_json_lines(text);
+    let text = json_normalised.as_str();
     let mut out = String::with_capacity(text.len());
     let tokens: Vec<&str> = text.split_inclusive(char::is_whitespace).collect();
     let mut request_id_value = false;
@@ -143,29 +148,36 @@ fn strip_per_attempt_entropy(text: &str) -> String {
         // logs; consume both as one timestamp while keeping the separator.
         let current = token.trim_end();
         if is_month(current) {
-            if let (Some(day), Some(clock)) = (tokens.get(index + 1), tokens.get(index + 2)) {
+            let (day_index, clock_index) = if tokens
+                .get(index + 1)
+                .is_some_and(|day| day.trim().is_empty())
+            {
+                (index + 2, index + 3)
+            } else {
+                (index + 1, index + 2)
+            };
+            if let (Some(day), Some(clock)) = (tokens.get(day_index), tokens.get(clock_index)) {
                 let day_text = day.trim();
-                let clock_text = clock.trim();
+                let clock_text = clock
+                    .trim()
+                    .trim_matches(|ch| matches!(ch, '[' | ']' | '(' | ')'));
                 if day_text.bytes().all(|b| b.is_ascii_digit()) && is_clock(clock_text) {
-                    out.push_str("<volatile>");
-                    out.push_str(&token[current.len()..]);
-                    out.push_str(&day[day_text.len()..]);
-                    out.push_str("<time>");
+                    out.push_str("<volatile> <time>");
                     out.push_str(&clock[clock_text.len()..]);
-                    consumed_through = index + 3;
+                    consumed_through = clock_index + 1;
                     continue;
                 }
             }
         }
-        if is_date_only(current) {
+        let date = current.trim_matches(|ch| matches!(ch, '[' | ']' | '(' | ')'));
+        if is_date_only(date) {
             if let Some(next) = tokens.get(index + 1) {
-                let next_core = next.trim();
+                let next_core = next
+                    .trim()
+                    .trim_matches(|ch| matches!(ch, '[' | ']' | '(' | ')'));
                 if is_clock(next_core) {
-                    let sep = &token[current.len()..];
-                    out.push_str("<volatile>");
-                    out.push_str(sep);
-                    out.push_str("<time>");
-                    out.push_str(&next[next_core.len()..]);
+                    out.push_str("<volatile> <time>");
+                    out.push_str(&next[next.trim().len()..]);
                     consumed_through = index + 2;
                     continue;
                 }
@@ -173,7 +185,10 @@ fn strip_per_attempt_entropy(text: &str) -> String {
         }
         let trimmed = token.trim_end();
         let tail = &token[trimmed.len()..];
-        if TEMP_MARKERS.iter().any(|marker| trimmed.contains(marker)) {
+        if let Some(normalised) = json::normalise_compact_json(trimmed) {
+            out.push_str(&normalised);
+        } else if TEMP_MARKERS.iter().any(|marker| trimmed.contains(marker)) {
+            request_id_value = false;
             out.push_str("<scratch>");
         } else if let Some(normalised) = normalise_timestamp_or_id(trimmed, &mut request_id_value) {
             out.push_str(&normalised);
@@ -183,8 +198,30 @@ fn strip_per_attempt_entropy(text: &str) -> String {
             out.push_str(trimmed);
         }
         out.push_str(tail);
+        if tail.contains('\n') || tail.contains('\r') {
+            request_id_value = false;
+        }
     }
     out
+}
+
+fn normalise_json_lines(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        let ending = &line[content.len()..];
+        if let Some(normalised) = json::normalise_compact_json(content.trim()) {
+            let leading = &content[..content.len() - content.trim_start().len()];
+            let trailing = &content[content.trim_end().len()..];
+            output.push_str(leading);
+            output.push_str(&normalised);
+            output.push_str(trailing);
+        } else {
+            output.push_str(content);
+        }
+        output.push_str(ending);
+    }
+    output
 }
 
 /// Replace recognized timestamp and request identity tokens while retaining

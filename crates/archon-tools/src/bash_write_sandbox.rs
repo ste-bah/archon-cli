@@ -1,5 +1,13 @@
-//! Issue-124: an operating-system write boundary around the shell of a write
-//! branch that runs in its own isolated item worktree.
+//! Issue-124: an operating-system write boundary around shell child processes.
+//!
+//! # The gap
+//!
+//! A write agent once rewrote a live project file from its worktree with an
+//! interpreter's atomic rename, and nothing refused it. File tools resolve one
+//! path and can be judged; a shell cannot: inline code, heredocs, `$(...)` and
+//! scripts write paths that lexical checks cannot reliably find. Refusal by
+//! text alone is only appearance. The boundary sits under the process: macOS
+//! `sandbox-exec` and Linux Landlock have the kernel refuse writes under sealed roots.
 //!
 //! # The profile
 //!
@@ -39,21 +47,18 @@
 //! judged on the real path.
 //!
 //! # What this does not cover
-//!
-//! Only the Bash tool's child processes are bounded. A process the command
+//! Only the shell's child processes are bounded. A process the command
 //! asks another, unbounded process to run — a build daemon the host started,
 //! an MCP server — is not.
-//!
-//! # Linux, and hosts with no kernel boundary (Issue-227/234)
-//!
+//! # Linux and hosts without a kernel boundary (Issue-227/234)
 //! On Linux the same sets are a Landlock ruleset
 //! (`archon_shell::write_boundary::landlock`). On a host with neither
 //! `sandbox-exec` nor Landlock (Windows), the host-side snapshot boundary
 //! (`bash_write_sandbox_snapshot`) records the sealed roots, lets the command
 //! run, then restores and names any change — for read-only shells AND write
 //! branches, so a write branch can no longer edit the canonical checkout
-//! (Issue-213). A call is refused when neither an OS nor snapshot boundary can
-//! be applied.
+//! (Issue-213). On macOS and Linux, failure to apply the kernel boundary
+//! refuses the call; the snapshot is not a fallback there.
 
 use std::path::PathBuf;
 
@@ -82,8 +87,7 @@ const HOST_DIR_ENV_KEYS: &[&str] = &[
     "CCACHE_DIR",
 ];
 
-/// The start of the note appended to a bounded command's result when a
-/// write was refused; pinned by tests.
+/// The start of the bounded command's refusal note; pinned by tests.
 pub(super) const WRITE_BOUNDARY_NOTE_MARKER: &str = "[write boundary]";
 
 /// What one command may and may not write, as absolute paths under every
@@ -91,7 +95,7 @@ pub(super) const WRITE_BOUNDARY_NOTE_MARKER: &str = "[write boundary]";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct WriteBoundary {
     protected: Vec<PathBuf>,
-    /// Drawn around a read-only call (Batch G).
+    /// Drawn around a read-only call or isolated write branch.
     read_only: bool,
     /// Every ancestor of a protected root, denied as a `literal`.
     ancestors: Vec<PathBuf>,
@@ -135,14 +139,10 @@ pub(super) fn for_call(
     };
     let Some(paths) = guard.boundary_paths() else {
         if guard.isolated_write_branch() {
-            let text = refusal(
-                "This isolated write branch's shell boundary",
-                "the host stamp, worktree root, or protected roots are missing",
+            let text = archon_shell::write_boundary::missing_stamp_refusal(
+                "This isolated write branch's command",
             );
-            return Err(ToolResult::refusal(format!(
-                "Error: {text} Use the file tools, and report anything you could not check in \
-                 your envelope."
-            )));
+            return Err(ToolResult::refusal(format!("Error: {text}")));
         }
         return Ok(None);
     };
@@ -157,9 +157,9 @@ pub(super) fn for_call(
         Ok(mechanism) => mechanism,
         Err(reason) => {
             let what = if paths.read_only {
-                "This read-only call's shell boundary"
+                "This read-only call's shell"
             } else {
-                "This isolated write branch's shell boundary"
+                "This isolated write branch's shell"
             };
             return Err(fail_closed(what, &reason));
         }

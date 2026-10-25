@@ -108,6 +108,20 @@ fn a_temp_path_does_not_make_one_answer_look_new() {
 }
 
 #[test]
+fn scratch_paths_inside_json_values_preserve_the_surrounding_message() {
+    assert_ne!(
+        result_digest(r#"{"msg":"/tmp/x: error E0308"}"#),
+        result_digest(r#"{"msg":"/tmp/y: error E0599"}"#),
+        "different diagnostics stay distinct when their paths change"
+    );
+    assert_eq!(
+        result_digest(r#"{"msg":"/tmp/x: error E0308"}"#),
+        result_digest(r#"{"msg":"/tmp/y: error E0308"}"#),
+        "a scratch path alone does not count as news"
+    );
+}
+
+#[test]
 fn an_elapsed_time_does_not_make_one_answer_look_new() {
     let first = result_digest("test result: ok. 334 passed; finished in 3.86s");
     let second = result_digest("test result: ok. 334 passed; finished in 4.02s");
@@ -134,6 +148,14 @@ fn a_timestamp_does_not_make_one_answer_look_new() {
 }
 
 #[test]
+fn compact_json_timestamps_are_ignored() {
+    assert_eq!(
+        result_digest(r#"{"ts":"2026-10-16T14:23:01Z"}"#),
+        result_digest(r#"{"ts":"2026-10-17T09:05:44Z"}"#)
+    );
+}
+
+#[test]
 fn distinct_urls_and_iso_date_paths_remain_novel() {
     assert_ne!(
         result_digest("requested https://example.com/a"),
@@ -154,8 +176,49 @@ fn a_request_id_does_not_make_one_answer_look_new() {
         result_digest("request_id=6ba7b810-9dad-11d1-80b4-00c04fd430c8 completed")
     );
     assert_eq!(
+        result_digest("request_id req_alpha123 completed"),
+        result_digest("request_id req_beta456 completed")
+    );
+    assert_eq!(
         result_digest("request_id: req_alpha123 completed"),
         result_digest("request_id: req_beta456 completed")
+    );
+    assert_eq!(
+        result_digest(r#"{"level":"info","request_id":"req_alpha123"}"#),
+        result_digest(r#"{"level":"info","request_id":"req_beta456"}"#)
+    );
+    assert_eq!(
+        result_digest("request_id: req_alpha123\nnext value"),
+        result_digest("request_id: req_beta456\nnext value")
+    );
+    assert_ne!(
+        result_digest("request_id:\nalpha content"),
+        result_digest("request_id:\nbeta content"),
+        "the flag replaces only the request id and preserves following content"
+    );
+    assert_eq!(
+        result_digest("Oct  6 14:23:01 service ready"),
+        result_digest("Nov 17 09:05:44 service ready")
+    );
+    assert_eq!(
+        result_digest("[2026-10-16 14:23:01] finished"),
+        result_digest("[2026-10-17 09:05:44] finished")
+    );
+}
+
+#[test]
+fn json_with_spaced_values_normalises_ids_and_scratch_paths() {
+    assert_eq!(
+        result_digest(
+            r#"{"ts":"2026-10-16T14:23:01Z","request_id":"req_alpha123","msg":"service ready","path":"/private/tmp/ac-x-1234/output file"}"#
+        ),
+        result_digest(
+            r#"{"ts":"2026-10-17T09:05:44Z","request_id":"req_beta456","msg":"service ready","path":"/private/tmp/ac-x-9876/output file"}"#
+        )
+    );
+    assert_ne!(
+        result_digest(r#"{"request_id":"req_alpha123","msg":"service ready"}"#),
+        result_digest(r#"{"request_id":"req_beta456","msg":"service failed"}"#)
     );
 }
 

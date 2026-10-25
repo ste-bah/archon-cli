@@ -1,11 +1,11 @@
 //! Test support: a canned agent that answers for every acceptance criterion
 //! its prompt lists (Batch O, C6b).
 //!
-//! Since a write call's `accepted` must carry `criterion_results`, a canned
+//! Since a write call's `accepted` or `noop` result must carry `criterion_results`, a canned
 //! implementation reply without them is (rightly) demoted. A harness whose
 //! subject is something else answers like a compliant agent: every criterion
 //! the prompt's "Acceptance Criteria Results" section lists, reported met,
-//! with evidence. Only an accepted JSON envelope is touched.
+//! with evidence. Only accepted and no-op JSON envelopes are touched.
 
 const SECTION: &str = "## Acceptance Criteria Results (required)";
 
@@ -19,7 +19,10 @@ pub(crate) fn satisfy(prompt: &str, content: String) -> String {
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&content) else {
         return content;
     };
-    if value.get("status").and_then(serde_json::Value::as_str) != Some("accepted") {
+    if !matches!(
+        value.get("status").and_then(serde_json::Value::as_str),
+        Some("accepted" | "noop")
+    ) {
         return content;
     }
     let entries: Vec<serde_json::Value> = prompt[start + SECTION.len()..]
@@ -51,7 +54,7 @@ pub(crate) fn satisfy(prompt: &str, content: String) -> String {
 #[test]
 fn a_listed_criterion_is_answered_and_other_replies_are_untouched() {
     let prompt = format!(
-        "x\n{SECTION}\nReturn data.criterion_results ...\n- T-1 #1: a holds\n- T-1 #2: b: c\n\n## Task\n"
+        "x\n{SECTION}\nReturn data.criterion_results ...\n- TASK-X-001 #1: a holds\n- TASK-X-001 #2: b: c\n\n## Task\n"
     );
     let out = satisfy(
         &prompt,
@@ -61,6 +64,15 @@ fn a_listed_criterion_is_answered_and_other_replies_are_untouched() {
     assert_eq!(value["data"]["k"], 1);
     assert_eq!(value["data"]["criterion_results"][1]["criterion"], "b: c");
     assert_eq!(value["data"]["criterion_results"][1]["criterion_index"], 2);
+    let noop = satisfy(&prompt, r#"{"status":"noop","data":{"k":1}}"#.to_string());
+    let noop_value: serde_json::Value = serde_json::from_str(&noop).unwrap();
+    assert_eq!(
+        noop_value["data"]["criterion_results"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     let blocked = r#"{"status":"blocked"}"#.to_string();
     assert_eq!(satisfy(&prompt, blocked.clone()), blocked);
     assert_eq!(satisfy("no section", "{}".to_string()), "{}");

@@ -132,13 +132,26 @@ async fn a_declared_artifact_lands_through_the_audited_landing_never_directly() 
     // for review -- never the branch's failure.
     let (result, prompts) = wave(&f, &[REPORT, "config/app.toml"], edits).await;
     if !archon_tools::bash::shell_write_boundary_available() {
-        // Issue-227: a host with no OS boundary (a write branch's shell is
-        // then best effort): the direct write reached the live copy, and the
-        // landing refused to write over a copy changed after seeding.
-        assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+        // Issue-213 C3 changed this: without an applicable host boundary the
+        // shell is refused, so its direct write cannot change the live copy.
+        assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+        assert_eq!(std::fs::read_to_string(&live).unwrap(), "old report\n");
+        let branch = f.branch_result("impl", "impl-0");
         assert!(
-            (result.residual_gaps.iter()).any(|gap| gap.id.starts_with("project_inputs_refused_")),
-            "{result:#?}"
+            branch.residual_gaps.iter().any(|gap| {
+                gap.id.starts_with("declared_artifact_not_deliverable_")
+                    && gap.severity.as_deref() == Some("review")
+                    && gap.description.contains("config/app.toml")
+            }),
+            "{branch:#?}"
+        );
+        let shell = f.shell.lock().unwrap().clone();
+        assert!(!shell.is_empty(), "the branch invoked a shell command");
+        assert!(
+            shell.iter().all(|line| {
+                line.contains("requires an OS write boundary") && line.contains("It was NOT run")
+            }),
+            "{shell:?}"
         );
         return;
     }

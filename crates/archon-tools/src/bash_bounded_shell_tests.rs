@@ -126,7 +126,9 @@ async fn a_write_branch_shell_on_a_host_with_no_boundary_is_refused_without_runn
     unavailable_for_tests(false);
     assert!(result.is_error, "{}", result.content);
     assert!(
-        result.content.contains("shell boundary"),
+        result
+            .content
+            .contains("This isolated write branch's shell requires"),
         "{}",
         result.content
     );
@@ -149,7 +151,19 @@ async fn an_unstamped_isolated_write_branch_fails_closed_without_running() {
     let marker = layout.worktree.join("must-not-run-unstamped.txt");
     let result = bash(&ctx, &format!("printf ran > {}", marker.display())).await;
     assert!(result.is_error, "{}", result.content);
-    assert!(result.content.contains("host stamp"), "{}", result.content);
+    assert!(
+        result
+            .content
+            .contains("host did not provide the boundary paths"),
+        "{}",
+        result.content
+    );
+    assert!(
+        !result.content.contains("none can be applied on this host")
+            && result.content.contains("Report this in your result"),
+        "{}",
+        result.content
+    );
     assert!(!marker.exists(), "the command never started");
 }
 
