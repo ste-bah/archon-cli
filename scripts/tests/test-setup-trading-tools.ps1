@@ -41,7 +41,7 @@ foreach ($case in $cases) {
 
 # Get-PythonCandidates must parse both py.exe -0p listing formats. The fake
 # launcher reports real fake interpreter paths so this exercises discovery.
-$root = Join-Path $env:RUNNER_TEMP 'trading setup safety checks'
+$root = Join-Path ([IO.Path]::GetTempPath()) 'trading setup safety checks'
 $candidateRoot = Join-Path $root 'py launcher candidates'
 $candidateBin = Join-Path $candidateRoot 'bin'
 New-Item -ItemType Directory -Force -Path $candidateBin | Out-Null
@@ -53,6 +53,7 @@ $pyLauncher = Join-Path $candidateBin 'py.cmd'
 Set-Content -LiteralPath $pyLauncher -Value @(
     '@echo off',
     "echo  -V:3.15 *        $python315",
+    "echo  -V:3.15        $python315 *",
     "echo  -3.12-64        $python312"
 )
 $savedCandidatePath = $env:Path
@@ -70,25 +71,90 @@ if (-not ($foundCandidates.Program -contains $python315) -or -not ($foundCandida
 }
 Write-Output 'PASS py.exe candidate discovery parses -V and architecture launcher formats'
 
-$candidateBin = Join-Path $root 'wheel probe candidates'
-New-Item -ItemType Directory -Force -Path $candidateBin | Out-Null
-$failingCandidate = Join-Path $candidateBin 'newer-python.cmd'
-$workingCandidate = Join-Path $candidateBin 'older-python.cmd'
-Set-Content -LiteralPath $failingCandidate -Value @('@echo off', 'echo no wheel for dependency >&2', 'echo complete resolver diagnostic >&2', 'exit /b 1')
-Set-Content -LiteralPath $workingCandidate -Value @('@echo off', 'exit /b 0')
+$script:PythonWheelProbeError = ''
+$script:PythonWheelProbeVersion = ''
+$script:MockOpenBBVersion = ''
+$script:MockWheelFails = $false
+$script:MockCompareFails = $false
+$script:Venv = Join-Path $root 'wheel probe temp venv'
+$script:Python = 'MockVenvPython'
+function Invoke-MockBaseCandidate([string]$ResolvedVersion, [string[]]$Arguments) {
+    $script:MockOpenBBVersion = $ResolvedVersion
+    if ($Arguments -contains '--compare') {
+        if ($script:MockCompareFails) { Write-Output 'comparison host defect'; $global:LASTEXITCODE = 42; return }
+        Write-Output (([version]$Arguments[-2]).CompareTo([version]$Arguments[-1]))
+        $global:LASTEXITCODE = 0
+        return
+    }
+    if ($Arguments.Count -gt 0 -and $Arguments[0] -eq '-m' -and $Arguments[1] -eq 'venv') {
+        New-Item -ItemType Directory -Force -Path (Join-Path $script:Venv 'Scripts') | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:Venv 'pyvenv.cfg') -Value 'home = fake-python'
+        Set-Content -LiteralPath (Join-Path $script:Venv 'Scripts/python.exe') -Value 'fake venv interpreter'
+        Set-Content -LiteralPath $script:Python -Value 'fake interpreter command marker'
+        return
+    }
+    if ($Arguments.Count -gt 0 -and $Arguments[-1].EndsWith('.py')) { $global:LASTEXITCODE = 0; return }
+    if ($Arguments -contains '--version') { Write-Output 'Python 3.12.0'; $global:LASTEXITCODE = 0; return }
+    throw "Unexpected mock base Python arguments: $($Arguments -join ' ')"
+}
+function MockCandidateNewer { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '4.7.2' -Arguments $args }
+function MockCandidateOlder { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '5.0.0' -Arguments $args }
+function MockCandidateFail { $script:MockWheelFails = $true; Invoke-MockBaseCandidate '5.1.0' -Arguments $args }
+function MockCandidateWorking { $script:MockWheelFails = $false; Invoke-MockBaseCandidate '5.0.0' -Arguments $args }
+function MockVenvPython {
+    if ($args -contains '--report') {
+        if ($script:MockWheelFails) {
+            Write-Output 'no wheel for dependency'
+            Write-Output 'complete resolver diagnostic'
+            $global:LASTEXITCODE = 1
+            return
+        }
+        $reportPath = $args[([array]::IndexOf($args, '--report') + 1)]
+        Set-Content -LiteralPath $reportPath -Encoding utf8 -Value (@{ install = @(@{ metadata = @{ name = 'openbb'; version = $script:MockOpenBBVersion; summary = 'café' } }) } | ConvertTo-Json -Depth 5 -Compress)
+        Write-Error 'pip warning on stderr' -ErrorAction Continue
+        $global:LASTEXITCODE = 0
+        return
+    }
+    $global:LASTEXITCODE = 0
+}
 $candidates = @(
-    @{ Program = $failingCandidate; FixedArguments = [string[]]@() },
-    @{ Program = $workingCandidate; FixedArguments = [string[]]@() }
+    @{ Program = 'MockCandidateNewer'; FixedArguments = [string[]]@(); Order = 0 },
+    @{ Program = 'MockCandidateOlder'; FixedArguments = [string[]]@(); Order = 1 }
 )
-$selected = Resolve-BasePython '>=3.10,<4' $candidates
-if ($selected.Program -ne $workingCandidate) { throw "Wheel resolution selected '$($selected.Program)' instead of '$workingCandidate'" }
+Push-Location $root
+try { $selected = Resolve-BasePython '>=3.10,<4' $candidates }
+finally { Pop-Location }
+if ($selected.Program -ne 'MockCandidateOlder' -or $selected.ResolvedOpenBBVersion -ne '5.0.0') {
+    throw "Wheel resolution selected '$($selected.Program)' / '$($selected.ResolvedOpenBBVersion)' instead of the older Python resolving openbb 5.0.0"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $script:Venv 'Scripts/python.exe') -PathType Leaf)) { throw 'Wheel fake did not create the venv Scripts/python.exe layout' }
+Write-Output 'PASS wheel resolution chooses older Python when its pip report resolves openbb 5.0.0'
+$fallbackCandidates = @(
+    @{ Program = 'MockCandidateFail'; FixedArguments = [string[]]@(); Order = 0 },
+    @{ Program = 'MockCandidateWorking'; FixedArguments = [string[]]@(); Order = 1 }
+)
+Push-Location $root
+try { $fallbackSelected = Resolve-BasePython '>=3.10,<4' $fallbackCandidates }
+finally { Pop-Location }
+if ($fallbackSelected.Program -ne 'MockCandidateWorking') { throw "Wheel failure fallback selected '$($fallbackSelected.Program)' instead of MockCandidateWorking" }
+Write-Output 'PASS wheel-only resolution skips a failing candidate and retains the working candidate'
 try {
-    Resolve-BasePython '>=3.10,<4' @($candidates[0]) | Out-Null
-    throw 'Wheel resolution assertion failed: all failed candidates were accepted'
+    Push-Location $root
+    Resolve-BasePython '>=3.10,<4' @(@{ Program = 'MockCandidateFail'; FixedArguments = [string[]]@(); Order = 0 }) | Out-Null
+    throw 'Wheel resolution assertion failed: failed pip candidate was accepted'
 } catch {
     if ($_.Exception.Message -notmatch 'no wheel for dependency' -or $_.Exception.Message -notmatch 'complete resolver diagnostic') { throw }
-}
-Write-Output 'PASS wheel-only resolution skips a failing candidate and retains its full pip error'
+} finally { Pop-Location }
+Write-Output 'PASS wheel-only failure retains complete pip diagnostics'
+$script:MockCompareFails = $true
+try {
+    Push-Location $root
+    Resolve-BasePython '>=3.10,<4' @(@{ Program = 'MockCandidateNewer'; FixedArguments = [string[]]@(); Order = 0 }, @{ Program = 'MockCandidateOlder'; FixedArguments = [string[]]@(); Order = 1 }) | Out-Null
+    throw 'Comparison assertion failed: broken comparison was accepted'
+} catch {
+    if ($_.Exception.Message -notmatch 'Could not compare OpenBB versions' -or $_.Exception.Message -notmatch 'comparison host defect') { throw }
+} finally { Pop-Location; $script:MockCompareFails = $false }
+Write-Output 'PASS broken OpenBB comparison fails with its error text'
 
 $junctionTarget = Join-Path $root 'junction target'
 $junctionProject = Join-Path $root 'junction project'

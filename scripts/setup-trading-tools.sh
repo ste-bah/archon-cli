@@ -8,8 +8,10 @@
 #
 # Installs external tools under <project>/.archon/tools so the source tree stays
 # clean and the project-local .mcp.json can point Archon at the pinned server.
-
 set -eu
+SCRIPT_DIR=${0%/*}
+[ "$SCRIPT_DIR" = "$0" ] && SCRIPT_DIR=.
+SCRIPT_DIR=$(CDPATH= cd "$SCRIPT_DIR" && pwd -P)
 if [ -n "${HOME:-}" ] && [ -f "$HOME/.profile" ]; then
     set +eu
     . "$HOME/.profile" >/dev/null 2>&1
@@ -19,17 +21,14 @@ if [ -n "${HOME:-}" ] && [ -f "$HOME/.profile" ]; then
         echo "setup-trading-tools.sh: warning: could not fully source profile: $HOME/.profile" >&2
     fi
 fi
-
 TARGET="${PWD:-.}"
 CHECK=false
 SKIP_TRADINGVIEW=false
 SKIP_OPENBB=false
 DRY_RUN=false
-
 TV_REPO="https://github.com/tradesdontlie/tradingview-mcp.git"
 TV_DIR=""
 OPENBB_VENV=""
-
 while [ $# -gt 0 ]; do
     case "$1" in
         --target)
@@ -63,7 +62,6 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-
 TARGET=$(cd "$TARGET" && pwd)
 TOOLS_DIR="$TARGET/.archon/tools"
 TV_DIR="$TOOLS_DIR/tradingview-mcp"
@@ -72,28 +70,30 @@ MCP_FILE="$TARGET/.mcp.json"
 REQUIRES_PYTHON='>=3.10,<4'
 PYTHON_CANDIDATES_TEMP=""
 PYTHON_FAILURES_TEMP=""
+PYTHON_SEEN_TEMP=""
+PYTHON_UPDATE_TEMP=""
+PYTHON_REPORT_TEMP=""
 OPENBB_VENV_READY=false
+OPENBB_RESOLVED_VERSION=""
 SETUP_PROCESS_ID=$$
 cleanup_setup_temp_files() {
     [ "$$" = "$SETUP_PROCESS_ID" ] || return 0
-    if [ -n "$PYTHON_CANDIDATES_TEMP$PYTHON_FAILURES_TEMP" ]; then
-        rm -f "$PYTHON_CANDIDATES_TEMP" "$PYTHON_FAILURES_TEMP"
+    if [ -n "$PYTHON_CANDIDATES_TEMP$PYTHON_FAILURES_TEMP$PYTHON_SEEN_TEMP$PYTHON_UPDATE_TEMP$PYTHON_REPORT_TEMP" ]; then
+        rm -f "$PYTHON_CANDIDATES_TEMP" "$PYTHON_FAILURES_TEMP" "$PYTHON_SEEN_TEMP" "$PYTHON_UPDATE_TEMP" "$PYTHON_REPORT_TEMP"
     fi
 }
 trap cleanup_setup_temp_files EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-
 run() {
     if [ "$DRY_RUN" = true ] || [ "$CHECK" = true ]; then
         echo "[dry-run] $*"
     else
         echo "+ $*"
-        "$@"
+        if [ "$1" = "$OPENBB_VENV/bin/python" ] && [ "$2" = -m ] && [ "$3" = pip ]; then PYTHONIOENCODING=utf-8 PYTHONUTF8=1 "$@"; else "$@"; fi
     fi
 }
-
 need_bin() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "setup-trading-tools.sh: missing required binary: $1" >&2
@@ -101,161 +101,168 @@ need_bin() {
         exit 2
     fi
 }
-
 load_openbb_specifier() {
     if [ -d "$OPENBB_VENV" ]; then
         spec=$(find "$OPENBB_VENV" -type f -path '*/openbb-*.dist-info/METADATA' -exec awk 'index($0, "Requires-Python: ")==1 {sub(/^Requires-Python: /, ""); print; exit}' {} \; 2>/dev/null | head -n 1)
         if [ -n "$spec" ]; then REQUIRES_PYTHON="$spec"; fi
     fi
 }
-
 python_satisfies_specifier() (
-    candidate=$1
-    probe_base=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-python-probe.XXXXXX")
-    probe_file="$probe_base.py"
-    mv "$probe_base" "$probe_file"
-    cat > "$probe_file" <<'PYTHON'
-import os, re, sys
-spec = os.environ["ARCHON_SETUP_PYTHON_SPECIFIER"]
-version = sys.version_info
-release = tuple(version[:3])
-pre = {"alpha": (0, version.serial), "beta": (1, version.serial), "candidate": (2, version.serial)}.get(version.releaselevel, (3, 0))
-
-def compare(left, right):
-    a, a_pre = left
-    b, b_pre = right
-    a = tuple(a[:next((i for i in range(len(a) - 1, -1, -1) if a[i] != 0), -1) + 1])
-    b = tuple(b[:next((i for i in range(len(b) - 1, -1, -1) if b[i] != 0), -1) + 1])
-    width = max(len(a), len(b))
-    a, b = a + (0,) * (width - len(a)), b + (0,) * (width - len(b))
-    if a != b: return (a > b) - (a < b)
-    return (a_pre > b_pre) - (a_pre < b_pre)
-
-def check_clause(clause):
-    match = re.fullmatch(r"(>=|<=|==|!=|~=|>|<)\s*(\d+(?:\.\d+)*)(a|b|rc)?(\d+)?(\.\*)?", clause.strip(), re.I)
-    if not match:
-        op = re.match(r"([^\s\d]+)", clause.strip())
-        return False, "unknown operator %s" % (op.group(1) if op else "(invalid clause)")
-    op, raw, pre_label, pre_serial, wildcard = match.groups()
-    if pre_label and pre_serial is None:
-        return False, "invalid pre-release clause"
-    wanted_pre = (({"a": 0, "b": 1, "rc": 2}[(pre_label or "").lower()], int(pre_serial)) if pre_label else (3, 0))
-    wanted = (tuple(map(int, raw.split("."))), wanted_pre)
-    order = compare((release, pre), wanted)
-    if wildcard and op in ("==", "!="):
-        prefix = wanted[0]
-        equal = release[:len(prefix)] == prefix
-        return (equal if op == "==" else not equal), None
-    if wildcard:
-        return False, "wildcard is only valid with == or !="
-    if op == ">=": return order >= 0, None
-    if op == ">": return order > 0, None
-    if op == "<=": return order <= 0, None
-    if op == "<": return order < 0, None
-    if op == "==": return order == 0, None
-    if op == "!=": return order != 0, None
-    if op == "~=":
-        if len(wanted[0]) < 2: return False, "invalid compatible-release clause"
-        upper = list(wanted[0][:-1])
-        upper[-1] += 1
-        upper_bound = (tuple(upper), (3, 0))
-        return order >= 0 and compare(current, upper_bound) < 0, None
-
-clauses = spec.split(",")
-for clause in clauses:
-    _, error = check_clause(clause)
-    if error:
-        print("%s (treated as unsatisfied)" % error)
-        raise SystemExit(2)
-for clause in clauses:
-    passed, _ = check_clause(clause)
-    if not passed:
-        raise SystemExit(1)
-raise SystemExit(0)
-PYTHON
-    if ARCHON_SETUP_PYTHON_SPECIFIER="$REQUIRES_PYTHON" "$candidate" "$probe_file" 2>&1; then
-        probe_status=0
-    else
-        probe_status=$?
-    fi
-    rm -f "$probe_file"
-    return "$probe_status"
+    PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ARCHON_SETUP_PYTHON_SPECIFIER="$REQUIRES_PYTHON" "$1" "$SCRIPT_DIR/setup-trading-tools-python-probe.py" 2>&1
 )
-
 find_python() {
     candidates=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-candidates.XXXXXX")
+    seen_paths=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-seen-paths.XXXXXX")
+    update_temp=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-candidate-update.XXXXXX")
     failures=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-pip-errors.XXXXXX")
     PYTHON_CANDIDATES_TEMP=$candidates
     PYTHON_FAILURES_TEMP=$failures
+    PYTHON_SEEN_TEMP=$seen_paths
+    PYTHON_UPDATE_TEMP=$update_temp
     : > "$failures"
     specifier_satisfied=false
+    selected_version=""
+    selected_candidate=""
+    selected_python_version=""
     saved_ifs=$IFS
     IFS=:
+    set -f
     path_order=0
     for directory in $PATH; do
         [ -d "$directory" ] || continue
+        set +f
         for candidate in "$directory"/python3 "$directory"/python "$directory"/python3.*; do
             [ -x "$candidate" ] || continue
-            version=$("$candidate" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null) || continue
-            case "$version" in *[!0-9.]*|'') continue ;; esac
             case "${candidate##*/}" in
                 python3) preference=0; versioned=0 ;;
                 python) preference=1; versioned=0 ;;
                 python3.*) preference=2; versioned=${candidate##*.} ;;
             esac
+            case "$versioned" in *[!0-9]*|'') versioned=0 ;; esac
+            resolved_path=$candidate
+            while [ -L "$resolved_path" ]; do
+                link_target=$(readlink "$resolved_path" 2>/dev/null) || break
+                case "$link_target" in
+                    /*) resolved_path=$link_target ;;
+                    *) resolved_path="${resolved_path%/*}/$link_target" ;;
+                esac
+            done
+            resolved_directory=$(CDPATH= cd "${resolved_path%/*}" 2>/dev/null && pwd -P) || continue
+            real_path="$resolved_directory/${resolved_path##*/}"
+            if grep -F -x "$real_path" "$seen_paths" >/dev/null 2>&1; then
+              if awk -F '\t' -v path="$real_path" '$8 == path { found=1 } END { exit !found }' "$candidates"; then
+                old_fields=$(awk -F '\t' -v path="$real_path" '$8 == path { print $4 "\t" $5; exit }' "$candidates")
+                old_preference=${old_fields%%"$(printf '\t')"*}
+                old_versioned=${old_fields#*"$(printf '\t')"}
+                if [ "$preference" -lt "$old_preference" ] || { [ "$preference" -eq "$old_preference" ] && [ "$versioned" -gt "$old_versioned" ]; }; then
+                    awk -F '\t' -v path="$real_path" -v candidate="$candidate" -v preference="$preference" -v versioned="$versioned" 'BEGIN { OFS="\t" } $8 == path { $4=preference; $5=versioned; $7=candidate } { print }' "$candidates" > "$update_temp"
+                    mv "$update_temp" "$candidates"
+                    update_temp=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-candidate-update.XXXXXX")
+                    PYTHON_UPDATE_TEMP=$update_temp
+                fi
+              fi
+              continue
+            fi
+            printf '%s\n' "$real_path" >> "$seen_paths"
+            version=$("$candidate" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' </dev/null 2>/dev/null) || continue
+            case "$version" in *[!0-9.]*|'') continue ;; esac
             major=${version%%.*}
             remainder=${version#*.}
             minor=${remainder%%.*}
             patch=${remainder#*.}
             case "$patch" in *.*) patch=${patch%%.*} ;; esac
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                "$major" "$minor" "$patch" "$preference" "$versioned" "$path_order" "$candidate" >> "$candidates"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$major" "$minor" "$patch" "$preference" "$versioned" "$path_order" "$candidate" "$real_path" >> "$candidates"
         done
+        set -f
         path_order=$((path_order + 1))
     done
+    set +f
     IFS=$saved_ifs
     sort -t "$(printf '\t')" -k1,1nr -k2,2nr -k3,3nr -k4,4n -k5,5nr -k6,6n "$candidates" -o "$candidates"
-    while IFS="$(printf '\t')" read -r major minor patch preference versioned path_order candidate; do
+    while IFS="$(printf '\t')" read -r major minor patch preference versioned path_order candidate real_path; do
         [ -n "$candidate" ] || continue
-        if ! spec_error=$(python_satisfies_specifier "$candidate" 2>&1); then
+        if ! spec_error=$(python_satisfies_specifier "$candidate" </dev/null 2>&1); then
+            printf 'OpenBB wheel probe: %s skipped; Python does not satisfy Requires-Python %s%s\n' "$candidate" "$REQUIRES_PYTHON" "${spec_error:+: $spec_error}"
             if [ -n "$spec_error" ]; then printf '%s: %s\n' "$candidate" "$spec_error" >> "$failures"; fi
             continue
         fi
         specifier_satisfied=true
         prepare_venv_rebuild || return 1
         printf '+ %s -m venv --clear %s\n' "$candidate" "$OPENBB_VENV" >&2
-        if output=$("$candidate" -m venv --clear "$OPENBB_VENV" 2>&1); then
+        if output=$("$candidate" -m venv --clear "$OPENBB_VENV" </dev/null 2>&1); then
             if [ ! -x "$OPENBB_VENV/bin/python" ]; then
+                printf 'OpenBB wheel probe: %s pip error; venv creation did not create %s/bin/python\n' "$candidate" "$OPENBB_VENV"
                 printf "setup-trading-tools.sh: venv creation with base interpreter '%s' did not create expected interpreter '%s/bin/python' in venv '%s'.\n%s\n" \
                     "${candidate##*/}" "$OPENBB_VENV" "$OPENBB_VENV" "$output" >> "$failures"
                 continue
             fi
         else
+            printf 'OpenBB wheel probe: %s pip error during venv creation\n%s\n' "$candidate" "$output"
             printf '%s venv creation:\n%s\n' "$candidate" "$output" >> "$failures"
             continue
         fi
-        if output=$("$OPENBB_VENV/bin/python" -m pip install --upgrade pip 2>&1); then
+        if output=$(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 "$OPENBB_VENV/bin/python" -m pip install --upgrade pip </dev/null 2>&1); then
             :
         else
+            printf 'OpenBB wheel probe: %s pip error during pip upgrade\n%s\n' "$candidate" "$output"
             printf '%s pip upgrade:\n%s\n' "$candidate" "$output" >> "$failures"
             continue
         fi
-        if output=$("$OPENBB_VENV/bin/python" -m pip install --dry-run --only-binary=:all: --quiet --report - --ignore-installed openbb openbb-platform-api 2>&1); then
-            PYTHON_BASE=$candidate
-            OPENBB_VENV_READY=true
-            return 0
+        PYTHON_REPORT_TEMP=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-report.XXXXXX")
+        if output=$(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 "$OPENBB_VENV/bin/python" -m pip install --dry-run --only-binary=:all: --quiet --report "$PYTHON_REPORT_TEMP" --ignore-installed openbb openbb-platform-api </dev/null 2>&1); then
+            resolved=$(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 "$OPENBB_VENV/bin/python" -c 'import json,sys; report=json.load(open(sys.argv[1],encoding="utf-8")); print(next(item["metadata"]["version"] for item in report["install"] if item["metadata"]["name"].lower()=="openbb"))' "$PYTHON_REPORT_TEMP" 2>/dev/null) || resolved=""
+            rm -f "$PYTHON_REPORT_TEMP"; PYTHON_REPORT_TEMP=""
+            if [ -z "$resolved" ]; then
+                printf 'OpenBB wheel probe: %s pip error; report did not contain openbb metadata/version\n' "$candidate"
+                printf '%s wheel probe: successful pip exit but report did not contain openbb metadata/version\n%s\n' "$candidate" "$output" >> "$failures"
+                continue
+            fi
+            printf 'OpenBB wheel probe: %s resolves openbb %s\n' "$candidate" "$resolved"
+            if [ -z "$selected_version" ]; then higher=1; else
+                if higher=$(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ARCHON_SETUP_PYTHON_COMPARE=1 "$candidate" "$SCRIPT_DIR/setup-trading-tools-python-probe.py" --compare "$resolved" "$selected_version" </dev/null 2>&1); then
+                    case "$higher" in 1|0) ;; *) echo "setup-trading-tools.sh: could not compare OpenBB versions '$resolved' and '$selected_version': $higher" >&2; return 1 ;; esac
+                else echo "setup-trading-tools.sh: could not compare OpenBB versions '$resolved' and '$selected_version': $higher" >&2; return 1; fi
+            fi
+            if [ "$higher" = 1 ]; then
+                selected_version=$resolved
+                selected_candidate=$candidate
+                selected_python_version=$version
+            fi
+            continue
         fi
+        rm -f "$PYTHON_REPORT_TEMP"; PYTHON_REPORT_TEMP=""
+        printf 'OpenBB wheel probe: %s pip error\n%s\n' "$candidate" "$output"
         printf '%s wheel probe:\n%s\n' "$candidate" "$output" >> "$failures"
     done < "$candidates"
     if [ "$specifier_satisfied" != true ]; then
         echo "setup-trading-tools.sh: no Python interpreter satisfies OpenBB Requires-Python specifier '$REQUIRES_PYTHON'. $(cat "$failures")" >&2
         return 1
     fi
-    if grep -F 'venv creation with base interpreter' "$failures" >/dev/null; then cat "$failures" >&2; fi
-    echo "setup-trading-tools.sh: no Python interpreter can resolve OpenBB entirely from wheels. $(cat "$failures")" >&2
-    return 1
+    if [ -z "$selected_candidate" ]; then
+        echo "setup-trading-tools.sh: no Python interpreter can resolve OpenBB entirely from wheels. $(cat "$failures")" >&2
+        return 1
+    fi
+    prepare_venv_rebuild || return 1
+    printf '+ %s -m venv --clear %s (selected OpenBB resolver)\n' "$selected_candidate" "$OPENBB_VENV" >&2
+    if output=$("$selected_candidate" -m venv --clear "$OPENBB_VENV" </dev/null 2>&1) && [ -x "$OPENBB_VENV/bin/python" ]; then
+        if output=$(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 "$OPENBB_VENV/bin/python" -m pip install --upgrade pip </dev/null 2>&1); then :; else
+            printf '%s selected interpreter pip upgrade:\n%s\n' "$selected_candidate" "$output" >> "$failures"
+            echo "setup-trading-tools.sh: selected Python could not prepare OpenBB install. $(cat "$failures")" >&2
+            return 1
+        fi
+    else
+        printf '%s selected interpreter venv creation:\n%s\n' "$selected_candidate" "$output" >> "$failures"
+        echo "setup-trading-tools.sh: selected Python could not prepare OpenBB install. $(cat "$failures")" >&2
+        return 1
+    fi
+    PYTHON_BASE=$selected_candidate
+    PYTHON_BASE_VERSION=$selected_python_version
+    OPENBB_RESOLVED_VERSION=$selected_version
+    OPENBB_VENV_READY=true
+    printf 'OpenBB Python: %s (Python %s) chosen because it resolves the highest OpenBB version, %s\n' "$PYTHON_BASE" "$PYTHON_BASE_VERSION" "$OPENBB_RESOLVED_VERSION"
+    return 0
 }
-
 prepare_venv_rebuild() {
     if [ -L "$OPENBB_VENV" ]; then
         link_target=$(readlink "$OPENBB_VENV" 2>/dev/null || echo unknown)
@@ -270,7 +277,6 @@ prepare_venv_rebuild() {
         return 1
     fi
 }
-
 state() {
     if [ -e "$1" ]; then
         echo "present: $1"
@@ -278,7 +284,6 @@ state() {
         echo "missing: $1"
     fi
 }
-
 openbb_state() {
     if [ ! -d "$OPENBB_VENV" ]; then
         printf 'missing (%s)' "$OPENBB_VENV"
@@ -292,8 +297,8 @@ openbb_state() {
         printf 'healthy (%s)' "$OPENBB_VENV/bin/python"
     else
         probe_exit=$?
-        printf 'broken (%s; import exit %s; last output lines):\n%s' \
-            "$OPENBB_VENV/bin/python" "$probe_exit" "$(printf '%s\n' "$output" | tail -n 20)"
+        printf 'broken (%s; import exit %s; output):\n%s' \
+            "$OPENBB_VENV/bin/python" "$probe_exit" "$output"
     fi
 }
 
@@ -340,7 +345,7 @@ if [ "$SKIP_OPENBB" != true ]; then
         prepare_venv_rebuild
         load_openbb_specifier
         find_python
-        python_version=$("$PYTHON_BASE" --version 2>&1)
+        python_version=$("$PYTHON_BASE" --version </dev/null 2>&1)
         echo "OpenBB Python: ${PYTHON_BASE##*/} ($python_version)"
         if [ ! -f "$OPENBB_VENV/bin/python" ]; then
             echo "setup-trading-tools.sh: venv creation with base interpreter '$PYTHON_BASE' did not create expected interpreter '$OPENBB_VENV/bin/python' in venv '$OPENBB_VENV'." >&2
@@ -349,9 +354,19 @@ if [ "$SKIP_OPENBB" != true ]; then
         ;;
     esac
     if [ "$OPENBB_VENV_READY" != true ]; then
-        run "$OPENBB_VENV/bin/python" -m pip install --upgrade pip
+        run "$OPENBB_VENV/bin/python" -m pip install --upgrade pip </dev/null
     fi
-    run "$OPENBB_VENV/bin/python" -m pip install --only-binary=:all: openbb openbb-platform-api
+    run "$OPENBB_VENV/bin/python" -m pip install --only-binary=:all: openbb openbb-platform-api </dev/null
+    if [ -n "$OPENBB_RESOLVED_VERSION" ]; then
+        installed_version=""
+        if installed_version=$("$OPENBB_VENV/bin/python" -c 'import importlib.metadata as m; print(m.version("openbb"))' 2>&1); then :; else
+            installed_version="(unavailable: $installed_version)"
+        fi
+        if [ "$installed_version" != "$OPENBB_RESOLVED_VERSION" ]; then
+            printf 'setup-trading-tools.sh: installed OpenBB version %s differs from wheel probe version %s\n' "$installed_version" "$OPENBB_RESOLVED_VERSION" >&2
+            exit 1
+        fi
+    fi
     if [ -x "$OPENBB_VENV/bin/openbb-build" ]; then
         run "$OPENBB_VENV/bin/openbb-build"
     fi

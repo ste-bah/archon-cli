@@ -24,7 +24,6 @@ export HOME
 TARGET="$TEMP_ROOT/project with spaces"
 mkdir -p "$TARGET"
 TARGET=$(cd "$TARGET" && pwd)
-
 for mode in --check --dry-run; do
     TEST_CASE="status $mode with spaced target"
     output=$($SETUP_SCRIPT --target "$TARGET" "$mode" --skip-tradingview --skip-openbb)
@@ -32,7 +31,6 @@ for mode in --check --dry-run; do
     if ! printf '%s\n' "$output" | grep -F 'OpenBB venv: missing' >/dev/null; then printf 'status output omitted venv state:\n%s\n' "$output" >&2; exit 1; fi
     if [ -e "$TARGET/.archon/tools" ] || [ -e "$TARGET/scripts" ]; then echo 'status mode created installer directories' >&2; exit 1; fi
 done
-
 # The installer must source a user's profile before checking the tool PATH.
 TEST_CASE='profile PATH loading'
 PROFILE_BIN="$TEMP_ROOT/profile bin"
@@ -46,7 +44,6 @@ printf 'PATH="%s:$PATH"\n' "$PROFILE_BIN" > "$HOME/.profile"
 profile_output=$("$SETUP_SCRIPT" --target "$TARGET" --check --skip-tradingview --skip-openbb)
 printf '%s\n' "$profile_output" | grep -F 'profile-node' >/dev/null
 rm -f "$HOME/.profile"
-
 # Nounset in a profile must not abort setup, and a later profile command can
 # still add tools to PATH even when sourcing eventually returns non-zero.
 TEST_CASE='profile nounset and non-zero handling'
@@ -66,13 +63,11 @@ test "$profile_status" -eq 0
 printf '%s\n' "$profile_output" | grep -F 'profile-node' >/dev/null
 printf '%s\n' "$profile_output" | grep -F "warning: could not fully source profile: $HOME/.profile" >/dev/null
 rm -f "$HOME/.profile"
-
 if "$SETUP_SCRIPT" --target 2>/dev/null; then
     TEST_CASE='missing --target argument refusal'
     echo 'expected missing --target argument to fail' >&2
     exit 1
 fi
-
 FAKE_BIN="$TEMP_ROOT/fake bin"
 REAL_PYTHON=$(command -v python3)
 mkdir -p "$FAKE_BIN"
@@ -100,8 +95,13 @@ if [ "$1" = -m ] && [ "$2" = venv ]; then
     mkdir -p "$VENV/bin"
     printf 'home = fake-python\n' > "$VENV/pyvenv.cfg"
     if [ -L "$VENV/bin/python" ]; then unlink "$VENV/bin/python"; fi
-    cat > "$VENV/bin/python" <<'PYTHON'
+cat > "$VENV/bin/python" <<'PYTHON'
 #!/bin/sh
+if [ "$1" = -m ] && [ "$2" = pip ]; then
+    case "$*" in *--dry-run*) report=''; previous=''; for argument in "$@"; do if [ "$previous" = --report ]; then report=$argument; fi; previous=$argument; done; printf '{"install":[{"metadata":{"name":"openbb","version":"5.0.0","summary":"café"}}]}' > "$report"; echo 'pip warning on stderr' >&2 ;; esac
+    exit 0
+fi
+if [ "$1" = -c ]; then printf '5.0.0\n'; exit 0; fi
 exit 0
 PYTHON
     cat > "$VENV/bin/openbb-api" <<'API'
@@ -137,7 +137,6 @@ FAKE_SETUP_LOG="$TEMP_ROOT/venv invocation.log"
 PATH="$FAKE_DEFAULT_BIN:$FAKE_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" \
     "$SETUP_SCRIPT" --target "$BROKEN_TARGET" --skip-tradingview
 grep -F -- '-m venv --clear ' "$FAKE_SETUP_LOG" >/dev/null
-
 # A successful base-interpreter exit without a created venv must name the
 # base interpreter, venv path, and missing interpreter file clearly.
 STORE_TARGET="$TEMP_ROOT/store stub target"
@@ -161,22 +160,20 @@ if store_output=$(PATH="$STORE_CANDIDATE_BIN:$STORE_SYSTEM_BIN" REAL_PYTHON="$ST
     echo 'expected missing venv interpreter to fail' >&2
     exit 1
 fi
-if ! printf '%s\n' "$store_output" | grep -Fx "$expected_store_error" >/dev/null; then
-    printf 'expected exact missing-interpreter diagnostic:\n%s\nactual output:\n%s\n' \
+if ! printf '%s\n' "$store_output" | grep -F "$expected_store_error" >/dev/null; then
+    printf 'expected missing-interpreter diagnostic in aggregated failure:\n%s\nactual output:\n%s\n' \
         "$expected_store_error" "$store_output" >&2
     exit 1
 fi
 grep -F -- "python3 -m venv --clear $STORE_VENV" "$FAKE_SETUP_LOG" >/dev/null
 test ! -e "$STORE_VENV/bin/python"
-
 test -f "$BROKEN_TARGET/scripts/start-openbb-api.sh"
 test -f "$BROKEN_TARGET/scripts/start-openbb-api.ps1"
 grep -F "OPENBB_HOST" "$BROKEN_TARGET/scripts/start-openbb-api.ps1" >/dev/null
 grep -F "OPENBB_PORT" "$BROKEN_TARGET/scripts/start-openbb-api.ps1" >/dev/null
 grep -F ".archon/tools/openbb-venv/Scripts/openbb-api.exe" "$BROKEN_TARGET/scripts/start-openbb-api.ps1" >/dev/null
-start_output=$(OPENBB_HOST=0.0.0.0 OPENBB_PORT=7011 "$BROKEN_TARGET/scripts/start-openbb-api.sh")
+start_output=$(OPENBB_HOST=0.0.0.0 OPENBB_PORT=7011 "$BROKEN_TARGET/scripts/start-openbb-api.sh" </dev/null)
 test "$start_output" = '--host 0.0.0.0 --port 7011'
-
 LINK_TARGET="$TEMP_ROOT/linked venv target"
 TEST_CASE='symlinked OpenBB venv refusal'
 LINKED_VENV_TARGET="$TEMP_ROOT/linked project"
@@ -196,7 +193,6 @@ if [ -s "$FAKE_SETUP_LOG" ]; then
     exit 1
 fi
 test "$(cat "$LINK_TARGET/sentinel.txt")" = 'keep me'
-
 NON_VENV_TARGET="$TEMP_ROOT/non-venv project"
 TEST_CASE='non-venv directory refusal'
 NON_VENV="$NON_VENV_TARGET/.archon/tools/openbb-venv"
@@ -210,7 +206,6 @@ if non_venv_output=$(PATH="$FAKE_BIN:$PATH" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" \
 fi
 printf '%s\n' "$non_venv_output" | grep -F "$NON_VENV" >/dev/null
 test "$(cat "$NON_VENV/sentinel.txt")" = 'keep non-venv data'
-
 HEALTHY_TARGET="$TEMP_ROOT/healthy project"
 TEST_CASE='healthy OpenBB venv preservation'
 HEALTHY_VENV="$HEALTHY_TARGET/.archon/tools/openbb-venv"
@@ -234,7 +229,6 @@ if grep -F -- '-m venv --clear ' "$FAKE_SETUP_LOG" >/dev/null; then
     echo 'healthy OpenBB venv was unnecessarily rebuilt' >&2
     exit 1
 fi
-
 # A healthy venv must not need any base Python on PATH.
 CORE_BIN="$TEMP_ROOT/core tools"
 TEST_CASE='healthy venv without base Python on PATH'
@@ -244,7 +238,6 @@ for core_tool in mkdir cat chmod; do
 done
 PATH="$CORE_BIN" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" \
     "$SETUP_SCRIPT" --target "$HEALTHY_TARGET" --skip-tradingview >/dev/null
-
 # Exercise the full specifier against mocked candidate versions. A non-venv
 # sentinel makes accepted candidates stop before any install or network call.
 SPEC_BIN="$TEMP_ROOT/spec interpreters"
@@ -261,7 +254,11 @@ if [ -n "${FAKE_SETUP_LOG:-}" ] && [ "$1" = -m ] && [ "$2" = venv ]; then
 fi
 if [ "$1" = --version ]; then echo 'Python 3.12.1'; exit 0; fi
 if [ "$1" = -c ]; then
-    echo '3.12.0'
+    case "$2" in
+      *realpath*) exec "$REAL_PYTHON" "$@" ;;
+      *importlib.metadata*) printf '%s\n' "${MOCK_INSTALLED_OPENBB_VERSION:-5.0.0}" ;;
+      *) echo '3.12.0' ;;
+    esac
     exit 0
 fi
 if [ "$1" = -m ] && [ "$2" = pip ]; then
@@ -283,11 +280,20 @@ if [ "\$1" = -m ] && [ "\$2" = pip ]; then
             printf 'wheel probe failed for %s\\nsecond diagnostic line\\n' "\$BASE_NAME" >&2
             exit 1
         fi
+        case "\$BASE_NAME" in python3.14|python3.16) version=5.0.0 ;; *) version=4.7.2 ;; esac
+        report=''; previous=''; for argument in "\$@"; do if [ "\$previous" = --report ]; then report=\$argument; fi; previous=\$argument; done; printf '{"install":[{"metadata":{"name":"openbb","version":"%s","summary":"café"}}]}' "\$version" > "\$report"
+        echo 'pip warning on stderr' >&2
         ;;
     esac
     exit 0
 fi
-if [ "\$1" = -c ]; then exit 0; fi
+if [ "\$1" = -c ]; then
+    case "\$2" in
+      *import\ json*) exec "\$REAL_PYTHON" -c "\$2" "\$3" ;;
+      *importlib.metadata*) printf '5.0.0\\n' ;;
+    esac
+    exit 0
+fi
 exit 8
 PYTHON_VENV
     chmod +x "$venv/bin/python"
@@ -296,10 +302,12 @@ fi
 if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_SPECIFIER" ]; then
     MOCK_PYTHON_INFO="${MOCK_PYTHON_INFO:-3,12,0,final,0}" exec "$REAL_PYTHON" -c 'import os,sys,collections; p=os.environ["MOCK_PYTHON_INFO"].split(","); v=collections.namedtuple("VersionInfo","major minor micro releaselevel serial"); sys.version_info=v(*([int(x) for x in p[:3]]+[p[3],int(p[4])])); probe=sys.argv[1]; sys.argv=[probe]; exec(compile(open(probe).read(),probe,"exec"))' "$1"
 fi
+if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_COMPARE" ] && [ -n "$MOCK_COMPARE_FAIL" ]; then echo 'comparison host defect' >&2; exit 42; fi
+if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_COMPARE" ]; then exec "$REAL_PYTHON" "$@"; fi
 exit 8
 PYTHON
 chmod +x "$SPEC_BIN/python-mock"
-for versioned_python in python3; do
+for versioned_python in python3.20 python3.19 python3.18 python3.17 python3.16 python3.15 python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
     ln -s "$SPEC_BIN/python-mock" "$SPEC_BIN/$versioned_python"
 done
 run_spec_case() {
@@ -316,7 +324,7 @@ run_spec_case() {
     printf 'Metadata-Version: 2.1\nName: openbb\nRequires-Python: %s\n' "$spec" > "$case_metadata/METADATA"
     printf 'preserve\n' > "$case_venv/sentinel"
     case_output=$(PATH="$SPEC_BIN:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO="$mock_info" \
-        "$SETUP_SCRIPT" --target "$case_target" --skip-tradingview 2>&1 || true)
+        "$SETUP_SCRIPT" --target "$case_target" --skip-tradingview </dev/null 2>&1 || true)
     if printf '%s\n' "$case_output" | grep -F -- '-m venv --clear ' >/dev/null; then case_status=accepted; else case_status=rejected; fi
     if [ "$case_status" != "$expected" ]; then
         printf 'specifier case expected %s, got %s: %s / %s\n%s\n' "$expected" "$case_status" "$spec" "$mock_info" "$case_output" >&2
@@ -345,7 +353,6 @@ run_spec_case '>=3.13rc1' '3,12,9,final,0' rejected
 run_spec_case '>=3.13.0b2' '3,13,0,beta,1' rejected
 run_spec_case '<3.14a1' '3,14,0,alpha,1' rejected
 run_spec_case '!===3.12' '3,13,0,final,0' rejected
-
 # Candidate and failure temp files must be removed after an unsatisfied spec.
 # This also catches an EXIT trap overwritten by the nested specifier probe.
 PROBE_TMP="$TEMP_ROOT/python probe temp files"
@@ -365,7 +372,6 @@ if find "$PROBE_TMP" -type f -print | grep . >/dev/null; then
     printf 'Python discovery leaked temporary files:\n%s\n' "$(find "$PROBE_TMP" -type f -print)" >&2
     exit 1
 fi
-
 FALLBACK_BIN="$TEMP_ROOT/versioned-only interpreters"
 mkdir -p "$FALLBACK_BIN"
 for versioned_python in python3.20 python3.10; do
@@ -394,7 +400,7 @@ run_python_order_case() {
     printf 'Metadata-Version: 2.1\nName: openbb\nRequires-Python: >=3.10,<3.14\n' > "$order_metadata/METADATA"
     order_output=$(PATH="$order_path:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" \
         MOCK_PYTHON_INFO='3,12,0,final,0' \
-        "$SETUP_SCRIPT" --target "$order_target" --skip-tradingview 2>&1 || true)
+        "$SETUP_SCRIPT" --target "$order_target" --skip-tradingview </dev/null 2>&1 || true)
     if ! printf '%s\n' "$order_output" | grep -F "OpenBB Python: $expected_interpreter (Python 3.12.1)" >/dev/null; then
         printf 'expected interpreter %s in order output:\n%s\n' "$expected_interpreter" "$order_output" >&2
         return 1
@@ -403,8 +409,7 @@ run_python_order_case() {
 run_python_order_case "$SPEC_BIN" python3
 run_python_order_case "$FALLBACK_BIN" python3.20
 run_python_order_case "$UNSAT_DEFAULT_BIN" python3.20
-
-# The newest candidate can pass the package version check yet fail pip's
+# A newer candidate can pass the package version check yet fail pip's
 # wheel-only dependency resolution. The next candidate must be selected.
 WHEEL_BIN="$TEMP_ROOT/wheel resolution candidates"
 mkdir -p "$WHEEL_BIN"
@@ -413,7 +418,7 @@ WHEEL_TARGET="$TEMP_ROOT/wheel resolution target"
 mkdir -p "$WHEEL_TARGET"
 TEST_CASE='wheel-only candidate selection'
 wheel_output=$(PATH="$WHEEL_BIN:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' MOCK_WHEEL_FAIL=python3.15 \
-    "$SETUP_SCRIPT" --target "$WHEEL_TARGET" --skip-tradingview 2>&1 || true)
+    "$SETUP_SCRIPT" --target "$WHEEL_TARGET" --skip-tradingview </dev/null 2>&1 || true)
 if ! printf '%s\n' "$wheel_output" | grep -F 'OpenBB Python: ' | grep -F 'python3.14' >/dev/null; then
     printf 'wheel resolution expected python3.14 after a failed python3.15 probe:\n%s\n' "$wheel_output" >&2
     exit 1
@@ -422,7 +427,31 @@ if printf '%s\n' "$wheel_output" | grep -F 'OpenBB Python: ' | grep -F 'python3.
     echo 'wheel resolution selected the candidate whose pip probe failed' >&2
     exit 1
 fi
-
+# A newer interpreter can resolve an older OpenBB major. Choose the candidate
+# with the highest OpenBB version even when its interpreter is older.
+RESOLUTION_BIN="$TEMP_ROOT/wheel version candidates"
+mkdir -p "$RESOLUTION_BIN"
+for candidate in python3.17 python3.16; do cp "$SPEC_BIN/python-mock" "$RESOLUTION_BIN/$candidate"; chmod +x "$RESOLUTION_BIN/$candidate"; done
+RESOLUTION_TARGET="$TEMP_ROOT/wheel version target"
+mkdir -p "$RESOLUTION_TARGET"
+TEST_CASE='highest resolved OpenBB version wins'
+if resolution_output=$(PATH="$RESOLUTION_BIN:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' \
+    "$SETUP_SCRIPT" --target "$RESOLUTION_TARGET" --skip-tradingview </dev/null 2>&1); then
+    :
+else
+    printf 'wheel version resolution command failed:\n%s\n' "$resolution_output" >&2
+    exit 1
+fi
+printf '%s\n' "$resolution_output" | grep -F 'resolves openbb 4.7.2' >/dev/null
+printf '%s\n' "$resolution_output" | grep -F 'resolves openbb 5.0.0' >/dev/null
+if ! printf '%s\n' "$resolution_output" | grep -F 'OpenBB Python: ' | grep -F 'python3.16' >/dev/null; then
+    printf 'wheel resolution expected the older interpreter with OpenBB 5.0.0 to win:\n%s\n' "$resolution_output" >&2
+    exit 1
+fi
+printf '%s\n' "$resolution_output" | grep -F 'chosen because it resolves the highest OpenBB version, 5.0.0' >/dev/null
+TEST_CASE='OpenBB version comparison failure is fatal'; compare_target="$TEMP_ROOT/compare failure target"; mkdir -p "$compare_target"
+if compare_output=$(PATH="$RESOLUTION_BIN:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO='3,12,0,final,0' MOCK_COMPARE_FAIL=1 "$SETUP_SCRIPT" --target "$compare_target" --skip-tradingview </dev/null 2>&1); then printf 'expected OpenBB version comparison failure:\n%s\n' "$compare_output" >&2; exit 1; fi
+printf '%s\n' "$compare_output" | grep -F 'comparison host defect' >/dev/null
 cat > "$FAKE_BIN/git" <<'EOF'
 #!/bin/sh
 if [ "$1" = clone ]; then

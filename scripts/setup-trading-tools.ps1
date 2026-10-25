@@ -14,7 +14,7 @@ $Venv = Join-Path $ToolsDir 'openbb-venv'
 $Python = Join-Path $Venv 'Scripts/python.exe'
 $Api = Join-Path $Venv 'Scripts/openbb-api.exe'
 $McpFile = Join-Path $Target '.mcp.json'
-
+function Invoke-PythonUtf8([string]$Program, [string[]]$Arguments) { $encoding = $env:PYTHONIOENCODING; $utf8 = $env:PYTHONUTF8; try { $env:PYTHONIOENCODING = 'utf-8'; $env:PYTHONUTF8 = '1'; & $Program @Arguments } finally { if ($null -eq $encoding) { Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue } else { $env:PYTHONIOENCODING = $encoding }; if ($null -eq $utf8) { Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue } else { $env:PYTHONUTF8 = $utf8 } } }
 function Get-OpenBBState {
     if (-not (Test-Path -LiteralPath $Venv -PathType Container)) { return "missing ($Venv)" }
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { return "broken (missing interpreter: $Python)" }
@@ -25,14 +25,22 @@ function Get-OpenBBState {
         $probeExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousErrorAction }
     if ($probeExit -eq 0) { return "healthy ($Python)" }
-    $tail = @($probeOutput | Select-Object -Last 20) -join [Environment]::NewLine
-    return "broken ($Python; import exit $probeExit; last output lines):$([Environment]::NewLine)$tail"
+    $fullOutput = $probeOutput -join [Environment]::NewLine
+    return "broken ($Python; import exit $probeExit; output):$([Environment]::NewLine)$fullOutput"
 }
 function Show-Status {
     Write-Output "setup-trading-tools: target=$Target"
     foreach ($bin in @('node', 'npm', 'python', 'git')) {
         $found = Get-Command $bin -ErrorAction SilentlyContinue
-        if ($found) { & $bin --version } else { Write-Output "${bin}: missing" }
+        if ($found) {
+            $previousErrorAction = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $statusOutput = @(& $bin --version 2>&1)
+                $statusExit = $LASTEXITCODE
+            } finally { $ErrorActionPreference = $previousErrorAction }
+            foreach ($line in $statusOutput) { Write-Output $line.ToString() }
+        } else { Write-Output "${bin}: missing" }
     }
     foreach ($path in @((Join-Path $TvDir 'src/server.js'), (Join-Path $TvDir 'src/cli/index.js'), $Api, $McpFile)) {
         if (Test-Path -LiteralPath $path) { Write-Output "present: $path" } else { Write-Output "missing: $path" }
@@ -44,9 +52,11 @@ function Invoke-External([string]$Program, [string[]]$Arguments) {
     $previousErrorAction = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $commandOutput = @(& $Program @Arguments 2>&1)
+        if ($Arguments -contains 'pip') { $commandOutput = @(Invoke-PythonUtf8 $Program $Arguments 2>&1) } else { $commandOutput = @(& $Program @Arguments 2>&1) }
         $commandExit = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousErrorAction }
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
     foreach ($line in $commandOutput) { [Console]::Out.WriteLine($line.ToString()) }
     if ($commandExit -ne 0) {
         $commandLine = (@($Program) + @($Arguments) | ForEach-Object {
@@ -83,7 +93,7 @@ function Invoke-TradingViewNpmInstall {
     }
     if ($logPath -and (Test-Path -LiteralPath $logPath -PathType Leaf)) {
         Write-Output "npm debug log: $logPath"
-        Get-Content -LiteralPath $logPath -Tail 30 | ForEach-Object { Write-Output $_ }
+        Get-Content -LiteralPath $logPath | ForEach-Object { Write-Output $_ }
     } else {
         Write-Output "npm debug log: no log file found (reported path: $logPath)"
     }
@@ -171,8 +181,13 @@ raise SystemExit(0)
         if ($VersionOverride) { $env:ARCHON_SETUP_PYTHON_VERSION = $VersionOverride }
         else { Remove-Item Env:ARCHON_SETUP_PYTHON_VERSION -ErrorAction SilentlyContinue }
         $pythonArguments = @($Prefix) + @($probeFile)
-        $script:PythonProbeError = (& $Program @pythonArguments 2>&1 | Out-String).Trim()
-        return $LASTEXITCODE -eq 0
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $script:PythonProbeError = (Invoke-PythonUtf8 $Program $pythonArguments 2>&1 | Out-String).Trim()
+            $probeExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousErrorAction }
+        return $probeExit -eq 0
     } catch { return $false }
     finally {
         if ($null -eq $previousSpecifier) { Remove-Item Env:ARCHON_SETUP_PYTHON_SPECIFIER -ErrorAction SilentlyContinue }
@@ -183,14 +198,34 @@ raise SystemExit(0)
     }
 }
 function Test-PythonWheelResolution([string]$Program, [string[]]$Prefix, [string[]]$Packages) {
+    $reportFile = [IO.Path]::GetTempFileName()
     $previousErrorAction = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $pipOutput = @(& $Program @($Prefix + @('-m', 'pip', 'install', '--dry-run', '--only-binary=:all:', '--quiet', '--report', '-', '--ignore-installed') + $Packages) 2>&1)
+        $pipOutput = @(Invoke-PythonUtf8 $Program ($Prefix + @('-m', 'pip', 'install', '--dry-run', '--only-binary=:all:', '--quiet', '--report', $reportFile, '--ignore-installed') + $Packages) 2>&1)
         $pipExit = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousErrorAction }
+    } catch { Remove-Item -LiteralPath $reportFile -Force -ErrorAction SilentlyContinue; throw } finally { $ErrorActionPreference = $previousErrorAction }
     $script:PythonWheelProbeError = @($pipOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    return $pipExit -eq 0
+    try {
+        if ($pipExit -ne 0) { return $false }
+        $report = (Get-Content -LiteralPath $reportFile -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop)
+        $openbb = @($report.install | Where-Object { $_.metadata.name -ieq 'openbb' } | Select-Object -First 1)
+        if ($openbb.Count -eq 0 -or -not $openbb[0].metadata.version) { throw 'pip report did not contain openbb metadata/version' }
+        $script:PythonWheelProbeVersion = [string]$openbb[0].metadata.version
+        return $true
+    } catch {
+        $script:PythonWheelProbeError = "pip succeeded but its report could not be read: $($_.Exception.Message)`n$script:PythonWheelProbeError"
+        return $false
+    } finally { Remove-Item -LiteralPath $reportFile -Force -ErrorAction SilentlyContinue }
+}
+function Compare-OpenBBVersions([hashtable]$Candidate, [string]$Left, [string]$Right) {
+    $compareArguments = @($Candidate.FixedArguments) + @((Join-Path $PSScriptRoot 'setup-trading-tools-python-probe.py'), '--compare', $Left, $Right)
+    $previousErrorAction = $ErrorActionPreference
+    try { $ErrorActionPreference = 'Continue'; $comparisonText = (Invoke-PythonUtf8 $Candidate.Program $compareArguments 2>&1 | Out-String).Trim(); $comparisonExit = $LASTEXITCODE } finally { $ErrorActionPreference = $previousErrorAction }
+    if ($comparisonExit -ne 0 -or $comparisonText -notmatch '^-?\d+$') {
+        throw "Could not compare OpenBB versions '$Left' and '$Right': $comparisonText"
+    }
+    return [int]$comparisonText
 }
 function Get-PathApplications([string]$Name) {
     $extensions = @($env:PATHEXT -split ';' | Where-Object { $_ -match '^\.(COM|EXE|BAT|CMD)$' })
@@ -218,9 +253,12 @@ function Get-PythonCandidates {
         foreach ($line in $installed) {
             if ($line.ToString() -match '^\s*-(?:V:)?[^\s]+\s+(?:\*\s+)?(.+?)\s*$') {
                 $path = $Matches[1].Trim()
-                if ((Test-Path -LiteralPath $path -PathType Leaf) -and -not $seen.ContainsKey($path)) {
-                    $seen[$path] = $true
-                    $candidates += @{ Program = $path; FixedArguments = [string[]]@(); Order = $candidateOrder }
+                $path = $path -replace '\s+\*$', ''
+                if (Test-Path -LiteralPath $path -PathType Leaf) {
+                    $resolvedPath = (Resolve-Path -LiteralPath $path).Path
+                    if ($seen.ContainsKey($resolvedPath)) { continue }
+                    $seen[$resolvedPath] = $true
+                    $candidates += @{ Program = $resolvedPath; FixedArguments = [string[]]@(); Order = $candidateOrder }
                     $candidateOrder++
                 }
             }
@@ -228,9 +266,10 @@ function Get-PythonCandidates {
     }
     foreach ($name in @('python', 'python3')) {
         foreach ($program in @(Get-PathApplications $name)) {
-            if (-not $seen.ContainsKey($program)) {
-                $seen[$program] = $true
-                $candidates += @{ Program = $program; FixedArguments = [string[]]@(); Order = $candidateOrder }
+            $resolvedPath = (Resolve-Path -LiteralPath $program).Path
+            if (-not $seen.ContainsKey($resolvedPath)) {
+                $seen[$resolvedPath] = $true
+                $candidates += @{ Program = $resolvedPath; FixedArguments = [string[]]@(); Order = $candidateOrder }
                 $candidateOrder++
             }
         }
@@ -239,47 +278,102 @@ function Get-PythonCandidates {
     $unranked = @()
     foreach ($candidate in $candidates) {
         $versionArgs = @($candidate.FixedArguments) + @('--version')
-        $versionText = (& $candidate.Program @versionArgs 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $versionText -match 'Python\s+(\d+(?:\.\d+){1,2})') {
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $versionText = (& $candidate.Program @versionArgs 2>&1 | Out-String).Trim()
+            $versionExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousErrorAction }
+        if ($versionExit -eq 0 -and $versionText -match 'Python\s+(\d+(?:\.\d+){1,2})') {
             $ranked += @{ Candidate = $candidate; Version = [version]$Matches[1]; Order = $candidate.Order }
         } else { $unranked += $candidate }
     }
-    return @($ranked | Sort-Object -Property @{ Expression = 'Version'; Descending = $true }, @{ Expression = 'Order'; Descending = $false } | ForEach-Object { $_.Candidate }) + $unranked
+    return @($ranked | Sort-Object -Property @{ Expression = { $_.Version }; Descending = $true }, @{ Expression = { $_.Order }; Descending = $false } | ForEach-Object { $_.Candidate }) + $unranked
 }
 function Resolve-BasePython([string]$Specifier, [object[]]$Candidates = @()) {
     $script:VenvProbed = $false
     if ($Candidates.Count -eq 0) { $Candidates = @(Get-PythonCandidates) }
     $failures = @()
+    $specifierSatisfied = $false
+    $selected = $null
+    $selectedVersion = $null
     foreach ($candidate in $Candidates) {
-        if (-not (Test-PythonCandidate $candidate.Program $candidate.FixedArguments $Specifier)) { continue }
+        if (-not (Test-PythonCandidate $candidate.Program $candidate.FixedArguments $Specifier)) {
+            $detail = if ($script:PythonProbeError) { ": $script:PythonProbeError" } else { '' }
+            Write-Host "OpenBB wheel probe: $($candidate.Program) skipped; Python does not satisfy Requires-Python $Specifier$detail"
+            if ($detail) { $failures += "$($candidate.Program) Requires-Python probe$detail" }
+            continue
+        }
+        $specifierSatisfied = $true
         Assert-SafeVenvRebuild
         $venvArguments = @($candidate.FixedArguments) + @('-m', 'venv', '--clear', $Venv)
         try {
             $previousErrorAction = $ErrorActionPreference
             try {
                 $ErrorActionPreference = 'Continue'
-                $createOutput = @(& $candidate.Program @venvArguments 2>&1)
+                $createOutput = @(Invoke-PythonUtf8 $candidate.Program $venvArguments 2>&1)
                 $createExit = $LASTEXITCODE
             } finally { $ErrorActionPreference = $previousErrorAction }
             if ($createExit -ne 0 -or -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-                $failures += "$($candidate.Program) venv creation (exit $createExit): $(@($createOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine)"
+                $detail = @($createOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+                Write-Host "OpenBB wheel probe: $($candidate.Program) pip error during venv creation (exit $createExit)`n$detail"
+                $failures += "$($candidate.Program) venv creation (exit $createExit): $detail"
                 continue
             }
-            $upgradeOutput = @(& $Python -m pip install --upgrade pip 2>&1)
-            $upgradeExit = $LASTEXITCODE
+            $previousErrorAction = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $upgradeOutput = @(Invoke-PythonUtf8 $Python @('-m', 'pip', 'install', '--upgrade', 'pip') 2>&1)
+                $upgradeExit = $LASTEXITCODE
+            } finally { $ErrorActionPreference = $previousErrorAction }
             if ($upgradeExit -ne 0) {
-                $failures += "$($candidate.Program) pip upgrade (exit $upgradeExit): $(@($upgradeOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine)"
+                $detail = @($upgradeOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+                Write-Host "OpenBB wheel probe: $($candidate.Program) pip error during upgrade (exit $upgradeExit)`n$detail"
+                $failures += "$($candidate.Program) pip upgrade (exit $upgradeExit): $detail"
                 continue
             }
             if (Test-PythonWheelResolution $Python @() @('openbb', 'openbb-platform-api')) {
-                $script:VenvProbed = $true
-                return $candidate
+                $resolvedVersion = $script:PythonWheelProbeVersion
+                Write-Host "OpenBB wheel probe: $($candidate.Program) resolves openbb $resolvedVersion"
+                if ($null -eq $selectedVersion -or (Compare-OpenBBVersions $candidate $resolvedVersion $selectedVersion) -gt 0) {
+                    $selected = $candidate
+                    $selectedVersion = $resolvedVersion
+                }
+                continue
             }
+            Write-Host "OpenBB wheel probe: $($candidate.Program) pip error`n$script:PythonWheelProbeError"
             $failures += "$($candidate.Program) wheel probe: $script:PythonWheelProbeError"
         } catch {
+            if ($_.Exception.Message -like 'Could not compare OpenBB versions*') { throw }
+            Write-Host "OpenBB wheel probe: $($candidate.Program) pip error`n$($_.Exception.Message)"
             $failures += "$($candidate.Program): $($_.Exception.Message)"
         }
     }
+    if ($null -ne $selected) {
+        Assert-SafeVenvRebuild
+        $selectedVenvArgs = @($selected.FixedArguments) + @('-m', 'venv', '--clear', $Venv)
+        $previousErrorAction = $ErrorActionPreference
+        try { $ErrorActionPreference = 'Continue'; $selectedVenvOutput = @(Invoke-PythonUtf8 $selected.Program $selectedVenvArgs 2>&1); $selectedVenvExit = $LASTEXITCODE } finally { $ErrorActionPreference = $previousErrorAction }
+        if ($selectedVenvExit -ne 0 -or -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+            $detail = @($selectedVenvOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+            throw "Selected Python '$($selected.Program)' could not recreate its OpenBB venv: $detail"
+        }
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $selectedUpgradeOutput = @(Invoke-PythonUtf8 $Python @('-m', 'pip', 'install', '--upgrade', 'pip') 2>&1)
+            $selectedUpgradeExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousErrorAction }
+        if ($selectedUpgradeExit -ne 0) {
+            $detail = @($selectedUpgradeOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+            throw "Selected Python '$($selected.Program)' could not upgrade pip: $detail"
+        }
+        $selected.ResolvedOpenBBVersion = $selectedVersion
+        $script:VenvProbed = $true
+        Write-Host "OpenBB Python: $($selected.Program) chosen because it resolves the highest OpenBB version, $selectedVersion"
+        return $selected
+    }
+    if (-not $specifierSatisfied) { throw "No Python interpreter satisfies OpenBB Requires-Python specifier '$Specifier'. $($failures -join [Environment]::NewLine)" }
     throw "No Python interpreter can resolve OpenBB entirely from wheels. $($failures -join [Environment]::NewLine)"
 }
 function Assert-SafeVenvRebuild {
@@ -323,25 +417,41 @@ c.mcpServers=c.mcpServers||{}; c.mcpServers.tradingview={command:'node',args:[se
 fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n');
 '@
     if ($DryRun) { Write-Output '[dry-run] write TradingView MCP config' }
-    else { $configScript | node - $McpFile (Join-Path $TvDir 'src/server.js'); if ($LASTEXITCODE -ne 0) { throw 'Failed to write TradingView MCP config' } }
+    else {
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $nodeOutput = @($configScript | & node - $McpFile (Join-Path $TvDir 'src/server.js') 2>&1)
+            $nodeExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousErrorAction }
+        foreach ($line in $nodeOutput) { [Console]::Out.WriteLine($line.ToString()) }
+        if ($nodeExit -ne 0) { throw 'Failed to write TradingView MCP config' }
+    }
     @'
 $ErrorActionPreference='Stop'
 $Root=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Port=if($args.Count -gt 0){$args[0]}else{'9222'}
 $Launcher=Join-Path $Root '.archon/tools/tradingview-mcp/scripts/launch_tv_debug_windows.ps1'
 if(-not(Test-Path -LiteralPath $Launcher -PathType Leaf)){throw "TradingView CDP launcher is missing: $Launcher. Install the external TradingView launcher project."}
-& $Launcher $Port
-exit $LASTEXITCODE
+$PreviousErrorAction=$ErrorActionPreference
+try{$ErrorActionPreference='Continue';& $Launcher $Port;$LauncherExit=$LASTEXITCODE}finally{$ErrorActionPreference=$PreviousErrorAction}
+exit $LauncherExit
 '@ | Set-Content -LiteralPath (Join-Path $Target 'scripts/start-tradingview-cdp.ps1') -Encoding utf8
 }
 if (-not $SkipOpenBB) {
+    $basePython = $null
     if ((Get-OpenBBState) -notlike 'healthy*') {
         Assert-SafeVenvRebuild
         $specifier = Get-OpenBBSpecifier
         $basePython = Resolve-BasePython $specifier
         $versionArguments = @($basePython.FixedArguments) + @('--version')
-        $pythonVersion = (& $basePython.Program @versionArguments 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0) { throw "Could not read Python version from '$($basePython.Program)'" }
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $pythonVersion = (& $basePython.Program @versionArguments 2>&1 | Out-String).Trim()
+            $versionExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousErrorAction }
+        if ($versionExit -ne 0) { throw "Could not read Python version from '$($basePython.Program)'" }
         $prefixText = if ($basePython.FixedArguments.Count) { " $($basePython.FixedArguments -join ' ')" } else { '' }
         Write-Output "OpenBB Python: $($basePython.Program)$prefixText ($pythonVersion)"
         if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
@@ -350,6 +460,17 @@ if (-not $SkipOpenBB) {
     }
     if (-not $VenvProbed) { Invoke-External $Python @('-m', 'pip', 'install', '--upgrade', 'pip') }
     Invoke-External $Python @('-m', 'pip', 'install', '--only-binary=:all:', 'openbb', 'openbb-platform-api')
+    if ($basePython -and $basePython.ResolvedOpenBBVersion) {
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $installedVersion = (& $Python -c 'import importlib.metadata as m; print(m.version("openbb"))' 2>&1 | Out-String).Trim()
+            $installedVersionExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousErrorAction }
+        if ($installedVersionExit -ne 0 -or $installedVersion -ne $basePython.ResolvedOpenBBVersion) {
+            throw "Installed OpenBB version '$installedVersion' differs from wheel probe version '$($basePython.ResolvedOpenBBVersion)'"
+        }
+    }
     $openbbBuilder = Join-Path $Venv 'Scripts/openbb-build.exe'
     if (Test-Path -LiteralPath $openbbBuilder -PathType Leaf) { Invoke-External $openbbBuilder @() }
     $openbbState = Get-OpenBBState
@@ -362,9 +483,13 @@ $Port=if($env:OPENBB_PORT){$env:OPENBB_PORT}else{'6900'}
 $Python=Join-Path $Root '.archon/tools/openbb-venv/Scripts/python.exe'
 $Api=Join-Path $Root '.archon/tools/openbb-venv/Scripts/openbb-api.exe'
 if(-not(Test-Path -LiteralPath $Python -PathType Leaf)){throw "OpenBB interpreter is missing: $Python. Run archon trading setup to repair the environment."}
-& $Python -c 'import openbb'; if($LASTEXITCODE -ne 0){throw 'OpenBB environment is broken. Run archon trading setup to recreate it.'}
+$PreviousErrorAction=$ErrorActionPreference
+try{$ErrorActionPreference='Continue';& $Python -c 'import openbb' 2>&1 | ForEach-Object { [Console]::Out.WriteLine($_.ToString()) };$PythonExit=$LASTEXITCODE}finally{$ErrorActionPreference=$PreviousErrorAction}
+if($PythonExit -ne 0){throw 'OpenBB environment is broken. Run archon trading setup to recreate it.'}
 if(-not(Test-Path -LiteralPath $Api -PathType Leaf)){throw "OpenBB API launcher is missing: $Api. Run archon trading setup to install packages."}
-& $Api --host $HostName --port $Port; exit $LASTEXITCODE
+$PreviousErrorAction=$ErrorActionPreference
+try{$ErrorActionPreference='Continue';& $Api --host $HostName --port $Port 2>&1 | ForEach-Object { [Console]::Out.WriteLine($_.ToString()) };$ApiExit=$LASTEXITCODE}finally{$ErrorActionPreference=$PreviousErrorAction}
+exit $ApiExit
 '@ | Set-Content -LiteralPath (Join-Path $Target 'scripts/start-openbb-api.ps1') -Encoding utf8
 }
 Write-Output 'setup-trading-tools: complete'

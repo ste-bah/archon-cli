@@ -31,6 +31,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/tests/test-setup-trading-tools.ps1
+      - name: Check PowerShell 5.1 specifier logic and refusal cases
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/tests/test-setup-trading-tools.ps1
       - name: Install, run, and repair real tools on POSIX
         if: runner.os != 'Windows'
         run: sh scripts/tests/trading-tools-e2e.sh
