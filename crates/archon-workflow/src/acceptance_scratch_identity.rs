@@ -195,7 +195,7 @@ pub(super) fn capture_site(
     let site = |part| move |error| CaptureFailure::of(roots, part, error);
     let mut targets = Vec::new();
     for cwd in [roots.project(), roots.repository()] {
-        let path = cwd.join("target");
+        let path = cwd.join(super::SITE_TARGET_DIRECTORY);
         let meta = std::fs::symlink_metadata(&path)
             .map_err(|e| WorkflowError::io(&path, e))
             .map_err(site("target links"))?;
@@ -225,7 +225,10 @@ pub(super) fn capture_site(
     }
     let mut config = BTreeMap::new();
     for (label, base) in [
-        ("cargo-home", roots.root().join("cargo-home")),
+        (
+            super::SITE_CARGO_HOME_DIRECTORY,
+            roots.root().join(super::SITE_CARGO_HOME_DIRECTORY),
+        ),
         (SITE_PROJECT_DIRECTORY, roots.project().join(".cargo")),
         (SITE_REPOSITORY_DIRECTORY, roots.repository().join(".cargo")),
     ] {

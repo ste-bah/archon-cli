@@ -34,6 +34,7 @@ pub(super) fn check_defects(
                 command,
                 *cwd,
                 &named.path,
+                scope.build_cache,
             ) {
                 let refused_path = refusal
                     .reason
@@ -49,11 +50,9 @@ pub(super) fn check_defects(
                     .unwrap_or_else(|| named.path.display().to_string());
                 let reason = refusal.reason.unwrap_or_else(|| {
                     format!(
-                        "alone in its site, `{}` from {root_name} resolves to `{}`, which the site does not create (it creates `{}` and `{}` plus the siblings this check names)",
+                        "alone in its site, `{}` from {root_name} resolves to `{}`, which the site does not create",
                         named.path.display(),
                         refusal.site_target.display(),
-                        archon_workflow::acceptance_scratch::SITE_REPOSITORY_DIRECTORY,
-                        archon_workflow::acceptance_scratch::SITE_PROJECT_DIRECTORY,
                     )
                 });
                 return Err(format!(

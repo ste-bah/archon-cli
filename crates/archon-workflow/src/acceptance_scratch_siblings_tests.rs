@@ -184,6 +184,7 @@ fn configured_copy_keeps_nested_tracked_sibling_and_omits_build_output() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
+        false,
     ));
     #[cfg(unix)]
     let command = std::process::Command::new("/bin/sh")
@@ -285,6 +286,7 @@ fn repository_sibling_alias_uses_the_scratch_tree_commit() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
+        false,
     ));
     let alias = copied_project.join("../repo-dir");
     assert!(alias.join("Cargo.toml").is_file());
@@ -324,6 +326,7 @@ fn a_check_without_an_outside_path_keeps_the_scratch_parent_unchanged() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
+        false,
     ));
     let after = std::fs::read_dir(copied.parent().unwrap()).unwrap().count();
     assert_eq!(before, after);
@@ -370,6 +373,7 @@ fn copies_a_standalone_sibling_file_and_omits_nested_build_output() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
+        false,
     ));
     let copied_sibling = copied.parent().unwrap().join("sibling");
     assert_eq!(
@@ -426,6 +430,7 @@ fn a_sibling_root_named_target_is_copied() {
             crate::task_set_contract::TrustedCwd::ProjectRoot,
         )],
         &mut remaining,
+        false,
     ));
     let copied_target = copied.parent().unwrap().join("target");
     assert_eq!(

@@ -121,6 +121,7 @@ async fn every_path_the_reauthor_prompt_names_is_readable_under_the_boundary() {
         task_root: PathBuf::new(),
         baseline: None,
         project_input_excludes: Vec::new(),
+        build_cache: false,
     };
 
     let call = author_call(&scope).await;
@@ -164,6 +165,7 @@ async fn a_prd_outside_the_project_root_is_still_readable() {
         task_root: PathBuf::new(),
         baseline: None,
         project_input_excludes: Vec::new(),
+        build_cache: false,
     };
 
     let call = author_call(&scope).await;
@@ -187,6 +189,7 @@ async fn a_scope_inside_the_repository_needs_no_read_roots() {
         task_root: PathBuf::new(),
         baseline: None,
         project_input_excludes: Vec::new(),
+        build_cache: false,
     };
     assert!(scope.read_roots().expect("a valid scope").is_empty());
 }
@@ -207,6 +210,7 @@ async fn an_empty_scope_field_fails_by_name_before_the_author_is_spawned() {
         task_root: PathBuf::new(),
         baseline: None,
         project_input_excludes: Vec::new(),
+        build_cache: false,
     };
     for (field, scope) in [
         (

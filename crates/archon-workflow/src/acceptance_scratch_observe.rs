@@ -296,7 +296,7 @@ pub async fn observe_commands_hooked(
                 dirty = false;
                 continue;
             }
-            let cargo_home_path = roots.root().join("cargo-home");
+            let cargo_home_path = roots.root().join(super::SITE_CARGO_HOME_DIRECTORY);
             let project_before = phase().run(|| inventory(roots.project()))?;
             let cache_before = phase().run(|| cargo_home.digest(&cargo_home_path))?;
             let target = roots.target();

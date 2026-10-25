@@ -333,7 +333,7 @@ fn a_path_naming_the_project_through_its_parent_is_refused_with_that_reason() {
     assert_refusal(&finding, "site does not create", "<site>/child");
 }
 #[test]
-fn a_missing_parent_path_into_the_other_root_is_still_refused() {
+fn a_missing_path_below_the_repository_copy_is_available_even_if_repo_is_its_name() {
     let set = frozen_set(&[("AC-X-004", "test -f feature.txt", false)]);
     let project = set.project.path().join("project");
     let repo = set.project.path().join("repo");
@@ -347,13 +347,8 @@ fn a_missing_parent_path_into_the_other_root_is_still_refused() {
         command: "test -f ../repo/missing/data.txt".into(),
         cwd: TrustedCwd::ProjectRoot,
     };
-    let finding = check_defects::check_defects(&set.contract(), candidate, &scope).unwrap_err();
-    assert!(finding.contains("../repo/missing/data.txt"), "{finding}");
-    assert!(finding.contains("site does not create"), "{finding}");
-    assert!(
-        finding.contains("<site>/repo/missing/data.txt"),
-        "{finding}"
-    );
+    check_defects::check_defects(&set.contract(), candidate, &scope)
+        .expect("the site creates the repository copy at this location");
 }
 #[test]
 fn discovered_sibling_paths_are_available_to_a_check() {
@@ -443,7 +438,10 @@ fn symlink_parent_path_that_resolves_outside_the_selected_root_is_refused() {
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the live symlink resolves outside the selected root");
-    assert!(finding.contains("site does not create"), "{finding}");
+    assert!(
+        finding.contains("the path leaves the project root"),
+        "{finding}"
+    );
     assert!(finding.contains("<site>/project/data.txt"), "{finding}");
 }
 #[test]
