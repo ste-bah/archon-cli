@@ -229,6 +229,15 @@ fn live_midline_fence_diagnosis_and_marker_removal_match_javascript() {
 }
 
 #[test]
+fn duplicate_objects_with_a_trailing_brace_still_extract_one_entry() {
+    let reply = r#"{"id":"A"},{"id":"A"}}"#;
+    assert_eq!(
+        reply_entry_with_blocks(reply, "A").map(|entry| entry["id"].clone()),
+        Some(serde_json::json!("A"))
+    );
+}
+
+#[test]
 fn recorded_live_replies_use_the_shared_expected_outcomes_reply_blocks() {
     let fixtures: Vec<ValueFixture> =
         serde_json::from_str(include_str!("fixtures/decompose_live_reply_outcomes.json")).unwrap();

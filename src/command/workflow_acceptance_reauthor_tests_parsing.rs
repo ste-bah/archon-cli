@@ -302,6 +302,121 @@ fn reply_shape_diagnoses_are_independent_and_valid_entries_still_parse() {
 }
 
 #[test]
+fn reply_blocks_misplaced_entry_brace_reports_missing_field_instead_of_multiple_entries() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = r#"{"id":"AC-X-001","criterion":"c","check":{"kind":"command","command":"run"},"cwd":"project_root"},"gap_permitted":false,"covers":["REQ-X-001"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}"#;
+    let error = candidate_entry(reply, frozen).expect_err("misplaced brace must be diagnosed");
+    assert!(error.contains("misplaced"), "{error}");
+    assert!(error.contains("check.cwd"), "{error}");
+    assert!(error.contains("before \"gap_permitted\""), "{error}");
+    assert!(!error.contains("different entries"), "{error}");
+
+    let two_entries = concat!(
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"first","cwd":"project_root"}}"#,
+        "\n",
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"second","cwd":"project_root"}}"#
+    );
+    let error = candidate_entry(two_entries, frozen).expect_err("two entries remain distinct");
+    assert!(error.contains("the reply holds 2 different entries; return exactly one"));
+}
+
+#[test]
+fn live_shape_reply_reports_early_entry_close_and_missing_command_cwd() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = r#"{"id":"AC-X-001","criterion":"Artifacts are generated and stored.","check":{"kind":"command","command":"tool-x test -p crate-x --test storage_x_tests --lib storage::storage_x_tests::wood::x_writer_emits_acceptance_token_shapes_and_manifest_rule_ids -- --exact"},"cwd":"repo_root"},"gap_permitted":false,"covers":["REQ-X-001","REQ-X-002"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}"#;
+    let marker = "</think>".to_string();
+    let reply = reply.replace(",\"gap_permitted\"", &format!(",{marker}\"gap_permitted\""));
+    let error = candidate_entry_with_markers(&reply, frozen, std::slice::from_ref(&marker))
+        .expect_err("live-shaped malformed reply is refused");
+    assert!(!error.contains("different entries"), "{error}");
+    assert!(error.contains("check.cwd"), "{error}");
+    assert!(error.contains("before \"gap_permitted\""), "{error}");
+    assert!(!error.contains("0-based byte offset"), "{error}");
+}
+
+#[test]
+fn stray_close_before_objects_does_not_panic_or_hide_two_entries() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = "Removed the extra } you flagged.\n{\"id\":\"A\"}\n{\"id\":\"B\"}";
+    let error = candidate_entry(reply, frozen).expect_err("two entries are refused");
+    assert!(
+        error.contains("the reply holds 2 different entries; return exactly one"),
+        "{error}"
+    );
+}
+
+#[test]
+fn check_fence_is_used_when_reporting_missing_check_fields() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = concat!(
+        "```json\n",
+        r#"{"id":"AC-X-001","check":{"kind":"command","command_block":true}}"#,
+        "\n```\n",
+        r#"{"id":"AC-X-001","check":{"kind":"command","command_block":true}}"#,
+        ",\n```check\nrun\n```\n",
+        r#""cwd":"repo_root"},"gap_permitted":false}"#
+    );
+    let error = candidate_entry(reply, frozen).expect_err("missing cwd is diagnosed");
+    assert!(error.contains("check.cwd"), "{error}");
+    assert!(!error.contains("check.command"), "{error}");
+}
+
+#[test]
+fn comma_followed_by_an_object_keeps_two_entry_diagnosis() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = r#"{"id":"A"},
+{"id":"B"}}"#;
+    let error = candidate_entry(reply, frozen).expect_err("two entries are refused");
+    assert!(
+        error.contains("the reply holds 2 different entries; return exactly one"),
+        "{error}"
+    );
+}
+
+#[test]
+fn misplaced_brace_fields_come_from_the_bare_object() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = concat!(
+        "```json\n",
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"run","cwd":"project_root"}}"#,
+        "\n```\n",
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"run"}},"gap_permitted":false}"#
+    );
+    let error = candidate_entry(reply, frozen).expect_err("early close is diagnosed");
+    assert!(error.contains("check.cwd"), "{error}");
+}
+
+#[test]
+fn one_candidate_with_continued_key_reports_early_close() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = r#"{"id":"A","check":{"kind":"command","command":"x"}},"cwd":"repo_root"}"#;
+    let error = candidate_entry(reply, frozen).expect_err("early close is diagnosed");
+    assert!(error.contains("before \"cwd\""), "{error}");
+}
+
+#[test]
+fn continued_object_with_non_command_check_does_not_report_multiple_entries() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    let reply = r#"{"id":"AC-X-001","check":{"kind":"manual"}},"gap_permitted":false,"judgment":{"verdict":"accepted"}}}"#;
+    let error = candidate_entry(reply, frozen).expect_err("malformed reply is refused");
+    assert!(!error.contains("different entries"), "{error}");
+    assert!(
+        error.contains("entry closes early, before \"gap_permitted\""),
+        "{error}"
+    );
+    assert!(error.contains("before \"gap_permitted\""), "{error}");
+    assert!(!error.contains("check.cwd"), "{error}");
+}
+
+#[test]
 fn inline_command_and_check_fence_have_one_shared_refusal() {
     let set = frozen_set(&[("AC-F-001", "run", false)]);
     let contract = set.contract();
