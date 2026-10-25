@@ -1,11 +1,11 @@
-//! Issue 333, on real runs of real tools: the run-start listing is asked
+//! Issue 333: the run-start listing is asked
 //! only of tools some check runs with a plugin the host has, once, all at
 //! once, under a no-progress bound (1); a rustup proxy lists as the site
 //! runs it (2); an option's value before the subcommand is no subcommand
 //! (3); a subcommand no program anywhere provides, such as an alias the
 //! deliverable adds, is a verdict (4).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::super::super::verdict_shell::simple_commands;
@@ -26,6 +26,11 @@ macro_rules! or_skip {
 }
 
 pub(super) const PLAIN: &str = "#!/bin/sh\nexit 0\n";
+fn configured_rustup_home() -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join("settings.toml"), "").unwrap();
+    home
+}
 
 /// A test's no-progress bound: long enough for a new script to start.
 pub(super) const STALL: Duration = Duration::from_millis(1500);
@@ -161,26 +166,12 @@ fn distinct_tools_are_listed_at_once() {
 
 // ---- Item 2: a rustup proxy lists as the site runs it.
 
-/// The host's rustup `cargo` proxy and its RUSTUP_HOME, if it has rustup.
-pub(super) fn rustup_proxy() -> Option<(PathBuf, String)> {
-    let path = std::env::var("PATH").ok()?;
-    let proxy = std::env::split_paths(&path)
-        .find(|dir| dir.join("rustup").is_file() && dir.join("cargo").is_file())?
-        .join("cargo");
-    let home = std::process::Command::new(proxy.with_file_name("rustup"))
-        .args(["show", "home"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())?;
-    Some((proxy, home))
-}
-
 #[test]
 fn a_rustup_proxy_is_judged_with_the_sites_rustup_home() {
-    let (proxy, home) = or_skip!(rustup_proxy(), "rustup");
+    let proxy = super::tests::host_toolchain::fake_rustup_proxy();
+    let rustup_home = configured_rustup_home();
     let bin = Bin::with_host(&proxy, &[SIBLING], &[NEXTEST]);
-    let site = [("RUSTUP_HOME", home.as_str())];
+    let site = [("RUSTUP_HOME", rustup_home.path().to_str().unwrap())];
     let run = bin.run_with("cargo nextest run", &site);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("no such command: `nextest`"), "{stderr}");
@@ -199,7 +190,7 @@ fn a_rustup_proxy_is_judged_with_the_sites_rustup_home() {
 
 #[test]
 fn the_operators_rustup_home_is_never_consulted() {
-    let (proxy, _) = or_skip!(rustup_proxy(), "rustup");
+    let proxy = super::tests::host_toolchain::fake_rustup_proxy();
     let bin = Bin::with_host(&proxy, &[SIBLING], &[NEXTEST]);
     // The site binds no RUSTUP_HOME: there the proxy finds no toolchain, so
     // the host says so rather than list from the operator's own home.
@@ -217,10 +208,11 @@ fn the_operators_rustup_home_is_never_consulted() {
 
 #[test]
 fn the_sites_toolchain_choice_is_followed() {
-    let (proxy, home) = or_skip!(rustup_proxy(), "rustup");
+    let proxy = super::tests::host_toolchain::fake_rustup_proxy();
+    let rustup_home = configured_rustup_home();
     let bin = Bin::with_host(&proxy, &[SIBLING], &[NEXTEST]);
     let site = [
-        ("RUSTUP_HOME", home.as_str()),
+        ("RUSTUP_HOME", rustup_home.path().to_str().unwrap()),
         ("RUSTUP_TOOLCHAIN", "archon-333-none"),
     ];
     let warned = unresolved_on_path(&["cargo nextest run"], &bin.context_with(&site));
@@ -241,9 +233,11 @@ fn a_site_that_runs_in_its_own_home_lists_what_that_home_installs() {
     std::fs::write(&script, plugin).unwrap();
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let bin = Bin::with_host(&cargo, &[SIBLING], &[("cargo-archon333home", PLAIN)]);
-    let rustup = rustup_proxy().map(|(_, rustup)| rustup);
+    let rustup_home = std::env::var("RUSTUP_HOME").ok();
     let mut site = vec![("HOME", home.path().to_str().unwrap())];
-    site.extend(rustup.as_deref().map(|rustup| ("RUSTUP_HOME", rustup)));
+    if let Some(rustup_home) = rustup_home.as_deref() {
+        site.push(("RUSTUP_HOME", rustup_home));
+    }
     let at = bin.context_with(&site);
     assert!(
         unresolved_on_path(&["cargo archon333home"], &at)[0].is_empty(),
@@ -350,8 +344,8 @@ fn an_alias_the_deliverable_adds_counts_once_the_check_shows_it() {
             .current_dir(tree.path())
             .env_clear();
         implemented.env("PATH", bin.path()).env("HOME", home.path());
-        if let Some((_, rustup)) = rustup_proxy() {
-            implemented.env("RUSTUP_HOME", rustup);
+        if let Ok(rustup_home) = std::env::var("RUSTUP_HOME") {
+            implemented.env("RUSTUP_HOME", rustup_home);
         }
         let out = implemented.output().unwrap();
         assert!(

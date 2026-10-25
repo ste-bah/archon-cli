@@ -5,6 +5,30 @@ pub mod ssh;
 pub mod sync;
 pub mod websocket;
 
+use sha2::{Digest, Sha256};
+
+/// Return a stable, non-reversible short tag for a remote session identifier.
+pub fn session_tag(session_id: &str) -> String {
+    let digest = Sha256::digest(session_id.as_bytes());
+    format!("{:x}", digest)[..12].to_string()
+}
+
+#[cfg(test)]
+mod session_tag_tests {
+    use super::session_tag;
+
+    #[test]
+    fn session_tag_is_stable_distinct_and_does_not_expose_the_id() {
+        let first_id = "AC-X-001";
+        let other_id = "AC-X-002";
+        let first_tag = session_tag(first_id);
+
+        assert_eq!(first_tag, session_tag(first_id));
+        assert_ne!(first_tag, session_tag(other_id));
+        assert!(!first_tag.contains(first_id));
+    }
+}
+
 use std::path::PathBuf;
 
 use async_trait::async_trait;
