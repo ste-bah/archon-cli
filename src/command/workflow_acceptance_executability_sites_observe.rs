@@ -162,7 +162,8 @@ fn observation_voided(observed: &archon_workflow::acceptance_scratch::Observatio
         || !observed.live_roots_unchanged
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 mod attributed_teardown_tests {
     use archon_workflow::acceptance_scratch::{CheckAllowance, ObserveHooks};
     use std::sync::{Arc, atomic::AtomicBool};
