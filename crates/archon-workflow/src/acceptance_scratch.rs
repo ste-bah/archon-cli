@@ -51,7 +51,9 @@ pub fn freeze_owned_path(path: &Path) -> bool {
 pub mod faults;
 #[path = "acceptance_scratch_hooks.rs"]
 mod hooks;
-pub use hooks::{AllowanceHook, CHECK_DEFERRED, CheckAllowance, CheckHook, ObserveHooks};
+pub use hooks::{
+    AllowanceHook, CHECK_DEFERRED, CheckAllowance, CheckHook, ObserveControl, ObserveHooks,
+};
 #[path = "acceptance_scratch_identity.rs"]
 mod identity;
 pub use identity::{BuildIdentity, CheckEvidence};
@@ -69,6 +71,7 @@ mod seal;
 #[path = "acceptance_scratch_teardown.rs"]
 mod teardown;
 pub use control::{OBSERVATION_STALLED, observation_stall};
+pub use observe::AttributedTeardown;
 pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
 pub(crate) use process::drain_counted;
@@ -227,12 +230,12 @@ impl ScratchRoots {
         }
         std::fs::create_dir_all(&policy.scratch_parent)
             .map_err(|e| WorkflowError::io(&policy.scratch_parent, e))?;
-        let lease = match (held, &policy.build_cache) {
+        let mut lease = match (held, &policy.build_cache) {
             (Some(held), _) => Some(held.renew(policy.scratch_bytes)?),
             (None, Some(dir)) => Some(cache::Lease::acquire(dir, policy.scratch_bytes)?),
             (None, None) => None,
         };
-        let root = match &lease {
+        let root = match &mut lease {
             // Keep Cargo paths stable; reclaim slots left by holders that did not tear down.
             Some(lease) => {
                 // Unregistered stale slots are removed and never reused.
@@ -242,9 +245,12 @@ impl ScratchRoots {
                         &["worktree", "remove", "--force"],
                         &[&stale.join("repo")],
                     );
+                    // A stale slot can be unregistered or partly damaged.
+                    // Remove old slot contents when possible; cache preparation
+                    // advances the generation if the current slot remains.
                     let _ = io::remove_owned_tree(&stale);
                 }
-                lease.slot()
+                lease.prepare_slot(policy.scratch_bytes)?
             }
             None => std::fs::canonicalize(&policy.scratch_parent)
                 .map(archon_shell::paths::plain)

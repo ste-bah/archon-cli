@@ -409,13 +409,24 @@ pub(super) async fn observe_in_scratch_at(
     {
         return Err(WorkflowError::ControlPaused(stall.clone()));
     }
-    if !result.operational_errors.is_empty() {
+    ensure_observation_usable(&result)?;
+    Ok(result.checks)
+}
+
+fn ensure_observation_usable(
+    result: &archon_workflow::acceptance_scratch::ObservationResult,
+) -> WorkflowResult<()> {
+    if observation_failed(result) {
         return Err(WorkflowError::StageFailed(format!(
             "scratch observation failed: {}",
             result.operational_errors.join("; ")
         )));
     }
-    Ok(result.checks)
+    Ok(())
+}
+
+fn observation_failed(result: &archon_workflow::acceptance_scratch::ObservationResult) -> bool {
+    !result.operational_errors.is_empty() || !result.teardown_verified
 }
 
 /// The guardian request for this round. The pin is read from disk HERE, at
@@ -466,3 +477,7 @@ pub(super) fn git_head(repository: &Path) -> (Option<String>, bool) {
 #[cfg(test)]
 #[path = "workflow_live_v3_acceptance_chain_tests.rs"]
 mod chain_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "workflow_live_v3_acceptance_exec_attributed_tests.rs"]
+mod attributed_teardown_tests;

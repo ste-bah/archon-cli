@@ -116,8 +116,10 @@ async fn each_result_is_told_as_it_finishes_and_a_spent_budget_defers_the_rest()
         "chain",
         &refs,
         &t.path().join("evidence"),
-        Arc::new(AtomicBool::new(false)),
-        &hooks,
+        archon_workflow::acceptance_scratch::ObserveControl::new(
+            Arc::new(AtomicBool::new(false)),
+            hooks,
+        ),
     )
     .await
     .unwrap();
@@ -161,8 +163,10 @@ async fn a_check_cut_by_the_budget_is_deferred_and_one_past_its_cap_timed_out() 
             "chain",
             &refs,
             &t.path().join(format!("evidence-{cut}")),
-            Arc::new(AtomicBool::new(false)),
-            &hooks,
+            archon_workflow::acceptance_scratch::ObserveControl::new(
+                Arc::new(AtomicBool::new(false)),
+                hooks,
+            ),
         )
         .await
         .unwrap();

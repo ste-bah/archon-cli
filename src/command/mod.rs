@@ -11,6 +11,10 @@
 #[cfg(test)]
 pub(crate) static USER_DATA_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "acceptance_scratch_attributed_tests.rs"]
+pub(crate) mod acceptance_scratch_attributed_tests;
+
 pub(crate) mod acceptance_check_policy;
 pub(crate) mod acceptance_scratch_guardian;
 pub(crate) mod acceptance_scratch_policy;

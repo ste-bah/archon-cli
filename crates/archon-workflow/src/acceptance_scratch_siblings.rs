@@ -155,7 +155,7 @@ pub(super) fn copy_external(
                 }
                 super::control::check()?;
                 *remaining = budget;
-                if !existed {
+                if !existed && destination.symlink_metadata().is_ok() {
                     super::io::remove_owned_tree(&destination)?;
                 }
                 let result = sibling_failure(&error, &relative, named_by.len() == 1);
@@ -185,12 +185,11 @@ fn sibling_failure(
 ) -> (String, Option<super::faults::FaultCause>) {
     use super::faults::{FaultCause, SIBLING_SHAPE_REFUSED, SIBLING_TOO_LARGE};
     let text = error.to_string();
-    let own = if text.contains("exceeds configured size limit") {
+    let own = if matches!(error, WorkflowError::ScratchCopyTooLarge) {
         Some((SIBLING_TOO_LARGE, FaultCause::SiblingTooLarge))
-    } else if text.contains("collision")
-        || text.contains("already exists outside the repository copy")
+    } else if matches!(error, WorkflowError::ScratchCopyShape(_))
         || matches!(error, WorkflowError::Io { source, .. }
-            if matches!(source.kind(), std::io::ErrorKind::NotADirectory | std::io::ErrorKind::IsADirectory))
+            if matches!(source.kind(), std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::NotADirectory | std::io::ErrorKind::IsADirectory))
     {
         Some((SIBLING_SHAPE_REFUSED, FaultCause::SiblingShapeRefused))
     } else {
@@ -235,8 +234,8 @@ fn copy_one(
                     .zip(target.canonicalize().ok())
                     .is_some_and(|(destination, target)| destination == target);
             if existed && !already_points_to_target {
-                return Err(invalid(format!(
-                    "sibling alias {} already exists outside the repository copy",
+                return Err(WorkflowError::ScratchCopyShape(format!(
+                    "sibling alias {} conflicts with the repository copy",
                     destination.display()
                 )));
             }
@@ -308,7 +307,7 @@ fn copy_one(
             }
             *remaining = remaining
                 .checked_sub(tree_bytes(destination)?)
-                .ok_or_else(|| invalid("scratch copy exceeds configured size limit"))?;
+                .ok_or(WorkflowError::ScratchCopyTooLarge)?;
             Some(head)
         }
     } else if existed {
@@ -318,7 +317,7 @@ fn copy_one(
             std::fs::create_dir_all(parent).map_err(|error| WorkflowError::io(parent, error))?;
         }
         if source.is_file() {
-            super::io::copy_tree(source, destination, remaining, true)?;
+            super::io::copy_sibling_tree(source, destination, remaining, true)?;
         } else {
             copy_directory(source, source, destination, remaining)?;
         }
@@ -460,7 +459,7 @@ fn copy_directory(
             copy_directory(root, &entry.path(), dest, remaining)?;
         }
     } else if metadata.is_file() {
-        super::io::copy_tree(source, &target, remaining, true)?;
+        super::io::copy_sibling_tree(source, &target, remaining, true)?;
     }
     Ok(())
 }

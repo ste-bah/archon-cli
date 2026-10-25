@@ -262,6 +262,16 @@ impl Lease {
         self.dir.join(format!("scratch-{}", self.generation))
     }
 
+    /// Choose a path that no earlier holder left behind. A leftover may be
+    /// unremovable even when its build target was safe to retain.
+    pub(super) fn prepare_slot(&mut self, limit: u64) -> WorkflowResult<PathBuf> {
+        while self.slot().symlink_metadata().is_ok() {
+            self.poison()?;
+            self.ready(false, limit)?;
+        }
+        Ok(self.slot())
+    }
+
     pub(super) fn target(&self) -> PathBuf {
         self.dir.join(format!("target-{}", self.generation))
     }

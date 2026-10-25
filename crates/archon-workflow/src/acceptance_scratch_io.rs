@@ -37,13 +37,35 @@ pub(super) fn copy_tree(
     remaining: &mut u64,
     exclude_git: bool,
 ) -> WorkflowResult<()> {
+    copy_tree_with_cause(source, dest, remaining, exclude_git, false)
+}
+
+pub(super) fn copy_sibling_tree(
+    source: &Path,
+    dest: &Path,
+    remaining: &mut u64,
+    exclude_git: bool,
+) -> WorkflowResult<()> {
+    copy_tree_with_cause(source, dest, remaining, exclude_git, true)
+}
+
+fn copy_tree_with_cause(
+    source: &Path,
+    dest: &Path,
+    remaining: &mut u64,
+    exclude_git: bool,
+    typed_sibling: bool,
+) -> WorkflowResult<()> {
     copy_tree_inner(
         source,
         dest,
         remaining,
-        exclude_git,
-        false,
-        false,
+        CopyOptions {
+            exclude_git,
+            cache: false,
+            exclude_freeze_owned: false,
+            typed_sibling,
+        },
         Path::new(""),
     )
 }
@@ -131,18 +153,36 @@ fn copy_task_root_inner(
 }
 /// The caller selects only registry/git cache subtrees, never Cargo home itself.
 pub(super) fn copy_cache(source: &Path, dest: &Path, remaining: &mut u64) -> WorkflowResult<()> {
-    copy_tree_inner(source, dest, remaining, false, true, false, Path::new(""))
+    copy_tree_inner(
+        source,
+        dest,
+        remaining,
+        CopyOptions {
+            exclude_git: false,
+            cache: true,
+            exclude_freeze_owned: false,
+            typed_sibling: false,
+        },
+        Path::new(""),
+    )
 }
+
+#[derive(Clone, Copy)]
+struct CopyOptions {
+    exclude_git: bool,
+    cache: bool,
+    exclude_freeze_owned: bool,
+    typed_sibling: bool,
+}
+
 fn copy_tree_inner(
     source: &Path,
     dest: &Path,
     remaining: &mut u64,
-    exclude_git: bool,
-    cache: bool,
-    exclude_freeze_owned: bool,
+    options: CopyOptions,
     relative: &Path,
 ) -> WorkflowResult<()> {
-    if cache
+    if options.cache
         && source.components().any(|part| {
             matches!(
                 part.as_os_str().to_str(),
@@ -160,17 +200,20 @@ fn copy_tree_inner(
         if let Ok(existing) = dest.symlink_metadata()
             && (!existing.is_dir() || existing.file_type().is_symlink())
         {
-            return Err(invalid("scratch input directory collision"));
+            return Err(copy_shape_error(
+                options.typed_sibling,
+                "scratch input directory collision",
+            ));
         }
         std::fs::create_dir_all(dest).map_err(|e| WorkflowError::io(dest, e))?;
         for item in std::fs::read_dir(source).map_err(|e| WorkflowError::io(source, e))? {
             let item = item.map_err(|e| WorkflowError::io(source, e))?;
             let name = item.file_name();
             let child_relative = relative.join(&name);
-            if exclude_git && name == ".git" {
+            if options.exclude_git && name == ".git" {
                 continue;
             }
-            if exclude_freeze_owned
+            if options.exclude_freeze_owned
                 && super::acceptance_input_excluded(&child_relative, &[], Some(Path::new("")))
             {
                 continue;
@@ -179,24 +222,23 @@ fn copy_tree_inner(
                 &item.path(),
                 &dest.join(name),
                 remaining,
-                exclude_git,
-                cache,
-                exclude_freeze_owned,
+                options,
                 &child_relative,
             )?;
         }
     } else if meta.is_file() {
         if meta.len() > *remaining {
-            return Err(invalid("scratch copy exceeds configured size limit"));
+            return Err(copy_size_error(options.typed_sibling));
         }
         let bytes = read(source)?;
         if let Ok(existing) = dest.symlink_metadata() {
             if !existing.is_file() || read(dest)? != bytes {
-                return Err(invalid(format!(
+                let message = format!(
                     "nonidentical scratch path collision: {} already holds a copy from an earlier overlay source and {} differs from it",
                     dest.display(),
                     source.display()
-                )));
+                );
+                return Err(copy_shape_error(options.typed_sibling, &message));
             }
             return Ok(());
         }
@@ -208,13 +250,33 @@ fn copy_tree_inner(
             .map_err(|e| WorkflowError::io(dest, e))?;
         *remaining -= bytes.len() as u64;
     } else {
-        return Err(invalid(format!(
+        let message = format!(
             "nonregular or symlink snapshot input refused: {}",
             source.display()
-        )));
+        );
+        // Refusing a symlink or special file in host-supplied snapshot data
+        // does not prove the check authored that input.
+        return Err(invalid(message));
     }
     Ok(())
 }
+
+fn copy_size_error(typed_sibling: bool) -> WorkflowError {
+    if typed_sibling {
+        WorkflowError::ScratchCopyTooLarge
+    } else {
+        invalid("scratch copy exceeds configured size limit")
+    }
+}
+
+fn copy_shape_error(typed_sibling: bool, message: &str) -> WorkflowError {
+    if typed_sibling {
+        WorkflowError::ScratchCopyShape(message.to_owned())
+    } else {
+        invalid(message)
+    }
+}
+
 pub(super) fn readonly(path: &Path) -> WorkflowResult<()> {
     control::check()?;
     let meta = std::fs::symlink_metadata(path).map_err(|e| WorkflowError::io(path, e))?;

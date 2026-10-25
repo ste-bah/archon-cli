@@ -27,6 +27,18 @@ fn a_teardown_the_host_could_not_verify_is_ambiguous() {
 }
 
 #[test]
+fn attributed_site_teardown_names_the_detected_permission_failure() {
+    let cause = FaultCause::SiteTeardownFailed;
+    match classify(Some(&cause), "permission denied removing an immutable file") {
+        CheckFault::Check { trigger, .. } => assert_eq!(
+            trigger,
+            "permission was denied when removing a file from its scratch site (for example, one with an immutable flag)"
+        ),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn what_the_host_caused_or_could_not_observe_is_the_hosts() {
     for error in [
         "scratch size audit failed: permission denied".to_string(),

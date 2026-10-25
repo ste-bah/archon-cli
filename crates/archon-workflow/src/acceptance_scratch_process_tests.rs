@@ -1,6 +1,9 @@
 //! Issue 270: a check's teardown is verified for every process it started,
 //! not only for the members of its own process group.
 use super::*;
+
+#[path = "acceptance_scratch_process_typed_tests.rs"]
+mod typed_tests;
 use crate::acceptance_world::AuthorizedCommand;
 use crate::task_set_contract::TrustedCwd;
 
@@ -89,7 +92,7 @@ const OWN_SESSION: &str = "POSIX::setsid()";
 
 async fn run(site: &CommandSite<'_>, text: &str) -> CheckResult {
     let command = AuthorizedCommand::for_test(text, TrustedCwd::ProjectRoot);
-    run_at(site, "AC-1", &command, Arc::new(AtomicBool::new(false)))
+    run_at(site, "AC-X-001", &command, Arc::new(AtomicBool::new(false)))
         .await
         .unwrap()
 }
@@ -150,6 +153,11 @@ async fn a_detached_descendant_holding_the_output_pipes_is_an_operational_error(
             .operational_error
             .as_deref()
             .is_some_and(|e| e.contains("pipes stayed open")),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.fault,
+        Some(super::super::faults::FaultCause::PipesHeld),
         "{result:?}"
     );
 }
@@ -248,6 +256,11 @@ async fn a_never_seen_writer_left_in_the_scratch_is_an_operational_error() {
             .operational_error
             .as_deref()
             .is_some_and(|e| e.contains(&escaper.pid().to_string())),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.fault,
+        Some(super::super::faults::FaultCause::LeftBehind),
         "{result:?}"
     );
 }

@@ -162,7 +162,7 @@ pub(super) fn copy_for_checks_with_check_map(
                         .is_some_and(|(destination, target)| destination == target);
                 if destination.exists() && !already_points_to_target {
                     return Err(Unrun(format!(
-                        "sibling alias {} already exists outside the repository copy",
+                        "sibling alias {} conflicts with the repository copy",
                         destination.display()
                     )));
                 }

@@ -88,6 +88,53 @@ fn combined_scratch_uses_recorded_commit_private_data_and_relative_target() {
         1
     );
 }
+
+#[test]
+fn removable_unregistered_stale_slot_is_removed_before_a_new_site_is_prepared() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repository");
+    let project = temp.path().join("project");
+    let build_cache = temp.path().join("cache");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "fixture@example.invalid"]);
+    git(&repo, &["config", "user.name", "fixture"]);
+    std::fs::write(repo.join("input"), "source").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-qm", "fixture"]);
+    let commit = git(&repo, &["rev-parse", "HEAD"]);
+    std::fs::create_dir_all(project.join("tasks")).unwrap();
+    std::fs::create_dir_all(project.join("data")).unwrap();
+    std::fs::create_dir_all(build_cache.join("scratch-orphan/repo")).unwrap();
+    std::fs::write(build_cache.join("scratch-orphan/repo/leftover"), "data").unwrap();
+
+    let policy = ScratchPolicy {
+        repository: repo,
+        project: project.clone(),
+        task_root: project.join("tasks"),
+        scratch_parent: temp.path().join("observations"),
+        project_inputs: vec!["data".into()],
+        project_input_excludes: vec![],
+        combined: true,
+        toolchain_path: "/usr/bin:/bin".into(),
+        environment: BTreeMap::new(),
+        environment_allowlist: vec![],
+        cargo_seed: None,
+        timeout_secs: 30,
+        output_bytes: 4096,
+        scratch_bytes: 16 * 1024 * 1024,
+        build_cache: Some(build_cache),
+    };
+
+    let mut roots = ScratchRoots::prepare(&policy, &commit).unwrap();
+    roots.cleanup().unwrap();
+    assert!(
+        !temp.path().join("cache/scratch-orphan").exists(),
+        "unregistered stale slot remains"
+    );
+}
+
 #[test]
 fn unsafe_input_and_credential_environment_are_rejected_before_setup() {
     let mut p = ScratchPolicy {

@@ -1,8 +1,8 @@
 //! Observation transaction: resolve, snapshot, execute, clean up, audit.
-use super::hooks::{CHECK_DEFERRED, ObserveHooks};
+use super::hooks::{CHECK_DEFERRED, ObserveControl};
 #[path = "acceptance_scratch_isolate.rs"]
 mod isolate;
-use super::process::{CHECK_TIMED_OUT, CheckResult, run_at};
+use super::process::{CHECK_TIMED_OUT, CheckResult};
 use super::*;
 use crate::acceptance_world::{FrozenCommandRef, resolve_command};
 use crate::task_set_contract::{AcceptanceContract, content_digest};
@@ -13,39 +13,12 @@ mod rebuild;
 #[path = "acceptance_scratch_observe_result.rs"]
 mod result_helpers;
 use rebuild::Rebuild;
+pub use result_helpers::{AttributedTeardown, ObservationResult};
 use result_helpers::{faulted, operational, redacted};
+#[path = "acceptance_scratch_observe_execute.rs"]
+mod execute;
+pub use execute::execute_check_at;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ObservationResult {
-    pub checks: Vec<CheckResult>,
-    pub host_environment: BTreeMap<String, bool>,
-    pub check_evidence: Vec<CheckEvidence>,
-    pub operational_errors: Vec<String>,
-    pub command_refs: Vec<FrozenCommandRef>,
-    pub command_cwds: Vec<crate::task_set_contract::TrustedCwd>,
-    pub policy: ScratchPolicy,
-    pub copied_project_manifest: BTreeMap<String, String>,
-    pub cleanup_error: Option<String>,
-    pub live_roots_unchanged: bool,
-    pub teardown_verified: bool,
-    pub source_commit: String,
-    pub policy_digest: String,
-    pub source_manifest_digest: String,
-    pub before: BTreeMap<String, BTreeMap<String, String>>,
-    pub after: BTreeMap<String, BTreeMap<String, String>>,
-}
-impl ObservationResult {
-    pub fn passed(&self) -> bool {
-        self.operational_errors.is_empty()
-            && self.live_roots_unchanged
-            && self.teardown_verified
-            && !self.checks.is_empty()
-            && self
-                .checks
-                .iter()
-                .all(|c| c.exit_code == Some(0) && c.operational_error.is_none())
-    }
-}
 /// The caller supplies an integrity-validated pinned contract and chain digest.
 /// Authorization is repeated here before creating scratch or spawning children.
 pub async fn observe_commands(
@@ -64,8 +37,7 @@ pub async fn observe_commands(
         chain_digest,
         refs,
         evidence,
-        resource_limits,
-        Arc::new(AtomicBool::new(false)),
+        ObserveControl::for_resource_limits(Arc::new(AtomicBool::new(false)), resource_limits),
     )
     .await
 }
@@ -76,10 +48,8 @@ pub async fn observe_commands_cancellable(
     chain_digest: &str,
     refs: &[FrozenCommandRef],
     evidence: &Path,
-    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
-    cancel: Arc<AtomicBool>,
+    control: ObserveControl,
 ) -> WorkflowResult<ObservationResult> {
-    let hooks = ObserveHooks::for_resource_limits(resource_limits);
     observe_commands_hooked(
         policy,
         commit,
@@ -87,13 +57,11 @@ pub async fn observe_commands_cancellable(
         chain_digest,
         refs,
         evidence,
-        cancel,
-        &hooks,
+        control,
     )
     .await
 }
-/// [`observe_commands_cancellable`] under the caller's [`ObserveHooks`].
-#[allow(clippy::too_many_arguments)]
+/// [`observe_commands_cancellable`] under the caller's observation control.
 pub async fn observe_commands_hooked(
     policy: &ScratchPolicy,
     commit: &str,
@@ -101,9 +69,10 @@ pub async fn observe_commands_hooked(
     chain_digest: &str,
     refs: &[FrozenCommandRef],
     evidence: &Path,
-    cancel: Arc<AtomicBool>,
-    hooks: &ObserveHooks,
+    control: ObserveControl,
 ) -> WorkflowResult<ObservationResult> {
+    let ObserveControl { cancel, hooks } = control;
+    let hooks = &hooks;
     policy.validate()?;
     // Authorization is per check. Collecting these into one Result would let a
     // single command that cannot be authorized abort the batch here, before any
@@ -144,6 +113,7 @@ pub async fn observe_commands_hooked(
         policy: policy.clone(),
         copied_project_manifest: BTreeMap::new(),
         cleanup_error: None,
+        attributed_teardown: None,
         live_roots_unchanged: false,
         teardown_verified: false,
         source_commit: commit.into(),
@@ -153,6 +123,10 @@ pub async fn observe_commands_hooked(
         after: BTreeMap::new(),
     };
     let mut roots = None;
+    let mut redaction_environment = BTreeMap::new();
+    let mut dirty = false;
+    let mut fresh = true;
+    let mut dirty_owner: Option<usize> = None;
     let phase = || control::Control::new(policy.timeout_secs, cancel.clone());
     let execution = async {
         result.before = phase().run(|| inputs::live(policy, commit))?;
@@ -199,22 +173,29 @@ pub async fn observe_commands_hooked(
         roots =
             Some(phase().run(|| ScratchRoots::prepare_inner_with_checks(policy, commit, &checks))?);
         let prepared = roots.as_ref().expect("prepared");
+        redaction_environment = prepared.host_environment.clone();
         result.copied_project_manifest = phase().run(|| inventory(prepared.project()))?;
         let mut baseline = phase().run(|| identity::capture(prepared, policy))?;
         result.source_manifest_digest = content_digest(&serde_json::to_vec(
             &phase().run(|| prepared.source_inventory())?,
         )?);
-        // Hashed in full once per site, then verified per check from metadata.
+        // The build tool home is shared by the checks and audited per check.
         let mut cargo_home = seal::TreeSeal::default();
         // Each check is its own unit (as a test runner gives each test its
         // own process): a fault one check leaves is its own result, and the next
-        // check runs on a site restored to the baseline. Only a site that
-        // cannot be restored stops the batch, as the host's.
-        let mut dirty = false;
+        // check runs on a site restored to the baseline. A failed teardown
+        // belongs to that check only when it started on a fresh verified site;
+        // remaining checks then stay host-unproven.
         let first = isolate::FirstSite::of(prepared, &baseline, &result.copied_project_manifest);
         let restore = |roots: &mut Option<ScratchRoots>| {
             let rebuilt = phase().run(|| isolate::restore(roots, policy, commit, &checks, &first));
-            rebuild::classify(rebuilt, &cancel)
+            match rebuilt {
+                Err(teardown_error @ WorkflowError::ScratchSiteRemoval(_)) => {
+                    Ok(Rebuild::CheckTeardown(teardown_error))
+                }
+                Ok(identity) => Ok(Rebuild::Verified(identity)),
+                Err(error) => rebuild::classify(Err(error), &cancel),
+            }
         };
         for (index, ((reference, command), refused)) in
             refs.iter().zip(commands).zip(&refusals).enumerate()
@@ -252,16 +233,50 @@ pub async fn observe_commands_hooked(
                         .and_then(|()| phase().run(|| identity::capture(current, policy)))
                 });
                 let rebuilt = match verified {
-                    Some(Ok(identity)) if identity == baseline => break Ok(identity),
+                    Some(Ok(identity)) if identity == baseline => {
+                        dirty = false;
+                        dirty_owner = None;
+                        break Ok(identity);
+                    }
                     _ if !restored => restore(&mut roots)?,
                     verified => Rebuild::HostUnproven(rebuild::unverified(verified, &cancel)?),
                 };
                 match rebuilt {
                     Rebuild::Verified(identity) => {
                         (baseline, restored) = (identity, true);
+                        fresh = true;
+                        dirty = false;
                         cargo_home = seal::TreeSeal::default();
+                        dirty_owner = None;
                     }
                     Rebuild::HostUnproven(error) => break Err(error),
+                    Rebuild::CheckTeardown(error) => {
+                        phase().check()?;
+                        if let Some(owner) = dirty_owner {
+                            let site = roots.as_ref().expect("site teardown retains its roots");
+                            let safe_error =
+                                String::from_utf8_lossy(&site.redact(error.to_string().as_bytes()))
+                                    .into_owned();
+                            rebuild::attribute_teardown_failure(
+                                &mut result.checks,
+                                &refs[owner].acceptance_id,
+                                &WorkflowError::ScratchSiteRemoval(safe_error.clone()),
+                            );
+                            result.attributed_teardown = Some(result_helpers::AttributedTeardown {
+                                acceptance_id: refs[owner].acceptance_id.clone(),
+                                error: safe_error.clone(),
+                            });
+                            for check in &mut result.checks {
+                                *check = redacted(site, check);
+                            }
+                            roots = None;
+                            dirty_owner = None;
+                            break Err(WorkflowError::ScratchSiteRemoval(safe_error));
+                        }
+                        break Err(WorkflowError::ScratchSiteRemoval(format!(
+                            "scratch site could not be restored for the remaining checks: {error}"
+                        )));
+                    }
                 }
             };
             let before_identity = match before_identity {
@@ -295,6 +310,8 @@ pub async fn observe_commands_hooked(
             );
             let attempt =
                 execute_check_at(&site, contract, reference, &command, cancel.clone()).await;
+            let site_was_fresh = fresh;
+            fresh = false;
             let mut check =
                 attempt.unwrap_or_else(|e| operational(&reference.acceptance_id, e.to_string()));
             // Cut short by the caller's budget, not by its own length.
@@ -328,17 +345,17 @@ pub async fn observe_commands_hooked(
                 before_identity,
                 after_identity: after_identity.ok(),
                 changed_project_paths: changed_paths,
-                cargo_cache_before: cache_before,
-                cargo_cache_after: cache_after.ok(),
+                cargo_cache_before: cache_before.clone(),
+                cargo_cache_after: cache_after.as_ref().ok().cloned(),
                 input_reset: true,
             });
             if let Some(on_check) = &hooks.on_check {
                 on_check(&redacted(roots, &check));
             }
-            // A check that changed its site or ended without a verdict (a
-            // process it started may still use the site) is followed by a
-            // restored site; it stops nothing.
+            // Keep the base rebuild rule; freshness independently proves this
+            // check alone used the site if its teardown fails.
             dirty = integrity_failed || (check.operational_error.is_some() && !deferred);
+            dirty_owner = (site_was_fresh && dirty).then_some(index);
             let stop = deferred || cancel.load(std::sync::atomic::Ordering::SeqCst);
             result.checks.push(check);
             if deferred {
@@ -361,10 +378,27 @@ pub async fn observe_commands_hooked(
         Some(roots) => roots.cleanup(),
         None => Ok(()), // prepare performs its own cleanup before returning an error.
     };
-    result.teardown_verified = cleanup.is_ok();
-    result.cleanup_error = cleanup.err().map(|e| e.to_string());
+    let cleanup_check_removal = matches!(&cleanup, Err(WorkflowError::ScratchSiteRemoval(_)));
+    result.cleanup_error = cleanup.as_ref().err().map(ToString::to_string);
+    let mut cleanup_attributed = false;
+    if cleanup_check_removal && let Some(owner) = dirty_owner {
+        let error = result.cleanup_error.as_deref().unwrap_or_default();
+        rebuild::attribute_teardown_failure(
+            &mut result.checks,
+            &refs[owner].acceptance_id,
+            &WorkflowError::ScratchSiteRemoval(error.to_owned()),
+        );
+        cleanup_attributed = true;
+        result.attributed_teardown = Some(result_helpers::AttributedTeardown {
+            acceptance_id: refs[owner].acceptance_id.clone(),
+            error: error.to_owned(),
+        });
+    }
+    result.teardown_verified = cleanup.is_ok() || cleanup_attributed;
     if let Some(e) = &result.cleanup_error {
-        result.operational_errors.push(e.clone());
+        if !cleanup_attributed {
+            result.operational_errors.push(e.clone());
+        }
     }
     let audit = control::Control::new(
         policy.timeout_secs,
@@ -401,80 +435,30 @@ pub async fn observe_commands_hooked(
             ));
         }
     }
-    if let Some(roots) = &roots {
-        for error in &mut result.operational_errors {
-            *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
-        }
-        if let Some(error) = &mut result.cleanup_error {
-            *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
-        }
-        for check in &mut result.checks {
-            *check = redacted(roots, check);
-        }
+    for error in &mut result.operational_errors {
+        *error =
+            String::from_utf8_lossy(&io::redact(&redaction_environment, error.as_bytes(), false))
+                .into_owned();
+    }
+    if let Some(error) = &mut result.cleanup_error {
+        *error =
+            String::from_utf8_lossy(&io::redact(&redaction_environment, error.as_bytes(), false))
+                .into_owned();
+    }
+    if let Some(teardown) = &mut result.attributed_teardown {
+        teardown.error = String::from_utf8_lossy(&io::redact(
+            &redaction_environment,
+            teardown.error.as_bytes(),
+            false,
+        ))
+        .into_owned();
+    }
+    for check in &mut result.checks {
+        *check = result_helpers::redacted_environment(&redaction_environment, check);
     }
     std::fs::create_dir_all(evidence).map_err(|e| WorkflowError::io(evidence, e))?;
     let path = evidence.join("observation.json");
     std::fs::write(&path, serde_json::to_vec_pretty(&result)?)
         .map_err(|e| WorkflowError::io(&path, e))?;
     Ok(result)
-}
-/// One authorized check at a site: a nested verifier's declarative
-/// prerequisites first (evaluated in-process, or as the generated predicate
-/// command when they defer), then the pinned command itself.
-pub async fn execute_check_at(
-    site: &super::process::CommandSite<'_>,
-    contract: &AcceptanceContract,
-    reference: &FrozenCommandRef,
-    command: &crate::acceptance_world::AuthorizedCommand,
-    cancel: Arc<AtomicBool>,
-) -> WorkflowResult<CheckResult> {
-    if reference.kind == crate::acceptance_world::AcceptanceCommandKind::NestedVerifier {
-        let entry = contract
-            .acceptance
-            .iter()
-            .chain(&contract.supplementary)
-            .find(|e| e.id == reference.acceptance_id)
-            .expect("authorized entry");
-        if let crate::task_set_contract::AcceptanceCheck::Floor { contract: floor } = &entry.check {
-            let mut prerequisites = floor.clone();
-            prerequisites.typed_verifier_command = None;
-            let facts = control::Control::new(site.timeout_secs, cancel.clone()).run(|| {
-                crate::collect_declarative_floor_facts(
-                    &crate::v2::deliverable_contract::ContractRoots::project_only(
-                        site.project.to_string_lossy(),
-                    ),
-                    &prerequisites,
-                )
-            })?;
-            match crate::evaluate_declarative_floor(&prerequisites, &facts) {
-                crate::DeclarativeFloorEvaluation::Passed => {}
-                crate::DeclarativeFloorEvaluation::Failed { findings } => {
-                    return Ok(CheckResult {
-                        fault: None,
-                        classification: None,
-                        acceptance_id: reference.acceptance_id.clone(),
-                        exit_code: Some(1),
-                        quota_walk_count: 0,
-                        stdout: vec![],
-                        stderr: findings.join("; ").into_bytes(),
-                        operational_error: None,
-                        environment_note: None,
-                    });
-                }
-                crate::DeclarativeFloorEvaluation::Deferred { .. } => {
-                    let generated =
-                        crate::acceptance_world::AuthorizedCommand::floor_prerequisites(
-                            site.project,
-                            floor,
-                        )?;
-                    let checked =
-                        run_at(site, &reference.acceptance_id, &generated, cancel.clone()).await?;
-                    if checked.exit_code != Some(0) || checked.operational_error.is_some() {
-                        return Ok(checked);
-                    }
-                }
-            }
-        }
-    }
-    run_at(site, &reference.acceptance_id, command, cancel).await
 }

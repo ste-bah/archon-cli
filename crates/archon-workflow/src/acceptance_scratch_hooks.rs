@@ -17,6 +17,28 @@ pub type AllowanceHook = Arc<dyn Fn() -> CheckAllowance + Send + Sync>;
 /// Told each finished check's result.
 pub type CheckHook = Arc<dyn Fn(&CheckResult) + Send + Sync>;
 
+/// The cancellation flag and callbacks supplied for one observation.
+#[derive(Clone)]
+pub struct ObserveControl {
+    pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) hooks: ObserveHooks,
+}
+
+impl ObserveControl {
+    /// Caller-provided cancellation and observation hooks.
+    pub fn new(cancel: Arc<std::sync::atomic::AtomicBool>, hooks: ObserveHooks) -> Self {
+        Self { cancel, hooks }
+    }
+
+    /// Caller-provided cancellation and resource policy, without callbacks.
+    pub fn for_resource_limits(
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+        resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    ) -> Self {
+        Self::new(cancel, ObserveHooks::for_resource_limits(resource_limits))
+    }
+}
+
 /// What the observation may spend on its next check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckAllowance {

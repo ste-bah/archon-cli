@@ -81,6 +81,7 @@ pub(super) struct FirstSite {
     root: PathBuf,
     target: PathBuf,
 }
+
 impl FirstSite {
     pub(super) fn of(
         roots: &ScratchRoots,
@@ -124,8 +125,9 @@ fn site_neutral(
 /// The fresh site must match `first` on every part that does not depend on
 /// its path (source, copied project inputs, tools, build configuration,
 /// environment): a difference is the host's change under the batch. A site
-/// that cannot be torn down stays in `roots`, so the observation's own
-/// cleanup reports it. Every failure here is the host's and stops the batch.
+/// that cannot be torn down stays in `roots` until the observation records
+/// the failure; attribution requires a fresh-site proof that one check alone
+/// used it.
 pub(super) fn restore(
     roots: &mut Option<ScratchRoots>,
     policy: &ScratchPolicy,
@@ -135,13 +137,8 @@ pub(super) fn restore(
 ) -> WorkflowResult<BuildIdentity> {
     let mut lease = None;
     if let Some(current) = roots.as_mut() {
-        lease = (current.forget_unless_idle())
-            .and_then(|()| current.tear_down_keeping_lease())
-            .map_err(|e| {
-                invalid(format!(
-                    "the scratch site could not be restored for the remaining checks: {e}"
-                ))
-            })?;
+        current.forget_unless_idle()?;
+        lease = current.tear_down_keeping_lease()?;
     }
     *roots = None;
     let fresh = ScratchRoots::prepare_leased(policy, commit, checks, lease)?;

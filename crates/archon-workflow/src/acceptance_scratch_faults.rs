@@ -81,6 +81,18 @@ pub enum FaultCause {
     SiblingTooLarge,
     /// It alone names a sibling whose shape the site cannot copy.
     SiblingShapeRefused,
+    /// The process layer observed an output limit violation.
+    OutputLimitExceeded,
+    /// The process layer observed a scratch size limit violation.
+    ScratchLimitExceeded,
+    /// A process started by the check kept a captured output pipe open.
+    PipesHeld,
+    /// A process started by the check still used the scratch after its tree ended.
+    LeftBehind,
+    /// The process layer could not verify teardown of the check's process tree.
+    TeardownUnverified,
+    /// The check left its private, verified site in a state the host could not remove.
+    SiteTeardownFailed,
 }
 
 const STOP: &str = "wait for every process it starts and leave none running when it ends";
@@ -118,6 +130,27 @@ impl FaultCause {
             Self::SiblingShapeRefused => check(
                 "it names a path outside its working directory that is not a directory where one is needed, or that collides with a path of the site",
                 "name only existing sibling files or directories beside its working directory, by the path they have",
+            ),
+            Self::OutputLimitExceeded => check(
+                "its output went past the site's output limit",
+                "print only what decides its verdict, and write bulky output to a file under a temporary directory",
+            ),
+            Self::ScratchLimitExceeded => check(
+                "the files it wrote went past the site's scratch size limit",
+                "write less data, and remove what it no longer needs while it runs",
+            ),
+            Self::PipesHeld => check(
+                "a process it started kept its output pipes open after it ended",
+                STOP,
+            ),
+            Self::LeftBehind => check(
+                "processes it started still used the scratch after its process tree ended",
+                STOP,
+            ),
+            Self::TeardownUnverified => CheckFault::Ambiguous,
+            Self::SiteTeardownFailed => check(
+                "permission was denied when removing a file from its scratch site (for example, one with an immutable flag)",
+                "leave the scratch site removable when the check ends",
             ),
         }
     }

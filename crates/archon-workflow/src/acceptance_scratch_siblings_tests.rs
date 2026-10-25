@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "acceptance_scratch_siblings_fault_tests.rs"]
+mod fault_tests;
 #[path = "acceptance_scratch_siblings_target_tests.rs"]
 mod target_tests;
 
@@ -383,17 +385,17 @@ fn copies_a_standalone_sibling_file_and_omits_nested_build_output() {
     assert!(
         evidence
             .iter()
-            .any(|revision| revision.path == PathBuf::from("../note.txt"))
+            .any(|revision| revision.path.as_path() == std::path::Path::new("../note.txt"))
     );
     assert!(
         evidence
             .iter()
-            .any(|revision| revision.path == PathBuf::from("../sibling"))
+            .any(|revision| revision.path.as_path() == std::path::Path::new("../sibling"))
     );
     assert_eq!(
         evidence
             .iter()
-            .find(|revision| revision.path == PathBuf::from("../sibling"))
+            .find(|revision| revision.path.as_path() == std::path::Path::new("../sibling"))
             .unwrap()
             .commit,
         None

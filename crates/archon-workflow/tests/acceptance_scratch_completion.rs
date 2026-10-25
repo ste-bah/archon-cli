@@ -212,8 +212,10 @@ async fn cancelled_observation_does_not_create_a_worktree() {
         "chain",
         &refs,
         &t.path().join("evidence"),
-        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
-        Arc::new(AtomicBool::new(true)),
+        archon_workflow::acceptance_scratch::ObserveControl::for_resource_limits(
+            Arc::new(AtomicBool::new(true)),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        ),
     )
     .await
     .unwrap();
