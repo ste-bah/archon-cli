@@ -108,10 +108,118 @@ fn a_temp_path_does_not_make_one_answer_look_new() {
 }
 
 #[test]
+fn scratch_paths_inside_json_values_preserve_the_surrounding_message() {
+    assert_ne!(
+        result_digest(r#"{"msg":"/tmp/x: error E0308"}"#),
+        result_digest(r#"{"msg":"/tmp/y: error E0599"}"#),
+        "different diagnostics stay distinct when their paths change"
+    );
+    assert_eq!(
+        result_digest(r#"{"msg":"/tmp/x: error E0308"}"#),
+        result_digest(r#"{"msg":"/tmp/y: error E0308"}"#),
+        "a scratch path alone does not count as news"
+    );
+}
+
+#[test]
 fn an_elapsed_time_does_not_make_one_answer_look_new() {
     let first = result_digest("test result: ok. 334 passed; finished in 3.86s");
     let second = result_digest("test result: ok. 334 passed; finished in 4.02s");
     assert_eq!(first, second, "a duration must not count as news");
+}
+
+#[test]
+fn a_timestamp_does_not_make_one_answer_look_new() {
+    let first = result_digest("completed at 2026-10-16T14:23:01.123Z");
+    let second = result_digest("completed at 2026-10-17T09:05:44.987+01:00");
+    assert_eq!(first, second, "an attempt timestamp must not count as news");
+    assert_eq!(
+        result_digest("[16/Oct/2026:14:23:01 +0000] finished"),
+        result_digest("[17/Oct/2026:09:05:44 +0000] finished")
+    );
+    assert_eq!(
+        result_digest("2026-10-16 14:23:01 completed"),
+        result_digest("2026-10-17 09:05:44 completed")
+    );
+    assert_eq!(
+        result_digest("Oct 16 14:23:01 service ready"),
+        result_digest("Nov 17 09:05:44 service ready")
+    );
+}
+
+#[test]
+fn compact_json_timestamps_are_ignored() {
+    assert_eq!(
+        result_digest(r#"{"ts":"2026-10-16T14:23:01Z"}"#),
+        result_digest(r#"{"ts":"2026-10-17T09:05:44Z"}"#)
+    );
+}
+
+#[test]
+fn distinct_urls_and_iso_date_paths_remain_novel() {
+    assert_ne!(
+        result_digest("requested https://example.com/a"),
+        result_digest("requested https://example.com/b"),
+        "different URL paths are different answers"
+    );
+    assert_ne!(
+        result_digest("requested https://example.com/2026-10-16T14:23:01/a"),
+        result_digest("requested https://example.com/2026-10-17T14:23:01/a"),
+        "an ISO-looking date embedded in a URL path is meaningful"
+    );
+}
+
+#[test]
+fn a_request_id_does_not_make_one_answer_look_new() {
+    assert_eq!(
+        result_digest("request_id=550e8400-e29b-41d4-a716-446655440000 completed"),
+        result_digest("request_id=6ba7b810-9dad-11d1-80b4-00c04fd430c8 completed")
+    );
+    assert_eq!(
+        result_digest("request_id req_alpha123 completed"),
+        result_digest("request_id req_beta456 completed")
+    );
+    assert_eq!(
+        result_digest("request_id: req_alpha123 completed"),
+        result_digest("request_id: req_beta456 completed")
+    );
+    assert_eq!(
+        result_digest(r#"{"level":"info","request_id":"req_alpha123"}"#),
+        result_digest(r#"{"level":"info","request_id":"req_beta456"}"#)
+    );
+    assert_eq!(
+        result_digest("request_id: req_alpha123\nnext value"),
+        result_digest("request_id: req_beta456\nnext value")
+    );
+    assert_ne!(
+        result_digest("request_id:\nalpha content"),
+        result_digest("request_id:\nbeta content"),
+        "the flag replaces only the request id and preserves following content"
+    );
+    assert_eq!(
+        result_digest("Oct  6 14:23:01 service ready"),
+        result_digest("Nov 17 09:05:44 service ready")
+    );
+    assert_eq!(
+        result_digest("[2026-10-16 14:23:01] finished"),
+        result_digest("[2026-10-17 09:05:44] finished")
+    );
+}
+
+#[test]
+fn json_with_spaced_values_normalises_ids_and_scratch_paths() {
+    assert_eq!(
+        result_digest(
+            r#"{"ts":"2026-10-16T14:23:01Z","request_id":"req_alpha123","msg":"service ready","path":"/private/tmp/ac-x-1234/output file"}"#
+        ),
+        result_digest(
+            r#"{"ts":"2026-10-17T09:05:44Z","request_id":"req_beta456","msg":"service ready","path":"/private/tmp/ac-x-9876/output file"}"#
+        )
+    );
+    assert_ne!(
+        result_digest(r#"{"request_id":"req_alpha123","msg":"service ready"}"#),
+        result_digest(r#"{"request_id":"req_beta456","msg":"service failed"}"#)
+    );
 }
 
 /// And a genuinely different answer still reads as different — the stripping
@@ -125,6 +233,21 @@ fn normalisation_does_not_collapse_real_differences() {
     let one = result_digest("src/a.rs:12: match");
     let other = result_digest("src/b.rs:99: match");
     assert_ne!(one, other, "different files are different answers");
+    assert_ne!(
+        result_digest("release 2026-10-16"),
+        result_digest("release 2026-10-17"),
+        "date-only values are meaningful"
+    );
+    assert_ne!(
+        result_digest("object 550e8400-e29b-41d4-a716-446655440000"),
+        result_digest("object 6ba7b810-9dad-11d1-80b4-00c04fd430c8"),
+        "unlabelled UUIDs are meaningful"
+    );
+    assert_ne!(
+        result_digest("req_schema"),
+        result_digest("req_data"),
+        "unlabelled req words are meaningful"
+    );
 }
 
 /// The live shape: a test suite re-run whose only change is its duration.
@@ -161,6 +284,14 @@ fn counts_are_not_collapsed() {
     assert_ne!(
         result_digest("334 passed; 0 failed"),
         result_digest("330 passed; 4 failed")
+    );
+}
+
+#[test]
+fn a_changed_test_count_stays_novel() {
+    assert_ne!(
+        result_digest("test result: ok. 334 passed; 0 failed"),
+        result_digest("test result: ok. 335 passed; 0 failed")
     );
 }
 

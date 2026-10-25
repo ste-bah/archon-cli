@@ -1,17 +1,13 @@
-//! Issue-124: an operating-system write boundary around the shell of a write
-//! branch that runs in its own isolated item worktree.
+//! Issue-124: an operating-system write boundary around shell child processes.
 //!
 //! # The gap
 //!
-//! A write-branch coder rewrote a live data file under the project root with
-//! `python3 - <<EOF … os.replace(…)`, from its worktree, and nothing refused
-//! it. The file tools resolve one path and can be judged; a shell cannot be:
-//! an interpreter's inline code, a heredoc, `$(…)` and a script file all
-//! write paths no reading of the command text reliably finds, so a lexical
-//! refusal would be a control in appearance only (`BashTool::description_for`
-//! says the same). The boundary therefore sits under the process: on macOS
-//! the command runs under `sandbox-exec` with a profile the host computes
-//! before the command starts, and the kernel refuses the write with `EPERM`.
+//! A write agent once rewrote a live project file from its worktree with an
+//! interpreter's atomic rename, and nothing refused it. File tools resolve one
+//! path and can be judged; a shell cannot: inline code, heredocs, `$(...)` and
+//! scripts write paths that lexical checks cannot reliably find. Refusal by
+//! text alone is only appearance. The boundary sits under the process: macOS
+//! `sandbox-exec` and Linux Landlock have the kernel refuse writes under sealed roots.
 //!
 //! # The profile
 //!
@@ -51,21 +47,18 @@
 //! judged on the real path.
 //!
 //! # What this does not cover
-//!
-//! Only the Bash tool's child processes are bounded. A process the command
+//! Only the shell's child processes are bounded. A process the command
 //! asks another, unbounded process to run — a build daemon the host started,
 //! an MCP server — is not.
-//!
-//! # Linux, and hosts with no kernel boundary (Issue-227/234)
-//!
+//! # Linux and hosts without a kernel boundary (Issue-227/234)
 //! On Linux the same sets are a Landlock ruleset
 //! (`archon_shell::write_boundary::landlock`). On a host with neither
 //! `sandbox-exec` nor Landlock (Windows), the host-side snapshot boundary
 //! (`bash_write_sandbox_snapshot`) records the sealed roots, lets the command
 //! run, then restores and names any change — for read-only shells AND write
 //! branches, so a write branch can no longer edit the canonical checkout
-//! (Issue-213). Only where even that cannot be taken is a read-only call
-//! refused and a write branch run unbounded with a logged warning.
+//! (Issue-213). On macOS and Linux, failure to apply the kernel boundary
+//! refuses the call; the snapshot is not a fallback there.
 
 use std::path::PathBuf;
 
@@ -73,7 +66,7 @@ use crate::tool::{ToolContext, ToolResult};
 use crate::workflow_read_guard::{BoundaryPaths, checkout_common_dir, spellings};
 use archon_shell::paths::path_starts_with;
 use archon_shell::write_boundary::landlock::LandlockSandbox;
-use archon_shell::write_boundary::{Mechanism, SnapshotBoundary, refusal, warn_unbounded_once};
+use archon_shell::write_boundary::{Mechanism, SnapshotBoundary, refusal};
 
 /// The host temp variables a private temp directory replaces (Linux).
 const TEMP_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
@@ -94,8 +87,7 @@ const HOST_DIR_ENV_KEYS: &[&str] = &[
     "CCACHE_DIR",
 ];
 
-/// The start of the note appended to a bounded command's result when a
-/// write was refused; pinned by tests.
+/// The start of the bounded command's refusal note; pinned by tests.
 pub(super) const WRITE_BOUNDARY_NOTE_MARKER: &str = "[write boundary]";
 
 /// What one command may and may not write, as absolute paths under every
@@ -103,7 +95,7 @@ pub(super) const WRITE_BOUNDARY_NOTE_MARKER: &str = "[write boundary]";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct WriteBoundary {
     protected: Vec<PathBuf>,
-    /// Drawn around a read-only call (Batch G).
+    /// Drawn around a read-only call or isolated write branch.
     read_only: bool,
     /// Every ancestor of a protected root, denied as a `literal`.
     ancestors: Vec<PathBuf>,
@@ -134,8 +126,8 @@ pub(super) struct ShellBoundary {
     pub(super) applied: Applied,
 }
 
-/// Builds this command's boundary. Unbounded write branches are logged and run;
-/// unbounded read-only calls and boundary construction failures are refused.
+/// Builds this command's boundary. Calls are refused when no boundary can be
+/// applied or when boundary construction fails.
 /// Landlock's private temp directory is written into `env`.
 pub(super) fn for_call(
     ctx: &ToolContext,
@@ -146,6 +138,12 @@ pub(super) fn for_call(
         return Ok(None);
     };
     let Some(paths) = guard.boundary_paths() else {
+        if guard.isolated_write_branch() {
+            let text = archon_shell::write_boundary::missing_stamp_refusal(
+                "This isolated write branch's command",
+            );
+            return Err(ToolResult::refusal(format!("Error: {text}")));
+        }
         return Ok(None);
     };
     let fail_closed = |what: &str, reason: &str| {
@@ -157,12 +155,13 @@ pub(super) fn for_call(
     };
     let mechanism = match mechanism() {
         Ok(mechanism) => mechanism,
-        Err(reason) if paths.read_only => {
-            return Err(fail_closed("This read-only call's shell", &reason));
-        }
         Err(reason) => {
-            warn_unbounded_once("isolated write branches' Bash commands are", &reason);
-            return Ok(None);
+            let what = if paths.read_only {
+                "This read-only call's shell"
+            } else {
+                "This isolated write branch's shell"
+            };
+            return Err(fail_closed(what, &reason));
         }
     };
     let boundary = for_shell(paths, env, extra_env_keys, guard.allows_git_mutation());

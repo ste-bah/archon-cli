@@ -1,4 +1,7 @@
 use super::*;
+use std::sync::Mutex;
+
+use crate::{WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest};
 
 #[test]
 fn verification_blocked_after_patch_is_contract_not_safety() {
@@ -8,10 +11,79 @@ fn verification_blocked_after_patch_is_contract_not_safety() {
     assert!(is_write_branch_validation_error(error));
     assert_eq!(write_branch_error_kind(error), BranchFailureKind::Contract);
 
-    let result = write_branch_validation_error_result("impl-task", None, error);
+    let result = write_branch_validation_error_result("TASK-X-001", None, error);
 
     assert_eq!(result.status, WorkflowV2Status::NeedsReview);
     assert_eq!(result.data["failure_kind"], "contract");
+}
+
+#[tokio::test]
+async fn criterion_text_does_not_change_the_needs_review_classification() {
+    struct ExhaustingClient(Mutex<Vec<String>>);
+
+    #[async_trait::async_trait]
+    impl WorkflowV2AgentClient for ExhaustingClient {
+        async fn run_agent(&self, _: String) -> Result<String, WorkflowV2AgentError> {
+            Ok(self.0.lock().unwrap().remove(0))
+        }
+
+        async fn continue_agent_request(
+            &self,
+            _: &WorkflowV2AgentRequest,
+            _: String,
+        ) -> Result<String, WorkflowV2AgentError> {
+            self.run_agent(String::new()).await
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("owned.txt");
+    std::fs::write(&path, "changed").unwrap();
+    let request = WorkflowV2AgentRequest {
+        call: WorkflowV2HostCall {
+            id: "call-x-001".into(),
+            method: WorkflowV2HostMethod::Implementation,
+            write_mode: Some(WorkflowV2WriteMode::Coordinated),
+            options: WorkflowV2HostOptions::default(),
+        },
+        role: "coder".into(),
+        task: "Complete the declared validation task".into(),
+        constraints: Vec::new(),
+        input: serde_json::json!({
+            "item": {"canonical_task_ids": ["TASK-X-001"]},
+            "task_universe": {"tasks": [{
+                "canonical_task_id": "TASK-X-001",
+                "acceptance_criteria": ["read-only verification timed out"]
+            }]}
+        }),
+        repository_root: Some(temp.path().display().to_string()),
+        project_artifacts: Default::default(),
+        target_files: vec!["owned.txt".into()],
+        target_ownership_scopes: Vec::new(),
+    };
+    let mut malformed = WorkflowV2Result::accepted("completed");
+    malformed.evidence.push(crate::WorkflowV2Evidence::new(
+        crate::WorkflowV2EvidenceKind::Implementation,
+        "updated the declared validation file",
+    ));
+    malformed
+        .files_changed
+        .push(WorkflowV2FileRecord::new(path.display().to_string()));
+    malformed.data = serde_json::json!({"criterion_results": [{
+        "task_id": "TASK-X-001", "criterion_index": 1,
+        "status": "invalid", "evidence": "the shape is invalid"
+    }]});
+    let output = serde_json::to_string(&malformed).unwrap();
+    let client = ExhaustingClient(Mutex::new(vec![output.clone(), output]));
+    let error = WorkflowV2AgentAdapter::new()
+        .run_with_repair(&client, &request)
+        .await
+        .unwrap_err();
+    let error_text = error.to_string();
+    assert!(error_text.contains("read-only"), "{error_text}");
+    assert!(error_text.contains("timed out"), "{error_text}");
+    let classification = write_branch_error_kind(&error_text);
+    assert_eq!(classification, BranchFailureKind::Contract, "{error_text}");
 }
 
 #[test]

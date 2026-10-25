@@ -12,10 +12,11 @@
 //! `{task_id, criterion_index, criterion, status: "met" | "unmet", evidence}`
 //!
 //! The criteria come from the host's task universe (the same scoped copy the
-//! request carries), never from the agent. A branch that claims `accepted`
-//! while any criterion has no entry, is not `met`, or has no evidence is not
-//! accepted: it is demoted to `needs_review`, every such criterion named in
-//! a residual gap, and its work is kept as partial work for the next attempt.
+//! request carries), never from the agent. An accepted or no-op branch must
+//! return a well-formed entry for every claimed criterion. A malformed
+//! envelope is repaired through the bounded contract path. A well-formed
+//! `unmet` answer on an accepted or no-op result is demoted to `needs_review`
+//! and named in a residual gap.
 //! A schema checks shape, not truth: this bounds what "accepted" can claim;
 //! the verifiers still judge whether the claim holds.
 
@@ -106,24 +107,8 @@ fn find_universe(value: &Value) -> Option<&Value> {
 
 /// Why `criterion` is not met by `data`'s entries, or `None` when it is.
 fn unmet_reason(criterion: &Criterion, single_task: bool, data: &Value) -> Option<String> {
-    let entries = data.get(CRITERION_RESULTS_KEY).and_then(Value::as_array);
-    let entry = entries.into_iter().flatten().rev().find(|entry| {
-        let task = entry.get("task_id").and_then(Value::as_str).map(str::trim);
-        let task_ok = task.map_or(single_task, |task| task == criterion.task_id);
-        let index = entry
-            .get("criterion_index")
-            .or_else(|| entry.get("index"))
-            .and_then(Value::as_u64);
-        let text = entry
-            .get("criterion")
-            .and_then(Value::as_str)
-            .map(str::trim);
-        task_ok
-            && (index == Some(criterion.index as u64)
-                || (index.is_none() && text == Some(criterion.text.as_str())))
-    });
-    let Some(entry) = entry else {
-        return Some("no criterion_results entry names it".to_string());
+    let Some(entry) = matching_entry(criterion, single_task, data) else {
+        return Some("it was not reported met with evidence".to_string());
     };
     let status = entry
         .get("status")
@@ -132,26 +117,57 @@ fn unmet_reason(criterion: &Criterion, single_task: bool, data: &Value) -> Optio
         .trim()
         .to_ascii_lowercase();
     if status != "met" {
-        return Some(if status.is_empty() {
-            "its entry gives no status".to_string()
-        } else {
+        return Some(if status == "unmet" {
             format!("its entry says `{status}`")
+        } else {
+            "it was not reported met with evidence".to_string()
         });
     }
-    let evidenced = match entry.get("evidence") {
+    (!has_evidence(entry)).then(|| "it was not reported met with evidence".to_string())
+}
+
+fn has_evidence(entry: &Value) -> bool {
+    match entry.get("evidence") {
         Some(Value::String(text)) => !text.trim().is_empty(),
         Some(Value::Array(items)) => !items.is_empty(),
         Some(Value::Object(object)) => !object.is_empty(),
         _ => false,
-    };
-    (!evidenced).then(|| "its entry gives no evidence".to_string())
+    }
 }
 
-/// Hold an accepted write result to its per-criterion contract; see the
-/// module doc. A result that is not `accepted`, or a call with no criteria to
-/// answer for, is left as it is.
+fn matching_entry<'a>(
+    criterion: &Criterion,
+    single_task: bool,
+    data: &'a Value,
+) -> Option<&'a Value> {
+    data.get(CRITERION_RESULTS_KEY)
+        .and_then(Value::as_array)?
+        .iter()
+        .rev()
+        .find(|entry| {
+            let task = entry.get("task_id").and_then(Value::as_str).map(str::trim);
+            let task_ok = task.map_or(single_task, |task| task == criterion.task_id);
+            let index = entry
+                .get("criterion_index")
+                .or_else(|| entry.get("index"))
+                .and_then(Value::as_u64);
+            let text = entry
+                .get("criterion")
+                .and_then(Value::as_str)
+                .map(str::trim);
+            task_ok
+                && (index == Some(criterion.index as u64)
+                    || (index.is_none() && text == Some(criterion.text.as_str())))
+        })
+}
+
+/// Hold an accepted or no-op write result to its per-criterion contract; see
+/// the module doc. Other statuses and calls with no criteria are left as they are.
 pub fn enforce(input: &Value, result: &mut WorkflowV2Result) {
-    if result.status != WorkflowV2Status::Accepted {
+    if !matches!(
+        result.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) {
         return;
     }
     let criteria = claimed_criteria(input);
@@ -186,7 +202,7 @@ pub fn enforce(input: &Value, result: &mut WorkflowV2Result) {
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Review,
         format!(
-            "host demoted an accepted write result: {} of {} acceptance criteria were not reported met with evidence",
+            "host demoted a write result: {} of {} acceptance criteria were not reported met with evidence",
             unmet.len(),
             criteria.len()
         ),
@@ -203,11 +219,53 @@ pub fn enforce(input: &Value, result: &mut WorkflowV2Result) {
         result.residual_gaps.push(WorkflowV2ResidualGap {
             id: format!("{UNMET_CRITERIA_GAP_PREFIX}{}", sanitize(task)),
             description: format!(
-                "task {task} was claimed accepted without every acceptance criterion reported met with evidence: {named}"
+                "task {task} was claimed complete (accepted or noop) without every acceptance criterion reported met with evidence: {named}"
             ),
             severity: Some("review".to_string()),
         });
     }
+}
+
+/// Validate the required envelope shape before `enforce` classifies a valid
+/// `unmet` answer as work needing review. Shape errors are contract errors so
+/// the adapter can route them through its existing bounded repair path.
+pub fn validate_envelope(input: &Value, data: &Value) -> Result<(), String> {
+    let criteria = claimed_criteria(input);
+    if criteria.is_empty() {
+        return Ok(());
+    }
+    data.get(CRITERION_RESULTS_KEY)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("data.{CRITERION_RESULTS_KEY} must be an array"))?;
+    let single_task = criteria.iter().all(|c| c.task_id == criteria[0].task_id);
+    for criterion in &criteria {
+        let entry = matching_entry(criterion, single_task, data);
+        let Some(entry) = entry else {
+            return Err(format!(
+                "data.{CRITERION_RESULTS_KEY} is missing an entry for {} criterion #{}",
+                criterion.task_id, criterion.index
+            ));
+        };
+        let status = entry
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .filter(|status| matches!(status.as_str(), "met" | "unmet"))
+            .ok_or_else(|| {
+                format!(
+                    "data.{CRITERION_RESULTS_KEY} entry for {} criterion #{} ({}) must have status `met` or `unmet` as a string",
+                    criterion.task_id, criterion.index, criterion.text
+                )
+            })?;
+        if !has_evidence(entry) {
+            return Err(format!(
+                "data.{CRITERION_RESULTS_KEY} entry for {} criterion #{} ({status}) must include non-empty evidence",
+                criterion.task_id, criterion.index
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn sanitize(raw: &str) -> String {
@@ -234,9 +292,9 @@ pub fn prompt_section(input: &Value) -> String {
          Return data.criterion_results: one entry for EVERY criterion below, \
          {\"task_id\", \"criterion_index\", \"criterion\", \"status\": \"met\" | \"unmet\", \
          \"evidence\": what you ran or inspected on this tree that establishes it (quote the output)}. \
-         An `accepted` result with any criterion missing, not `met`, or without evidence is not \
-         accepted: the host returns it as needs_review naming those criteria. If a criterion is \
-         not met, say so honestly.\n",
+         Missing or malformed entries, statuses, or evidence on an accepted or no-op result \
+         are contract errors that will be re-asked. A well-formed `unmet` answer on an accepted or no-op result is returned as \
+         needs_review naming those criteria. If a criterion is not met, say so honestly.\n",
     );
     for c in &criteria {
         text.push_str(&format!("- {} #{}: {}\n", c.task_id, c.index, c.text));

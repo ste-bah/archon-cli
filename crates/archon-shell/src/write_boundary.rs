@@ -14,13 +14,10 @@
 //!   than refusing the write, but nothing a command writes under a sealed root
 //!   persists and no verdict taken from a tampered tree stands (Issue-234).
 //!
-//! What a caller does without even that is the caller's decision, and never a
-//! silent one: a caller that REQUIRES a bounded child (a read-only call's
-//! shell, a host-run verifier) refuses to run it ([`refusal`]); a caller
-//! that only ever had a best-effort bound runs unbounded and says so in the
-//! log ([`warn_unbounded_once`]). With [`Mechanism::HostSnapshot`] always
-//! available off macOS/Linux, that fallback is reached only where even the
-//! snapshot cannot be taken.
+//! A caller that requires a bounded child (a Bash shell or host-run verifier)
+//! refuses to run it ([`refusal`]). A caller must also
+//! refuse when the host did not stamp the boundary paths: without that stamp
+//! it cannot identify which roots to seal.
 
 use std::sync::OnceLock;
 
@@ -75,17 +72,15 @@ pub fn refusal(what: &str, reason: &str) -> String {
     text
 }
 
-/// Log, once per process, that a best-effort caller runs unbounded.
-pub fn warn_unbounded_once(what: &str, reason: &str) {
-    static WARNED: OnceLock<()> = OnceLock::new();
-    WARNED.get_or_init(|| {
-        tracing::warn!(
-            os = std::env::consts::OS,
-            reason,
-            "{what} run WITHOUT an OS write boundary (best effort only for this caller; \
-             callers that require one refuse to run instead)"
-        );
-    });
+/// The host failed to stamp the roots this boundary must seal.
+pub fn missing_stamp_refusal(what: &str) -> String {
+    let text = format!(
+        "{what} was refused: the host did not provide the boundary paths (stamp, worktree root \
+         or protected roots), so it cannot seal the project, repository and run roots. Report \
+         this in your result."
+    );
+    tracing::error!("{text}");
+    text
 }
 
 #[cfg(target_os = "macos")]

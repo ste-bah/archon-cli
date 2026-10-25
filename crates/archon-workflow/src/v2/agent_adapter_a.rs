@@ -166,22 +166,30 @@ impl WorkflowV2AgentAdapter {
         // that, never let through on the strength of a well-formed `data`.
         // Issue-116: a contract violation above is reported TOGETHER with
         // this one, so a single repair turn is told everything.
+        let mut violations = Vec::new();
         match validate_request_specific_result(request, result, agent_status) {
-            Ok(()) => {
-                super::declared_output_contract::enforce_declared_call_outputs(request, result)?
-            }
-            Err(error) if error.is_contract_violation() => {
-                let mut violations = vec![error];
-                violations.extend(
-                    super::declared_output_contract::enforce_declared_call_outputs(request, result)
-                        .err(),
-                );
-                WorkflowV2AgentError::all_of(violations)?
-            }
+            Ok(()) => {}
+            Err(error) if error.is_contract_violation() => violations.push(error),
             Err(error) => return Err(error),
         }
-        // Batch O (C6b): an accepted write answers for every criterion.
-        if request.is_write_capable() {
+        violations.extend(
+            super::declared_output_contract::enforce_declared_call_outputs(request, result).err(),
+        );
+        // An accepted result or an explicit no-op completes the claimed task;
+        // blocked and review results report why completion is not being claimed.
+        if request.is_write_capable()
+            && matches!(result.status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
+        {
+            violations.extend(
+                super::criterion_results::validate_envelope(&request.input, &result.data)
+                    .err()
+                    .map(WorkflowV2AgentError::CriterionResultsMalformed),
+            );
+        }
+        WorkflowV2AgentError::all_of(violations)?;
+        if request.is_write_capable()
+            && matches!(result.status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
+        {
             super::criterion_results::enforce(&request.input, result);
         }
         crate::repository_audit::contract::enforce(request, result)

@@ -351,6 +351,8 @@ async fn repair_allows_one_more_attempt_for_a_new_error_class() {
         "crates/archon-trading/src/data_lake.rs"
     );
 }
+#[path = "agent_adapter_criterion_repair_tests.rs"]
+mod criterion_repair_tests;
 
 #[test]
 fn artifact_declaring_noop_requires_existing_project_artifact_evidence() {

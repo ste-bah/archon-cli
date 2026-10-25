@@ -9,6 +9,9 @@ pub(in crate::v2::write) fn write_branch_error_kind(error: &str) -> BranchFailur
         return BranchFailureKind::Execution;
     }
     let lower = root_write_branch_error(error).to_ascii_lowercase();
+    if lower.contains("invalid per-criterion result envelope") {
+        return BranchFailureKind::Contract;
+    }
     if lower.contains("changed files outside declared ownership")
         || lower.contains("implementation agent changed files outside declared target_files")
         || lower.contains("changed files outside declared target_files")
