@@ -105,10 +105,58 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          sudo rm -f /usr/local/bin/cargo /usr/local/bin/rustc /usr/local/bin/rustup
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustup" default stable
+          is_rustup_init() {
+            local file="$1" resolved version
+            resolved="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$file" 2>/dev/null || true)"
+            if [[ "$resolved" == *rustup-init* ]]; then
+              return 0
+            fi
+            version="$("$file" --version 2>&1 || true)"
+            [[ "$version" == *rustup-init* ]]
+          }
+
+          candidates=()
+          rustup_path=""
+          home_rustup="$HOME/.cargo/bin/rustup"
+          candidates+=("$home_rustup")
+          if [[ -x "$home_rustup" ]] && ! is_rustup_init "$home_rustup"; then
+            rustup_path="$home_rustup"
+          else
+            IFS=: read -r -a path_dirs <<< "$PATH"
+            for path_dir in "${path_dirs[@]}"; do
+              [[ -n "$path_dir" ]] || path_dir="."
+              candidate="$path_dir/rustup"
+              [[ -x "$candidate" ]] || continue
+              candidates+=("$candidate")
+              if ! is_rustup_init "$candidate"; then
+                rustup_path="$candidate"
+                break
+              fi
+            done
+          fi
+
+          if [[ -z "$rustup_path" ]]; then
+            printf 'No usable rustup found. Candidates checked: %s\n' "${candidates[*]}" >&2
+            exit 1
+          fi
+
+          rustup_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$rustup_path")"
+          for file in /usr/local/bin/cargo /usr/local/bin/rustc /usr/local/bin/rustup; do
+            [[ -e "$file" || -L "$file" ]] || continue
+            if is_rustup_init "$file"; then
+              file_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$file")"
+              [[ "$file_real" == "$rustup_real" ]] && continue
+              sudo rm -f "$file"
+            fi
+          done
+
+          rustup_dir="$(dirname "$rustup_path")"
+          echo "$rustup_dir" >> "$GITHUB_PATH"
+          export PATH="$rustup_dir:$PATH"
+          "$rustup_path" default stable
+          command -v cargo
           cargo --version
+          rustup --version
 
       # The `targets:` input on the toolchain action adds the target to
       # *stable*, but rust-toolchain.toml pins the channel and rustup honours
