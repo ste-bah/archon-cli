@@ -6,6 +6,21 @@ trap {
 $scriptPath = (Resolve-Path 'scripts/setup-trading-tools.ps1').Path
 . $scriptPath -LoadFunctionsOnly
 $python = (Get-Command python -ErrorAction Stop).Source
+$externalConsoleOutput = [IO.StringWriter]::new()
+$originalConsoleOut = [Console]::Out
+try {
+    [Console]::SetOut($externalConsoleOutput)
+    try {
+        Invoke-External $python @('-c', "import sys; print('external stderr marker', file=sys.stderr); sys.exit(7)") | Out-Null
+        throw 'External command assertion failed: nonzero exit was accepted'
+    } catch {
+        if ($_.Exception.Message -notmatch 'Command failed with exit 7') { throw }
+    }
+} finally { [Console]::SetOut($originalConsoleOut) }
+if ($externalConsoleOutput.ToString() -notmatch '(?m)^external stderr marker\r?$') {
+    throw "External command assertion failed: stderr was not written before failure: $($externalConsoleOutput.ToString())"
+}
+Write-Output 'PASS failing external command stderr reaches console output'
 $cases = @(
     @{ Specifier = '>=3.10,<3.13'; Version = '3.12'; Expected = $true },
     @{ Specifier = '>=3.10,<3.13'; Version = '3.13'; Expected = $false },

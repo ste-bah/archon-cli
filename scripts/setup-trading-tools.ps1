@@ -41,14 +41,20 @@ function Show-Status {
 }
 function Invoke-External([string]$Program, [string[]]$Arguments) {
     if ($DryRun) { Write-Output "[dry-run] $Program $($Arguments -join ' ')"; return }
-    & $Program @Arguments
-    if ($LASTEXITCODE -ne 0) {
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $commandOutput = @(& $Program @Arguments 2>&1)
+        $commandExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousErrorAction }
+    foreach ($line in $commandOutput) { [Console]::Out.WriteLine($line.ToString()) }
+    if ($commandExit -ne 0) {
         $commandLine = (@($Program) + @($Arguments) | ForEach-Object {
             $argument = [string]$_
             if ($argument -match '[\s"]') { '"' + $argument.Replace('"', '\"') + '"' }
             else { $argument }
         }) -join ' '
-        throw "Command failed with exit ${LASTEXITCODE}: $commandLine"
+        throw "Command failed with exit ${commandExit}: $commandLine"
     }
 }
 function Invoke-TradingViewNpmInstall {
