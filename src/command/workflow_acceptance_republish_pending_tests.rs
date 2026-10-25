@@ -28,7 +28,7 @@ fn request<'a>(set: &'a FrozenSet, named: &'a BTreeSet<String>) -> ReauthorReque
 }
 
 fn scope(set: &FrozenSet) -> AuthorScope {
-    AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap()
+    AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap()
 }
 
 /// AC-F-002's first reply is no entry, so the first judge call holds

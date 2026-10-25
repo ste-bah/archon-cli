@@ -4,6 +4,26 @@ pub(super) fn is_project_or_ancestor(source: &Path, project: &Path) -> bool {
     project.starts_with(source)
 }
 
+pub(super) fn site_destination_first_component(
+    copied_root: &Path,
+    relative: &Path,
+) -> Option<String> {
+    let mut components = vec![copied_root.file_name()?.to_string_lossy().into_owned()];
+    for component in relative.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
+            std::path::Component::Normal(name) => {
+                components.push(name.to_string_lossy().into_owned());
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    components.into_iter().next()
+}
+
 pub(super) fn git_head(path: &Path) -> WorkflowResult<String> {
     let output = archon_shell::spawn::command("git")
         .args(["-C"])

@@ -77,6 +77,8 @@ pub enum FaultCause {
     TargetMappingChanged,
     /// It names a sibling path resolving to the project root or above.
     SiblingRootRefused,
+    /// Its path leaves the selected root and returns through a site-owned name.
+    SiteAliasRefused,
     /// It alone names a sibling whose copy exceeds the scratch limit.
     SiblingTooLarge,
     /// It alone names a sibling whose shape the site cannot copy.
@@ -110,6 +112,10 @@ impl FaultCause {
             Self::SiblingRootRefused => check(
                 "it names a path outside its working directory that resolves to the project root or a directory above it, which the site never copies",
                 "name only paths under its own working directory or a sibling directory beside it, never the project root or a directory above it",
+            ),
+            Self::SiteAliasRefused => check(
+                "it names a path that leaves its selected root and returns through a directory name the site uses for its own copy",
+                "name only paths under its selected root or sibling directories whose names are not used by the site",
             ),
             Self::SiblingTooLarge => check(
                 "it names a path outside its working directory whose copy is larger than the site's scratch size limit",

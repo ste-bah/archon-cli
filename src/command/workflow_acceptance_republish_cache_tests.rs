@@ -53,7 +53,8 @@ fn prompt_and_judge_digest_covers_every_static_source_contributor() {
 fn reauthor_cache_key_binds_named_file_content() {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
     std::fs::write(set.project.path().join("input"), "first assertion").unwrap();
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     let frozen = contract.acceptance[0].clone();
     let mut item = candidate(&frozen);
@@ -159,7 +160,8 @@ fn save_with_probe(
 async fn a_matching_saved_candidate_skips_author_and_candidate_judge_calls() {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
     let named = ids(&["AC-F-001"]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     let saved = candidate(&contract.acceptance[0]);
     crate::command::workflow_task_set::reauthor::cache::remove(&set.tasks).unwrap();
@@ -189,7 +191,8 @@ async fn a_matching_saved_candidate_skips_author_and_candidate_judge_calls() {
 async fn a_reused_candidate_skips_author_and_judge_but_runs_the_probe() {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
     let named = ids(&["AC-F-001"]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     let saved = candidate(&contract.acceptance[0]);
     let probe = DataProbe::default();
@@ -223,7 +226,8 @@ async fn a_reused_candidate_skips_author_and_judge_but_runs_the_probe() {
 async fn changed_project_data_can_make_a_reused_candidate_fail_the_proof_gate() {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
     let named = ids(&["AC-F-001"]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     let saved = candidate(&contract.acceptance[0]);
     let probe = DataProbe {
@@ -267,7 +271,8 @@ async fn changed_project_data_can_make_a_reused_candidate_fail_the_proof_gate() 
 async fn changed_criterion_prompt_instruction_or_judge_ignores_a_saved_candidate() {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
     let named = ids(&["AC-F-001"]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     let saved = candidate(&contract.acceptance[0]);
     crate::command::workflow_task_set::reauthor::cache::remove(&set.tasks).unwrap();
@@ -415,7 +420,8 @@ async fn changed_criterion_prompt_instruction_or_judge_ignores_a_saved_candidate
 async fn changed_candidate_check_text_discards_a_saved_candidate() {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
     let named = ids(&["AC-F-001"]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     save(&set, &contract, &scope, &candidate(&contract.acceptance[0]));
 
@@ -456,7 +462,8 @@ async fn saved_candidates_that_fail_proof_return_to_authoring() {
         ("AC-F-005", "false", false),
     ]);
     let named = ids(&["AC-F-001", "AC-F-002", "AC-F-003", "AC-F-004", "AC-F-005"]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     for entry in contract.acceptance.iter().take(3) {
         save(&set, &contract, &scope, &candidate(entry));

@@ -193,7 +193,9 @@ pub(crate) async fn reauthor_refused(
 ) -> Result<(String, serde_json::Value)> {
     let ids: BTreeSet<String> = decision.reauthor.keys().cloned().collect();
     let named = ids.iter().cloned().collect::<Vec<_>>().join(",");
-    let scope = AuthorScope::for_task_set(project_root, task_root, prd_path)
+    let build_cache =
+        crate::command::workflow_task_set::reauthor::site_uses_build_cache(project_root, task_root);
+    let scope = AuthorScope::for_task_set(project_root, task_root, prd_path, build_cache)
         .map_err(|why| anyhow!("re-authoring frozen check(s) {named}: {why}"))?;
     let trigger = format!(
         "workflow decompose launch: this build's acceptance entry rules refused check(s) {named} ({})",

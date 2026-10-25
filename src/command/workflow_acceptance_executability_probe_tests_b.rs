@@ -190,9 +190,12 @@ async fn a_host_failure_is_never_fed_to_the_author() {
         |entry, _| command_entry(entry, "test -f feature.txt && test -s feature.txt"),
         |_, _| true,
     );
-    let scope =
-        AuthorScope::for_task_set(trees.set.project.path(), &trees.set.tasks, &trees.set.prd)
-            .expect("the task set's repository record is believed");
+    let scope = AuthorScope::for_task_set_without_cache(
+        trees.set.project.path(),
+        &trees.set.tasks,
+        &trees.set.prd,
+    )
+    .expect("the task set's repository record is believed");
     let seeds = BTreeMap::new();
     let error = reauthor_with_cache(
         &client,
@@ -410,7 +413,7 @@ async fn the_republish_path_holds_a_repair_to_its_originals_failing_verdict() {
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd)
             .expect("the task set's repository record is believed"),
     )
     .await

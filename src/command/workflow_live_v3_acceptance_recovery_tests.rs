@@ -112,7 +112,7 @@ async fn a_resumed_run_heals_a_recovery_unfreeze_to_an_accepted_contract() {
 
     // Both the recovered run and a run launched after the recovery can
     // subsequently adopt an ordinary, recorded per-check re-author.
-    let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
+    let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set_without_cache(
         run.set.project.path(),
         &run.set.tasks,
         &run.set.prd,

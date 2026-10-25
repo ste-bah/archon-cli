@@ -7,11 +7,14 @@ pub(crate) fn resume_author_scope(
     task_root: &Path,
     prd_path: &Path,
 ) -> Result<crate::command::workflow_task_set::reauthor::AuthorScope> {
+    let build_cache =
+        crate::command::workflow_task_set::reauthor::site_uses_build_cache(project_root, task_root);
     Ok(
         crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
             project_root,
             task_root,
             prd_path,
+            build_cache,
         )
         .map_err(anyhow::Error::msg)?,
     )

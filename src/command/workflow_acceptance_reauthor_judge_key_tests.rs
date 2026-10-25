@@ -11,7 +11,8 @@ use archon_workflow::task_set_contract::{AcceptanceCheck, JudgeDecision, Trusted
 /// `resolved` (when set).
 async fn authored_with(resolved: Option<&str>) -> usize {
     let set = frozen_set(&[("AC-F-001", "false", false)]);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
     let contract = set.contract();
     let mut saved = contract.acceptance[0].clone();
     saved.check = AcceptanceCheck::Command {

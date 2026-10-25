@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "acceptance_scratch_siblings_internal_tests.rs"]
+mod internal_tests;
+
 #[path = "acceptance_scratch_siblings_target_tests.rs"]
 mod target_tests;
 
@@ -402,38 +405,4 @@ fn copies_a_standalone_sibling_file_and_omits_nested_build_output() {
             .commit,
         None
     );
-}
-
-#[test]
-fn a_sibling_root_named_target_is_copied() {
-    // EXPECTED: the check names ../target itself, so the root is copied;
-    // only target directories below that root are omitted.
-    let root = tempfile::tempdir().unwrap();
-    let project = root.path().join("project");
-    let copied = root.path().join("scratch/project");
-    let sibling = root.path().join("target");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(&copied).unwrap();
-    std::fs::create_dir_all(sibling.join("target/debug")).unwrap();
-    std::fs::write(sibling.join("needed.txt"), "current target root").unwrap();
-    std::fs::write(sibling.join("target/debug/output"), "nested build").unwrap();
-    let mut remaining = u64::MAX;
-    copied_all(copy_external(
-        &project,
-        &project,
-        &copied,
-        &copied,
-        &[(
-            "cat ../target/needed.txt".into(),
-            crate::task_set_contract::TrustedCwd::ProjectRoot,
-        )],
-        &mut remaining,
-        false,
-    ));
-    let copied_target = copied.parent().unwrap().join("target");
-    assert_eq!(
-        std::fs::read_to_string(copied_target.join("needed.txt")).unwrap(),
-        "current target root"
-    );
-    assert!(!copied_target.join("target").exists());
 }

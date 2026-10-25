@@ -37,7 +37,7 @@ fn ids(list: &[&str]) -> BTreeSet<String> {
 }
 
 fn scope(set: &FrozenSet) -> AuthorScope {
-    AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+    AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd)
         .expect("the task set's repository record is believed")
 }
 
@@ -195,7 +195,7 @@ async fn crash_dry_run(project: &Path, tasks: &Path, prd: &Path, spec: [&str; 3]
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(project, tasks, prd)
+        &AuthorScope::for_task_set_without_cache(project, tasks, prd)
             .expect("the task set's repository record is believed"),
     )
     .await

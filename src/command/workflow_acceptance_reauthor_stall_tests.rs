@@ -79,7 +79,7 @@ async fn one_host_unproven_check_does_not_discard_two_proven_repairs() {
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
     )
     .await
     .expect("the host-unproven entry remains pending while its siblings publish");
@@ -133,7 +133,7 @@ async fn enforce_partial_republish_publishes_proven_siblings_and_keeps_pending_i
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
     )
     .await
     .expect("pending check must not block proven siblings under enforcement");
@@ -191,7 +191,7 @@ async fn enforce_timeout_stays_pending_while_proven_siblings_publish() {
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
     )
     .await
     .expect("host-unproven timeout must not block siblings");
@@ -227,7 +227,7 @@ async fn an_unaccepted_authored_check_stays_pending_while_accepted_siblings_publ
             gate: set.gate(),
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
     )
     .await
     .expect("an authored refusal remains per-check pending");
@@ -265,7 +265,7 @@ async fn malformed_judge_replies_keep_each_authored_check_pending_for_retry() {
             gate: set.gate(),
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
     )
     .await
     .expect("malformed judge text is a pending authored outcome");
@@ -339,7 +339,7 @@ async fn an_all_unproven_republish_returns_a_pending_partial_result_without_publ
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
     )
     .await
     .expect("unproven checks are reported as pending, not a run error");
@@ -371,7 +371,7 @@ async fn a_re_author_that_stops_repairing_is_incomplete_not_failed() {
         &client,
         &contract,
         &named,
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd).unwrap(),
+        &AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap(),
         "sonnet",
         &ReauthorGate {
             probe: &UnprovenProbe::default(),
