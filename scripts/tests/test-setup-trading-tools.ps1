@@ -41,6 +41,7 @@ foreach ($case in $cases) {
 
 # Get-PythonCandidates must parse both py.exe -0p listing formats. The fake
 # launcher reports real fake interpreter paths so this exercises discovery.
+$root = Join-Path $env:RUNNER_TEMP 'trading setup safety checks'
 $candidateRoot = Join-Path $root 'py launcher candidates'
 $candidateBin = Join-Path $candidateRoot 'bin'
 New-Item -ItemType Directory -Force -Path $candidateBin | Out-Null
@@ -69,7 +70,6 @@ if (-not ($foundCandidates.Program -contains $python315) -or -not ($foundCandida
 }
 Write-Output 'PASS py.exe candidate discovery parses -V and architecture launcher formats'
 
-$root = Join-Path $env:RUNNER_TEMP 'trading setup safety checks'
 $candidateBin = Join-Path $root 'wheel probe candidates'
 New-Item -ItemType Directory -Force -Path $candidateBin | Out-Null
 $failingCandidate = Join-Path $candidateBin 'newer-python.cmd'
