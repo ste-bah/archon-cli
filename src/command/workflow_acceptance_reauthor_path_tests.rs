@@ -120,8 +120,10 @@ async fn author_path_decisions_match_the_real_scratch_site() {
             chain_digest,
             refs,
             evidence,
-            Arc::new(AtomicBool::new(false)),
-            &ObserveHooks::for_resource_limits(Default::default()),
+            archon_workflow::acceptance_scratch::ObserveControl::new(
+                Arc::new(AtomicBool::new(false)),
+                ObserveHooks::for_resource_limits(Default::default()),
+            ),
         )
         .await
         .unwrap()

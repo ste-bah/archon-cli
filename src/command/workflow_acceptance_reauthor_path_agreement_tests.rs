@@ -152,8 +152,10 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
             &chain_digest,
             &[reference],
             &scratch.join(format!("evidence-{index}")),
-            Arc::new(AtomicBool::new(false)),
-            &ObserveHooks::for_resource_limits(Default::default()),
+            archon_workflow::acceptance_scratch::ObserveControl::new(
+                Arc::new(AtomicBool::new(false)),
+                ObserveHooks::for_resource_limits(Default::default()),
+            ),
         )
         .await
         .unwrap();
