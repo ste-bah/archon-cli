@@ -116,7 +116,9 @@ echo 'error: no such command: `nextest`' >&2; exit 101
     dir.path().join("cargo")
 }
 
+// The fake proxy is a POSIX shell script; every caller is unix-only too.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 
