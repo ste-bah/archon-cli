@@ -158,19 +158,14 @@ pub(super) async fn pre_implementation_findings_with_limits(
     // check's own run showed still goes to its author at once, beside an
     // operational finding for each check the host could not prove, which
     // blocks publication and is probed again by the freeze that follows the
-    // repair.
-    if resume.persist && !unproven.is_empty() {
-        let reason = super::executability::HostUnproven(unproven.clone()).to_string();
-        if defects.is_empty() {
-            return Err(
-                crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
-                    reason,
-                    &resume.progress,
-                )
-                .into(),
-            );
+    // repair. A judge refutation is likewise an authored finding, though it
+    // is assembled by `finish_acceptance` after this probe returns.
+    let host_unproven_reason = (!unproven.is_empty())
+        .then(|| super::executability::HostUnproven(unproven.clone()).to_string());
+    if resume.persist {
+        if let Some(reason) = &host_unproven_reason {
+            eprintln!("{reason}; the freeze will probe these checks again on retry");
         }
-        eprintln!("{reason}; probed again after the authored findings are repaired");
     }
     let unproven = unproven.into_iter().map(|(id, why)| {
         let text = format!(
@@ -191,6 +186,7 @@ pub(super) async fn pre_implementation_findings_with_limits(
     Ok(PreImplementation {
         findings,
         baseline: probe.take_baseline_runs(),
+        host_unproven_reason,
     })
 }
 
@@ -199,6 +195,7 @@ pub(super) async fn pre_implementation_findings_with_limits(
 pub(crate) struct PreImplementation {
     pub(crate) findings: Vec<GateFinding>,
     pub(crate) baseline: Option<super::executability::BaselineRuns>,
+    pub(crate) host_unproven_reason: Option<String>,
 }
 
 #[cfg(test)]
