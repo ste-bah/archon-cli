@@ -5,6 +5,28 @@ use archon_workflow::task_set_contract::TrustedCwd;
 use std::sync::{Arc, atomic::AtomicBool};
 
 #[test]
+fn an_unresolvable_root_is_refused_with_its_actual_reason() {
+    let set = frozen_set(&[("AC-X-001", "true", false)]);
+    let missing = set.project.path().join("not-created");
+    let refusal = archon_workflow::acceptance_scratch::site_path_alone(
+        &missing,
+        &missing,
+        "test -f ../input",
+        TrustedCwd::ProjectRoot,
+        std::path::Path::new("../input"),
+    )
+    .expect_err("an unavailable root cannot model a prepared site");
+    assert!(refusal.site_target == std::path::Path::new("<site>"));
+    assert!(
+        refusal
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("project root cannot be resolved")),
+        "{refusal:?}"
+    );
+}
+
+#[test]
 fn repository_root_path_to_project_root_is_refused() {
     let set = frozen_set(&[("AC-X-001", "true", false)]);
     let base = set.project.path().join("roots");
@@ -23,7 +45,42 @@ fn repository_root_path_to_project_root_is_refused() {
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the site refuses a repository-root path into the project root");
-    assert!(finding.contains("../workspace/item"), "{finding}");
+    assert!(finding.contains("`../workspace`"), "{finding}");
+    assert!(finding.contains("<site>/workspace/item"), "{finding}");
+    assert!(
+        finding.contains(archon_workflow::acceptance_scratch::faults::SIBLING_ROOT_REFUSED),
+        "{finding}"
+    );
+}
+
+#[test]
+fn a_whole_check_refusal_names_the_sibling_that_caused_it() {
+    let set = frozen_set(&[("AC-X-002", "true", false)]);
+    let project = set.project.path().join("workspace");
+    let repository = set.project.path().join("repository");
+    let other = set.project.path().join("other");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&repository).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(project.join("item"), "project input").unwrap();
+    std::fs::write(other.join("item"), "other input").unwrap();
+    let mut author_scope = scope(&set);
+    author_scope.project_root = project;
+    author_scope.repository_root = repository;
+    let mut candidate = set.contract().acceptance[0].clone();
+    candidate.check = AcceptanceCheck::Command {
+        command: "test -e ../other/item && test -e ../workspace/item".into(),
+        cwd: TrustedCwd::RepoRoot,
+    };
+    let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
+        .expect_err("the later project alias refuses the whole check");
+    assert!(finding.contains("`../workspace`"), "{finding}");
+    assert!(!finding.contains("`../other/item`"), "{finding}");
+    assert!(finding.contains("<site>/workspace/item"), "{finding}");
+    assert!(
+        finding.contains(archon_workflow::acceptance_scratch::faults::SIBLING_ROOT_REFUSED),
+        "{finding}"
+    );
 }
 
 #[test]
@@ -45,6 +102,7 @@ fn a_cross_root_path_in_here_document_finding_names_the_path() {
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the here-document path has no site copy");
     assert!(finding.contains(named), "{finding}");
+    assert!(finding.contains("<site>/external/item"), "{finding}");
 }
 
 #[cfg(unix)]
@@ -138,10 +196,31 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
         std::fs::create_dir_all(project.join("tasks")).unwrap();
         std::fs::write(project.join("item"), "project input").unwrap();
         std::fs::write(repository.join("item"), "repository input").unwrap();
+        std::fs::write(repository.join("Manifest-like.toml"), "manifest input").unwrap();
+        std::fs::create_dir_all(repository.join("src")).unwrap();
+        std::fs::write(repository.join("src/committed.rs"), "committed input").unwrap();
+        std::fs::write(repository.join("src/uncommitted.rs"), "uncommitted input").unwrap();
+        let loose_file = project.parent().unwrap().join("loose.txt");
+        std::fs::write(&loose_file, "sibling file").unwrap();
+        let collision_paths = ["target", "home", "tmp"];
+        for name in collision_paths {
+            let collision = project.parent().unwrap().join(name);
+            std::fs::create_dir_all(&collision).unwrap();
+            std::fs::write(collision.join("item"), "collision input").unwrap();
+        }
+        let other_git = project.parent().unwrap().join("othergit");
+        std::fs::create_dir_all(&other_git).unwrap();
+        std::fs::write(other_git.join("item"), "other git sibling").unwrap();
         let external = base.join("external");
         let missing = base.join("missing");
         std::fs::create_dir_all(&external).unwrap();
         std::fs::write(external.join("item"), "external input").unwrap();
+        if layout == "site_names" {
+            std::fs::create_dir_all(external.join("sub")).unwrap();
+            std::fs::write(external.join("data.txt"), "external symlink target").unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(external.join("sub"), project.join("alias")).unwrap();
+        }
         std::fs::create_dir_all(&missing).unwrap();
         if !repository.join(".git").exists() {
             git(&repository, &["init", "-q"]);
@@ -152,8 +231,22 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
             git(&repository, &["config", "user.name", "test"]);
             git(&repository, &["config", "commit.gpgsign", "false"]);
             git(&repository, &["add", "-f", "item"]);
+            git(&repository, &["add", "-f", "Manifest-like.toml"]);
+            git(&repository, &["add", "-f", "src/committed.rs"]);
+            if loose_file.starts_with(&repository) {
+                git(&repository, &["add", "-f", "loose.txt"]);
+            }
             git(&repository, &["commit", "-qm", "initial"]);
         }
+        git(&other_git, &["init", "-q"]);
+        git(
+            &other_git,
+            &["config", "user.email", "test@example.invalid"],
+        );
+        git(&other_git, &["config", "user.name", "test"]);
+        git(&other_git, &["config", "commit.gpgsign", "false"]);
+        git(&other_git, &["add", "-f", "item"]);
+        git(&other_git, &["commit", "-qm", "initial"]);
         let uncommitted = repository.join("new-item");
         std::fs::write(&uncommitted, "not in the committed copy").unwrap();
         let commit = String::from_utf8(
@@ -190,30 +283,67 @@ async fn author_path_decisions_agree_with_one_check_sites_across_root_layouts() 
         scope.repository_root = policy.repository.clone();
         let repo_name = repository.file_name().unwrap().to_string_lossy();
         let project_name = project.file_name().unwrap().to_string_lossy();
-        let commands = [
-            (
-                format!("test -e ../{repo_name}/item"),
-                TrustedCwd::ProjectRoot,
-            ),
-            (
-                format!("test -e ../{repo_name}/new-item"),
-                TrustedCwd::ProjectRoot,
-            ),
-            (
-                format!("test -e ../{project_name}/item"),
-                TrustedCwd::ProjectRoot,
-            ),
-            (format!("test -e ../{repo_name}/item"), TrustedCwd::RepoRoot),
-            (
-                format!("test -e ../{project_name}/item"),
-                TrustedCwd::RepoRoot,
-            ),
-            (format!("cd ../{project_name}"), TrustedCwd::RepoRoot),
-            ("cd ..".into(), TrustedCwd::ProjectRoot),
-            ("test -e ../external/item".into(), TrustedCwd::ProjectRoot),
-            ("test -e ../missing/item".into(), TrustedCwd::ProjectRoot),
+        let mut commands = vec![
             ("test -e item".into(), TrustedCwd::ProjectRoot),
+            // A single file beside the selected root is copied at its alias.
+            ("test -f ../loose.txt".into(), TrustedCwd::ProjectRoot),
+            // These names already belong to the one-check site.
+            ("test -f ../target/item".into(), TrustedCwd::ProjectRoot),
+            ("test -f ../home/item".into(), TrustedCwd::ProjectRoot),
+            ("test -f ../tmp/item".into(), TrustedCwd::ProjectRoot),
         ];
+        match layout {
+            "repository_inside_project" => {
+                commands.push(("test -f ../item".into(), TrustedCwd::RepoRoot))
+            }
+            "project_inside_repository" => {
+                commands.push(("test ! -e ../othergit/item".into(), TrustedCwd::ProjectRoot));
+                // Both the top-level file and a subdirectory alias come from
+                // the committed repository copy at this layout.
+                commands.push(("test -f ../item".into(), TrustedCwd::ProjectRoot));
+                commands.push((
+                    "test ! -e ../src/uncommitted.rs".into(),
+                    TrustedCwd::ProjectRoot,
+                ));
+                commands.push((
+                    "test -f ../src/committed.rs".into(),
+                    TrustedCwd::ProjectRoot,
+                ));
+            }
+            "same_path" => {}
+            _ => {
+                // This Git sibling is not the declared repository.
+                commands.push(("test -f ../othergit/item".into(), TrustedCwd::ProjectRoot));
+                commands.push((
+                    format!("test -f ../{repo_name}/item"),
+                    TrustedCwd::ProjectRoot,
+                ));
+                commands.push((
+                    format!("test -f ../{project_name}/item"),
+                    TrustedCwd::RepoRoot,
+                ));
+                commands.push((
+                    format!("test ! -e ../{repo_name}/src/uncommitted.rs"),
+                    TrustedCwd::ProjectRoot,
+                ));
+                commands.push((
+                    format!("test -f ../{repo_name}/src/committed.rs"),
+                    TrustedCwd::ProjectRoot,
+                ));
+                commands.push((
+                    format!(
+                        "test -f ../{repo_name}/Manifest-like.toml && test -d ../{repo_name}/target && test ! -e ../{repo_name}/target/out/bin"
+                    ),
+                    TrustedCwd::ProjectRoot,
+                ));
+                if layout == "site_names" {
+                    commands.push((
+                        "test -f ../project/alias/../data.txt".into(),
+                        TrustedCwd::ProjectRoot,
+                    ));
+                }
+            }
+        }
         for (case_index, (command, cwd)) in commands.into_iter().enumerate() {
             let mut entry = set.contract().acceptance[0].clone();
             entry.check = AcceptanceCheck::Command { command, cwd };

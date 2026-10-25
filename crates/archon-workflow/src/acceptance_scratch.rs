@@ -300,7 +300,7 @@ impl ScratchRoots {
             if head.trim() != commit {
                 return Err(invalid("scratch worktree revision mismatch"));
             }
-            for name in ["project", "home", "tmp", "cargo-home"] {
+            for name in [SITE_PROJECT_DIRECTORY, "home", "tmp", "cargo-home"] {
                 let path = roots.root.join(name);
                 std::fs::create_dir_all(&path).map_err(|e| WorkflowError::io(&path, e))?;
             }

@@ -20,9 +20,15 @@ pub fn site_path_alone(
     cwd: crate::task_set_contract::TrustedCwd,
     named: &Path,
 ) -> Result<(), SitePathRefusal> {
-    let project = archon_shell::paths::canonicalize(project).unwrap_or_else(|_| project.into());
+    let project = archon_shell::paths::canonicalize(project).map_err(|error| SitePathRefusal {
+        site_target: PathBuf::from("<site>"),
+        reason: Some(format!("project root cannot be resolved: {error}")),
+    })?;
     let repository =
-        archon_shell::paths::canonicalize(repository).unwrap_or_else(|_| repository.into());
+        archon_shell::paths::canonicalize(repository).map_err(|error| SitePathRefusal {
+            site_target: PathBuf::from("<site>"),
+            reason: Some(format!("repository root cannot be resolved: {error}")),
+        })?;
     let (root, site_root) = match cwd {
         crate::task_set_contract::TrustedCwd::ProjectRoot => {
             (&project, PathBuf::from(SITE_PROJECT_DIRECTORY))
@@ -35,9 +41,21 @@ pub fn site_path_alone(
     let site_target = lexical_site_path(&site_cwd.join(named));
     let discovered = crate::acceptance_sibling_paths::discover(root, &[check.to_string()]);
     if let Some(reason) = super::siblings::refused_sibling(&project, &repository, check, cwd) {
+        let site_target = refused_named_path(check, &reason)
+            .map(|path| lexical_site_path(&site_cwd.join(path)))
+            .unwrap_or(site_target);
         return Err(SitePathRefusal {
             site_target,
             reason: Some(reason),
+        });
+    }
+    if !site_target.starts_with(&site_cwd)
+        && is_site_internal_target(&site_target)
+        && !repository_copy_target(&site_target, root, &site_cwd, &discovered, &repository)
+    {
+        return Err(SitePathRefusal {
+            site_target,
+            reason: None,
         });
     }
     if site_target.starts_with(&site_cwd) {
@@ -55,12 +73,7 @@ pub fn site_path_alone(
         let alias =
             lexical_site_path(&site_cwd.join(super::siblings::relative(root, &sibling.alias)));
         if site_target == alias || site_target.starts_with(&alias) {
-            let relative_target = site_target
-                .strip_prefix(&alias)
-                .unwrap_or_else(|_| Path::new(""));
-            if sibling_contains(sibling.source.as_path(), relative_target) {
-                return Ok(());
-            }
+            return Ok(());
         }
     }
     Err(SitePathRefusal {
@@ -69,22 +82,49 @@ pub fn site_path_alone(
     })
 }
 
-fn sibling_contains(source: &Path, relative_target: &Path) -> bool {
-    let target = source.join(relative_target);
-    if !target.exists() {
+fn repository_copy_target(
+    site_target: &Path,
+    root: &Path,
+    site_cwd: &Path,
+    discovered: &[crate::acceptance_sibling_paths::SiblingSource],
+    repository: &Path,
+) -> bool {
+    let site_repository = PathBuf::from("<site>").join(SITE_REPOSITORY_DIRECTORY);
+    site_target.starts_with(&site_repository)
+        && discovered.iter().any(|sibling| {
+            let alias =
+                lexical_site_path(&site_cwd.join(super::siblings::relative(root, &sibling.alias)));
+            (site_target == alias || site_target.starts_with(&alias))
+                && sibling.source.starts_with(repository)
+        })
+}
+
+fn refused_named_path(check: &str, reason: &str) -> Option<PathBuf> {
+    let alias = reason.split_once(": ")?.1.split_once(" resolves to ")?.0;
+    let alias = Path::new(alias);
+    crate::acceptance_sibling_paths::scan(check)
+        .into_iter()
+        .map(|named| named.path)
+        .find(|path| path.starts_with(alias))
+}
+
+fn is_site_internal_target(target: &Path) -> bool {
+    let Some(mut components) = target.strip_prefix("<site>").ok().map(Path::components) else {
         return false;
-    }
-    if !source.join(".git").exists() || relative_target.as_os_str().is_empty() {
-        return true;
-    }
-    let object = format!("HEAD:{}", relative_target.to_string_lossy());
-    archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(source)
-        .args(["cat-file", "-e"])
-        .arg(object)
-        .output()
-        .is_ok_and(|output| output.status.success())
+    };
+    let Some(std::path::Component::Normal(name)) = components.next() else {
+        return false;
+    };
+    [
+        SITE_REPOSITORY_DIRECTORY,
+        SITE_PROJECT_DIRECTORY,
+        "home",
+        "tmp",
+        "cargo-home",
+        "target",
+        "project-baseline",
+    ]
+    .contains(&name.to_string_lossy().as_ref())
 }
 
 fn lexical_site_path(path: &Path) -> PathBuf {

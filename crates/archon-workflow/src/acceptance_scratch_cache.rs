@@ -293,8 +293,10 @@ impl Lease {
         !spawned
             || record.iter().all(|(key, seen)| {
                 key.split_once('/').is_some_and(|(label, name)| {
-                    matches!(label, "repo" | "project")
-                        && intact(&slot.join(label).join(name), seen)
+                    matches!(
+                        label,
+                        super::SITE_REPOSITORY_DIRECTORY | super::SITE_PROJECT_DIRECTORY
+                    ) && intact(&slot.join(label).join(name), seen)
                 })
             })
     }

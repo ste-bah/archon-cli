@@ -1,6 +1,13 @@
 //! Re-author decisions for relative sibling paths.
 use super::*;
 use archon_workflow::task_set_contract::TrustedCwd;
+fn assert_refusal(finding: &str, reason: &str, target: &str) {
+    assert!(
+        finding.contains(reason) && finding.contains(target),
+        "{finding}"
+    );
+}
+
 #[test]
 fn a_parent_path_into_the_repository_sibling_is_available_before_judging() {
     let set = frozen_set(&[("AC-X-001", "test -f feature.txt", false)]);
@@ -38,7 +45,7 @@ fn repository_root_cannot_name_its_own_repository_alias_through_parent() {
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the repository root is not copied under its own sibling alias");
-    assert!(finding.contains("site does not create"), "{finding}");
+    assert_refusal(&finding, "site does not create", "<site>/repository/item");
 }
 #[test]
 fn parent_paths_that_return_to_the_selected_root_are_refused_for_both_roots() {
@@ -63,7 +70,11 @@ fn parent_paths_that_return_to_the_selected_root_are_refused_for_both_roots() {
         };
         let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
             .expect_err("a parent path that re-enters the selected root is not portable");
-        assert!(finding.contains("site does not create"), "{finding}");
+        assert_refusal(
+            &finding,
+            "site does not create",
+            &format!("<site>/{path}/item"),
+        );
     }
 }
 
@@ -204,11 +215,13 @@ async fn author_path_decisions_match_the_real_scratch_site() {
     for (index, entry) in contract.acceptance.iter().enumerate().skip(1) {
         let finding = check_defects::check_defects(&contract, entry.clone(), &author_scope)
             .expect_err("each refused path shape is rejected before judging");
-        let expected_reason = match index {
-            1..=3 => "site does not create",
+        let expected = match index {
+            1 => ("site does not create", "<site>/repository/item"),
+            2 => ("site does not create", "<site>/repository/missing/data.txt"),
+            3 => ("site does not create", "<site>/workspace/item"),
             _ => unreachable!(),
         };
-        assert!(finding.contains(expected_reason), "{finding}");
+        assert_refusal(&finding, expected.0, expected.1);
     }
     check_defects::check_defects(&contract, contract.acceptance[0].clone(), &author_scope)
         .expect("the copied sibling path is accepted");
@@ -315,7 +328,7 @@ fn a_path_naming_the_project_through_its_parent_is_refused_with_that_reason() {
     };
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the site does not lead back into its project copy by directory name");
-    assert!(finding.contains("site does not create"), "{finding}");
+    assert_refusal(&finding, "site does not create", "<site>/child");
 }
 #[test]
 fn a_missing_parent_path_into_the_other_root_is_still_refused() {
@@ -335,6 +348,10 @@ fn a_missing_parent_path_into_the_other_root_is_still_refused() {
     let finding = check_defects::check_defects(&set.contract(), candidate, &scope).unwrap_err();
     assert!(finding.contains("../repo/missing/data.txt"), "{finding}");
     assert!(finding.contains("site does not create"), "{finding}");
+    assert!(
+        finding.contains("<site>/repo/missing/data.txt"),
+        "{finding}"
+    );
 }
 #[test]
 fn discovered_sibling_paths_are_available_to_a_check() {
@@ -425,6 +442,7 @@ fn symlink_parent_path_that_resolves_outside_the_selected_root_is_refused() {
     let finding = check_defects::check_defects(&set.contract(), candidate, &author_scope)
         .expect_err("the live symlink resolves outside the selected root");
     assert!(finding.contains("site does not create"), "{finding}");
+    assert!(finding.contains("<site>/project/data.txt"), "{finding}");
 }
 #[test]
 fn a_discovered_sibling_in_here_document_program_text_is_available() {
