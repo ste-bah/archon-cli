@@ -1,0 +1,11 @@
+[package]
+name = "old-rocksdb-fixture-generator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rust-rocksdb = { version = "=0.34.0", default-features = false }
+cozo = { package = "cozo-ce", version = "=0.7.13-alpha.3", default-features = false, features = ["storage-new-rocksdb", "rayon"] }
+blake3 = "1"
+
+[workspace]

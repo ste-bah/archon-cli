@@ -35,17 +35,3 @@ rustflags = ["-C", "link-arg=/STACK:8388608"]
 #   AWS_LC_SYS_PREBUILT_NASM=0 in your environment.
 [env]
 AWS_LC_SYS_PREBUILT_NASM = "1"
-
-# Bundled RocksDB on current Linux compilers (#485):
-#   rust-librocksdb-sys 0.30.0+9.8.4 (RocksDB 9.8.4) uses uint64_t in
-#   db/blob/blob_file_meta.h and include/rocksdb/trace_record.h without
-#   including <cstdint>. Newer GCC/libstdc++ (Ubuntu 26.04, the current
-#   ubuntu-latest) no longer pulls it in transitively, so the C++ build fails
-#   with "'uint64_t' has not been declared". RocksDB fixed the headers in
-#   10.4.2 (rust-rocksdb 0.42.0), but cozo-ce pins rust-rocksdb ^0.34.0 and
-#   the -sys crate `links = "rocksdb"`, so only one version can be linked.
-#   Until that pin moves, force-include <cstdint> for C++ on Linux targets
-#   only. cc-rs reads these per-target variables; macOS (libc++) and Windows
-#   (MSVC) builds are untouched. An exported CXXFLAGS_<target> still wins.
-CXXFLAGS_x86_64_unknown_linux_gnu = "-include cstdint"
-CXXFLAGS_aarch64_unknown_linux_gnu = "-include cstdint"
