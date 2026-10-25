@@ -36,7 +36,10 @@ impl ScratchRoots {
         if let Some(lease) = &mut self.lease
             && self.registered
         {
-            lease.audit(&[("repo", &self.repository), ("project", &self.project)])?;
+            lease.audit(&[
+                (SITE_REPOSITORY_DIRECTORY, &self.repository),
+                (SITE_PROJECT_DIRECTORY, &self.project),
+            ])?;
         }
         if self.registered {
             self.relink()?;

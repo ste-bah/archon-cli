@@ -74,8 +74,8 @@ test('the prompt claims no isolation that may not exist', () => {
   // Each site copies different project files, and the repository alias is
   // linked only when a project-root check names it.
   assert.match(prompt, /project files the host is configured to copy/);
-  assert.match(prompt, /project_root may reach copied repository files via \.\.\/<repository dir>\/ when the repository directory sits beside the project and the named path already exists in the live repository/);
-  assert.match(prompt, /repo_root names repository paths relative to repo_root and cannot use `\.\.` to reach project_root or rely on `\.\.\/<repository dir>`, which the site links only when a project_root check names it/);
+  assert.match(prompt, /project_root may reach repository files via \.\.\/<repository dir>\/ when the repository directory sits beside the project and the check names an existing path in that tree \(the site then links the repository copy there\)/);
+  assert.match(prompt, /repo_root names repository paths relative to repo_root and cannot use `\.\.` to reach project_root or its own repository/);
 });
 
 test('the rule is generic: it names no PRD, project or language', () => {

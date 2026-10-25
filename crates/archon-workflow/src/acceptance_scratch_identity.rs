@@ -226,8 +226,8 @@ pub(super) fn capture_site(
     let mut config = BTreeMap::new();
     for (label, base) in [
         ("cargo-home", roots.root().join("cargo-home")),
-        ("project", roots.project().join(".cargo")),
-        ("repository", roots.repository().join(".cargo")),
+        (SITE_PROJECT_DIRECTORY, roots.project().join(".cargo")),
+        (SITE_REPOSITORY_DIRECTORY, roots.repository().join(".cargo")),
     ] {
         for name in ["config", "config.toml", "credentials", "credentials.toml"] {
             let path = base.join(name);

@@ -35,6 +35,18 @@ pub(super) fn check_defects(
                 *cwd,
                 &named.path,
             ) {
+                let refused_path = refusal
+                    .reason
+                    .as_deref()
+                    .and_then(|reason| {
+                        reason.strip_prefix(
+                            archon_workflow::acceptance_scratch::faults::SIBLING_ROOT_REFUSED,
+                        )
+                    })
+                    .and_then(|reason| reason.strip_prefix(": "))
+                    .and_then(|reason| reason.split_once(" resolves to ").map(|(path, _)| path))
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| named.path.display().to_string());
                 let reason = refusal.reason.unwrap_or_else(|| {
                     format!(
                         "alone in its site, `{}` from {root_name} resolves to `{}`, which the site does not create (it creates `{}` and `{}` plus the siblings this check names)",
@@ -45,9 +57,10 @@ pub(super) fn check_defects(
                     )
                 });
                 return Err(format!(
-                    "check '{}': it names `{}` from the {root_name}; {reason}.",
+                    "check '{}': it names `{}` from the {root_name}; {reason} (site target `{}`).",
                     candidate.id,
-                    named.path.display(),
+                    refused_path,
+                    refusal.site_target.display(),
                 ));
             }
         }
