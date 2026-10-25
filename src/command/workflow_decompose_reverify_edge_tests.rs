@@ -2,6 +2,9 @@
 use super::workflow_decompose_reverify_tests::{archon_binary, fixture, invoke_reverify};
 use archon_workflow::RunStatus;
 
+#[path = "workflow_decompose_reverify_fingerprint_tests.rs"]
+mod fingerprint_tests;
+
 #[tokio::test]
 async fn refusals_for_wrong_kind_or_incomplete_run_do_not_write_results() {
     let binary = archon_binary();
