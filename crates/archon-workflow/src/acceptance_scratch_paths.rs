@@ -17,6 +17,24 @@ pub fn relative_key(path: &Path) -> String {
         .join("/")
 }
 
+/// Whether `path` is a strict component-wise descendant of `ancestor`.
+/// Component comparisons are case-sensitive; case-only nesting on APFS or
+/// Windows remains outside this helper's guarantee.
+pub fn is_strict_descendant(path: &Path, ancestor: &Path) -> bool {
+    let mut path_components = path.components();
+    let mut ancestor_components = ancestor.components();
+    let mut matched = false;
+    loop {
+        match (path_components.next(), ancestor_components.next()) {
+            (_, Some(Component::ParentDir)) | (Some(Component::ParentDir), _) => return false,
+            (Some(path), Some(ancestor)) if path == ancestor => matched = true,
+            (Some(_), Some(_)) | (None, Some(_)) => return false,
+            (Some(_), None) => return matched,
+            (None, None) => return false,
+        }
+    }
+}
+
 /// A path as a single POSIX shell argument: the Windows verbatim prefix
 /// removed, backslashes turned to forward slashes, single-quoted. A Windows
 /// path interpolated into a shell command raw loses its backslashes to the

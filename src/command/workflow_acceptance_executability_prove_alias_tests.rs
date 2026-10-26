@@ -15,6 +15,7 @@ fn setup_file_that_was_not_moved_has_no_site_copy_note() {
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeMap::new(),
+        &std::collections::BTreeMap::new(),
         true,
     );
     assert!(diagnostics.contains("../project/setup.toml"));
@@ -65,6 +66,7 @@ fn repository_alias_diagnostic_keeps_the_named_path_and_site_copy_note_when_move
         &[],
         &std::collections::BTreeSet::from([path.to_string()]),
         &std::collections::BTreeSet::new(),
+        &std::collections::BTreeMap::new(),
         &std::collections::BTreeMap::new(),
         true,
     );

@@ -75,6 +75,63 @@ fn recreated_inputs_route_to_author_action_with_the_named_path() {
 }
 
 #[test]
+fn snapshot_error_author_text_names_the_observed_recreation_and_unsafe_reason() {
+    let markers = mutation::Markers::with_nonce("0123456789abcdef0123456789abcdef").unwrap();
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        fault: None,
+        classification: None,
+        acceptance_id: "AC-X-001".into(),
+        exit_code: Some(0),
+        quota_walk_count: 0,
+        stdout: format!(
+            "archon-mutation-state-{}: 0:unsafe-to-restore: parent snapshot failed: permission denied\n",
+            markers.nonce()
+        )
+        .into_bytes(),
+        stderr: format!(
+            "{}0\n{}0\n{}0\n{}0\n",
+            markers.moved_prefix(),
+            markers.generated_prefix(),
+            markers.recreated_prefix(),
+            format!("archon-mutation-check-recreated-{}: ", markers.nonce())
+        )
+        .into_bytes(),
+        operational_error: None,
+        environment_note: None,
+    };
+    let names = ["data/state.txt".to_string()];
+    let state_map = input_states(&result, &markers, &names);
+    let candidates = [mutation::CandidateDiagnostic {
+        path: names[0].clone(),
+        move_path: Some("project/data/state.txt".into()),
+        move_root: Some("project".into()),
+        exclusion: None,
+    }];
+    let baseline = format!(
+        "{}; considered inputs: {}",
+        baseline_pass_finding("AC-X-001", "0123456789ab"),
+        describe_candidates_with_run_state(
+            &candidates,
+            &markers.generated(&result, &names),
+            &recreated_inputs(&result, &markers, &names),
+            &markers.moved(&result, &names).into_iter().collect(),
+            &recreated_paths(&state_map).into_iter().collect(),
+            &markers.move_states(&result, &names),
+            &std::collections::BTreeMap::new(),
+            true,
+        )
+    );
+    let finding = author_recreated_finding(&baseline, &recreated_inputs(&result, &markers, &names));
+    assert_eq!(
+        finding,
+        "check 'AC-X-001': the criterion already holds on the pre-implementation tree; write a regression guard. It passed on the pre-implementation tree at 0123456789ab, before any implementation, so it cannot show its criterion false and proves nothing; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must fail whenever the deciding test fails; considered inputs: the check recreated a moved input while it ran: data/state.txt (moved in the site copy); it recreated data/state.txt while running, so that data is not evidence; use a movable input that exists under the selected root before the run and make the check fail whenever the deciding test fails"
+    );
+    assert!(finding.contains("the check recreated a moved input while it ran"));
+    assert!(!finding.contains("parent directory metadata changed"));
+    assert!(state_map["data/state.txt"].contains("parent snapshot failed: permission denied"));
+}
+
+#[test]
 fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
     let finding = baseline_pass_finding("check-id", "0123456789ab");
     let candidate = super::mutation::CandidateDiagnostic {
@@ -111,6 +168,7 @@ fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
         &[],
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::from(recreated.clone()),
+        &std::collections::BTreeMap::new(),
         &std::collections::BTreeMap::new(),
         true,
     );
@@ -247,6 +305,7 @@ fn each_move_state_has_a_distinct_candidate_diagnostic() {
             (symlink.clone(), "refused: symlink component".into()),
             (move_failed.clone(), "move failed: permission denied".into()),
         ]),
+        &std::collections::BTreeMap::new(),
         true,
     );
 

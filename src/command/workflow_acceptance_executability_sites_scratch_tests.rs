@@ -363,3 +363,5 @@ async fn normal_run_saves_and_reuses_evidence_with_an_existing_lock_path() {
     assert_eq!(run.results.len(), 1);
     assert!(store.load(&key, false).is_some());
 }
+
+include!("workflow_acceptance_executability_sites_scratch_regression_tests.rs");

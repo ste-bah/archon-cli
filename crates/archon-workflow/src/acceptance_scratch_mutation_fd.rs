@@ -20,6 +20,7 @@ pub(crate) struct SiteRoot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum MoveOutcome {
     Moved,
+    CoveredByAncestor(String),
     Absent,
     SymlinkComponent,
     Failed(String),

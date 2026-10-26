@@ -16,7 +16,7 @@ pub(super) fn finish(
     pipes: &(CapturedStream, CapturedStream),
     process_tree_gone: bool,
     moved: Option<&[super::mutation_fd::MoveOutcome]>,
-    parent_snapshots: Option<&[Option<String>]>,
+    parent_snapshots: Option<&[Option<Result<String, String>>]>,
 ) -> WorkflowResult<CheckResult> {
     if let (Some(plan), Some(moved)) = (site.mutation_plan, moved) {
         super::mutation::record_move_outcomes(&mut result, plan, moved);

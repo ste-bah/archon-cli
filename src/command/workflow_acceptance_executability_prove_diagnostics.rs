@@ -31,6 +31,7 @@ pub(crate) fn describe_candidates(candidates: &[mutation::CandidateDiagnostic]) 
         &BTreeSet::new(),
         &BTreeSet::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
         false,
     )
 }
@@ -42,6 +43,7 @@ pub(crate) fn describe_candidates_with_run_state(
     moved: &BTreeSet<String>,
     original_recreated: &BTreeSet<String>,
     move_states: &BTreeMap<String, String>,
+    covered_inputs: &BTreeMap<String, String>,
     run_observed: bool,
 ) -> String {
     if candidates.is_empty() {
@@ -65,6 +67,14 @@ pub(crate) fn describe_candidates_with_run_state(
             && !was_moved
         {
             match move_states.get(&candidate.path).map(String::as_str) {
+                Some(state) if state.starts_with("covered by moved ancestor '") => state,
+                _ if covered_inputs.contains_key(&candidate.path) => {
+                    // Keep a child's own move failure when its ancestor failed.
+                    move_states
+                        .get(&candidate.path)
+                        .map(String::as_str)
+                        .unwrap_or("move failed: no move state was recorded")
+                }
                 Some("absent at the selected root") => "absent at the selected root",
                 Some("refused: symlink component") => "refused: symlink component",
                 Some(state) if state.starts_with("move failed: ") => state,
