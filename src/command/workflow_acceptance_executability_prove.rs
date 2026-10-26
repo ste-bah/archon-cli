@@ -15,6 +15,15 @@ use std::path::{Path, PathBuf};
 
 #[path = "workflow_acceptance_executability_prove_plan.rs"]
 mod plan;
+#[cfg(test)]
+pub(super) fn mutation_plan(
+    names: &[String],
+    discovery: &mutation::InputDiscovery,
+    entry: &AcceptanceCriterion,
+    markers: &mutation::Markers,
+) -> archon_workflow::acceptance_scratch::MutationPlan {
+    plan::plan(names, discovery, entry, markers).plan
+}
 
 #[path = "workflow_acceptance_executability_prove_diagnostics.rs"]
 mod diagnostics;
@@ -114,6 +123,24 @@ pub(super) async fn prove(
             .as_ref()
             .map(|(_, markers)| markers.clone())
             .unwrap_or_else(|| probe.mutation_markers(baseline, contract, id));
+        let entry = entry.expect("input discovery came from an acceptance entry");
+        let built_plan = plan::plan(&names, &discovery, entry, &markers);
+        debug_assert!(discovery.eligible.iter().all(|name| {
+            built_plan
+                .plan
+                .inputs
+                .iter()
+                .any(|input| &input.named_path == name)
+                || built_plan.covered_inputs.contains_key(name)
+        }));
+        let move_plan = built_plan.plan;
+        // Marker indexes describe the plan, so derive every indexed list from
+        // its inputs after sorting ancestors before their children.
+        let names: Vec<String> = move_plan
+            .inputs
+            .iter()
+            .map(|input| input.named_path.clone())
+            .collect();
         let inputs = BTreeMap::from([(id.clone(), names.clone())]);
         let move_paths = BTreeMap::from([(
             id.clone(),
@@ -142,8 +169,6 @@ pub(super) async fn prove(
                 })
                 .collect(),
         )]);
-        let entry = entry.expect("input discovery came from an acceptance entry");
-        let move_plan = plan::plan(&names, &discovery, entry, &markers);
         let mutation_plans = BTreeMap::from([(id.clone(), move_plan)]);
         let mutated =
             mutation::mutated(contract, &inputs, &move_paths, &move_roots, &live, &markers);
@@ -256,6 +281,7 @@ pub(super) async fn prove(
                 &moved,
                 &original_recreated,
                 &markers.move_states(&result.result, &names),
+                &built_plan.covered_inputs,
                 true,
             )
         );

@@ -474,3 +474,6 @@ async fn a_replaced_site_root_restores_inside_the_held_directory() {
 
 #[path = "acceptance_scratch_idle_tests.rs"]
 mod idle;
+
+#[path = "acceptance_scratch_process_mutation_regression_tests.rs"]
+mod mutation_regression_tests;

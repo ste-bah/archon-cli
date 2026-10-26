@@ -24,9 +24,9 @@ use control::git;
 
 #[path = "acceptance_scratch_paths.rs"]
 mod paths;
-pub use paths::relative_key;
 #[cfg(test)]
 pub(crate) use paths::shell_arg;
+pub use paths::{is_strict_descendant, relative_key};
 
 /// Project paths never copied out: credentials, engine config, workflows and git.
 pub(crate) use inputs::excluded as project_input_excluded;
