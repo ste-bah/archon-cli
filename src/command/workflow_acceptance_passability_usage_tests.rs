@@ -71,7 +71,7 @@ fn only_resolved_external_programs_with_parser_errors_are_host_refuted() {
         actual,
         Some((
             "tool".into(),
-            external.path().join("tool").canonicalize().unwrap(),
+            external.path().join("tool"),
             "tool: error: unrecognized arguments: --new-flag".into()
         )),
         "a PATH-resolved external parser refusal is the only host-refuted case"
@@ -238,7 +238,7 @@ fn recognizes_external_parser_errors_and_requires_both_output_signals() {
             .and_then(|path| {
                 Some((
                     "cargo".into(),
-                    path.canonicalize().ok()?,
+                    path,
                     "error: unexpected argument '--exact' found".into(),
                 ))
             })
@@ -354,10 +354,14 @@ async fn a_declared_binary_reaches_the_reauthor_passability_judge() {
 #[cfg(unix)]
 #[tokio::test]
 async fn external_parser_refusal_uses_bounded_evidence_and_the_audit_gate() {
+    use std::os::unix::fs::symlink;
+
     let repository = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let external = tempfile::tempdir().unwrap();
-    let executable = executable(external.path(), "tool");
+    let executable = executable(external.path(), "tool-real");
+    let path_entry = external.path().join("tool");
+    symlink(&executable, &path_entry).unwrap();
     std::fs::write(
         &executable,
         "#!/bin/sh\nprintf '%s\\n' \"error: unexpected argument '--new-flag' found\" >&2\nprintf '%s\\n' 'Usage: tool [OPTIONS]' >&2\nexit 2\n",
@@ -401,10 +405,7 @@ async fn external_parser_refusal_uses_bounded_evidence_and_the_audit_gate() {
     .await
     .unwrap();
     let finding = &findings["AC-X-001"];
-    assert!(finding.contains(&format!(
-        "tool ({}",
-        executable.canonicalize().unwrap().display()
-    )));
+    assert!(finding.contains(&format!("tool ({}", path_entry.display())));
     assert!(finding.contains("outside the repository) rejected the check's command line"));
     assert!(finding.contains("stderr:"));
     assert!(finding.contains("unexpected argument '--new-flag' found"));

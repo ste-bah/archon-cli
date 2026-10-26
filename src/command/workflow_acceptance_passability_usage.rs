@@ -138,7 +138,7 @@ fn external_usage_error_on_path(
     let (index, error) = lines
         .iter()
         .enumerate()
-        .find(|(_, line)| parser_error(line))?;
+        .find_map(|(index, line)| parser_error(line).map(|error| (index, error)))?;
     if invokes_script_or_module(command) {
         return None;
     }
@@ -173,7 +173,7 @@ fn external_usage_error_on_path(
     if canonical.starts_with(&root) || canonical.starts_with(&project) {
         return None;
     }
-    Some((program, canonical, error.to_string()))
+    Some((program, resolved, error.to_string()))
 }
 
 fn invokes_script_or_module(command: &str) -> bool {
@@ -189,7 +189,16 @@ fn invokes_script_or_module(command: &str) -> bool {
         .is_some_and(|argument| argument == "-m" || argument.contains('/'))
 }
 
-fn parser_error(line: &str) -> bool {
+fn parser_error(line: &str) -> Option<&str> {
+    std::iter::once(line)
+        .chain(
+            line.match_indices(": ")
+                .map(|(index, separator)| &line[index + separator.len()..]),
+        )
+        .find(|candidate| parser_error_at_start(candidate))
+}
+
+fn parser_error_at_start(line: &str) -> bool {
     if let Some((program, message)) = line.split_once(": error:") {
         return valid_identifier(program) && syntax_refusal(message);
     }
@@ -424,6 +433,9 @@ fn script_names(path: &Path, names: &mut BTreeSet<String>) -> Option<()> {
     Some(())
 }
 
+#[cfg(test)]
+#[path = "workflow_acceptance_passability_usage_regression_tests.rs"]
+mod regression_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_passability_usage_tests.rs"]
 mod tests;
