@@ -432,6 +432,7 @@ pub(super) async fn reverify_checks(
         let mut judged = contract.clone();
         let findings = crate::command::workflow_task_set::passability::judge_baseline_failures(
             project_root,
+            &scope.repository_root,
             task_root,
             prd_text,
             client.as_ref(),

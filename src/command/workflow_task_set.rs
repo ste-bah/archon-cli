@@ -285,7 +285,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         live_root::freeze_repository(project_root, tasks_root, None).map_err(anyhow::Error::msg)?;
     let judge_roots = judge::JudgeRoots {
         project: Some(project_root.to_path_buf()),
-        repository: Some(repository_root),
+        repository: Some(repository_root.clone()),
         task_root: Some(tasks_root.to_path_buf()),
         repository_commit: None,
     };
@@ -326,6 +326,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
     // rule a correct implementation keeps: it could never pass.
     let probed = passability::judge_baseline_failures(
         project_root,
+        &repository_root,
         tasks_root,
         &prd_text,
         client.as_ref(),

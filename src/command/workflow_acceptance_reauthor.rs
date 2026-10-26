@@ -356,6 +356,8 @@ pub(crate) async fn reauthor_partial_with_cache(
                     match super::passability::cannot_pass_findings(
                         client,
                         judge_model,
+                        &scope.repository_root,
+                        &scope.project_root,
                         &working,
                         &sound,
                         &runs,
