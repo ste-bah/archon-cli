@@ -372,6 +372,14 @@ impl WorkflowScriptHost {
         if answered {
             // Answered after the marker, or an earlier answer that must not
             // be replaced: either way the run log still names the orphan.
+            self.with_owned_run_lock(|locked| {
+                archon_workflow::v2::run_state_sync::reconcile_running_v2_call_stage(
+                    locked,
+                    &self.runner.run_id,
+                    call_id,
+                    existing.as_ref().expect("answered record exists").status,
+                )
+            })?;
             self.emit_v2_event(
                 WorkflowEventKind::StageStalled,
                 serde_json::json!({
@@ -426,7 +434,10 @@ impl WorkflowScriptHost {
         .with_scaffold_hash(Some(self.scaffold_hash.clone()))
         .with_agent_sessions(marker.agent_sessions.clone());
         // Issue 291: only the run's owner records an orphan.
-        self.with_owned_run_lock(|_| self.runner.v2_store.save_call_record(&record))?;
+        self.with_owned_run_lock(|locked| {
+            settle_interrupted_stage(locked, &self.runner.run_id, call_id)?;
+            self.runner.v2_store.save_call_record(&record)
+        })?;
         self.emit_call_finished_event(&record);
         Ok(())
     }

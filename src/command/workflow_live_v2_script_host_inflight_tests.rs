@@ -426,3 +426,6 @@ async fn an_unstarted_host_command_record_passes_the_resume_check() {
     .to_string();
     assert!(error.contains("result.data"), "{error}");
 }
+
+#[path = "workflow_live_v2_script_host_inflight_recovery_tests.rs"]
+mod recovery_tests;
