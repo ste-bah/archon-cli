@@ -191,7 +191,9 @@ pub fn request_key(role: &str, prompt: &str) -> String {
             )
         ),
         "judge" => {
-            let kind = if text.starts_with("Each acceptance check below already ran on the evidence tree") {
+            let kind = if text
+                .starts_with("Each acceptance check below already ran on the evidence tree")
+            {
                 "passability"
             } else {
                 "adversarial"
