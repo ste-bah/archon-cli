@@ -117,7 +117,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 60: #516 a toolchain usage error in a check's own invocation is refuted by the
         // can-pass judge; #477 repository-sibling inputs are provable in the Scratch site;
         // #497 F2 a freeze stalls only when every finding is operational.
-        version: 60,
+        // 61: #518 a path a check names only in message text no longer outranks a movable
+        // input class; #519 nested inputs prove without a false unsafe restore; #494
+        // re-author prompts prefetch inputs per attempt.
+        version: 61,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -156,7 +159,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
-        sources_digest: "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
+        sources_digest: "84fc5e4dcef09fed9defd875e516764fbf7182f5dc19f3879a32d725d525313b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -187,7 +190,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // Batch 24 re-pin only: skeleton freeze verdicts do not read the acceptance judge, reply extraction or Scratch evidence.
-        sources_digest: "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
+        // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
+        sources_digest: "84fc5e4dcef09fed9defd875e516764fbf7182f5dc19f3879a32d725d525313b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -225,7 +229,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 26: exit-path audit: an unusable critic reply is typed authored_judge_reply, not gate_operational, which changes how body gate outcomes are routed.
         // 27: batch 24 (#497 F2 freeze findings, #515 reply extraction) shares sources
         // with body gating; bumped so no body verdict is reused across it.
-        version: 27,
+        // 28: batch 25 (#494 read-guard ranges and prompt prefetch) shares sources with
+        // body gating; bumped so no body verdict is reused across it.
+        version: 28,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -248,7 +254,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+        sources_digest: "0ed9331041d3d906ee37e3158bf930938c3c560af4579b21bd984d92580dfe0f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -277,7 +283,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 21: exit-path audit: an unusable set-critic reply is typed authored_judge_reply and counts in the ordinary no-progress window.
         // 22: batch 24 (#497 F2 freeze findings, #515 reply extraction) shares sources
         // with set gating; bumped so no set verdict is reused across it.
-        version: 22,
+        // 23: batch 25 (#494) shares sources with set gating; bumped likewise.
+        version: 23,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -297,7 +304,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+        sources_digest: "0ed9331041d3d906ee37e3158bf930938c3c560af4579b21bd984d92580dfe0f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -314,7 +321,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: exit-path audit: shared judge and critic sources changed with the typed reply kinds; bumped so no record judged by the previous logic is replayed.
         version: 7,
         // Re-pinned only (verdict rules unchanged): #434 #417 #438 #441 #424 #369 #383 #440 #420 #447 #446 #464 #466 #469
-        sources_digest: "7ba2c588e00cd3e413ad8122f9ede26910eb6ddbcf550ce08a81adc679a888a0",
+        // Batch 25 re-pin only: the shared Scratch path helper moved; trace verdicts do not read mutation proofs.
+        sources_digest: "74f57df2beddbb139943a17d9f5aa035d207e3ae0f4bf807c5ab71ed460b1c00",
         build_bound: true,
     },
     CapabilityLogic {
@@ -337,7 +345,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // stale-logic stage open.
         // 16: #477 Scratch evidence schema 5 and repository-sibling proofs can change
         // frozen acceptance re-verification verdicts.
-        version: 16,
+        // 17: #518 and #519 change which inputs a frozen-check mutation proof moves
+        // and how it restores them.
+        version: 17,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -360,7 +370,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
-        sources_digest: "5b639460fba35a71ba13bdc3afecefe61ea7f1376983e06965dd4712c100f02e",
+        sources_digest: "4ef6fd3ddabd411d000f4c3a0317e57aa8d8066294473d5eda0bfd0c37f99a7b",
         build_bound: true,
     },
     CapabilityLogic {
@@ -390,7 +400,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // Batch 24 re-pin only: frozen skeleton verification does not read Scratch evidence or the acceptance judge.
-        sources_digest: "5b639460fba35a71ba13bdc3afecefe61ea7f1376983e06965dd4712c100f02e",
+        // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
+        sources_digest: "4ef6fd3ddabd411d000f4c3a0317e57aa8d8066294473d5eda0bfd0c37f99a7b",
         build_bound: true,
     },
 ];
