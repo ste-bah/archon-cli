@@ -85,3 +85,22 @@ pub(super) fn operational_words(commands: &[Vec<String>]) -> BTreeSet<String> {
     }
     excluded
 }
+
+pub(super) fn exclusion_paths(
+    commands: &[Vec<String>],
+    message_words: &BTreeSet<String>,
+    written_words: &BTreeSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    // Written outputs keep their mechanics priority so an existing parent of
+    // a path the check writes is never offered as a movable input.
+    let mechanics = operational_words(commands)
+        .iter()
+        .chain(written_words)
+        .flat_map(|word| path_tokens(word))
+        .collect();
+    let message_mentions = message_words
+        .iter()
+        .flat_map(|word| path_tokens(word))
+        .collect();
+    (mechanics, message_mentions)
+}

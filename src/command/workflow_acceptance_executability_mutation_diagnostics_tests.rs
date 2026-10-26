@@ -114,6 +114,46 @@ fn repository_root_operands_are_excluded_with_accurate_reason_and_cd_options_are
 }
 
 #[test]
+fn message_only_paths_stay_excluded_as_check_mechanics() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("tests")).unwrap();
+    std::fs::write(root.path().join("tests/focused.rs"), "focused\n").unwrap();
+    let result = input_discovery(
+        &entry("echo 'tests/focused.rs'", "project_root"),
+        root.path(),
+        root.path(),
+    );
+    let path = result
+        .candidates
+        .iter()
+        .find(|candidate| candidate.path == "tests/focused.rs")
+        .expect("message-only path is still diagnosed");
+    assert_eq!(path.exclusion, Some(ExclusionReason::CheckMechanics));
+    assert!(
+        !result
+            .eligible
+            .iter()
+            .any(|candidate| candidate == "tests/focused.rs")
+    );
+}
+
+#[test]
+fn cd_pipeline_does_not_turn_pipe_into_a_path_operand() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("pipe"), "input\n").unwrap();
+    let result = input_discovery(&entry("cd | cmd", "project_root"), root.path(), root.path());
+    assert!(
+        !result
+            .candidates
+            .iter()
+            .any(|candidate| candidate.path == "pipe"),
+        "the pipeline marker became a bogus input: {:?}",
+        result.candidates
+    );
+    assert!(!result.eligible.iter().any(|path| path == "pipe"));
+}
+
+#[test]
 fn a_sibling_alias_resolving_inside_the_repository_is_movable_from_its_copy() {
     let parent = tempfile::tempdir().unwrap();
     let project = parent.path().join("project");
