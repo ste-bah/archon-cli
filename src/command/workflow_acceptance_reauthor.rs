@@ -377,6 +377,7 @@ pub(crate) async fn reauthor_partial_with_cache(
             let mut passability_pending = BTreeSet::new();
             let cannot_pass = match gate.probe.take_baseline_runs() {
                 Some(runs) if !sound.is_empty() => {
+                    let audit = cache::passability_audit_dir(state_dir.unwrap_or(&scope.task_root));
                     match super::passability::cannot_pass_findings(
                         client,
                         judge_model,
@@ -384,10 +385,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                         &sound,
                         &runs,
                         &prd_text,
-                        Some(cache::passability_audit_dir(
-                            state_dir.unwrap_or(scope.task_root.as_path()),
-                        ))
-                        .as_deref(),
+                        Some(&audit),
                     )
                     .await
                     {

@@ -533,8 +533,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
-            "logicVersion": 59,
+            "logicDigest": "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
+            "logicVersion": 60,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -800,8 +800,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
-            "logicVersion": 59,
+            "logicDigest": "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
+            "logicVersion": 60,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1043,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
+            "logicDigest": "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
             "logicVersion": 5,
             "postcondition": {
               "satisfied": true,
@@ -1281,8 +1281,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-            "logicVersion": 26,
+            "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+            "logicVersion": 27,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1401,8 +1401,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-            "logicVersion": 26,
+            "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+            "logicVersion": 27,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1621,8 +1621,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-            "logicVersion": 21,
+            "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+            "logicVersion": 22,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative task-set-lint postcondition evaluated"
@@ -1707,8 +1707,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
-                  "logicVersion": 59,
+                  "logicDigest": "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
+                  "logicVersion": 60,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1770,8 +1770,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
-                      "logicVersion": 59,
+                      "logicDigest": "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
+                      "logicVersion": 60,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1853,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
+                  "logicDigest": "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
                   "logicVersion": 5,
                   "postcondition": {
                     "satisfied": true,
@@ -1914,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
+                      "logicDigest": "793d6a207c678a804445d36316c7734fa1d29eb3e3805e4f6c101ab8ba9b9c98",
                       "logicVersion": 5,
                       "postcondition": {
                         "satisfied": true,
@@ -2015,8 +2015,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-                  "logicVersion": 26,
+                  "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+                  "logicVersion": 27,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2065,8 +2065,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-                      "logicVersion": 26,
+                      "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+                      "logicVersion": 27,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2147,8 +2147,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-                  "logicVersion": 26,
+                  "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+                  "logicVersion": 27,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2197,8 +2197,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-                      "logicVersion": 26,
+                      "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+                      "logicVersion": 27,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2279,8 +2279,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-                  "logicVersion": 21,
+                  "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+                  "logicVersion": 22,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2324,8 +2324,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8d5afba4684d62ef71560cac7c6e0ca6e4a7788e53353daaf103633f9fb61a34",
-                      "logicVersion": 21,
+                      "logicDigest": "2e93e00b345705b59cdbd1aeb52995d5b461161129dfc3750a3031135b2de9b3",
+                      "logicVersion": 22,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative task-set-lint postcondition evaluated"
