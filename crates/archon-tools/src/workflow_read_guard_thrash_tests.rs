@@ -6,7 +6,7 @@ use super::{
 };
 use serde_json::{Value, json};
 
-const TERMINAL: &str = "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes in this session";
+const TERMINAL: &str = "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes in this agent tree";
 
 fn bash(guard: &WorkflowReadGuard, command: &str) -> Option<String> {
     guard.before_tool("Bash", &json!({"command": command}))
@@ -101,7 +101,7 @@ fn a_substantive_write_after_the_wall_resets_the_count() {
     assert_eq!(
         bash(&guard, "echo uv").as_deref(),
         Some(
-            "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 1 substantive write in this session"
+            "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 1 substantive write in this agent tree"
         )
     );
 }
@@ -144,7 +144,7 @@ fn the_terminal_message_text_is_pinned() {
     assert_eq!(READ_WALL_THRASH_MARKER, "read-wall thrash:");
     assert_eq!(
         super::thrash::terminal_message(16, 0, None),
-        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes in this session"
+        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes in this agent tree"
     );
     assert!(TERMINAL.starts_with(READ_WALL_THRASH_MARKER));
     // The retry classifier must never read this as a transient provider
@@ -162,6 +162,33 @@ fn the_terminal_message_text_is_pinned() {
     ] {
         assert!(!TERMINAL.contains(needle), "{needle}");
     }
+}
+
+#[test]
+fn terminal_children_charge_their_parent_toward_the_same_cutoff() {
+    let guard = WorkflowReadGuard::new(0, 0, false, false);
+    let parent = crate::tool::ToolContext {
+        session_id: "AC-X-001".into(),
+        ..crate::tool::ToolContext::default()
+    };
+    let inspection = crate::workflow_read_guard::READ_ONLY_INSPECTION_TOOLS[0];
+    for n in 1..=MAX_NON_WRITING_CALLS_AFTER_WALL + 1 {
+        let child = crate::tool::ToolContext {
+            session_id: parent.session_id.clone(),
+            subagent_id: Some(format!("TASK-X-{n:03}")),
+            parent_subagent_id: parent.subagent_id.clone(),
+            ..crate::tool::ToolContext::default()
+        };
+        for _ in 0..=MAX_NON_WRITING_CALLS_AFTER_WALL {
+            let _ = guard.before_tool_for(&child, inspection, &json!({"file_path":"data.txt"}));
+        }
+        assert!(guard.terminal_failure_for(&child).is_some());
+        guard.charge_terminal_to_parent(&child);
+        if n <= MAX_NON_WRITING_CALLS_AFTER_WALL {
+            assert_eq!(guard.terminal_failure_for(&parent), None);
+        }
+    }
+    assert!(guard.terminal_failure_for(&parent).is_some());
 }
 
 #[test]
@@ -268,7 +295,7 @@ fn a_session_done_with_its_tests_is_told_to_return_before_the_cut_names_it() {
     }
     assert_eq!(
         terminal,
-        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 1 substantive write in this session; all 1 declared focused tests had passed at tool call 5 and the result envelope was not returned"
+        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 1 substantive write in this agent tree; all 1 declared focused tests in this agent tree had passed at tool call 5 and the result envelope was not returned"
     );
     assert!(terminal.starts_with(READ_WALL_THRASH_MARKER));
 }

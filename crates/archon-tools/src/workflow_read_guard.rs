@@ -113,6 +113,7 @@ struct AgentState {
     non_writing_after_wall: u32,
     /// Terminal thrash verdict for this invocation only.
     terminal: Option<String>,
+    terminal_charged_to_parent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,19 +217,26 @@ impl WorkflowReadGuard {
     /// worktree add` the previous session had already been refused.
     #[cfg(test)]
     pub fn before_tool(&self, name: &str, input: &Value) -> Option<String> {
-        self.before_tool_for_key((String::new(), None), name, input)
+        self.before_tool_for_key((String::new(), None), false, name, input)
     }
 
     /// Common tool-dispatch boundary with the calling agent's identity.
     pub fn before_tool_for(&self, ctx: &ToolContext, name: &str, input: &Value) -> Option<String> {
         self.before_tool_for_key(
             (ctx.session_id.clone(), ctx.subagent_id.clone()),
+            ctx.parent_subagent_id.is_some(),
             name,
             input,
         )
     }
 
-    fn before_tool_for_key(&self, key: AgentKey, name: &str, input: &Value) -> Option<String> {
+    fn before_tool_for_key(
+        &self,
+        key: AgentKey,
+        child: bool,
+        name: &str,
+        input: &Value,
+    ) -> Option<String> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.calls = state.calls.saturating_add(1);
         state.calls_since_write = state.calls_since_write.saturating_add(1);
@@ -251,10 +259,12 @@ impl WorkflowReadGuard {
         let reason = first_line(&refusal);
         self.remember(json!({
             "kind": REFUSAL_RECORD_KIND, "call": call, "tool": name, "head": head, "reason": reason,
+            "agent_id": key.1.clone(), "child": child,
         }));
         self.remember(json!({
             "kind": TOOL_CALL_RECORD_KIND, "call": call, "tool": name, "head": head,
             "status": format!("refused: {reason}"),
+            "agent_id": key.1.clone(), "child": child,
         }));
         Some(refusal)
     }
@@ -496,6 +506,38 @@ impl WorkflowReadGuard {
             .agent_state
             .get(&(ctx.session_id.clone(), ctx.subagent_id.clone()))
             .and_then(|agent| agent.terminal.clone())
+    }
+
+    /// Count a terminal child invocation as one non-writing call for its
+    /// caller, so repeated respawns eventually reach the same cutoff.
+    pub fn charge_terminal_to_parent(&self, ctx: &ToolContext) {
+        if ctx.subagent_id.is_none() {
+            return;
+        }
+        if self.terminal_failure_for(ctx).is_none() {
+            return;
+        }
+        let child_key = (ctx.session_id.clone(), ctx.subagent_id.clone());
+        let parent_key = (ctx.session_id.clone(), ctx.parent_subagent_id.clone());
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let charged = state.agent_state.entry(child_key).or_default();
+        if charged.terminal_charged_to_parent {
+            return;
+        }
+        charged.terminal_charged_to_parent = true;
+        if !state.wall_hit {
+            return;
+        }
+        let non_writing = {
+            let parent = state.agent_state.entry(parent_key.clone()).or_default();
+            parent.non_writing_after_wall = parent.non_writing_after_wall.saturating_add(1);
+            parent.non_writing_after_wall
+        };
+        if non_writing > MAX_NON_WRITING_CALLS_AFTER_WALL {
+            let terminal =
+                thrash::terminal_message(non_writing, state.writes, state.focused.as_ref());
+            state.agent_state.entry(parent_key).or_default().terminal = Some(terminal);
+        }
     }
 }
 

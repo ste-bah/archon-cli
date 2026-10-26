@@ -145,7 +145,12 @@ impl SessionMemory {
                         if crate::error::is_read_wall_thrash_text(reason) {
                             // Every call after the cut repeats the same
                             // reason under a different head; one is enough.
-                            ended_by_host.get_or_insert_with(|| clip(reason, MAX_LINE_CHARS));
+                            // A child invocation's terminal is not a host
+                            // cut of the session; old sidecars carry no
+                            // `child` flag and keep the root reading.
+                            if record.get("child") != Some(&Value::Bool(true)) {
+                                ended_by_host.get_or_insert_with(|| clip(reason, MAX_LINE_CHARS));
+                            }
                             continue;
                         }
                         let line = line(&record, "reason");

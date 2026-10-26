@@ -24,6 +24,7 @@ impl Agent {
             // Top-level agent: no subagent is in scope. The executor stamps a
             // real id onto the child context it derives from this one.
             subagent_id: None,
+            parent_subagent_id: None,
             // `turn_number` is incremented once, in `begin_process_turn`, and
             // this is built per tool round *inside* the turn — so it names the
             // turn the tools are running in and changes when the turn does.

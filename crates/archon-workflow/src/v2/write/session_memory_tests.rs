@@ -323,6 +323,40 @@ fn a_session_the_host_ended_for_read_wall_thrash_says_so_first() {
     );
 }
 
+#[test]
+fn a_child_terminal_does_not_mark_the_parent_invocation_host_ended() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let terminal = "read-wall thrash: 16 non-writing calls after the read budget was exhausted";
+    let records = vec![
+        json!({"kind":"refusal","call":1,"tool":"AC-X-TOOL","head":"data.txt","reason":terminal,"agent_id":"TASK-X-001","child":true}),
+        json!({"kind":"tool_call","call":1,"tool":"AC-X-TOOL","head":"data.txt","status":format!("refused: {terminal}"),"agent_id":"TASK-X-001","child":true}),
+    ];
+    sidecar(&store, "AC-X-001", &records);
+
+    let memory = SessionMemory::for_branch(&store, "AC-X-001", 12);
+
+    assert_eq!(memory.ended_by_host, None, "{memory:#?}");
+}
+
+#[test]
+fn a_root_subagent_terminal_still_marks_the_session_host_ended() {
+    // Workflow coders run as subagents, so their records carry an agent id;
+    // only `child: true` marks a nested invocation (Issue-521).
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let terminal = "read-wall thrash: 16 non-writing calls after the read budget was exhausted";
+    let records = vec![
+        json!({"kind":"refusal","call":1,"tool":"AC-X-TOOL","head":"data.txt","reason":terminal,"agent_id":"TASK-X-001","child":false}),
+        json!({"kind":"tool_call","call":1,"tool":"AC-X-TOOL","head":"data.txt","status":format!("refused: {terminal}"),"agent_id":"TASK-X-001","child":false}),
+    ];
+    sidecar(&store, "AC-X-001", &records);
+
+    let memory = SessionMemory::for_branch(&store, "AC-X-001", 12);
+
+    assert!(memory.ended_by_host.is_some(), "{memory:#?}");
+}
+
 fn thrash_ended_session(writes: u32) -> Vec<Value> {
     let terminal = format!(
         "read-wall thrash: 16 non-writing calls after the read budget was exhausted; {writes} substantive writes"

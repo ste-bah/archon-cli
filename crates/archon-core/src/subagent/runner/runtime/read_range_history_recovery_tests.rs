@@ -261,16 +261,47 @@ fn one_thrashing_sibling_does_not_end_another_sibling() {
         subagent_id: Some("TASK-X-002".into()),
         ..sibling_a.clone()
     };
+    let inspection = archon_tools::workflow_read_guard::READ_ONLY_INSPECTION_TOOLS[0];
     for _ in 0..=archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL {
-        let _ = guard.before_tool_for(&sibling_a, "Read", &json!({"file_path":"data.txt"}));
+        let _ = guard.before_tool_for(&sibling_a, inspection, &json!({"file_path":"data.txt"}));
     }
+    assert!(guard.terminal_failure_for(&sibling_a).is_some());
+    for _ in 0..archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL {
+        let verdict =
+            guard.before_tool_for(&sibling_b, inspection, &json!({"file_path":"data.txt"}));
+        assert!(verdict.is_some_and(|reason| {
+            !reason.starts_with(archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER)
+        }));
+    }
+    let terminal = guard.before_tool_for(&sibling_b, inspection, &json!({"file_path":"data.txt"}));
+    assert!(terminal.is_some_and(|reason| {
+        reason.starts_with(archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER)
+    }));
 
     assert!(guard.terminal_failure_for(&sibling_a).is_some());
-    assert_eq!(guard.terminal_failure_for(&sibling_b), None);
-    assert!(
-        guard
-            .before_tool_for(&sibling_b, "Read", &json!({"file_path":"data.txt"}))
-            .is_some_and(|reason| !reason
-                .starts_with(archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER))
-    );
+    assert!(guard.terminal_failure_for(&sibling_b).is_some());
+}
+
+#[test]
+fn terminal_verdict_stays_with_invocation_after_sibling_write() {
+    let guard = WorkflowReadGuard::new(0, 0, false, false);
+    let thrashing = ToolContext {
+        session_id: "AC-X-001".into(),
+        subagent_id: Some("TASK-X-001".into()),
+        ..ToolContext::default()
+    };
+    let sibling = ToolContext {
+        subagent_id: Some("TASK-X-002".into()),
+        ..thrashing.clone()
+    };
+    let inspection = archon_tools::workflow_read_guard::READ_ONLY_INSPECTION_TOOLS[0];
+    for _ in 0..=archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL {
+        let _ = guard.before_tool_for(&thrashing, inspection, &json!({"file_path":"data.txt"}));
+    }
+    let terminal = guard.terminal_failure_for(&thrashing).unwrap();
+
+    guard.record_write(b"before", b"after");
+
+    assert_eq!(guard.terminal_failure_for(&thrashing), Some(terminal));
+    assert_eq!(guard.terminal_failure_for(&sibling), None);
 }

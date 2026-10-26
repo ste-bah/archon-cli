@@ -44,13 +44,13 @@ pub(super) fn terminal_message(
     focused: Option<&FocusedTests>,
 ) -> String {
     let mut text = format!(
-        "{READ_WALL_THRASH_MARKER} {non_writing} non-writing calls after the read budget was exhausted; {writes} substantive write{} in this session",
+        "{READ_WALL_THRASH_MARKER} {non_writing} non-writing calls after the read budget was exhausted; {writes} substantive write{} in this agent tree",
         if writes == 1 { "" } else { "s" }
     );
     if let Some((n, call)) = focused.and_then(|f| f.complete_at_call.map(|c| (f.declared.len(), c)))
     {
         text.push_str(&format!(
-            "; all {n} declared focused tests had passed at tool call {call} and the result envelope was not returned"
+            "; all {n} declared focused tests in this agent tree had passed at tool call {call} and the result envelope was not returned"
         ));
     }
     text

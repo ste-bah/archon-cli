@@ -76,6 +76,9 @@ pub struct ToolContext {
     /// caller reads this instead. `None` means the top-level agent made the
     /// call — that is a real answer, not absent data.
     pub subagent_id: Option<String>,
+    /// Identity of the caller that spawned this invocation. `None` marks a
+    /// child of the top-level invocation.
+    pub parent_subagent_id: Option<String>,
     /// Identity of the agent turn this invocation belongs to
     /// (`sandbox.scope = "turn"`).
     ///
