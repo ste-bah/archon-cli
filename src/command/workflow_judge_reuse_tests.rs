@@ -343,7 +343,7 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
         entry.judgment.sampling = Some(serde_json::json!({
             "model": client.resolve_model_alias("sonnet"),
             "provider": client.provider_id(),
-            "logic_identity": crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity().unwrap()
+            "logic_identity": crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(&client.resolve_model_alias("sonnet"), client.provider_id().as_deref())
         }));
     }
     current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
@@ -385,7 +385,7 @@ fn pin_reuse_covers_supplementary_checks_too() {
     supplementary.judgment.sampling = Some(serde_json::json!({
         "model": client.resolve_model_alias("sonnet"),
         "provider": client.provider_id(),
-        "logic_identity": crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity().unwrap()
+        "logic_identity": crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(&client.resolve_model_alias("sonnet"), client.provider_id().as_deref())
     }));
     current.supplementary[0].judgment.verdict = JudgeDecision::Refuted;
     let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);

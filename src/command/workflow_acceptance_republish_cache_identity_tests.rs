@@ -35,10 +35,12 @@ async fn a_matching_saved_candidate_skips_author_and_candidate_judge_calls() {
             .sampling
             .as_ref()
             .and_then(|sampling| sampling.get("logic_identity")),
-        Some(&serde_json::json!(
-            crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
-                .unwrap()
-        )),
-        "a reused candidate keeps the judge logic identity in its judgment"
+        Some(
+            &crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(
+                super::super::test_fixture::FIXTURE_JUDGE_MODEL,
+                Some(crate::command::workflow_task_set::reauthor::test_client::SCRIPTED_PROVIDER),
+            )
+        ),
+        "a reused candidate keeps the judge instruction identity in its judgment"
     );
 }

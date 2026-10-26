@@ -5,21 +5,104 @@ struct RefutingJudge {
     batches: Mutex<Vec<Vec<String>>>,
 }
 
-fn expected_logic_identity() -> serde_json::Value {
-    serde_json::json!(
-        crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
-            .unwrap()
+fn expected_logic_identity(client: &dyn WorkflowLlmClient) -> serde_json::Value {
+    crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(
+        &client.resolve_model_alias("sonnet"),
+        client.provider_id().as_deref(),
     )
 }
 
-fn assert_recorded_current_logic_identity(entry: &AcceptanceCriterion) {
+fn assert_recorded_current_logic_identity(
+    entry: &AcceptanceCriterion,
+    client: &dyn WorkflowLlmClient,
+) {
     assert_eq!(
         entry
             .judgment
             .sampling
             .as_ref()
             .and_then(|sampling| sampling.get("logic_identity")),
-        Some(&expected_logic_identity())
+        Some(&expected_logic_identity(client))
+    );
+}
+
+#[test]
+fn pinned_identity_uses_instruction_model_and_provider_across_builds() {
+    let client = RefutingJudge {
+        batches: Mutex::new(Vec::new()),
+    };
+    let mut current = super::cache_contract();
+    let mut pinned = current.clone();
+    let entry = &mut pinned.acceptance[0];
+    entry.judgment.verdict = JudgeDecision::Accepted;
+    let instruction_digest =
+        crate::command::workflow_task_set::reauthor::cache::prompt_and_judge_source_digest(
+            crate::command::workflow_task_set::reauthor::cache::PROMPT_AND_JUDGE_SOURCES,
+        );
+    let identity = serde_json::json!([
+        instruction_digest,
+        client.resolve_model_alias("sonnet"),
+        client.provider_id()
+    ]);
+    entry.judgment.sampling = Some(serde_json::json!({
+        "model": client.resolve_model_alias("sonnet"),
+        "provider": client.provider_id(),
+        "logic_identity": identity
+    }));
+    current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
+
+    let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+
+    assert!(
+        restored.contains(&current.acceptance[0].id),
+        "same instruction identity must restore across builds"
+    );
+    assert_eq!(
+        current.acceptance[0].judgment.verdict,
+        JudgeDecision::Accepted
+    );
+}
+
+#[test]
+fn changed_judge_instruction_keeps_the_fresh_refutation() {
+    let client = RefutingJudge {
+        batches: Mutex::new(Vec::new()),
+    };
+    let mut current = super::cache_contract();
+    let mut pinned = current.clone();
+    let entry = &mut pinned.acceptance[0];
+    entry.judgment.verdict = JudgeDecision::Accepted;
+    let model = client.resolve_model_alias("sonnet");
+    let provider = client.provider_id();
+    let changed_source = [("judge-instruction", b"changed instruction".as_slice())];
+    let prior_identity =
+        crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity_for_sources(
+            &changed_source,
+            &model,
+            provider.as_deref(),
+        );
+    assert_ne!(
+        prior_identity,
+        crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(
+            &model,
+            provider.as_deref()
+        )
+    );
+    entry.judgment.sampling = Some(serde_json::json!({
+        "model": model,
+        "provider": provider,
+        // A pass 1 pin has no judge instruction binding, so this is the
+        // identity it would carry even after the instruction text changed.
+        "logic_identity": crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity().unwrap()
+    }));
+    current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
+
+    let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+
+    assert!(!restored.contains(&current.acceptance[0].id));
+    assert_eq!(
+        current.acceptance[0].judgment.verdict,
+        JudgeDecision::Refuted
     );
 }
 
@@ -178,7 +261,7 @@ async fn judge_restores_a_pinned_acceptance_from_the_same_logic_identity() {
         JudgeDecision::Accepted,
         "the same-identity pin preserves the anti-flap behavior"
     );
-    assert_recorded_current_logic_identity(&judged.acceptance[0]);
+    assert_recorded_current_logic_identity(&judged.acceptance[0], &client);
 }
 
 #[tokio::test]
@@ -219,5 +302,5 @@ async fn judge_does_not_restore_after_check_text_changes() {
         JudgeDecision::Refuted,
         "a changed check keeps the fresh refutation"
     );
-    assert_recorded_current_logic_identity(&judged.acceptance[0]);
+    assert_recorded_current_logic_identity(&judged.acceptance[0], &client);
 }

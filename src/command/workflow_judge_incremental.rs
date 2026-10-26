@@ -29,8 +29,12 @@ fn entry_key_with_budget(
     remaining: &mut usize,
 ) -> Option<String> {
     let named_file_digest = super::judge::named_files_digest_with_budget(entry, roots, remaining);
+    // Freeze logic version and digest stay in the key (a deliberate version
+    // bump re-judges); the judge identity adds the instruction sources the
+    // freeze digest does not cover (Issue-520).
     let (version, digest, _) =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
+    let judge_identity = current_logic_identity(client);
     Some(content_digest(
         serde_json::json!([
             "acceptance-entry-judge-v1",
@@ -45,6 +49,7 @@ fn entry_key_with_budget(
             client.provider_id(),
             version,
             digest,
+            judge_identity,
         ])
         .to_string()
         .as_bytes(),
@@ -58,9 +63,11 @@ fn sampling_matches(client: &dyn WorkflowLlmClient, entry: &AcceptanceCriterion)
     })
 }
 
-fn current_logic_identity() -> Option<serde_json::Value> {
-    crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
-        .map(|identity| serde_json::json!(identity))
+fn current_logic_identity(client: &dyn WorkflowLlmClient) -> serde_json::Value {
+    crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(
+        &client.resolve_model_alias("sonnet"),
+        client.provider_id().as_deref(),
+    )
 }
 
 fn record_logic_identity(entry: &mut AcceptanceCriterion, identity: &serde_json::Value) {
@@ -81,9 +88,7 @@ pub(super) fn keep_pinned_entries(
     if contract.prd.digest != base.prd.digest {
         return BTreeSet::new();
     }
-    let Some(identity) = current_logic_identity() else {
-        return BTreeSet::new();
-    };
+    let identity = current_logic_identity(client);
     let mut restored = BTreeSet::new();
     for entry in contract
         .acceptance
@@ -236,9 +241,8 @@ pub(super) async fn judge(
         if let Some(judgment) = load_entry(project, &key) {
             if judgment.verdict == JudgeDecision::Accepted {
                 entry.judgment = judgment;
-                if let Some(identity) = current_logic_identity() {
-                    record_logic_identity(entry, &identity);
-                }
+                let identity = current_logic_identity(client);
+                record_logic_identity(entry, &identity);
                 reused.insert(entry.id.clone());
                 remaining = before_entry;
             }
@@ -272,15 +276,14 @@ pub(super) async fn judge(
             }
         };
         merge_judgments(&mut contract, &judged);
-        if let Some(identity) = current_logic_identity() {
-            for entry in contract
-                .acceptance
-                .iter_mut()
-                .chain(&mut contract.supplementary)
-                .filter(|entry| judged_ids.contains(&entry.id))
-            {
-                record_logic_identity(entry, &identity);
-            }
+        let identity = current_logic_identity(client);
+        for entry in contract
+            .acceptance
+            .iter_mut()
+            .chain(&mut contract.supplementary)
+            .filter(|entry| judged_ids.contains(&entry.id))
+        {
+            record_logic_identity(entry, &identity);
         }
     }
     let mut pinned_ids = BTreeSet::new();

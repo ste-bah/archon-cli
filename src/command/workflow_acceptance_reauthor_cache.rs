@@ -28,8 +28,6 @@ struct Key {
     prompt_and_judge_source_digest: String,
     #[serde(default)]
     named_file_digest: String,
-    #[serde(default)]
-    judge_logic_identity: Option<(u32, String, String)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,13 +41,13 @@ fn digest(bytes: &[u8]) -> String {
     content_digest(bytes)
 }
 
-fn record_logic_identity(candidate: &mut AcceptanceCriterion, identity: &(u32, String, String)) {
+fn record_judge_identity(candidate: &mut AcceptanceCriterion, identity: &serde_json::Value) {
     let sampling = candidate
         .judgment
         .sampling
         .get_or_insert_with(|| serde_json::json!({}));
     if let Some(fields) = sampling.as_object_mut() {
-        fields.insert("logic_identity".into(), serde_json::json!(identity));
+        fields.insert("logic_identity".into(), identity.clone());
     }
 }
 
@@ -116,6 +114,18 @@ pub(crate) fn prompt_and_judge_source_digest(sources: &[(&str, &[u8])]) -> Strin
     digest(&closure)
 }
 
+pub(crate) fn judge_instruction_identity(model: &str, provider: Option<&str>) -> serde_json::Value {
+    judge_instruction_identity_for_sources(PROMPT_AND_JUDGE_SOURCES, model, provider)
+}
+
+pub(crate) fn judge_instruction_identity_for_sources(
+    sources: &[(&str, &[u8])],
+    model: &str,
+    provider: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!([prompt_and_judge_source_digest(sources), model, provider])
+}
+
 fn key(
     frozen: &AcceptanceCriterion,
     candidate: &AcceptanceCriterion,
@@ -149,8 +159,6 @@ fn key(
         judge_provider: judge_provider.map(str::to_string),
         prompt_and_judge_source_digest: prompt_and_judge_source_digest(PROMPT_AND_JUDGE_SOURCES),
         named_file_digest: super::judge::named_files_digest(candidate, &roots),
-        judge_logic_identity:
-            crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity(),
     })
 }
 
@@ -241,9 +249,10 @@ pub(crate) fn load(
             );
         }
         let mut candidate = record.candidate;
-        if let Some(identity) = &expected.judge_logic_identity {
-            record_logic_identity(&mut candidate, identity);
-        }
+        record_judge_identity(
+            &mut candidate,
+            &judge_instruction_identity(&expected.judge_model, expected.judge_provider.as_deref()),
+        );
         return Ok(Some(candidate));
     }
     if let Some(reason) = mismatch {
@@ -272,9 +281,10 @@ pub(crate) fn store(
         .ok_or_else(|| anyhow!("candidate is absent from its source contract"))?;
     let key = key(frozen, candidate, scope, judge_model, judge_provider, probe)?;
     let mut saved_candidate = candidate.clone();
-    if let Some(identity) = &key.judge_logic_identity {
-        record_logic_identity(&mut saved_candidate, identity);
-    }
+    record_judge_identity(
+        &mut saved_candidate,
+        &judge_instruction_identity(&key.judge_model, key.judge_provider.as_deref()),
+    );
     let record = Record {
         key_digest: digest(&serde_json::to_vec(&key)?),
         key,
