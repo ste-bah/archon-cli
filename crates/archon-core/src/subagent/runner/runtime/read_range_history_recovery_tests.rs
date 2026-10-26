@@ -88,7 +88,7 @@ async fn pruning_history_restores_the_same_range_with_full_content() {
 }
 
 #[tokio::test]
-async fn fitting_an_oversized_read_keeps_a_truncated_marker_and_stops_the_reread_loop() {
+async fn history_replacement_restores_an_oversized_read_until_budget_exhaustion() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("data.txt");
     std::fs::write(
@@ -99,7 +99,7 @@ async fn fitting_an_oversized_read_keeps_a_truncated_marker_and_stops_the_reread
             .join("\n"),
     )
     .unwrap();
-    let guard = Arc::new(WorkflowReadGuard::new(40, 20, false, false));
+    let guard = Arc::new(WorkflowReadGuard::new(2, 20, false, false));
     let context = context(root.path(), guard);
     let content = read(&context, &path, false).await;
     let mut history =
@@ -107,12 +107,16 @@ async fn fitting_an_oversized_read_keeps_a_truncated_marker_and_stops_the_reread
     history.replace_for_agent(vec![json!({"role":"user","content":"fitted"})], &context);
 
     let repeated = read(&context, &path, false).await;
-    assert!(
-        repeated.contains("truncated")
-            && repeated.contains("offset=0")
-            && repeated.contains("limit=4"),
-        "expected an offset and limit reminder for the truncated range"
-    );
+    assert_eq!(repeated, content);
+
+    let input = json!({"file_path": path, "limit": 4});
+    let refusal = context
+        .workflow_read_guard
+        .as_ref()
+        .unwrap()
+        .before_tool_for(&context, "Read", &input)
+        .unwrap();
+    assert!(refusal.starts_with("read budget exhausted"), "{refusal}");
 }
 
 #[tokio::test]
