@@ -89,6 +89,10 @@ pub(crate) use resolved::{
 mod consumed;
 pub(crate) use consumed::{append_consumed, is_consumed};
 
+#[path = "workflow_decompose_remediation_report_seed.rs"]
+mod report_seed;
+pub(crate) use report_seed::report_author_seed;
+
 #[path = "workflow_decompose_remediation_lineage.rs"]
 mod lineage;
 use lineage::{consumed_ledger_findings, consumed_ledger_review};
@@ -191,18 +195,7 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
             let finding = uncertain
                 .get(id)
                 .cloned()
-                .or_else(|| {
-                    report["checks"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .find(|check| check["check_id"].as_str() == Some(id.as_str()))
-                        .and_then(|check| check["findings"].as_array())
-                        .and_then(|findings| findings.first())
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
-                })
-                .unwrap_or_else(|| "the frozen check failed on the current tree".to_string());
+                .unwrap_or_else(|| report_author_seed(&report, &ledger.report_id, id));
             (id.clone(), finding)
         })
         .collect::<std::collections::BTreeMap<_, _>>();

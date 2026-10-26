@@ -17,31 +17,31 @@ mod scope_tests;
 #[tokio::test]
 async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_finding_seed() {
     let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
-        "AC-F-001",
-        "jq -e '.a == true' out.json",
+        "AC-X-002",
+        "test -f build-manifest",
         true,
     )]);
     let run_dir = tempfile::tempdir().unwrap();
     let report_dir = run_dir.path().join("decomposition/reverify/reports");
     std::fs::create_dir_all(&report_dir).unwrap();
-    let finding = "passed on base but the can-fail proof has no named input";
+    let finding = "the recorded check had no named input";
     std::fs::write(
         report_dir.join("report-check-defect.json"),
         serde_json::json!({
-            "checks": [{"check_id":"AC-F-001", "findings":[finding]}]
+            "checks": [{"check_id":"AC-X-002", "findings":[finding]}]
         })
         .to_string(),
     )
     .unwrap();
     let ledger = Ledger {
         report_id: "report-check-defect".into(),
-        subjects: vec!["AC-F-001".into()],
+        subjects: vec!["AC-X-002".into()],
     };
     let client = crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
         |entry, _| {
             crate::command::workflow_task_set::reauthor::test_client::command_entry(
                 entry,
-                "jq -e '.a == true and .b == 1' out.json",
+                "test -f build-manifest && test -f build-output",
             )
         },
         |_, _| true,
@@ -63,13 +63,19 @@ async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_find
             .lock()
             .unwrap()
             .iter()
-            .all(|id| id == "AC-F-001")
+            .all(|id| id == "AC-X-002")
     );
-    assert!(client.prompts.lock().unwrap()[0].contains(finding));
+    let prompt = client.prompts.lock().unwrap()[0].clone();
+    assert!(prompt.contains(&format!(
+        "Report report-check-defect said about check AC-X-002: \"{finding}\""
+    )));
 }
 
 #[path = "workflow_decompose_remediation_resume_plan_tests.rs"]
 mod resume_plan_tests;
+
+#[path = "workflow_decompose_remediation_seed_lineage_tests.rs"]
+mod seed_lineage_tests;
 
 #[test]
 fn completed_run_with_ledger_builds_seed_and_other_cases_do_not() {
