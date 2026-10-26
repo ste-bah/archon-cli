@@ -434,8 +434,7 @@ mod crash;
 mod stalled;
 pub(crate) use stalled::{stall_note, stalled_running};
 
-/// Refuses while a group (or a process of its session) that a dead executor
-/// left behind still runs.
+/// Refuses while a process group left behind by a dead executor still runs.
 /// Returns the records of the groups that have ended.
 pub(crate) fn require_no_running_groups(
     run_dir: &Path,
@@ -472,8 +471,10 @@ fn require_no_running_groups_from(
         });
         let files = refusal_files(&path);
         return Err(anyhow::anyhow!(
-            "fixed decomposition {run_id} cannot resume: host command '{}' has unknown survivors; verify by hand that none of its processes runs, then remove {files} and resume again",
-            first.command_id
+            "run {run_id} cannot resume: host command '{}' (process group {}, recorded pid {}) has unknown survivors; verify by hand that none of its processes runs, then remove {files} and resume again",
+            first.command_id,
+            first.pgid,
+            first.pid
         ));
     }
     Err(anyhow::anyhow!(

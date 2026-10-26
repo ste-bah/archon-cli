@@ -1,6 +1,8 @@
 use super::*;
 use archon_shell::paths::plain;
 
+#[path = "workflow_decomposition_resume_host_group_tests.rs"]
+mod host_group_tests;
 #[path = "workflow_decomposition_resume_legacy_tests.rs"]
 mod legacy_tests;
 #[path = "workflow_decompose_resume_ordering_tests.rs"]
