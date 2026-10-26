@@ -381,13 +381,23 @@ fn sibling_word(word: &str) -> Option<PathBuf> {
     let value = word.split_once('=').map_or(word, |(_, value)| value);
     let value = value.strip_prefix("$PWD/").unwrap_or(value);
     let value = value.trim_matches(|character: char| {
-        character.is_ascii_punctuation() && !"._/-\\".contains(character)
+        character.is_ascii_punctuation() && !is_path_character(character)
     });
     if value.is_empty() {
         return None;
     }
     let path = PathBuf::from(value);
     names_entry_below_parent(&path).then_some(path)
+}
+
+/// Characters shared by the sibling and movable input path scanners.
+/// Non-ASCII characters remain part of a path. A backslash is not: in check
+/// text it is almost always an escape (`\n`, `\.`), which would glue junk to
+/// a real path (Issue-489).
+pub fn is_path_character(character: char) -> bool {
+    !character.is_ascii()
+        || character.is_ascii_alphanumeric()
+        || matches!(character, '.' | '_' | '/' | '-' | '+' | '@')
 }
 
 fn names_entry_below_parent(path: &std::path::Path) -> bool {

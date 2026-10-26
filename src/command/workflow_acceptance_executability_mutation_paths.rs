@@ -7,7 +7,7 @@ mod variables;
 use variables::{VariableFlow, apply_assignments, join_variables, valid_variable};
 #[path = "workflow_acceptance_executability_mutation_paths_fs.rs"]
 mod fs_paths;
-pub(super) use fs_paths::{normalize_absolute, relative_path};
+pub(super) use fs_paths::{diagnostic_path, normalize_absolute, relative_path};
 
 #[path = "workflow_acceptance_executability_mutation_paths_lex.rs"]
 mod lex;
@@ -23,9 +23,7 @@ fn normalize(token: &str) -> &str {
 }
 
 pub(super) fn path_tokens(text: &str) -> Vec<String> {
-    let allowed =
-        |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-' | '+' | '@');
-    text.split(|c: char| !allowed(c))
+    text.split(|c: char| !archon_workflow::acceptance_sibling_paths::is_path_character(c))
         .filter(|token| !token.ends_with('/'))
         .map(normalize)
         .filter(|token| {
@@ -39,6 +37,7 @@ pub(super) fn path_tokens(text: &str) -> Vec<String> {
                     .all(|(index, part)| match part {
                         std::path::Component::Normal(name) => name != ".git" && name != "target",
                         std::path::Component::ParentDir => index == 0,
+                        std::path::Component::CurDir => index == 0,
                         _ => false,
                     })
         })
