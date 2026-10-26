@@ -314,75 +314,47 @@ pub(crate) fn reconcile_task_root(
         }
         lock
     };
-    let prd_path = if !task_root
-        .join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE)
-        .exists()
-    {
-        project_root.join("missing-acceptance-prd")
-    } else {
-        match std::fs::read(
-            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        ) {
-            Ok(bytes) => match serde_json::from_slice::<
-                archon_workflow::task_set_contract::AcceptanceContract,
-            >(&bytes)
-            {
-                Ok(contract) => {
-                    let path = Path::new(&contract.prd.path);
-                    if path.is_absolute() {
-                        path.to_path_buf()
-                    } else {
-                        project_root.join(path)
-                    }
-                }
-                Err(error) => {
-                    return Ok(vec![format!(
-                        "landing reconciliation: the frozen chain does not validate (parsing acceptance contract: {error:#}); no body was compared"
-                    )]);
-                }
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                project_root.join("missing-acceptance-prd")
-            }
-            Err(error) => {
-                return Ok(vec![format!(
-                    "landing reconciliation: the frozen chain does not validate (reading acceptance contract: {error:#}); no body was compared"
-                )]);
-            }
+    let pin: archon_workflow::task_set_contract::AcceptancePin = match std::fs::read(&pin_path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("parsing acceptance pin {}", pin_path.display()))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(vec![
+                "landing reconciliation: no acceptance pin yet; nothing landed".into(),
+            ]);
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("reading acceptance pin {}", pin_path.display()));
         }
     };
-    let skeleton = match crate::command::workflow_decompose_frozen_chain::frozen_chain_decision(
-        project_root,
-        &prd_path,
-        task_root,
-    ) {
-        Ok(
-            crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::AcceptanceAbsent,
-        ) => {
+    if !task_root
+        .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE)
+        .exists()
+    {
+        return Ok(vec![
+            "landing reconciliation: no frozen skeleton yet; nothing landed".into(),
+        ]);
+    }
+    match crate::command::workflow_skeleton_pending::is_pending(task_root, &pin) {
+        Ok(true) => {
             return Ok(vec![
-                "landing reconciliation: no acceptance freeze yet; no body was compared".into(),
+                "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; nothing landed".into(),
             ]);
         }
-        Ok(
-            crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::AcceptanceOnly,
-        ) => {
-            return Ok(vec![
-                "landing reconciliation: no frozen skeleton yet; no body was compared".into(),
-            ]);
-        }
-        Ok(
-            crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::SkeletonPending,
-        ) => {
-            return Ok(vec![
-                "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; no body was compared".into(),
-            ]);
-        }
-        Ok(crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::Complete(
-            skeleton,
-        )) => skeleton,
         Err(error) => {
             return Ok(vec![format!(
-                "landing reconciliation: the frozen chain does not validate ({error:#}); no body was compared"
+                "landing reconciliation: the frozen chain does not validate ({error}); no body was compared"
+            )]);
+        }
+        Ok(false) => {}
+    }
+    let skeleton = match archon_workflow::task_skeleton::validate_full_chain(task_root, &pin) {
+        Ok(skeleton) => skeleton,
+        // The frozen-chain decision after this reports the chain itself; no
+        // body can be rebuilt against a skeleton that does not validate.
+        Err(error) => {
+            return Ok(vec![format!(
+                "landing reconciliation: the frozen chain does not validate ({error}); no body was compared"
             )]);
         }
     };

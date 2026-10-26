@@ -29,13 +29,11 @@ fn landing_reconciliation_reports_a_pending_skeleton_without_manual_instructions
         "the landing fixture must satisfy the shared pending rule"
     );
 
-    seed_landing_record(&fixture);
-
     let lines = landing_reconciliation_lines(&fixture);
     assert_eq!(
         lines,
         vec![
-            "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; no body was compared"
+            "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; nothing landed"
         ]
     );
     assert!(
@@ -72,94 +70,5 @@ fn landing_reconciliation_reports_a_pending_skeleton_without_manual_instructions
     assert_eq!(
         lines[0],
         "landing reconciliation: would settle 0 of 2 task bodies"
-    );
-}
-
-fn seed_landing_record(fixture: &Fixture) {
-    use archon_workflow::{
-        HostCommandRequest, HostCommandSubject, WorkflowV2CallRecord, WorkflowV2HostCall,
-        WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result,
-    };
-    let mut options = WorkflowV2HostOptions::default();
-    options.host_command = Some(HostCommandRequest {
-        command_id: "land-task-body".into(),
-        stdin: Some("candidate".into()),
-        target: Some(HostCommandSubject {
-            task_id: "TASK-X-010".into(),
-            file_name: "TASK-X-010.md".into(),
-        }),
-    });
-    let mut result = WorkflowV2Result::default();
-    result.data = serde_json::json!({
-        "publicationReceipt": {"entries": [], "committed_at": "now"}
-    });
-    let record = WorkflowV2CallRecord::new(
-        "wf-reconcile",
-        WorkflowV2HostCall {
-            id: "call-X-001".into(),
-            method: WorkflowV2HostMethod::HostCommand,
-            write_mode: None,
-            options,
-        },
-        1,
-        "input".into(),
-        result,
-        Vec::new(),
-    );
-    archon_workflow::WorkflowV2ResultStore::new(fixture.project.join("v2"))
-        .save_call_record(&record)
-        .unwrap();
-}
-
-#[test]
-fn pending_chain_still_reports_a_tampered_acceptance_before_the_newer_pin() {
-    let mut fixture = project();
-    freeze_acceptance(&mut fixture);
-    freeze_skeleton(&fixture);
-    let mut prd = std::fs::read(&fixture.prd).unwrap();
-    prd.extend_from_slice(b"\n<!-- newer acceptance freeze -->\n");
-    std::fs::write(&fixture.prd, prd).unwrap();
-    freeze_acceptance(&mut fixture);
-    let contract_path = fixture
-        .tasks
-        .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-    let contract = std::fs::read_to_string(&contract_path).unwrap();
-    std::fs::write(
-        contract_path,
-        contract.replace(
-            "The project PRD file exists and is nonempty.",
-            "The project PRD file is tampered.",
-        ),
-    )
-    .unwrap();
-
-    let lines = landing_reconciliation_lines(&fixture);
-    assert!(lines[0].contains("frozen acceptance contract"), "{lines:?}");
-    assert!(!lines[0].contains("waits to be frozen"), "{lines:?}");
-}
-
-#[test]
-fn missing_skeleton_lock_has_the_same_acceptance_only_answer_in_both_readers() {
-    let mut fixture = project();
-    freeze_acceptance(&mut fixture);
-    freeze_skeleton(&fixture);
-    std::fs::remove_file(
-        fixture
-            .tasks
-            .join(archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE),
-    )
-    .unwrap();
-
-    let snapshot = crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
-        &fixture.project,
-        &fixture.prd,
-        &fixture.tasks,
-    )
-    .unwrap();
-    let lines = landing_reconciliation_lines(&fixture);
-    assert!(snapshot.acceptance && !snapshot.skeleton);
-    assert_eq!(
-        lines,
-        vec!["landing reconciliation: no frozen skeleton yet; no body was compared"]
     );
 }

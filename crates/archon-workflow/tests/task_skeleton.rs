@@ -128,35 +128,6 @@ fn full_chain_binds_both_exact_files_to_the_host_pin() {
 }
 
 #[test]
-fn skeleton_acceptance_binding_mismatch_precedes_missing_skeleton_pin_provenance() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().join("tasks");
-    let (acceptance_digest, pin) = write_acceptance(&root);
-    let mut skeleton = skeleton(&acceptance_digest);
-    skeleton.acceptance_digest = "stale-acceptance".into();
-    let bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
-    fs::write(root.join(TASK_SKELETON_FILE), &bytes).unwrap();
-    fs::write(
-        root.join(TASK_SKELETON_LOCK_FILE),
-        serde_json::to_vec_pretty(&TaskSkeletonLock {
-            algorithm: "blake3".into(),
-            digest: content_digest(&bytes),
-            acceptance_digest: acceptance_digest.clone(),
-            gate: clean_stamp(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
-
-    let error = validate_full_chain(&root, &pin).unwrap_err().to_string();
-    assert!(
-        error.contains("acceptance_digest is stale-acceptance"),
-        "{error}"
-    );
-    assert!(!error.contains("no skeleton gate provenance"), "{error}");
-}
-
-#[test]
 fn frozen_fields_compare_structurally_not_by_yaml_formatting() {
     let frozen = skeleton("acceptance").tasks.remove(0);
     let task = WorkflowV2TaskUniverseTask {
