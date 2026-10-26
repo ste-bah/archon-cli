@@ -1,6 +1,7 @@
 //! Reuse only unchanged accepted judgments saved for their exact inputs.
 use super::*;
 use archon_workflow::task_set_contract::{AcceptanceCriterion, JudgeDecision};
+use std::collections::BTreeMap;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct EntryVerdict {
@@ -89,6 +90,18 @@ pub(super) fn keep_pinned_entries(
         return BTreeSet::new();
     };
     let mut restored = BTreeSet::new();
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    let old_named_file_digests: BTreeMap<_, _> = base
+        .acceptance
+        .iter()
+        .chain(&base.supplementary)
+        .map(|old| {
+            (
+                old.id.clone(),
+                super::judge::named_files_digest_with_budget(old, roots, &mut remaining),
+            )
+        })
+        .collect();
     for entry in contract
         .acceptance
         .iter_mut()
@@ -105,6 +118,7 @@ pub(super) fn keep_pinned_entries(
         else {
             continue;
         };
+        let old_named_file_digest = old_named_file_digests.get(&old.id).map(String::as_str);
         if old.judgment.verdict == JudgeDecision::Accepted
             && old
                 .judgment
@@ -118,7 +132,7 @@ pub(super) fn keep_pinned_entries(
                 .as_ref()
                 .and_then(|sampling| sampling.get("named_file_digest"))
                 .and_then(serde_json::Value::as_str)
-                == Some(super::judge::named_files_digest(old, roots).as_str())
+                == old_named_file_digest
             && old.criterion == entry.criterion
             && old.check == entry.check
             && old.covers == entry.covers

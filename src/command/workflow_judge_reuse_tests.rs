@@ -7,6 +7,8 @@ use std::sync::Mutex;
 mod logic_identity_tests;
 #[path = "workflow_judge_reuse_restore_tests.rs"]
 mod restore_tests;
+#[path = "workflow_judge_reuse_stamp_tests.rs"]
+mod stamp_tests;
 
 fn expected_logic_identity(client: &dyn WorkflowLlmClient) -> serde_json::Value {
     crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
@@ -334,42 +336,6 @@ fn incremental_key_binds_effective_named_file_content() {
     std::fs::write(temp.path().join("input"), "changed").unwrap();
     let changed = super::super::incremental::entry_key(&client, &task_root, "prd", &entry, &roots);
     assert_ne!(first, changed);
-}
-
-#[test]
-fn an_unstamped_entry_cache_record_is_a_miss() {
-    let temp = tempfile::tempdir().unwrap();
-    let client = RecordingJudge {
-        batches: Mutex::new(vec![]),
-        omit_supplementary: false,
-    };
-    let entry = cache_contract().acceptance[0].clone();
-    let named_digest = super::super::judge::named_files_digest(
-        &entry,
-        &super::super::judge::JudgeRoots::default(),
-    );
-    let key = "seeded-entry";
-    let cache = temp
-        .path()
-        .join(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)
-        .join("judge-entry");
-    std::fs::create_dir_all(&cache).unwrap();
-    std::fs::write(
-        cache.join(format!("{key}.json")),
-        serde_json::json!({ "key": key, "judgment": entry.judgment }).to_string(),
-    )
-    .unwrap();
-
-    assert!(
-        super::super::incremental::load_entry(
-            temp.path(),
-            key,
-            &expected_logic_identity(&client),
-            &named_digest,
-        )
-        .is_none(),
-        "an unstamped verdict must miss the entry cache"
-    );
 }
 
 #[test]
