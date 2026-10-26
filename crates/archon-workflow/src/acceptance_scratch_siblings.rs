@@ -439,8 +439,8 @@ pub(crate) fn refused_sibling(
             format!(
                 "{}: {} resolves to {}",
                 super::faults::SIBLING_ROOT_REFUSED,
-                relative(root, &sibling.alias).display(),
-                sibling.source.display()
+                archon_shell::paths::stored_text(&relative(root, &sibling.alias)),
+                archon_shell::paths::stored_text(&sibling.source)
             )
         })
 }

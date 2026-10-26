@@ -47,19 +47,19 @@ pub(super) fn check_defects(
                     .and_then(|reason| reason.strip_prefix(": "))
                     .and_then(|reason| reason.split_once(" resolves to ").map(|(path, _)| path))
                     .map(str::to_owned)
-                    .unwrap_or_else(|| named.path.display().to_string());
+                    .unwrap_or_else(|| archon_shell::paths::stored_text(&named.path));
                 let reason = refusal.reason.unwrap_or_else(|| {
                     format!(
                         "alone in its site, `{}` from {root_name} resolves to `{}`, which the site does not create",
-                        named.path.display(),
-                        refusal.site_target.display(),
+                        archon_shell::paths::stored_text(&named.path),
+                        archon_shell::paths::stored_text(&refusal.site_target),
                     )
                 });
                 return Err(format!(
                     "check '{}': it names `{}` from the {root_name}; {reason} (site target `{}`).",
                     candidate.id,
                     refused_path,
-                    refusal.site_target.display(),
+                    archon_shell::paths::stored_text(&refusal.site_target),
                 ));
             }
         }

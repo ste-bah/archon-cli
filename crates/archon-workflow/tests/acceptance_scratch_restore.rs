@@ -6,7 +6,9 @@
 
 #[path = "support/isolation_fixture.rs"]
 mod support;
-use archon_workflow::acceptance_scratch::{CheckAllowance, CheckResult, ObserveHooks};
+#[cfg(target_os = "macos")]
+use archon_workflow::acceptance_scratch::CheckAllowance;
+use archon_workflow::acceptance_scratch::{CheckResult, ObserveHooks};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,6 +34,8 @@ fn assert_all_ran_but_the_first(result: &archon_workflow::acceptance_scratch::Ob
     }
 }
 
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 fn assert_one_attributed_teardown(result: &archon_workflow::acceptance_scratch::ObservationResult) {
     let attribution_notes = result
         .checks
@@ -53,6 +57,8 @@ fn assert_one_attributed_teardown(result: &archon_workflow::acceptance_scratch::
     );
 }
 
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 fn hooks_with_short_checks() -> ObserveHooks {
     let mut hooks = ObserveHooks::for_resource_limits(Default::default());
     hooks.allowance = Some(Arc::new(move || CheckAllowance::Run {

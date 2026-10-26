@@ -152,7 +152,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 52: a missing program at the probe site is an author finding and
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
-        sources_digest: "4fc6a38e6045cd2117a05f7f2d1dcbf58655236a92c102706e796398f53f348a",
+        // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
+        sources_digest: "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
         build_bound: false,
     },
     CapabilityLogic {
@@ -181,7 +182,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // mutation and publication rules do not change skeleton verdicts.
         // Re-pin only: resume lineage repairs and missing cross-root refusal do not change the freeze verdict.
         // #496 re-pin only: partial CLI repair outcome reporting does not change skeleton freeze verdicts.
-        sources_digest: "4fc6a38e6045cd2117a05f7f2d1dcbf58655236a92c102706e796398f53f348a",
+        // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
+        sources_digest: "83c7dbcebb6d8656e23ff35792de7381d508d59453879f8bea73bfa91c1da141",
         build_bound: false,
     },
     CapabilityLogic {
@@ -347,7 +349,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
-        sources_digest: "38f1379d5ff2b398e0ab66645cd42027e61e3a0af0b24a9edd46ceaa5be78f83",
+        // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
+        sources_digest: "74ac0e71aa6e9fd7ec1e9922d9e069de22f71d957d5368694e8e3f8f63331c82",
         build_bound: true,
     },
     CapabilityLogic {
@@ -375,7 +378,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: bounded mutation output evidence and resume routing do not change frozen verification verdicts.
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen skeleton verification.
-        sources_digest: "38f1379d5ff2b398e0ab66645cd42027e61e3a0af0b24a9edd46ceaa5be78f83",
+        // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
+        sources_digest: "74ac0e71aa6e9fd7ec1e9922d9e069de22f71d957d5368694e8e3f8f63331c82",
         build_bound: true,
     },
 ];
