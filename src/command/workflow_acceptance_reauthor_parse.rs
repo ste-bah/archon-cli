@@ -101,6 +101,25 @@ pub(super) fn shape_diagnoses(
             "the reply holds {count} different entries; return exactly one"
         ));
     }
+    if let blocks::ObjectExtraction::MisplacedBrace {
+        missing_fields,
+        next_field,
+    } = extraction
+    {
+        let missing = if missing_fields.is_empty() {
+            String::new()
+        } else if missing_fields.len() == 1 {
+            format!("; check lacks required field {}", missing_fields[0])
+        } else {
+            format!(
+                "; check lacks required fields {}",
+                missing_fields.join(", ")
+            )
+        };
+        diagnoses.push(format!(
+            "the entry closes early, before \"{next_field}\"{missing}; a closing brace is extra or misplaced"
+        ));
+    }
     if reply_blocks
         .iter()
         .any(|block| block.info == "check" && block.content.trim().is_empty())
@@ -188,7 +207,8 @@ fn candidate_entry_with_markers_inner(
         blocks::ObjectExtraction::Entry(entry)
         | blocks::ObjectExtraction::ArrayWrappedEntry(entry) => entry.clone(),
         blocks::ObjectExtraction::NoneFound
-        | blocks::ObjectExtraction::SeveralDifferentEntries { .. } => {
+        | blocks::ObjectExtraction::SeveralDifferentEntries { .. }
+        | blocks::ObjectExtraction::MisplacedBrace { .. } => {
             let shape = shape_diagnoses(reply, markers, &extraction);
             let details = shape.join(". ");
             return Err(format!(

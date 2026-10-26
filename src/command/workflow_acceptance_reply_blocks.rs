@@ -358,8 +358,8 @@ pub(crate) fn extract_object(content: &str) -> String {
 pub(crate) fn extract_object_with_markers(content: &str, markers: &[String]) -> String {
     match extract_object_outcome_with_markers(content, markers) {
         ObjectExtraction::Entry(entry) | ObjectExtraction::ArrayWrappedEntry(entry) => entry,
-        ObjectExtraction::NoneFound | ObjectExtraction::SeveralDifferentEntries { .. } => {
-            String::new()
-        }
+        ObjectExtraction::NoneFound
+        | ObjectExtraction::SeveralDifferentEntries { .. }
+        | ObjectExtraction::MisplacedBrace { .. } => String::new(),
     }
 }
