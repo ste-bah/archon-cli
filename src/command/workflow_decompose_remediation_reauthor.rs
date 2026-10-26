@@ -60,18 +60,9 @@ pub(super) async fn reauthor_resume_plan(
                     .as_ref()
                     .is_some_and(|ids| ids.contains(id))
             {
-                let finding = report["checks"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|check| check["check_id"].as_str() == Some(id))
-                    .and_then(|check| check["findings"].as_array())
-                    .and_then(|items| items.first())
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("the frozen check failed on the current tree");
                 seeds
                     .entry(id.clone())
-                    .or_insert_with(|| finding.to_string());
+                    .or_insert_with(|| super::report_author_seed(&report, &pending.report_id, id));
             }
         }
     }
