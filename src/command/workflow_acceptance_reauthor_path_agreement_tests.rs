@@ -2,7 +2,7 @@ use super::*;
 use archon_workflow::task_set_contract::TrustedCwd;
 
 #[cfg(unix)]
-#[path = "workflow_acceptance_reauthor_path_matrix_helpers.rs"]
+#[path = "workflow_acceptance_reauthor_path_matrix_helpers_tests.rs"]
 mod path_matrix_helpers;
 
 #[test]
