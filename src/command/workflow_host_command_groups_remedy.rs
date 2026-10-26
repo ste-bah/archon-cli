@@ -4,7 +4,7 @@ use super::{HostCommandGroupRecord, stall_note};
 pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: usize) -> String {
     if record.pid == 0 {
         return format!(
-            "fixed decomposition {run} cannot resume: host command '{}' launch is still supervised by executor {}; wait for that executor to settle its launch or teardown and resume again (barrier {})",
+            "run {run} cannot resume: host command '{}' launch is still supervised by executor {}; wait for that executor to settle its launch or teardown and resume again (barrier {})",
             record.command_id,
             record.host_pid,
             record
@@ -44,7 +44,7 @@ pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: 
             Ok(pins) => live.extend(pins),
             Err(error) => {
                 return format!(
-                    "fixed decomposition {run} cannot resume: host command '{}' membership cannot be read ({error}); verify its processes, then remove {} and resume again",
+                    "run {run} cannot resume: host command '{}' membership cannot be read ({error}); verify its processes, then remove {} and resume again",
                     record.command_id,
                     record
                         .file
@@ -96,7 +96,7 @@ pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: 
         action
     };
     format!(
-        "fixed decomposition {run} cannot resume: host command '{}' (process group {}, pid {}) is still running{}{}; {remedy}",
+        "run {run} cannot resume: host command '{}' (process group {}, pid {}) is still running{}{}; {remedy}",
         record.command_id,
         record.pgid,
         record.pid,
