@@ -108,7 +108,7 @@ mod tool_preflight_filesystem;
 pub(crate) mod tool_preflight_freshness;
 mod tool_preflight_gates;
 mod tool_preflight_steps;
-pub(crate) mod tool_result_context;
+pub mod tool_result_context;
 mod tool_types;
 mod turn_completion;
 mod two_pass;

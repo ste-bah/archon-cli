@@ -7,8 +7,8 @@ use anyhow::{Context, Result, anyhow};
 use archon_workflow::WorkflowLlmClient;
 use archon_workflow::llm_client_port::WorkflowAgentOutcome;
 use archon_workflow::task_set_contract::{
-    AcceptanceContract, AcceptancePin, FreezeGateMode, FreezeGateStamp, JudgeDecision,
-    content_digest,
+    AcceptanceContract, AcceptanceCriterion, AcceptancePin, FreezeGateMode, FreezeGateStamp,
+    JudgeDecision, content_digest,
 };
 
 use crate::command::workflow_gate::{GateFinding, GateId};
@@ -22,6 +22,36 @@ pub(super) use named_files::named_files_digest;
 pub(super) use named_files::named_files_digest_for_list;
 pub(super) use named_files::named_files_digest_with_budget;
 use named_files::named_files_with_budget;
+
+#[derive(Default)]
+pub(crate) struct ReauthorPrefetchCache(named_files::PrefetchSourceCache);
+
+pub(crate) fn named_files_for_reauthor_cached(
+    criterion: &AcceptanceCriterion,
+    project: &Path,
+    repository: &Path,
+    task_root: &Path,
+    repository_commit: Option<String>,
+    extra_inputs: &[String],
+    cache: &mut ReauthorPrefetchCache,
+) -> Vec<serde_json::Value> {
+    let roots = JudgeRoots {
+        project: Some(project.to_path_buf()),
+        repository: Some(repository.to_path_buf()),
+        task_root: Some(task_root.to_path_buf()),
+        repository_commit,
+    };
+    // The author prompt enters the subagent request history, where the normal
+    // context-window fit keeps the request within its configured budget.
+    let mut remaining = usize::MAX;
+    named_files::named_files_for_inputs_with_budget_cached(
+        criterion,
+        &roots,
+        &mut remaining,
+        extra_inputs,
+        &mut cache.0,
+    )
+}
 
 #[path = "workflow_task_set_judge_rounds.rs"]
 mod rounds;

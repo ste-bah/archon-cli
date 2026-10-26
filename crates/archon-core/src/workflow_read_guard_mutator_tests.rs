@@ -1,5 +1,6 @@
 //! Issue-13: a formatter or fixer run over the whole tree is refused up front,
 //! in its scoped form it runs, and the operator switch disables the refusal.
+use crate::test_support::BeforeToolForTest;
 use archon_tools::workflow_read_guard::{
     TreeWideMutator, WorkflowReadGuard, WorkflowReadGuardSettings, default_tree_wide_mutators,
 };

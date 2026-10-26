@@ -12,6 +12,59 @@ fn minimal_oversized_messages() -> Vec<serde_json::Value> {
 }
 
 #[tokio::test]
+async fn emergency_projection_clears_ranges_for_trimmed_results() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("data.txt");
+    std::fs::write(&path, "x".repeat(4_000)).unwrap();
+    let guard = Arc::new(archon_tools::workflow_read_guard::WorkflowReadGuard::new(
+        40, 20, false, false,
+    ));
+    let context = ToolContext {
+        working_dir: root.path().to_path_buf(),
+        session_id: "AC-X-001".into(),
+        read_result_replay_limit_bytes: archon_tools::READ_REPLAY_CONTEXT_BYTES,
+        workflow_read_guard: Some(guard.clone()),
+        ..ToolContext::default()
+    };
+    let input = serde_json::json!({"file_path": path, "limit": 10});
+    assert!(guard.before_tool_for(&context, "Read", &input).is_none());
+    let first = archon_tools::file_read::ReadTool.execute(input.clone(), &context).await;
+    guard.after_tool("Read", &input, true, "ok");
+    assert!(first.content.len() > 512);
+    assert!(first.content.len() < archon_tools::READ_REPLAY_CONTEXT_BYTES);
+
+    let mut config = crate::agent::AgentConfig::default();
+    config.context.max_tool_result_bytes = 512;
+    let runner = SubagentRunner::new(
+        Arc::new(AnthropicTestProvider),
+        String::new(),
+        Vec::new(),
+        Arc::new(crate::dispatch::ToolRegistry::new()),
+        context.clone(),
+        "fixture".into(),
+        1,
+        60,
+        Arc::new(config),
+        Arc::new(test_identity()),
+    );
+    let messages = vec![serde_json::json!({
+        "role":"user",
+        "content":[{"type":"tool_result","tool_use_id":"r1","content":first.content}]
+    })];
+    let request = LlmRequest { messages: messages.clone(), ..LlmRequest::default() };
+    let projected = super::emergency_projected_request(&runner, &messages, &request);
+    let projected_content = projected.messages[0]["content"][0]["content"]
+        .as_str()
+        .unwrap();
+    assert!(projected_content.len() < 512);
+
+    assert!(guard.before_tool_for(&context, "Read", &input).is_none());
+    let second = archon_tools::file_read::ReadTool.execute(input.clone(), &context).await;
+
+    assert_eq!(second.content, first.content);
+}
+
+#[tokio::test]
 async fn subagent_pre_stream_no_safe_boundary_advances_to_emergency_projection() {
     let provider = Arc::new(FieldLimitRecoveryProvider::new());
     let runner = field_recovery_runner(provider.clone());

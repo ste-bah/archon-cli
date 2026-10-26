@@ -314,6 +314,7 @@ pub(super) fn declared_target_scope(
 #[cfg(test)]
 mod scope_tests {
     use super::*;
+    use archon_tools::tool::ToolContext;
     use archon_tools::workflow_read_guard::{WorkflowReadGuard, WorkflowReadGuardSettings};
     use archon_workflow::agent_dispatch_port::{
         DECLARED_TARGETS_INPUT_KEY, GRANTABLE_SCOPE_INPUT_KEY,
@@ -326,10 +327,16 @@ mod scope_tests {
     fn the_grant_stamp_on_a_branch_input_reaches_the_tool_guard() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().display().to_string();
+        let context = ToolContext {
+            working_dir: temp.path().to_path_buf(),
+            session_id: "AC-X-001".into(),
+            ..ToolContext::default()
+        };
         let edit = |input: &serde_json::Value, rel: &str| {
             WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
                 .with_declared_targets(declared_target_scope(input, Some(&root)))
-                .before_tool(
+                .before_tool_for(
+                    &context,
                     "Edit",
                     &serde_json::json!({"file_path": temp.path().join(rel)}),
                 )
@@ -360,10 +367,16 @@ mod scope_tests {
     fn the_isolated_worktree_stamp_reaches_the_tool_guard() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().display().to_string();
+        let context = ToolContext {
+            working_dir: temp.path().to_path_buf(),
+            session_id: "AC-X-001".into(),
+            ..ToolContext::default()
+        };
         let restore = |input: &serde_json::Value| {
             WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
                 .with_declared_targets(declared_target_scope(input, Some(&root)))
-                .before_tool(
+                .before_tool_for(
+                    &context,
                     "Bash",
                     &serde_json::json!({"command": "git checkout -- pkg/Cargo.lock"}),
                 )
@@ -386,10 +399,16 @@ mod scope_tests {
         std::fs::create_dir_all(&worktree).unwrap();
         let root = worktree.display().to_string();
         let data = project.path().join(".archon/lab/data/registry.json");
+        let context = ToolContext {
+            working_dir: worktree,
+            session_id: "AC-X-001".into(),
+            ..ToolContext::default()
+        };
         let write = |input: &serde_json::Value| {
             WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
                 .with_declared_targets(declared_target_scope(input, Some(&root)))
-                .before_tool(
+                .before_tool_for(
+                    &context,
                     "Write",
                     &serde_json::json!({"file_path": data, "content": "x"}),
                 )

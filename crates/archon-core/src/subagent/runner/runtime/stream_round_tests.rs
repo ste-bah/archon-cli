@@ -9,6 +9,7 @@ use archon_llm::provider::{
 };
 use archon_llm::streaming::StreamEvent;
 use archon_tools::tool::ToolContext;
+use archon_tools::tool::Tool;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 

@@ -90,7 +90,7 @@ async fn execute_tool_attempt_owned(
     }
 
     if let Some(guard) = &ctx.workflow_read_guard
-        && let Some(reason) = guard.before_tool(tool.name(), &input)
+        && let Some(reason) = guard.before_tool_for(ctx, tool.name(), &input)
     {
         record_outcome(
             ctx,
@@ -162,7 +162,7 @@ async fn execute_tool_attempt_owned(
         // A read-only call past its soft inspection ceiling (Issue-58) is
         // told so on the result itself, where the model reads it, rather
         // than in a separate turn it could skim past.
-        if let Some(note) = guard.result_note(tool.name(), &outcome_input) {
+        if let Some(note) = guard.result_note_for(ctx, tool.name(), &outcome_input) {
             result.content.push_str("\n\n");
             result.content.push_str(&note);
         }

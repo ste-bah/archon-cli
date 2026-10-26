@@ -160,9 +160,11 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
         .read_guard
         .clone()
         .expect("read-only workflow call gets a guard");
+    let context = ToolContext::default();
     assert_eq!(guard.mode(), GuardMode::ReadOnly);
     let refusal = guard
-        .before_tool(
+        .before_tool_for(
+            &context,
             "Bash",
             &serde_json::json!({"command": "cargo build --release --bin archon"}),
         )
@@ -173,12 +175,20 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
     );
     assert!(
         guard
-            .before_tool("Bash", &serde_json::json!({"command": "git stash"}))
+            .before_tool_for(
+                &context,
+                "Bash",
+                &serde_json::json!({"command": "git stash"})
+            )
             .is_some()
     );
     assert!(
         guard
-            .before_tool("Bash", &serde_json::json!({"command": "cargo fmt --all"}))
+            .before_tool_for(
+                &context,
+                "Bash",
+                &serde_json::json!({"command": "cargo fmt --all"})
+            )
             .is_some()
     );
     // Issue-58: inspection is admitted through call 120, then refused without
@@ -186,19 +196,28 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
     for _ in 0..120 {
         assert!(
             guard
-                .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
+                .before_tool_for(
+                    &context,
+                    "Read",
+                    &serde_json::json!({"file_path": "src/lib.rs"})
+                )
                 .is_none()
         );
     }
     assert!(
         guard
-            .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
+            .before_tool_for(
+                &context,
+                "Read",
+                &serde_json::json!({"file_path": "src/lib.rs"})
+            )
             .unwrap()
             .starts_with("read ceiling reached: 120 inspection calls;")
     );
     assert!(
         guard
-            .before_tool(
+            .before_tool_for(
+                &context,
                 "Bash",
                 &serde_json::json!({"command": "cargo test -p check"})
             )

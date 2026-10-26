@@ -85,6 +85,11 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
         // to ground itself in. Read access only: `write_roots` is per call.
         extra_dirs: read_roots,
         session_id: session_id.to_string(),
+        read_result_replay_limit_bytes:
+            archon_core::agent::tool_result_context::read_result_replay_limit_bytes(
+                config.context.max_tool_result_bytes,
+                provider.as_ref(),
+            ),
         cancel_parent: agent_config.cancel_token.clone(),
         // The workflow CLI has no turn loop — one invocation is one unit of
         // work — so the run *is* the turn, and saying so is what stops

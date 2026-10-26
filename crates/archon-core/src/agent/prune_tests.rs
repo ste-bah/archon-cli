@@ -69,6 +69,25 @@ fn three_reads_of_an_unchanged_file_collapse_to_one() {
     );
 }
 
+#[test]
+fn omitted_reread_does_not_prune_the_only_full_read_result() {
+    let body = "file contents ".repeat(400);
+    let messages = vec![
+        call("r1", "Read", read("/proj/src/main.rs")),
+        result("r1", &body),
+        call("r2", "Read", read("/proj/src/main.rs")),
+        result(
+            "r2",
+            "unchanged since your earlier Read call 1; content omitted",
+        ),
+    ];
+
+    let outcome = prune_mechanical(&messages, PruneConfig::default());
+
+    assert_eq!(content_of(&outcome.messages, "r1"), body);
+    assert!(content_of(&outcome.messages, "r2").contains("content omitted"));
+}
+
 /// Collapsing across a write would present stale text as current — worse than
 /// spending the tokens.
 #[test]
@@ -102,6 +121,32 @@ fn reads_of_different_files_are_not_collapsed() {
 
     let outcome = prune_mechanical(&messages, PruneConfig::default());
 
+    assert!(!outcome.rules_fired.contains(&RULE_REPEATED_READS));
+}
+
+#[test]
+fn reads_of_different_ranges_are_not_collapsed() {
+    let first = "first range contents ".repeat(400);
+    let second = "second range contents ".repeat(400);
+    let messages = vec![
+        call(
+            "r1",
+            "Read",
+            serde_json::json!({"file_path": "/proj/a.rs", "offset": 1, "limit": 100}),
+        ),
+        result("r1", &first),
+        call(
+            "r2",
+            "Read",
+            serde_json::json!({"file_path": "/proj/a.rs", "offset": 101, "limit": 100}),
+        ),
+        result("r2", &second),
+    ];
+
+    let outcome = prune_mechanical(&messages, PruneConfig::default());
+
+    assert_eq!(content_of(&outcome.messages, "r1"), first);
+    assert_eq!(content_of(&outcome.messages, "r2"), second);
     assert!(!outcome.rules_fired.contains(&RULE_REPEATED_READS));
 }
 

@@ -84,7 +84,7 @@ pub(super) async fn prepare_request_round(
             scope = "subagent",
             "history exceeded the window after compaction; dropped oldest turns to fit"
         );
-        messages.replace(fitted);
+        messages.replace_for_agent(fitted, &runner.tool_context);
     }
 
     let template = build_llm_request(runner, messages.as_slice(), reasoning_encrypted, turn).await;
@@ -280,7 +280,7 @@ fn request_tools(runner: &SubagentRunner) -> archon_llm::provider::SharedTools {
         .tool_context
         .workflow_read_guard
         .as_ref()
-        .is_some_and(|guard| guard.inspection_withdrawn())
+        .is_some_and(|guard| guard.inspection_withdrawn_for(&runner.tool_context))
     {
         return archon_llm::provider::SharedTools::clone(&runner.tool_definitions);
     }
@@ -395,7 +395,7 @@ async fn maybe_compact_for_request_pressure(
         last_known_context_tokens,
         request_body_bytes,
         envelope_bytes,
-        super::request_round_pressure::prune_history_mechanically,
+        |history| super::request_round_pressure::prune_history_mechanically(runner, history),
     ) == super::request_round_pressure::PruneVerdict::Cleared
     {
         return;

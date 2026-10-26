@@ -118,19 +118,23 @@ fn read_only_guard_admits_unlimited_inspection_when_the_ceilings_are_off() {
 }
 
 #[test]
-fn read_only_guard_never_dedups_reads_credits_writes_orients_or_nudges() {
+fn read_only_guard_dedups_from_returned_bytes_without_credits_or_nudges() {
     let guard = WorkflowReadGuard::shell_only(&tight()).with_focused_tests(FocusedTestPlan::new(
         vec!["cargo test -p archon-tools".into()],
         0,
     ));
     let ctx = ToolContext::default();
     let path = std::path::Path::new("/repo/src/lib.rs");
-    for _ in 0..3 {
-        assert_eq!(
-            guard.read_result(&ctx, path, 0, 10, b"same bytes", false),
-            Ok(None)
-        );
-    }
+    assert_eq!(
+        guard.read_result(&ctx, path, 0, 10, b"same bytes", 64_000, None, false,),
+        Ok(None)
+    );
+    let repeated = guard
+        .read_result(&ctx, path, 0, 10, b"same bytes", 64_000, None, false)
+        .unwrap()
+        .unwrap();
+    assert!(repeated.contains("unchanged since your earlier Read call"));
+    assert!(repeated.contains("force_refresh=true"));
     guard.record_write(b"before", b"after");
     assert_eq!(guard.orientation(), "");
     guard.after_tool(
@@ -180,6 +184,8 @@ async fn read_only_guard_records_shell_refusals_and_nothing_else() {
             0,
             5,
             b"secret",
+            64_000,
+            None,
             false
         ),
         Ok(None)

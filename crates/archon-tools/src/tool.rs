@@ -65,6 +65,9 @@ pub enum AgentMode {
 pub struct ToolContext {
     pub working_dir: PathBuf,
     pub session_id: String,
+    /// Effective byte ceiling used when this agent's tool results enter its
+    /// transcript. Zero keeps the standalone tool default.
+    pub read_result_replay_limit_bytes: usize,
     /// Identity of the subagent this invocation is running inside.
     ///
     /// `session_id` is copied verbatim from parent to child, so it answers

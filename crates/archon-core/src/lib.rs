@@ -64,4 +64,25 @@ pub mod url_redact;
 /// Re-export from archon-tools so downstream crates can use `archon_core::task_manager`.
 pub use archon_tools::task_manager;
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    use archon_tools::tool::ToolContext;
+    use archon_tools::workflow_read_guard::WorkflowReadGuard;
+    use serde_json::Value;
+
+    pub(crate) trait BeforeToolForTest {
+        fn before_tool(&self, name: &str, input: &Value) -> Option<String>;
+    }
+
+    impl BeforeToolForTest for WorkflowReadGuard {
+        fn before_tool(&self, name: &str, input: &Value) -> Option<String> {
+            let context = ToolContext {
+                session_id: "AC-X-001".into(),
+                ..ToolContext::default()
+            };
+            self.before_tool_for(&context, name, input)
+        }
+    }
+}
+
 pub use tasks::{Task, TaskError, TaskEvent, TaskId, TaskState};

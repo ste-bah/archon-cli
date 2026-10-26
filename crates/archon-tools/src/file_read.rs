@@ -5,6 +5,10 @@ use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
 };
 
+#[cfg(test)]
+#[path = "file_read_tests.rs"]
+mod tests;
+
 pub struct ReadTool;
 
 #[async_trait::async_trait]
@@ -92,13 +96,22 @@ impl Tool for ReadTool {
             ));
         }
 
+        let numbered: String = lines[offset..end]
+            .iter()
+            .enumerate()
+            .map(|(i, line)| format!("{}\t{}", offset + i + 1, line))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         if let Some(guard) = &ctx.workflow_read_guard {
             match guard.read_result(
                 ctx,
                 &path,
                 offset,
                 end - offset,
-                text.as_bytes(),
+                numbered.as_bytes(),
+                ctx.read_result_replay_limit_bytes,
+                guard.result_note_for(ctx, "Read", &input).as_deref(),
                 input
                     .get("force_refresh")
                     .and_then(|v| v.as_bool())
@@ -109,13 +122,6 @@ impl Tool for ReadTool {
                 Err(error) => return ToolResult::error(error),
             }
         }
-
-        let numbered: String = lines[offset..end]
-            .iter()
-            .enumerate()
-            .map(|(i, line)| format!("{}\t{}", offset + i + 1, line))
-            .collect::<Vec<_>>()
-            .join("\n");
 
         ToolResult::success(numbered)
     }

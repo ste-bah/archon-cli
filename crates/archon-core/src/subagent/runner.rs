@@ -97,6 +97,12 @@ struct PendingThinkingBlock {
 }
 
 impl SubagentRunner {
+    pub(crate) fn clear_workflow_read_ranges(&self) {
+        if let Some(guard) = &self.tool_context.workflow_read_guard {
+            guard.clear_ranges_for(&self.tool_context);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Arc<dyn LlmProvider>,

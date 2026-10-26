@@ -20,6 +20,10 @@ mod stream_round;
 mod tool_helpers;
 mod tool_round;
 
+#[cfg(test)]
+#[path = "runtime/read_range_history_recovery_tests.rs"]
+mod read_range_history_recovery_tests;
+
 use cargo_credit::CargoCredit;
 use message_history::MessageHistory;
 use progress_window::ProgressWindow;
@@ -95,9 +99,10 @@ impl SubagentRunner {
                     .tool_context
                     .workflow_read_guard
                     .as_ref()
-                    .filter(|guard| guard.inspection_withdrawn())
+                    .filter(|guard| guard.inspection_withdrawn_for(&self.tool_context))
             {
-                let note = withdrawn_note(guard.withdrawal_reason().as_deref());
+                let note =
+                    withdrawn_note(guard.withdrawal_reason_for(&self.tool_context).as_deref());
                 let message = flatten_history::flatten_history(
                     messages.as_slice(),
                     initial_prompt,
@@ -105,7 +110,7 @@ impl SubagentRunner {
                     request_round::read_ceiling_fit_budget(self),
                 );
                 self.record_transcript(&message);
-                messages.replace(vec![message]);
+                messages.replace_for_agent(vec![message], &self.tool_context);
                 inspection_tools_withdrawn = true;
             }
 
@@ -359,7 +364,9 @@ impl SubagentRunner {
                     .tool_context
                     .workflow_read_guard
                     .as_ref()
-                    .is_some_and(|guard| guard.withdraw_inspection(STALL_WITHDRAWAL_REASON))
+                    .is_some_and(|guard| {
+                        guard.withdraw_inspection_for(&self.tool_context, STALL_WITHDRAWAL_REASON)
+                    })
                 {
                     tracing::warn!(
                         turn = turn.saturating_add(1),

@@ -16,6 +16,11 @@ impl Agent {
         ToolContext {
             working_dir: self.config.working_dir.clone(),
             session_id: self.config.session_id.clone(),
+            read_result_replay_limit_bytes:
+                crate::agent::tool_result_context::read_result_replay_limit_bytes(
+                    self.config.context.max_tool_result_bytes,
+                    self.client.as_ref(),
+                ),
             // Top-level agent: no subagent is in scope. The executor stamps a
             // real id onto the child context it derives from this one.
             subagent_id: None,
