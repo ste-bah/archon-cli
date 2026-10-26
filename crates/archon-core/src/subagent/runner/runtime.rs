@@ -347,7 +347,7 @@ impl SubagentRunner {
                 .tool_context
                 .workflow_read_guard
                 .as_ref()
-                .and_then(|guard| guard.terminal_failure())
+                .and_then(|guard| guard.terminal_failure_for(&self.tool_context))
             {
                 self.emit_activity_stream("error", reason.clone(), None, true);
                 anyhow::bail!("{reason}");

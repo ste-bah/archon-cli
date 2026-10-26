@@ -97,10 +97,6 @@ struct State {
     focused: Option<FocusedTests>,
     /// The budget has been refused at least once since the last substantive write (Issue-54).
     wall_hit: bool,
-    /// Calls counted as thrash since the wall was hit; see `thrash`.
-    non_writing_after_wall: u32,
-    /// Set once the thrash cutoff is passed: every later call is refused with it.
-    terminal: Option<String>,
     /// Failures of each normalised Bash command since the last substantive
     /// write (Issue-124); see `repeat`.
     failing_runs: BTreeMap<String, u32>,
@@ -113,6 +109,10 @@ struct AgentState {
     calls: u64,
     read_only_inspections: u32,
     inspection_withdrawn: Option<String>,
+    /// Calls counted after the shared branch read wall, scoped to this agent.
+    non_writing_after_wall: u32,
+    /// Terminal thrash verdict for this invocation only.
+    terminal: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -235,11 +235,15 @@ impl WorkflowReadGuard {
         let agent = state.agent_state.entry(key.clone()).or_default();
         agent.calls = agent.calls.saturating_add(1);
         let call = state.calls;
-        let refusal = match state.terminal.clone() {
+        let terminal = state
+            .agent_state
+            .get(&key)
+            .and_then(|agent| agent.terminal.clone());
+        let refusal = match terminal {
             Some(terminal) => terminal,
             None => {
                 let verdict = self.admit(&mut state, &key, name, input);
-                thrash::observe(&mut state, name, input, verdict)?
+                thrash::observe(&mut state, &key, name, input, verdict)?
             }
         };
         drop(state);
@@ -472,14 +476,26 @@ impl WorkflowReadGuard {
         Some(focused.submit_instruction())
     }
 
-    /// The text the session must end with, once the thrash cutoff is passed
-    /// (Issue-54). Read by the subagent runner after each tool round.
+    /// Any agent's terminal thrash verdict, for diagnostics and tests over the
+    /// whole guard. Agent runners use [`Self::terminal_failure_for`], so one
+    /// agent's verdict never ends another (Issue-521).
     pub fn terminal_failure(&self) -> Option<String> {
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .terminal
-            .clone()
+            .agent_state
+            .values()
+            .find_map(|agent| agent.terminal.clone())
+    }
+
+    /// The terminal thrash verdict for the calling agent invocation.
+    pub fn terminal_failure_for(&self, ctx: &ToolContext) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .agent_state
+            .get(&(ctx.session_id.clone(), ctx.subagent_id.clone()))
+            .and_then(|agent| agent.terminal.clone())
     }
 }
 

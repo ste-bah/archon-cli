@@ -16,9 +16,9 @@
 //! substantive write — the guard's existing `record_write` verdict, the one
 //! that grants reads — lifts the wall and clears the count. Past
 //! [`MAX_NON_WRITING_CALLS_AFTER_WALL`] the guard answers with a terminal
-//! refusal and repeats it for every later call; the subagent runner reads
-//! `terminal_failure` at the end of that tool round and ends the session
-//! with the same text, which the write layer treats as a host interruption
+//! refusal and repeats it for every later call by that agent; its runner
+//! reads the invocation's terminal verdict at the end of that tool round and
+//! ends only that invocation with the same text, which the write layer treats as a host interruption
 //! (partial work captured, the note carried to the next attempt through
 //! session memory) rather than a verdict on the task.
 use super::{State, focused::FocusedTests, shell};
@@ -34,7 +34,7 @@ pub const MAX_NON_WRITING_CALLS_AFTER_WALL: u32 = 15;
 /// side.
 pub const READ_WALL_THRASH_MARKER: &str = "read-wall thrash:";
 
-/// Issue-115: the count is THIS session's — a session re-asked in a
+/// Issue-115: the count is THIS invocation's — a session re-asked in a
 /// worktree an earlier session wrote starts from 0 — and a session whose
 /// declared focused tests had all passed is named as one that did not
 /// return, not as one that never wrote.
@@ -61,6 +61,7 @@ pub(super) fn terminal_message(
 /// until the count passes the cutoff, the terminal refusal from then on.
 pub(super) fn observe(
     state: &mut State,
+    key: &super::AgentKey,
     name: &str,
     input: &Value,
     verdict: Option<String>,
@@ -78,16 +79,16 @@ pub(super) fn observe(
     if !counted {
         return verdict;
     }
-    state.non_writing_after_wall = state.non_writing_after_wall.saturating_add(1);
-    if state.non_writing_after_wall <= MAX_NON_WRITING_CALLS_AFTER_WALL {
+    let non_writing = {
+        let agent = state.agent_state.entry(key.clone()).or_default();
+        agent.non_writing_after_wall = agent.non_writing_after_wall.saturating_add(1);
+        agent.non_writing_after_wall
+    };
+    if non_writing <= MAX_NON_WRITING_CALLS_AFTER_WALL {
         return verdict;
     }
-    let terminal = terminal_message(
-        state.non_writing_after_wall,
-        state.writes,
-        state.focused.as_ref(),
-    );
-    state.terminal = Some(terminal.clone());
+    let terminal = terminal_message(non_writing, state.writes, state.focused.as_ref());
+    state.agent_state.entry(key.clone()).or_default().terminal = Some(terminal.clone());
     Some(terminal)
 }
 
@@ -110,6 +111,8 @@ fn declared_check(state: &State, command: &str) -> bool {
 /// count starts over if it is exhausted again.
 pub(super) fn on_substantive_write(state: &mut State) {
     state.wall_hit = false;
-    state.non_writing_after_wall = 0;
+    for agent in state.agent_state.values_mut() {
+        agent.non_writing_after_wall = 0;
+    }
     state.failing_runs.clear();
 }
