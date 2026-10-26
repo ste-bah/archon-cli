@@ -19,7 +19,6 @@ use super::executed_text;
 
 #[path = "workflow_acceptance_executability_mutation_operational.rs"]
 mod operational;
-use operational::operational_words;
 
 #[path = "workflow_acceptance_executability_mutation_markers.rs"]
 mod marker_protocol;
@@ -181,11 +180,8 @@ pub(super) fn input_discovery_for_check(
                 .map(|pair| pair[1].clone())
         })
         .collect();
-    let excluded: Vec<String> = (operational_words(&commands).iter())
-        .flat_map(|word| path_tokens(word))
-        .chain(message_words.iter().flat_map(|word| path_tokens(word)))
-        .chain(written_words.iter().flat_map(|word| path_tokens(word)))
-        .collect();
+    let (mechanics, message_mentions) =
+        operational::exclusion_paths(&commands, &message_words, &written_words);
     let bases = paths::command_directories(&commands, bases);
     let inline_programs = inline::program_positions(&commands);
     let structured_program_texts: BTreeSet<String> = inline::programs(&commands)
@@ -332,7 +328,12 @@ pub(super) fn input_discovery_for_check(
                 .file_name()
                 .is_some_and(|name| MANIFESTS.contains(&name.to_string_lossy().as_ref()));
             // Neither what runs the check nor a directory that holds it.
-            let runs = (excluded.iter()).any(|word| Path::new(word).starts_with(path));
+            let mechanics = mechanics
+                .iter()
+                .any(|word| Path::new(word).starts_with(path));
+            let message_mention = message_mentions
+                .iter()
+                .any(|word| Path::new(word).starts_with(path));
             let has_manifest_sibling = manifest_sibling.is_some();
             let mapped = mapped_sibling.or(manifest_sibling).unwrap_or_else(|| {
                 paths::relative_path(&cwd, &resolved_path)
@@ -359,7 +360,7 @@ pub(super) fn input_discovery_for_check(
                 Some(ExclusionReason::CheckWritesPathInText)
             } else if manifest {
                 Some(ExclusionReason::ManifestOrSetup)
-            } else if runs {
+            } else if mechanics {
                 Some(ExclusionReason::CheckMechanics)
             } else if repository_root {
                 Some(ExclusionReason::RepositoryRoot)
@@ -371,6 +372,8 @@ pub(super) fn input_discovery_for_check(
                 Some(ExclusionReason::RepositoryAliasUnverified)
             } else if sibling {
                 Some(ExclusionReason::SiblingFromRoot)
+            } else if message_mention {
+                Some(ExclusionReason::CheckMechanics)
             } else if mapped.starts_with("../") {
                 Some(ExclusionReason::OutsideCopiedTree)
             } else if !exists && !has_manifest_sibling && canonical_move.is_none() {
