@@ -437,6 +437,7 @@ async fn reauthor_decisions_are_written_to_the_audit_directory() {
     let findings = super::passability::cannot_pass_findings(
         &judge,
         "sonnet",
+        audit.path(),
         &contract,
         &BTreeSet::from(["AC-X-001".into()]),
         &runs,

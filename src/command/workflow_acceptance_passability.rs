@@ -46,10 +46,13 @@ use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeIncomplete,
 mod audit;
 #[path = "workflow_acceptance_passability_evidence.rs"]
 pub(crate) mod evidence;
+#[path = "workflow_acceptance_passability_usage.rs"]
+mod usage;
 pub(super) use audit::verdict_key;
 #[cfg(test)]
 pub(crate) use evidence::test_secret;
 use evidence::{Evidence, Redactor};
+pub(crate) use usage::cannot_pass_findings;
 
 /// What every finding for a check that cannot pass says, after its id.
 pub(crate) const CANNOT_PASS: &str = "cannot pass as written";
@@ -345,6 +348,7 @@ fn candidates(
 /// such check is refuted in `contract` (see the module docs).
 pub(crate) async fn judge_baseline_failures(
     project_root: &Path,
+    repository_root: &Path,
     tasks_root: &Path,
     prd_text: &str,
     client: &dyn WorkflowLlmClient,
@@ -383,17 +387,53 @@ pub(crate) async fn judge_baseline_failures(
     let store = (resume.persist).then(|| Store {
         dir: project_root.join(FREEZE_CACHE_DIR).join("passability"),
     });
-    let refuted = assess(
-        client,
-        "sonnet",
-        contract,
-        &candidates,
-        &redactor,
-        store.as_ref(),
-        resume,
-        None,
-    )
-    .await?;
+    let mut refuted = BTreeMap::new();
+    let mut pending = Vec::new();
+    for candidate in candidates {
+        if let Some((program, rejected_line)) =
+            usage::external_usage_error(&runs, &candidate.id, repository_root)
+        {
+            let rejected_line = evidence::inert(&rejected_line);
+            let reason = format!(
+                "{program} rejected the check's own command: {rejected_line}; no implementation can change how {program} parses its arguments; fix the invocation"
+            );
+            let decision = Decision {
+                verdict: JudgeDecision::Refuted,
+                counterexample: rejected_line,
+                reason: reason.clone(),
+                sampling: Some(serde_json::json!({"provenance": "host"})),
+            };
+            if let Some(store) = store.as_ref() {
+                audit::write(
+                    &store.dir,
+                    &candidate.key,
+                    &candidate.id,
+                    &decision,
+                    candidate.evidence.exit_code,
+                )
+                .with_context(|| format!("writing passability audit for check {}", candidate.id))?;
+            }
+            let text = format!("check '{}': {CANNOT_PASS}: {reason}", candidate.id);
+            refuted.insert(candidate.id.clone(), (decision, text));
+        } else {
+            pending.push(candidate);
+        }
+    }
+    if !pending.is_empty() {
+        refuted.extend(
+            assess(
+                client,
+                "sonnet",
+                contract,
+                &pending,
+                &redactor,
+                store.as_ref(),
+                resume,
+                None,
+            )
+            .await?,
+        );
+    }
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     for (id, (decision, text)) in refuted {
         let entry = (contract.acceptance.iter_mut())
@@ -406,7 +446,17 @@ pub(crate) async fn judge_baseline_failures(
             .judgment
             .counterexample
             .clone_from(&decision.counterexample);
-        entry.judgment.host_call_id = format!("acceptance-passability-batch:{id}");
+        entry.judgment.host_call_id = if decision
+            .sampling
+            .as_ref()
+            .and_then(|value| value.get("provenance"))
+            .and_then(serde_json::Value::as_str)
+            == Some("host")
+        {
+            "host:argument-parser-usage".to_string()
+        } else {
+            format!("acceptance-passability-batch:{id}")
+        };
         entry.judgment.sampling.clone_from(&decision.sampling);
         findings.push(GateFinding::new(
             GateId::FreezeAcceptance,
@@ -417,41 +467,6 @@ pub(crate) async fn judge_baseline_failures(
         ));
     }
     Ok(findings)
-}
-
-/// The finding for each of `ids` (re-authored replacements in `contract`,
-/// just probed) that failed in `runs` in a way it cannot pass as written.
-pub(crate) async fn cannot_pass_findings(
-    client: &dyn WorkflowLlmClient,
-    model: &str,
-    contract: &AcceptanceContract,
-    ids: &BTreeSet<String>,
-    runs: &BaselineRuns,
-    prd_text: &str,
-    audit_dir: Option<&Path>,
-) -> Result<BTreeMap<String, String>> {
-    let requirements =
-        archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
-    let redactor = Redactor::for_runs(runs);
-    let candidates = candidates(client, model, contract, ids, runs, &requirements, &redactor);
-    if candidates.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-    let resume = FreezeResume::none();
-    let refuted = assess(
-        client,
-        model,
-        contract,
-        &candidates,
-        &redactor,
-        None,
-        &resume,
-        audit_dir,
-    )
-    .await?;
-    Ok((refuted.into_iter())
-        .map(|(id, (_, text))| (id, text))
-        .collect())
 }
 
 #[path = "workflow_acceptance_passability_judge.rs"]

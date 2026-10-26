@@ -7,6 +7,34 @@ use archon_workflow::task_set_contract::AcceptanceCriterion;
 use std::collections::BTreeMap;
 
 #[tokio::test]
+async fn an_external_argument_parser_rejection_is_refuted_by_the_host() {
+    let command = r#"echo "error: unexpected argument '--exact' found" >&2; echo 'Usage: cargo test [OPTIONS] [TESTNAME] [-- [ARGS]...]' >&2; exit 1"#;
+    let (project, _outside, tasks, prd) = outside_set(command);
+    let client = Arc::new(EvidenceJudge::default());
+    let prepared = freeze(project.path(), &tasks, &prd, &client, &FreezeResume::none())
+        .await
+        .expect("the freeze completes");
+    let found = cannot_pass(&prepared, "AC-X-001");
+    assert_eq!(found.len(), 1, "{:?}", prepared.findings);
+    assert!(
+        found[0]
+            .text
+            .contains("cargo rejected the check's own command")
+    );
+    assert_eq!(
+        client.evidence.load(SeqCst),
+        0,
+        "host verdict bypasses judge"
+    );
+    assert_eq!(
+        prepared.contract().unwrap().acceptance[0]
+            .judgment
+            .host_call_id,
+        "host:argument-parser-usage"
+    );
+}
+
+#[tokio::test]
 async fn provider_authentication_failure_survives_the_freeze_incomplete_message() {
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
     let error = super::super::judge::produced_incomplete(vec![Err(

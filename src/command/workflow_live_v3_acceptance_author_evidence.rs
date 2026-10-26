@@ -60,6 +60,7 @@ pub(super) async fn validate(
                     match cannot_pass_findings(
                     client,
                     model,
+                    &site.context.repository,
                     &contract,
                     &ids,
                     &runs,
