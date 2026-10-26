@@ -123,6 +123,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 62: batch 26: #520 a pinned or cached verdict counts only under the current judge
         // identity; #523 the host refutes external-program usage errors; #478 bare . and ..
         // are whole-tree inputs; #490 a pending skeleton is reported, not compared.
+        // #524 the can-pass instruction names the evidence tree, not only the pre-implementation tree.
         version: 62,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -162,7 +163,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
-        sources_digest: "9df9738daafaba9bf57e5380ab8f8da003776c7706d617c011488f35bc1749bd",
+        sources_digest: "5cc1baa9e6c37c85b9dc08a4db1680315dc76475b32ed6437051c3d816fbb88f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -195,7 +196,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 24 re-pin only: skeleton freeze verdicts do not read the acceptance judge, reply extraction or Scratch evidence.
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton freeze verdicts do not read acceptance judge identity, passability or path classes.
-        sources_digest: "9df9738daafaba9bf57e5380ab8f8da003776c7706d617c011488f35bc1749bd",
+        sources_digest: "5cc1baa9e6c37c85b9dc08a4db1680315dc76475b32ed6437051c3d816fbb88f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -378,7 +379,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
-        sources_digest: "221301ed641a01c09dce55186c539bd935e42111ecae28354dd7731121386e6c",
+        sources_digest: "5143aa37edae7e482f41c73420df09b0146c891ecd6e63bb9554b0ccad67ab9c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -410,7 +411,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 24 re-pin only: frozen skeleton verification does not read Scratch evidence or the acceptance judge.
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton reverify verdicts do not read passability or acceptance judge identity.
-        sources_digest: "221301ed641a01c09dce55186c539bd935e42111ecae28354dd7731121386e6c",
+        sources_digest: "5143aa37edae7e482f41c73420df09b0146c891ecd6e63bb9554b0ccad67ab9c",
         build_bound: true,
     },
 ];

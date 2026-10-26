@@ -9,7 +9,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
         return ("fidelity", answer);
     }
     if text.contains("Adversarially judge every acceptance check below. The toolchain is fixed:")
-        || text.starts_with("Each acceptance check below already ran once on the repository tree BEFORE any implementation of its criterion")
+        || text.starts_with("Each acceptance check below already ran on the evidence tree identified in its evidence")
     {
         let Some(checks) = text
             .rsplit_once("Checks: ")
