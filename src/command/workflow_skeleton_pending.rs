@@ -1,16 +1,16 @@
-//! Shared recognition of an intact skeleton made stale by an acceptance publish.
+//! Shared recognition of a valid predecessor skeleton made stale by an acceptance publish.
 
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::task_set_contract::{
-    AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest,
+    AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest, validate_gate_stamp,
 };
-use archon_workflow::task_skeleton::{TaskSkeleton, TaskSkeletonLock};
+use archon_workflow::task_skeleton::{TaskSkeleton, TaskSkeletonLock, validate_skeleton};
 
-/// The acceptance pin has advanced, so this intact predecessor skeleton is
+/// The acceptance pin has advanced, so this validated predecessor skeleton is
 /// waiting for the normal skeleton phase to freeze it against the new pin.
-/// Malformed or digest-mismatched artifacts are errors, never treated as absent.
+/// Only the successor pin fields may be absent; malformed artifacts are errors.
 pub(crate) fn is_pending(task_root: &Path, pin: &AcceptancePin) -> Result<bool> {
     if pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some() {
         return Ok(false);
@@ -27,8 +27,17 @@ pub(crate) fn is_pending(task_root: &Path, pin: &AcceptancePin) -> Result<bool> 
     .with_context(|| format!("parsing frozen skeleton lock {}", lock_path.display()))?;
     let bytes = std::fs::read(&skeleton_path)
         .with_context(|| format!("reading frozen skeleton {}", skeleton_path.display()))?;
+    if lock.algorithm != "blake3" {
+        return Err(anyhow!(
+            "frozen task skeleton under {} uses unsupported lock algorithm {}; expected blake3",
+            task_root.display(),
+            lock.algorithm
+        ));
+    }
+    validate_gate_stamp(&lock.gate, TASK_SKELETON_LOCK_FILE)
+        .map_err(|error| anyhow!("frozen task skeleton gate is invalid: {error}"))?;
     let actual = content_digest(&bytes);
-    if lock.algorithm != "blake3" || lock.digest != actual {
+    if lock.digest != actual {
         return Err(anyhow!(
             "frozen task skeleton under {} does not verify: lock expected {}, actual {}; restore the frozen version",
             task_root.display(),
@@ -38,18 +47,43 @@ pub(crate) fn is_pending(task_root: &Path, pin: &AcceptancePin) -> Result<bool> 
     }
     let skeleton: TaskSkeleton = serde_json::from_slice(&bytes)
         .with_context(|| format!("parsing frozen skeleton {}", skeleton_path.display()))?;
-    Ok(lock.acceptance_digest != pin.acceptance_digest
-        && skeleton.acceptance_digest == lock.acceptance_digest)
+    if lock.acceptance_digest == pin.acceptance_digest {
+        return Ok(false);
+    }
+    if skeleton.acceptance_digest != lock.acceptance_digest {
+        return Err(anyhow!(
+            "{} acceptance_digest is {}, but frozen skeleton {} binds {}; restore the matching frozen version",
+            TASK_SKELETON_LOCK_FILE,
+            lock.acceptance_digest,
+            TASK_SKELETON_FILE,
+            skeleton.acceptance_digest
+        ));
+    }
+    let canonical_root = task_root.canonicalize()?;
+    let pinned_root = Path::new(&pin.task_root)
+        .canonicalize()
+        .unwrap_or_else(|_| Path::new(&pin.task_root).to_path_buf());
+    if canonical_root != pinned_root {
+        return Err(anyhow!(
+            "acceptance pin binds task_root {}, actual {}; restore the frozen directory",
+            pinned_root.display(),
+            canonical_root.display()
+        ));
+    }
+    validate_skeleton(&skeleton, &lock.acceptance_digest)
+        .map_err(|error| anyhow!("frozen predecessor skeleton is invalid: {error}"))?;
+    Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use archon_workflow::task_set_contract::{FreezeGateMode, FreezeGateStamp};
+    use archon_workflow::task_skeleton::FrozenTask;
 
-    fn pin(acceptance_digest: &str) -> AcceptancePin {
+    fn pin(root: &Path, acceptance_digest: &str) -> AcceptancePin {
         AcceptancePin {
-            task_root: "tasks/set".into(),
+            task_root: root.canonicalize().unwrap().display().to_string(),
             acceptance_digest: acceptance_digest.into(),
             freeze_event_id: "acceptance-freeze".into(),
             acceptance_gate: stamp(),
@@ -66,9 +100,9 @@ mod tests {
         FreezeGateStamp {
             mode: FreezeGateMode::Observe,
             finding_count: 0,
-            findings_digest: "findings".into(),
+            findings_digest: archon_workflow::task_set_contract::empty_gate_findings_digest(),
             binary_commit: "build".into(),
-            evaluated_at: "now".into(),
+            evaluated_at: "2026-08-26T18:30:00Z".into(),
         }
     }
 
@@ -76,7 +110,14 @@ mod tests {
         let skeleton = TaskSkeleton {
             schema_version: 1,
             acceptance_digest: acceptance_digest.into(),
-            tasks: Vec::new(),
+            tasks: vec![FrozenTask {
+                task_id: "TASK-X-010".into(),
+                file_name: "TASK-X-010.md".into(),
+                depends_on: Vec::new(),
+                blocks: Vec::new(),
+                implements: vec!["AC-X-001".into()],
+                deliverable_contracts: Vec::new(),
+            }],
         };
         let bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
         std::fs::write(root.join(TASK_SKELETON_FILE), &bytes).unwrap();
@@ -97,9 +138,9 @@ mod tests {
     fn intact_prior_skeleton_is_pending_until_current_acceptance_freeze() {
         let root = tempfile::tempdir().unwrap();
         frozen(root.path(), "old");
-        assert!(is_pending(root.path(), &pin("new")).unwrap());
-        assert!(!is_pending(root.path(), &pin("old")).unwrap());
-        let mut already_frozen = pin("new");
+        assert!(is_pending(root.path(), &pin(root.path(), "new")).unwrap());
+        assert!(!is_pending(root.path(), &pin(root.path(), "old")).unwrap());
+        let mut already_frozen = pin(root.path(), "new");
         already_frozen.skeleton_digest = Some("digest".into());
         assert!(!is_pending(root.path(), &already_frozen).unwrap());
     }
@@ -109,7 +150,21 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         frozen(root.path(), "old");
         std::fs::write(root.path().join(TASK_SKELETON_FILE), b"tampered").unwrap();
-        let error = is_pending(root.path(), &pin("new")).unwrap_err();
+        let error = is_pending(root.path(), &pin(root.path(), "new")).unwrap_err();
         assert!(error.to_string().contains("does not verify"), "{error}");
+    }
+
+    #[test]
+    fn invalid_gate_provenance_is_not_a_pending_skeleton() {
+        let root = tempfile::tempdir().unwrap();
+        frozen(root.path(), "old");
+        let lock_path = root.path().join(TASK_SKELETON_LOCK_FILE);
+        let mut lock: TaskSkeletonLock =
+            serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+        lock.gate.findings_digest = "invalid".into();
+        std::fs::write(lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+        let error = is_pending(root.path(), &pin(root.path(), "new")).unwrap_err();
+        assert!(error.to_string().contains("gate is invalid"), "{error}");
     }
 }

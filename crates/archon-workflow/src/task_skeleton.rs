@@ -210,30 +210,11 @@ pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonRe
     let skeleton_bytes = read_required(&tasks_root.join(TASK_SKELETON_FILE))?;
     let lock: TaskSkeletonLock = read_json(&tasks_root.join(TASK_SKELETON_LOCK_FILE))?;
     require_blake3(&lock.algorithm, TASK_SKELETON_LOCK_FILE)?;
-    validate_gate_stamp(&lock.gate, TASK_SKELETON_LOCK_FILE)
-        .map_err(|source| error(source.to_string()))?;
-    let pin_skeleton_gate = pin.skeleton_gate.as_ref().ok_or_else(|| {
-        error(format!(
-            "freeze event '{}' has no skeleton gate provenance; re-run `workflow freeze-skeleton` with the current binary",
-            pin.freeze_event_id
-        ))
-    })?;
-    validate_gate_stamp(pin_skeleton_gate, "skeleton pin")
-        .map_err(|source| error(source.to_string()))?;
-    if &lock.gate != pin_skeleton_gate {
-        return invalid(
-            "task skeleton lock/pin gate provenance mismatch; re-run `workflow freeze-skeleton` with the current binary",
-        );
-    }
     let actual = content_digest(&skeleton_bytes);
-    let pinned_skeleton = pin.skeleton_digest.as_deref().ok_or_else(|| error(format!(
-        "freeze event '{}' has no skeleton_digest; run `workflow freeze-skeleton` before writing task bodies",
-        pin.freeze_event_id
-    )))?;
-    if lock.digest != actual || pinned_skeleton != actual {
+    if lock.digest != actual {
         return invalid(format!(
-            "task skeleton differs from freeze event '{}': lock expected {}, pin expected {}, actual {}; restore the frozen version or re-run `workflow freeze-skeleton`",
-            pin.freeze_event_id, lock.digest, pinned_skeleton, actual
+            "task skeleton differs from freeze event '{}': lock expected {}, actual {}; restore the frozen version or re-run `workflow freeze-skeleton`",
+            pin.freeze_event_id, lock.digest, actual
         ));
     }
     if lock.acceptance_digest != acceptance_actual {
@@ -249,6 +230,34 @@ pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonRe
         ))
     })?;
     validate_skeleton(&skeleton, &acceptance_actual)?;
+    if let Some(pinned_skeleton) = pin.skeleton_digest.as_deref() {
+        if pinned_skeleton != actual {
+            return invalid(format!(
+                "task skeleton differs from freeze event '{}': lock expected {}, pin expected {}, actual {}; restore the frozen version or re-run `workflow freeze-skeleton`",
+                pin.freeze_event_id, lock.digest, pinned_skeleton, actual
+            ));
+        }
+    } else {
+        return Err(error(format!(
+            "freeze event '{}' has no skeleton_digest; run `workflow freeze-skeleton` before writing task bodies",
+            pin.freeze_event_id
+        )));
+    }
+    validate_gate_stamp(&lock.gate, TASK_SKELETON_LOCK_FILE)
+        .map_err(|source| error(source.to_string()))?;
+    let pin_skeleton_gate = pin.skeleton_gate.as_ref().ok_or_else(|| {
+        error(format!(
+            "freeze event '{}' has no skeleton gate provenance; re-run `workflow freeze-skeleton` with the current binary",
+            pin.freeze_event_id
+        ))
+    })?;
+    validate_gate_stamp(pin_skeleton_gate, "skeleton pin")
+        .map_err(|source| error(source.to_string()))?;
+    if &lock.gate != pin_skeleton_gate {
+        return invalid(
+            "task skeleton lock/pin gate provenance mismatch; re-run `workflow freeze-skeleton` with the current binary",
+        );
+    }
     Ok(skeleton)
 }
 

@@ -47,7 +47,6 @@ pub(super) fn task_file_freeze(cwd: &Path, path: &Path) -> Result<()> {
         ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, AcceptancePin, content_digest,
         validate_acceptance_bundle,
     };
-    use archon_workflow::task_skeleton::validate_full_chain;
 
     let root = path
         .parent()
@@ -105,34 +104,32 @@ pub(super) fn task_file_freeze(cwd: &Path, path: &Path) -> Result<()> {
         skeleton_lock_path.exists(),
         pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some(),
     );
-    let pending = crate::command::workflow_skeleton_pending::is_pending(root, &pin)?;
-    match (pending, skeleton_state) {
-        (true, (true, true, false)) => {
-            let bytes = std::fs::read(&skeleton_path)?;
-            let mut draft: archon_workflow::task_skeleton::TaskSkeleton =
-                serde_json::from_slice(&bytes).with_context(|| {
-                    format!("parsing draft skeleton {}", skeleton_path.display())
-                })?;
-            draft.acceptance_digest = pin.acceptance_digest.clone();
-            archon_workflow::task_skeleton::validate_skeleton(&draft, &pin.acceptance_digest)
-                .map_err(|error| anyhow!(error.to_string()))?;
-            Ok(())
-        }
-        (false, (false, false, false)) => Ok(()),
-        (false, (true, true, true)) => {
-            validate_full_chain(root, &pin).map_err(|error| anyhow!(error.to_string()))?;
-            Ok(())
-        }
-        (false, (file, lock, pin)) => Err(anyhow!(
-            "partial skeleton freeze beside {}: file={}, lock={}, pin={}; restore a matching frozen triple or remove all successor artifacts",
+    let decision = crate::command::workflow_decompose_frozen_chain::frozen_chain_decision(
+        cwd, &prd_path, root,
+    )?;
+    match (decision, skeleton_state) {
+        (
+            crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::SkeletonPending,
+            (true, true, false),
+        ) => Ok(()),
+        (
+            crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::AcceptanceAbsent,
+            (false, false, false),
+        )
+        | (
+            crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::AcceptanceOnly,
+            (false, false, false),
+        ) => Ok(()),
+        (
+            crate::command::workflow_decompose_frozen_chain::FrozenChainDecision::Complete(_),
+            (true, true, true),
+        ) => Ok(()),
+        (_, (file, lock, pin)) => Err(anyhow!(
+            "partial skeleton artifacts beside {}: file={}, lock={}, pin={}; restore a matching frozen triple or remove all successor artifacts",
             path.display(),
             file,
             lock,
             pin
-        )),
-        (true, _) => Err(anyhow!(
-            "pending skeleton predicate disagreed with its artifact state beside {}",
-            root.display()
         )),
     }
 }

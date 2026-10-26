@@ -295,7 +295,23 @@ fn reconcile_takes_the_chain_lock_before_planning_and_defers_to_live_settle() {
     let project = context.project_root.clone();
     let task_root = context.task_root.clone();
     let task_path = task_root.join(FILE);
-    crate::command::workflow_host_command_exec_tests::seed_frozen_chain(&context, &task_path);
+    let prd_path = project.join("prds/PRD-X.md");
+    std::fs::create_dir_all(prd_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &prd_path,
+        "# PRD X\n\n## Acceptance Criteria\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | The fixture is valid. |\n",
+    )
+    .unwrap();
+    let acceptance_digest =
+        crate::command::workflow_decompose_frozen_chain::test_support::freeze_acceptance(
+            &project, &prd_path, &task_root,
+        );
+    crate::command::workflow_decompose_frozen_chain::test_support::freeze_skeleton(
+        &project,
+        &task_root,
+        &acceptance_digest,
+        &[TASK],
+    );
     std::fs::write(&task_path, landed("round-1")).unwrap();
     let pin = crate::command::workflow_task_set::acceptance_pin_path(&project, &task_root);
     let held = crate::command::workflow_task_set::ChainLock::acquire(&pin, &task_root).unwrap();

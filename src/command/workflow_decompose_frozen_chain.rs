@@ -30,6 +30,52 @@ pub(crate) struct LaunchSnapshot {
     pub(crate) decision: LaunchAcceptance,
     pub(crate) deferred: bool,
 }
+/// The verified state shared by launch snapshots, landing reconciliation, and topology preflight.
+pub(crate) enum FrozenChainDecision {
+    AcceptanceAbsent,
+    AcceptanceOnly,
+    SkeletonPending,
+    Complete(archon_workflow::task_skeleton::TaskSkeleton),
+}
+
+pub(crate) fn frozen_chain_decision(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+) -> Result<FrozenChainDecision> {
+    if !task_root.is_dir() {
+        return Ok(FrozenChainDecision::AcceptanceAbsent);
+    }
+    let acceptance_lock = task_root.join(ACCEPTANCE_LOCK_FILE);
+    let skeleton_lock = task_root.join(TASK_SKELETON_LOCK_FILE);
+    if !acceptance_lock.exists() {
+        if skeleton_lock.exists() {
+            return Err(anyhow!(
+                "{} exists under {} without {}; the frozen chain is inconsistent — restore the acceptance freeze or clear the task root",
+                TASK_SKELETON_LOCK_FILE,
+                task_root.display(),
+                ACCEPTANCE_LOCK_FILE
+            ));
+        }
+        return Ok(FrozenChainDecision::AcceptanceAbsent);
+    }
+    let pin = read_pin(project_root, task_root)?;
+    verify_acceptance(project_root, prd_path, task_root, &pin)?;
+    if !skeleton_lock.exists() {
+        return Ok(FrozenChainDecision::AcceptanceOnly);
+    }
+    if super::workflow_skeleton_pending::is_pending(task_root, &pin)? {
+        return Ok(FrozenChainDecision::SkeletonPending);
+    }
+    validate_full_chain(task_root, &pin)
+        .map(FrozenChainDecision::Complete)
+        .map_err(|error| {
+            anyhow!(
+                "frozen task skeleton under {} does not verify: {error:#}",
+                task_root.display()
+            )
+        })
+}
 
 /// Inspect a launch chain without settling a pending publication before claim.
 pub(crate) fn prepare_launch_snapshot(
@@ -217,45 +263,17 @@ pub(crate) fn snapshot_locked(
     task_root: &Path,
 ) -> Result<FrozenChainSnapshot> {
     let mut snapshot = FrozenChainSnapshot::default();
-    if !task_root.is_dir() {
-        return Ok(snapshot);
-    }
     #[cfg(test)]
     super::workflow_task_set::reader_test_step("decomposition-read");
-    let acceptance_lock = task_root.join(ACCEPTANCE_LOCK_FILE);
-    let skeleton_lock = task_root.join(TASK_SKELETON_LOCK_FILE);
-    if !acceptance_lock.exists() {
-        if skeleton_lock.exists() {
-            return Err(anyhow!(
-                "{} exists under {} without {}; the frozen chain is inconsistent — restore the acceptance freeze or clear the task root",
-                TASK_SKELETON_LOCK_FILE,
-                task_root.display(),
-                ACCEPTANCE_LOCK_FILE
-            ));
+    let skeleton = match frozen_chain_decision(project_root, prd_path, task_root)? {
+        FrozenChainDecision::AcceptanceAbsent => return Ok(snapshot),
+        FrozenChainDecision::AcceptanceOnly | FrozenChainDecision::SkeletonPending => {
+            snapshot.acceptance = true;
+            return Ok(snapshot);
         }
-        return Ok(snapshot);
-    }
-    let pin = read_pin(project_root, task_root)?;
-    verify_acceptance(project_root, prd_path, task_root, &pin)?;
+        FrozenChainDecision::Complete(skeleton) => skeleton,
+    };
     snapshot.acceptance = true;
-    if !skeleton_lock.exists() {
-        // Originating acceptance-only behavior: without the skeleton lock,
-        // the skeleton is not a frozen successor, even if its draft bytes or
-        // pin fields remain. Preflight tells operators to remove successor
-        // artifacts, and every chain reader therefore leaves this phase open.
-        return Ok(snapshot);
-    }
-    // An acceptance published before the skeleton phase leaves the old
-    // skeleton pending. Its lock must still authenticate its exact bytes.
-    if super::workflow_skeleton_pending::is_pending(task_root, &pin)? {
-        return Ok(snapshot);
-    }
-    let skeleton = validate_full_chain(task_root, &pin).map_err(|error| {
-        anyhow!(
-            "frozen task skeleton under {} does not verify: {error}",
-            task_root.display()
-        )
-    })?;
     snapshot.skeleton = true;
     for file_name in [TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE] {
         let path = task_root.join(file_name);
