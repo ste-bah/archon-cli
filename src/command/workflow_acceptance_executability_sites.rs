@@ -227,6 +227,7 @@ pub(super) async fn run_at(
         let layout = CopyLayout {
             root: binding.policy.scratch_parent.clone(),
             repository: binding.policy.repository.clone(),
+            site_repository: None,
             project: binding.policy.project.clone(),
             siblings: Vec::new(),
             check_siblings: BTreeMap::new(),
@@ -247,6 +248,10 @@ pub(super) async fn run_at(
         .map(
             |(results, sibling_revisions, check_siblings, _disposable_root)| {
                 let mut layout = layout;
+                layout.site_repository = check_siblings
+                    .values()
+                    .flatten()
+                    .find_map(|sibling| sibling.site_repository.clone());
                 layout.siblings = sibling_revisions;
                 layout.check_siblings = check_siblings;
                 SiteRun {

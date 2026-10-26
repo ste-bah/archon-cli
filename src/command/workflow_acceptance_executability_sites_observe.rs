@@ -96,7 +96,8 @@ pub(super) async fn observe(
             let sibling = super::hermetic::SiblingRevision {
                 path: sibling.path.clone(),
                 commit: sibling.commit.clone(),
-                target: None,
+                target: sibling.target.clone(),
+                site_repository: sibling.site_repository.clone(),
             };
             if let Some(previous) = siblings.get(source)
                 && previous.commit != sibling.commit

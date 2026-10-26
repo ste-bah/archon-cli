@@ -204,6 +204,7 @@ pub(super) fn copy_for_checks_with_check_map(
                 path: relative,
                 commit,
                 target: destination.canonicalize().ok(),
+                site_repository: Some(copied_repository.to_path_buf()),
             });
     }
     let revisions = evidence;

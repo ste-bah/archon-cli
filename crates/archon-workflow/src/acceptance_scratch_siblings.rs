@@ -189,6 +189,8 @@ pub(super) fn copy_external(
                 .push(crate::acceptance_sibling_paths::SiblingRevision {
                     path: relative,
                     commit,
+                    target: destination.canonicalize().ok(),
+                    site_repository: Some(copied_repository.to_path_buf()),
                     cwd: Some(cwd),
                 }),
             Err(error) => {

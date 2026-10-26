@@ -91,6 +91,40 @@ fn layoutless_current_schema_cache_is_a_miss_without_deletion() {
 }
 
 #[test]
+fn scratch_cache_without_site_repository_mapping_is_a_miss_without_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::ResultStore::new(
+        dir.path().into(),
+        crate::command::workflow_task_set::passability::evidence::Redactor::from_vars(
+            Vec::new(),
+            &[],
+        ),
+    );
+    let key = "a".repeat(64);
+    let path = store.path(&key).unwrap();
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "schema": 4,
+        "key": key,
+        "result": {
+            "acceptance_id": "AC-X-001", "exit_code": 1,
+            "stdout": [], "stderr": [], "operational_error": null,
+            "classification": {"passed": false, "zero_work": false, "crash": "Failed"}
+        },
+        "copy_layout": {
+            "root": "/scratch", "repository": "/scratch/repo", "project": "/scratch/project",
+            "siblings": [], "check_siblings": {"AC-X-001": [{"path": "../repo-alias", "commit": null}]}
+        }
+    })).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+
+    assert!(
+        store.load(&key, true).is_none(),
+        "Scratch evidence from before site repository mappings must be reobserved"
+    );
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
+
+#[test]
 fn schema3_scratch_result_is_reused_without_changing_its_file_or_verdict() {
     let dir = tempfile::tempdir().unwrap();
     let store = super::ResultStore::new(
@@ -166,7 +200,7 @@ fn replacing_a_schema3_provisional_record_keeps_its_original_bytes() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&std::fs::read(provisional).unwrap()).unwrap()
             ["schema"],
-        4
+        5
     );
 }
 
@@ -256,7 +290,7 @@ async fn hermetic_old_record_is_a_miss_and_survives_rerun(schema: u32, layout: b
         assert_eq!(std::fs::read(archived).unwrap(), bytes);
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&std::fs::read(path).unwrap()).unwrap()["schema"],
-            4
+            5
         );
     }
 }

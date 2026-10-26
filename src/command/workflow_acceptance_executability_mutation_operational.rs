@@ -49,7 +49,12 @@ pub(super) fn operational_words(commands: &[Vec<String>]) -> BTreeSet<String> {
             .unwrap_or_default();
         let operands: Vec<&String> = rest.collect();
         if program == "cd" || program == "pushd" {
-            excluded.extend(operands.iter().take(1).map(|word| word.to_string()));
+            excluded.extend(
+                operands
+                    .iter()
+                    .find(|word| word.as_str() == "-" || !word.starts_with('-'))
+                    .map(|word| word.to_string()),
+            );
         }
         if INTERPRETERS.contains(&program.as_str()) {
             for word in &operands {

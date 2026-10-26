@@ -462,6 +462,7 @@ fn empty_sibling_layout_serializes_like_the_original_layout_shape() {
     let layout = super::super::hermetic::CopyLayout {
         root: PathBuf::from("copy"),
         repository: PathBuf::from("copy/repository"),
+        site_repository: None,
         project: PathBuf::from("copy/project"),
         siblings: Vec::new(),
         check_siblings: std::collections::BTreeMap::new(),

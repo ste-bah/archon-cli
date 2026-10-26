@@ -83,6 +83,7 @@ pub(super) enum ExclusionReason {
     SiblingFromRoot,
     RepositoryCopyAlias,
     RepositoryAliasUnverified,
+    RepositoryRoot,
     CheckWritesPathInText,
     CheckRecreatedPathObserved,
     OutsideCopiedTree,
@@ -101,6 +102,7 @@ impl ExclusionReason {
             Self::RepositoryAliasUnverified => {
                 "repository sibling alias target could not be verified in the site copy; not movable"
             }
+            Self::RepositoryRoot => "the repository root itself; not movable",
             Self::CheckWritesPathInText => {
                 "a command in the check writes this path (seen in the check text), so it is not a pre-existing input"
             }
@@ -265,15 +267,21 @@ pub(super) fn input_discovery_for_check(
                 base.join(path)
             };
             let exists = super::hermetic::siblings::exact_path_exists(&resolved_path);
-            let direct_copy_move =
-                repository_alias::direct_copy_repository_input(path, &cwd, repository, copy_layout);
+            let direct_copy_move = repository_alias::direct_copy_repository_input(
+                path,
+                &base,
+                &cwd,
+                repository,
+                copy_layout,
+                &entry.id,
+            );
             let direct_copy = direct_copy_move.is_some();
             let shaped = token.contains('/') || exists;
             let resolved = resolved_path.canonicalize().ok();
             let escapes_through_symlink = resolved
                 .as_ref()
                 .is_some_and(|resolved| !resolved.starts_with(&cwd))
-                && has_symlink_component(&base, path);
+                && has_symlink_component_within(&base, path);
             let sibling_root = resolved.as_ref().and_then(|resolved| {
                 siblings.iter().find(|sibling| {
                     sibling
@@ -288,6 +296,11 @@ pub(super) fn input_discovery_for_check(
                 });
             let repository_sibling = sibling_root
                 .is_some_and(|sibling| repository_alias::is_repository_source(sibling, repository));
+            let repository_root = resolved.as_ref().is_some_and(|resolved| {
+                repository
+                    .canonicalize()
+                    .is_ok_and(|root| resolved == &root)
+            });
             let sibling = (exists && sibling_root.is_some()) || direct_copy;
             let mapped_sibling = sibling_root.and_then(|sibling| {
                 let resolved = resolved.as_ref()?;
@@ -346,6 +359,10 @@ pub(super) fn input_discovery_for_check(
                 Some(ExclusionReason::CheckWritesPathInText)
             } else if manifest {
                 Some(ExclusionReason::ManifestOrSetup)
+            } else if runs {
+                Some(ExclusionReason::CheckMechanics)
+            } else if repository_root {
+                Some(ExclusionReason::RepositoryRoot)
             } else if escapes_through_symlink {
                 Some(ExclusionReason::OutsideCopiedTree)
             } else if sibling && repository_copy_alias && canonical_move.is_some() {
@@ -354,8 +371,6 @@ pub(super) fn input_discovery_for_check(
                 Some(ExclusionReason::RepositoryAliasUnverified)
             } else if sibling {
                 Some(ExclusionReason::SiblingFromRoot)
-            } else if runs {
-                Some(ExclusionReason::CheckMechanics)
             } else if mapped.starts_with("../") {
                 Some(ExclusionReason::OutsideCopiedTree)
             } else if !exists && !has_manifest_sibling && canonical_move.is_none() {
@@ -394,14 +409,17 @@ pub(super) fn input_discovery_for_check(
     }
 }
 
-fn has_symlink_component(base: &Path, path: &Path) -> bool {
+fn has_symlink_component_within(base: &Path, path: &Path) -> bool {
     let candidate = if path.is_absolute() {
         path.to_path_buf()
     } else {
         base.join(path)
     };
-    let mut current = PathBuf::new();
-    for component in candidate.components() {
+    let Ok(relative) = candidate.strip_prefix(base) else {
+        return false;
+    };
+    let mut current = base.to_path_buf();
+    for component in relative.components() {
         current.push(component.as_os_str());
         if std::fs::symlink_metadata(&current)
             .is_ok_and(|metadata| metadata.file_type().is_symlink())
