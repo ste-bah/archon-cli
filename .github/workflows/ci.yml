@@ -211,10 +211,19 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          sudo rm -f /usr/local/bin/cargo /usr/local/bin/rustc /usr/local/bin/rustup
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustup" default stable
-          cargo --version
+          sudo rm -f /usr/local/bin/cargo /usr/local/bin/rustc
+          if [ -x "$HOME/.cargo/bin/rustup" ]; then
+            BIN="$HOME/.cargo/bin"
+          else
+            # Newer images ship a package-managed rustup on PATH, so
+            # dtolnay/rust-toolchain skips the ~/.cargo install; use that
+            # rustup's own proxy directory instead.
+            BIN=$(dirname "$(realpath "$(command -v rustup)")")
+          fi
+          [ -x "$BIN/cargo" ] || { echo "no cargo proxy next to rustup in $BIN" >&2; exit 1; }
+          echo "$BIN" >> "$GITHUB_PATH"
+          "$BIN/rustup" default stable
+          "$BIN/cargo" --version
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
