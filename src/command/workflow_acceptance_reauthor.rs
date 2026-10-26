@@ -16,6 +16,9 @@ use archon_workflow::task_set_contract::{
 
 use super::executability::ExecutabilityProbe;
 use super::*;
+#[path = "workflow_acceptance_reauthor_reporting.rs"]
+mod reporting;
+pub(crate) use reporting::{not_accepted_lines, not_accepted_report};
 #[path = "workflow_acceptance_reauthor_scope.rs"]
 mod scope;
 pub(crate) use scope::{AuthorScope, site_uses_build_cache};
@@ -45,48 +48,6 @@ const AUTHOR_TOOLS: [&str; 3] = HOST_READ_ONLY_TOOLS;
 
 /// The two entry shapes the decomposition author is shown.
 const ENTRY_SHAPES: &str = r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#;
-
-/// One line per named check: its id and what the judge said about it.
-pub(crate) fn not_accepted_lines(
-    contract: &AcceptanceContract,
-    ids: &BTreeSet<String>,
-) -> Vec<String> {
-    contract
-        .acceptance
-        .iter()
-        .chain(&contract.supplementary)
-        .filter(|entry| ids.contains(&entry.id))
-        .map(|entry| {
-            refuted_check_message(
-                &entry.id,
-                &entry.judgment.reason,
-                &entry.judgment.counterexample,
-            )
-        })
-        .collect()
-}
-
-/// The per-check refusal every non-accepted publication reports.
-pub(crate) fn not_accepted_report(
-    contract: &AcceptanceContract,
-    ids: &BTreeSet<String>,
-    attempts: usize,
-) -> String {
-    report(&not_accepted_lines(contract, ids), attempts)
-}
-
-fn report(lines: &[String], attempts: usize) -> String {
-    let after = if attempts == 0 {
-        String::new()
-    } else {
-        format!(" after {attempts} re-author attempt(s)")
-    };
-    format!(
-        "acceptance contract not published: {} check(s) not accepted by the judge{after}; a check the judge did not accept can never run, so nothing was written:\n  - {}",
-        lines.len(),
-        lines.join("\n  - ")
-    )
-}
 
 fn entry<'a>(contract: &'a AcceptanceContract, id: &str) -> Option<&'a AcceptanceCriterion> {
     contract
@@ -163,7 +124,7 @@ pub(crate) async fn reauthor_with_cache(
             escalation::baseline_escalation(&authored_pending, &lines, progress.attempts)
                 .unwrap_or_default();
         return Err(ReauthorStalled {
-            report: format!("{}\nthe re-author stopped after {} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}", report(&lines, progress.attempts), progress.attempts),
+            report: format!("{}\nthe re-author stopped after {} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}", reporting::report(&lines, progress.attempts), progress.attempts),
             pending: authored_pending.into_iter().collect(),
         }.into());
     }
@@ -261,6 +222,8 @@ pub(crate) async fn reauthor_partial_with_cache(
     // Bounded by progress: every attempt that repairs a check resets the
     // count, and with finitely many named checks the loop always ends.
     let (mut attempt, mut idle) = (0, 0);
+    let mut prefetch_cache =
+        crate::command::workflow_task_set::judge::ReauthorPrefetchCache::default();
     while (!pending.is_empty() || !reused.is_empty()) && idle < REAUTHOR_ATTEMPTS {
         attempt += 1;
         let before = pending.len();
@@ -275,7 +238,19 @@ pub(crate) async fn reauthor_partial_with_cache(
             }
             let frozen = entry(contract, id).expect("named ids were checked above");
             let notes = feedback.get_mut(id).expect("feedback seeded per id");
-            let reply = author_entry(client, scope, frozen, notes, attempt).await?;
+            // Findings evolve after every rejected draft. Snapshot the named
+            // inputs from the current notes immediately before each prompt.
+            let prefetched_files =
+                author::prefetch_files_cached(scope, frozen, notes, &mut prefetch_cache);
+            let reply = author::author_entry_with_prefetch(
+                client,
+                scope,
+                frozen,
+                notes,
+                attempt,
+                &prefetched_files,
+            )
+            .await?;
             match candidate_entry_with_markers(&reply, frozen, &reply_leaked_markers)
                 .and_then(|candidate| author::live_root_refusal(candidate, &refused))
                 .and_then(|candidate| check_defects::check_defects(&working, candidate, scope))
@@ -479,7 +454,6 @@ pub(crate) mod author;
 mod escalation;
 #[path = "workflow_acceptance_reauthor_stalled.rs"]
 mod stalled;
-use author::author_entry;
 pub(crate) use stalled::ReauthorStalled;
 
 #[cfg(test)]
@@ -488,6 +462,9 @@ mod boundary_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_live_root_tests.rs"]
 mod live_root_tests;
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_prefetch_tests.rs"]
+mod prefetch_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_prompt_tests.rs"]
 mod prompt_tests;

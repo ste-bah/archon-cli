@@ -1,5 +1,6 @@
 //! The focused-test completion signal: a write session whose declared tests
 //! have all passed is told to submit, and bounded after that.
+use crate::test_support::BeforeToolForTest;
 use archon_tools::workflow_read_guard::{FocusedTestPlan, WorkflowReadGuard};
 use serde_json::json;
 

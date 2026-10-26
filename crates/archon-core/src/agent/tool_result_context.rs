@@ -23,10 +23,21 @@ pub(crate) fn resolved_max_tool_result_bytes(
     )
 }
 
+/// The largest serialized read result the range guard may omit on a repeat.
+/// Both ordinary transcript recording and emergency replay must retain the
+/// complete earlier result for omission to be safe.
+pub fn read_result_replay_limit_bytes(
+    configured_max: usize,
+    provider: &dyn archon_llm::provider::LlmProvider,
+) -> usize {
+    resolved_max_tool_result_bytes(configured_max, provider)
+        .min(archon_tools::READ_REPLAY_CONTEXT_BYTES)
+}
+
 fn resolve_max_tool_result_bytes(configured_max: usize, provider_max: Option<usize>) -> usize {
     provider_max.map_or(configured_max, |limit| configured_max.min(limit))
 }
-const DEFAULT_TOOL_RESULT_CONTEXT_BYTES: usize = 64_000;
+const DEFAULT_TOOL_RESULT_CONTEXT_BYTES: usize = archon_tools::READ_REPLAY_CONTEXT_BYTES;
 const SHELL_TOOL_RESULT_CONTEXT_BYTES: usize = 24_000;
 const SUBAGENT_TOOL_RESULT_CONTEXT_BYTES: usize = 32_000;
 

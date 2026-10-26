@@ -1,5 +1,12 @@
 use super::*;
+use sha2::{Digest, Sha256};
 use std::path::Path;
+
+#[derive(Default)]
+pub(super) struct PrefetchSourceCache {
+    content: BTreeMap<(PathBuf, String), Vec<u8>>,
+    repository_path_digest: BTreeMap<(PathBuf, String, String), String>,
+}
 
 #[cfg(test)]
 pub(super) fn named_files(
@@ -17,6 +24,26 @@ pub(super) fn named_files_with_budget(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
     remaining: &mut usize,
+) -> Vec<serde_json::Value> {
+    named_files_for_inputs_with_budget(criterion, roots, remaining, &[])
+}
+
+pub(super) fn named_files_for_inputs_with_budget(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+    remaining: &mut usize,
+    extra_inputs: &[String],
+) -> Vec<serde_json::Value> {
+    let mut cache = PrefetchSourceCache::default();
+    named_files_for_inputs_with_budget_cached(criterion, roots, remaining, extra_inputs, &mut cache)
+}
+
+pub(super) fn named_files_for_inputs_with_budget_cached(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+    remaining: &mut usize,
+    extra_inputs: &[String],
+    cache: &mut PrefetchSourceCache,
 ) -> Vec<serde_json::Value> {
     let root = match &criterion.check {
         archon_workflow::task_set_contract::AcceptanceCheck::Command {
@@ -60,6 +87,7 @@ pub(super) fn named_files_with_budget(
         &project,
         &repository,
     );
+    inputs.extend(extra_inputs.iter().cloned());
     inputs.sort();
     inputs.dedup();
     inputs
@@ -90,9 +118,23 @@ pub(super) fn named_files_with_budget(
                     ));
                 };
                 let stored_path = archon_shell::paths::stored_text(&path);
-                let Some(content_bytes) =
-                    repository_regular_blob(&repository, commit, &stored_path)
-                else {
+                let resolved_path = repository.join(&path);
+                let lookup = (repository.clone(), commit.to_string(), stored_path.clone());
+                let cached = cache
+                    .repository_path_digest
+                    .get(&lookup)
+                    .and_then(|digest| cache.content.get(&(resolved_path.clone(), digest.clone())))
+                    .cloned();
+                let content_bytes = cached.or_else(|| {
+                    let bytes = repository_regular_blob(&repository, commit, &stored_path)?;
+                    let digest = format!("{:x}", Sha256::digest(&bytes));
+                    cache
+                        .content
+                        .insert((resolved_path.clone(), digest.clone()), bytes.clone());
+                    cache.repository_path_digest.insert(lookup, digest);
+                    Some(bytes)
+                });
+                let Some(content_bytes) = content_bytes else {
                     return Some(repository_missing_entry(
                         &path_text,
                         &repository,

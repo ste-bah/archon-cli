@@ -71,7 +71,7 @@ pub fn prune_mechanical(messages: &[serde_json::Value], config: PruneConfig) -> 
         plan_spilled_supersessions(messages, &calls, &mut replacements);
     }
     if config.repeated_reads {
-        plan_repeated_reads(&calls, &mut replacements);
+        plan_repeated_reads(messages, &calls, &mut replacements);
     }
     if config.retried_errors {
         plan_retried_errors(messages, &calls, &mut replacements);
@@ -203,25 +203,49 @@ fn spill_paths(messages: &[serde_json::Value]) -> HashMap<String, String> {
 /// The intervening-write check is what keeps this sound: collapsing two reads
 /// across an `Edit` would present stale content as current, which is worse than
 /// spending the tokens.
-fn plan_repeated_reads(calls: &ToolCalls, out: &mut HashMap<String, (String, &'static str)>) {
-    let mut reads: HashMap<String, Vec<(usize, String)>> = HashMap::new();
+fn plan_repeated_reads(
+    messages: &[serde_json::Value],
+    calls: &ToolCalls,
+    out: &mut HashMap<String, (String, &'static str)>,
+) {
+    let mut reads: HashMap<(String, usize, usize), Vec<(usize, String)>> = HashMap::new();
     let mut writes: HashMap<String, Vec<usize>> = HashMap::new();
     for (id, (ordinal, name, input)) in &calls.by_id {
         let Some(path) = path_argument(input) else {
             continue;
         };
         if name == "Read" || name == "NotebookRead" {
-            reads.entry(path).or_default().push((*ordinal, id.clone()));
+            let value: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
+            let offset = value.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let limit = value.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+            reads
+                .entry((path, offset, limit))
+                .or_default()
+                .push((*ordinal, id.clone()));
         } else if matches!(name.as_str(), "Edit" | "Write" | "NotebookEdit") {
             writes.entry(path).or_default().push(*ordinal);
         }
     }
 
-    for (path, mut same_path) in reads {
+    let omitted: std::collections::HashSet<_> = results(messages, calls)
+        .into_iter()
+        .filter(|(_, _, _, content)| content.contains("content omitted"))
+        .map(|(id, _, _, _)| id)
+        .collect();
+    for ((path, _, _), mut same_path) in reads {
         if same_path.len() < 2 {
             continue;
         }
         same_path.sort_by_key(|(ordinal, _)| *ordinal);
+        // An unchanged-read result contains no bytes. Keep the most recent
+        // earlier full result available to the model instead of pointing at
+        // an omission that can no longer explain the file.
+        while same_path.len() > 1 && omitted.contains(&same_path.last().unwrap().1) {
+            same_path.pop();
+        }
+        if same_path.len() < 2 {
+            continue;
+        }
         let written = writes.get(&path).cloned().unwrap_or_default();
         let (last_ordinal, _) = same_path[same_path.len() - 1];
         for (ordinal, id) in same_path.iter().take(same_path.len() - 1) {

@@ -65,7 +65,10 @@ pub(super) fn proactive_rearmed(watermark: Option<u64>, trigger_tokens: u64) -> 
 ///
 /// Returns the tokens reclaimed, or 0 when the pass is disabled or found
 /// nothing.
-pub(super) fn prune_history_mechanically(messages: &mut MessageHistory) -> u64 {
+pub(super) fn prune_history_mechanically(
+    runner: &SubagentRunner,
+    messages: &mut MessageHistory,
+) -> u64 {
     let config = match crate::config::load_config() {
         Ok(loaded) => loaded.prune,
         Err(_) => return 0,
@@ -79,7 +82,7 @@ pub(super) fn prune_history_mechanically(messages: &mut MessageHistory) -> u64 {
         return 0;
     }
     let rules = outcome.rules_fired.join(",");
-    messages.replace(outcome.messages);
+    messages.replace_for_agent(outcome.messages, &runner.tool_context);
     let after = messages.estimated_tokens();
     let reclaimed = before.saturating_sub(after);
     tracing::info!(
@@ -231,7 +234,7 @@ pub(super) async fn compact_proactively(
             },
             compacted,
         )) => {
-            messages.replace(compacted);
+            messages.replace_for_agent(compacted, &runner.tool_context);
             let recovery = runner.evidence_recovery_message();
             runner.record_transcript(&recovery);
             messages.push(recovery);

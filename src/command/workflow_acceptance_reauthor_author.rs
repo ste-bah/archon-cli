@@ -13,11 +13,84 @@ use std::{
 };
 
 use super::*;
+
+#[cfg(test)]
+pub(super) fn prefetch_files(
+    scope: &AuthorScope,
+    frozen: &AcceptanceCriterion,
+    notes: &[String],
+) -> Vec<serde_json::Value> {
+    prefetch_files_cached(
+        scope,
+        frozen,
+        notes,
+        &mut crate::command::workflow_task_set::judge::ReauthorPrefetchCache::default(),
+    )
+}
+
+pub(super) fn prefetch_files_cached(
+    scope: &AuthorScope,
+    frozen: &AcceptanceCriterion,
+    notes: &[String],
+    cache: &mut crate::command::workflow_task_set::judge::ReauthorPrefetchCache,
+) -> Vec<serde_json::Value> {
+    let cwd = match &frozen.check {
+        archon_workflow::task_set_contract::AcceptanceCheck::Command { cwd, .. } => *cwd,
+        _ => archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let mut inputs = Vec::new();
+    for note in notes {
+        let mut finding = frozen.clone();
+        finding.check = archon_workflow::task_set_contract::AcceptanceCheck::Command {
+            command: note.clone(),
+            cwd,
+        };
+        inputs.extend(
+            crate::command::workflow_task_set::executability::named_inputs(
+                &finding,
+                &scope.project_root,
+                &scope.repository_root,
+            ),
+        );
+    }
+    inputs.sort();
+    inputs.dedup();
+    crate::command::workflow_task_set::judge::named_files_for_reauthor_cached(
+        frozen,
+        &scope.project_root,
+        &scope.repository_root,
+        &scope.task_root,
+        scope
+            .baseline
+            .as_ref()
+            .map(|baseline| baseline.commit.clone()),
+        &inputs,
+        cache,
+    )
+}
+
+#[cfg(test)]
 pub(super) fn author_prompt(
     scope: &AuthorScope,
     frozen: &AcceptanceCriterion,
     notes: &[String],
     attempt: usize,
+) -> String {
+    author_prompt_with_prefetch(
+        scope,
+        frozen,
+        notes,
+        attempt,
+        &prefetch_files(scope, frozen, notes),
+    )
+}
+
+pub(super) fn author_prompt_with_prefetch(
+    scope: &AuthorScope,
+    frozen: &AcceptanceCriterion,
+    notes: &[String],
+    attempt: usize,
+    prefetched_files: &[serde_json::Value],
 ) -> String {
     let baseline_pass = notes.iter().any(|note| {
         note.contains("criterion already holds on the pre-implementation tree")
@@ -68,11 +141,17 @@ pub(super) fn author_prompt(
         ENTRY_SHAPES.to_string(),
         "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.".to_string(),
         "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
-        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name the deciding file by its literal path relative to the check's working directory. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. The host moves aside only inputs it actually moves, never the check's own script, a program it runs, a directory it changes into or a build manifest; the check must still fail on its own assertion, not by crashing, and a move-aside failure proves the guard and is never a counterexample. The named file's assertions are known to the judge only when its content is supplied in named_files. A named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Read the deciding file by its named path.".to_string(),
+        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name the deciding file by its literal path relative to the check's working directory. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. The host moves aside only inputs it actually moves, never the check's own script, a program it runs, a directory it changes into or a build manifest; the check must still fail on its own assertion, not by crashing, and a move-aside failure proves the guard and is never a counterexample. The named file's assertions are known to the judge only when its content is supplied in named_files; supplied content is a redacted, UTF-8-lossy copy that can be read in place of opening the original file. A named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Read the deciding file by its named path only when its content was not supplied.".to_string(),
         format!(
             "Use the exact id {}. Criterion and judgment are host-owned placeholders; gap_permitted stays {}.",
             frozen.id, frozen.gap_permitted
         ),
+        format!(
+            "Files already identified for this check are supplied here when available: {}",
+            serde_json::to_string(prefetched_files)
+                .unwrap_or_else(|_| "[]".to_string())
+        ),
+        "Answer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.".to_string(),
         format!("The entry being replaced: {current}"),
     ]);
     if baseline_pass {
@@ -301,6 +380,7 @@ pub(super) fn live_root_refusal(
     }
 }
 
+#[cfg(test)]
 pub(super) async fn author_entry(
     client: &dyn WorkflowLlmClient,
     scope: &AuthorScope,
@@ -308,8 +388,27 @@ pub(super) async fn author_entry(
     notes: &[String],
     attempt: usize,
 ) -> Result<String> {
+    author_entry_with_prefetch(
+        client,
+        scope,
+        frozen,
+        notes,
+        attempt,
+        &prefetch_files(scope, frozen, notes),
+    )
+    .await
+}
+
+pub(super) async fn author_entry_with_prefetch(
+    client: &dyn WorkflowLlmClient,
+    scope: &AuthorScope,
+    frozen: &AcceptanceCriterion,
+    notes: &[String],
+    attempt: usize,
+    prefetched_files: &[serde_json::Value],
+) -> Result<String> {
     let read_roots = scope.read_roots().map_err(|error| anyhow!(error))?;
-    let prompt = author_prompt(scope, frozen, notes, attempt);
+    let prompt = author_prompt_with_prefetch(scope, frozen, notes, attempt, prefetched_files);
     let call = WorkflowAgentCall {
         session_id: format!(
             "{ACCEPTANCE_REAUTHOR_AGENT}-{}-{}",

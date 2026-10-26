@@ -16,8 +16,115 @@ use archon_tools::repeat_tool_guard::{ChainKey, REPEAT_TOOL_CHAINS, RepeatToolCo
 use archon_tools::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, ToolRunAdmission,
 };
+use archon_tools::workflow_read_guard::{WorkflowReadGuard, WorkflowReadGuardSettings};
 
 use crate::dispatch::ToolRegistry;
+
+#[tokio::test]
+async fn a_repeated_read_reaches_the_tool_through_attempt_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("data.txt");
+    std::fs::write(&path, "alpha\nbeta").unwrap();
+    let guard = Arc::new(WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings {
+        read_only_hard_call_ceiling: 8,
+        ..Default::default()
+    }));
+    let ctx = ToolContext {
+        working_dir: dir.path().to_path_buf(),
+        session_id: "AC-X-001".into(),
+        workflow_read_guard: Some(guard),
+        ..Default::default()
+    };
+    let tool = archon_tools::file_read::ReadTool;
+    let input = serde_json::json!({"file_path": path});
+
+    let first =
+        crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &ctx, false).await;
+    let repeat = crate::tool_run_admission::execute_tool_attempt(&tool, input, &ctx, false).await;
+    assert_eq!(first.content, "1\talpha\n2\tbeta");
+    assert!(
+        repeat
+            .content
+            .contains("unchanged since your earlier Read call 1")
+    );
+    assert!(repeat.content.contains(path.to_str().unwrap()));
+    assert!(repeat.content.contains("force_refresh=true"));
+}
+
+#[tokio::test]
+async fn child_read_ceiling_does_not_spend_the_parent_allowance() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("data.txt");
+    std::fs::write(&path, "alpha").unwrap();
+    let guard = Arc::new(WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings {
+        read_only_hard_call_ceiling: 2,
+        ..Default::default()
+    }));
+    let make_context = |subagent_id: Option<&str>| ToolContext {
+        working_dir: dir.path().to_path_buf(),
+        session_id: "AC-X-001".into(),
+        subagent_id: subagent_id.map(str::to_owned),
+        workflow_read_guard: Some(guard.clone()),
+        ..Default::default()
+    };
+    let parent = make_context(None);
+    let child = make_context(Some("TASK-X-001"));
+    let tool = archon_tools::file_read::ReadTool;
+    let input = serde_json::json!({"file_path": path});
+
+    let first =
+        crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &parent, false).await;
+    let child_read =
+        crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &child, false).await;
+    let second =
+        crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &parent, false).await;
+    let refused =
+        crate::tool_run_admission::execute_tool_attempt(&tool, input, &parent, false).await;
+
+    assert_eq!(first.content, "1\talpha");
+    assert_eq!(child_read.content, "1\talpha");
+    assert!(
+        second
+            .content
+            .contains("unchanged since your earlier Read call 1")
+    );
+    assert!(refused.content.contains("read ceiling reached: 2"));
+    assert_eq!(guard.read_only_inspections_for(&parent), 2);
+    assert_eq!(guard.read_only_inspections_for(&child), 1);
+}
+
+#[tokio::test]
+async fn child_withdrawal_leaves_parent_reads_available() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("data.txt");
+    std::fs::write(&path, "alpha").unwrap();
+    let guard = Arc::new(WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings {
+        read_only_hard_call_ceiling: 4,
+        ..Default::default()
+    }));
+    let make_context = |subagent_id: Option<&str>| ToolContext {
+        working_dir: dir.path().to_path_buf(),
+        session_id: "AC-X-001".into(),
+        subagent_id: subagent_id.map(str::to_owned),
+        workflow_read_guard: Some(guard.clone()),
+        ..Default::default()
+    };
+    let parent = make_context(None);
+    let child = make_context(Some("TASK-X-001"));
+    assert!(guard.withdraw_inspection_for(&child, "child repeated results"));
+
+    let result = crate::tool_run_admission::execute_tool_attempt(
+        &archon_tools::file_read::ReadTool,
+        serde_json::json!({"file_path": path}),
+        &parent,
+        false,
+    )
+    .await;
+    assert_eq!(result.content, "1\talpha");
+    assert!(guard.inspection_withdrawn_for(&child));
+    assert!(!guard.inspection_withdrawn_for(&parent));
+    assert_eq!(guard.read_only_inspections_for(&parent), 1);
+}
 
 const TOOL_OUTPUT: &str = "crates/archon-core/src/agent.rs:141: struct PendingToolCall";
 

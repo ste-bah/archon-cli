@@ -24,7 +24,7 @@
 //!
 //! Either ceiling set to 0 is off. The write-capable guard never reaches
 //! this module.
-use super::{State, WorkflowReadGuard, inspection_call};
+use super::{AgentKey, State, WorkflowReadGuard, inspection_call};
 use serde_json::Value;
 
 /// Tool names whose calls are withdrawn once a read-only call reaches its
@@ -84,20 +84,22 @@ pub(super) fn nudge(inspections: u32, hard: u32) -> String {
 pub(super) fn admit(
     guard: &WorkflowReadGuard,
     state: &mut State,
+    key: &AgentKey,
     name: &str,
     input: &Value,
 ) -> Option<String> {
     if !inspection_call(name, command(input)) {
         return None;
     }
-    if let Some(reason) = &state.inspection_withdrawn {
+    let agent = state.agent_state.entry(key.clone()).or_default();
+    if let Some(reason) = &agent.inspection_withdrawn {
         return Some(withdrawn_refusal(reason));
     }
     let hard = guard.read_only_hard_ceiling;
-    if hard > 0 && state.read_only_inspections >= hard {
-        return Some(refusal(state.read_only_inspections));
+    if hard > 0 && agent.read_only_inspections >= hard {
+        return Some(refusal(agent.read_only_inspections));
     }
-    state.read_only_inspections = state.read_only_inspections.saturating_add(1);
+    agent.read_only_inspections = agent.read_only_inspections.saturating_add(1);
     None
 }
 
@@ -105,30 +107,58 @@ impl WorkflowReadGuard {
     /// Whether this read-only call has exhausted its configured inspection
     /// allowance. Write-capable guards and a disabled hard ceiling never
     /// report reached.
+    #[cfg(test)]
     pub fn read_only_ceiling_reached(&self) -> bool {
+        self.read_only_ceiling_reached_for_key(&(String::new(), None))
+    }
+
+    pub fn read_only_ceiling_reached_for(&self, ctx: &crate::tool::ToolContext) -> bool {
+        self.read_only_ceiling_reached_for_key(&(ctx.session_id.clone(), ctx.subagent_id.clone()))
+    }
+
+    fn read_only_ceiling_reached_for_key(&self, key: &AgentKey) -> bool {
         if !self.read_only() || self.read_only_hard_ceiling == 0 {
             return false;
         }
-        self.read_only_inspections() >= self.read_only_hard_ceiling
+        self.read_only_inspections_for_key(key) >= self.read_only_hard_ceiling
     }
 
     /// Whether this read-only call may no longer inspect: its hard ceiling
     /// is reached, or inspection was withdrawn (Issue-396). The runner then
     /// withdraws the inspection tools and asks for the deliverable.
+    #[cfg(test)]
     pub fn inspection_withdrawn(&self) -> bool {
-        self.read_only_ceiling_reached() || self.withdrawal_reason().is_some()
+        self.inspection_withdrawn_for_key(&(String::new(), None))
+    }
+
+    pub fn inspection_withdrawn_for(&self, ctx: &crate::tool::ToolContext) -> bool {
+        self.inspection_withdrawn_for_key(&(ctx.session_id.clone(), ctx.subagent_id.clone()))
+    }
+
+    fn inspection_withdrawn_for_key(&self, key: &AgentKey) -> bool {
+        self.read_only_ceiling_reached_for_key(key) || self.withdrawal_reason_for_key(key).is_some()
     }
 
     /// Why inspection was withdrawn before the hard ceiling, if it was.
+    #[cfg(test)]
     pub fn withdrawal_reason(&self) -> Option<String> {
+        self.withdrawal_reason_for_key(&(String::new(), None))
+    }
+
+    pub fn withdrawal_reason_for(&self, ctx: &crate::tool::ToolContext) -> Option<String> {
+        self.withdrawal_reason_for_key(&(ctx.session_id.clone(), ctx.subagent_id.clone()))
+    }
+
+    fn withdrawal_reason_for_key(&self, key: &AgentKey) -> Option<String> {
         if !self.read_only() {
             return None;
         }
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .inspection_withdrawn
-            .clone()
+            .agent_state
+            .get(key)
+            .and_then(|agent| agent.inspection_withdrawn.clone())
     }
 
     /// Withdraw inspection from a read-only call that keeps getting the same
@@ -136,12 +166,25 @@ impl WorkflowReadGuard {
     /// asked for it rather than failed. `true` only when this call withdrew
     /// it; a write-capable guard, or a call already withdrawn (by this or
     /// by its hard ceiling), returns `false` and the caller keeps its stop.
+    #[cfg(test)]
     pub fn withdraw_inspection(&self, reason: &str) -> bool {
-        if !self.read_only() || self.inspection_withdrawn() {
+        self.withdraw_inspection_for_key(&(String::new(), None), reason)
+    }
+
+    pub fn withdraw_inspection_for(&self, ctx: &crate::tool::ToolContext, reason: &str) -> bool {
+        self.withdraw_inspection_for_key(&(ctx.session_id.clone(), ctx.subagent_id.clone()), reason)
+    }
+
+    fn withdraw_inspection_for_key(&self, key: &AgentKey, reason: &str) -> bool {
+        if !self.read_only() || self.inspection_withdrawn_for_key(key) {
             return false;
         }
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.inspection_withdrawn = Some(reason.to_string());
+        state
+            .agent_state
+            .entry(key.clone())
+            .or_default()
+            .inspection_withdrawn = Some(reason.to_string());
         true
     }
 
@@ -153,11 +196,22 @@ impl WorkflowReadGuard {
     }
 
     /// Admitted inspection calls so far; a write-capable guard reports 0.
+    #[cfg(test)]
     pub fn read_only_inspections(&self) -> u32 {
+        self.read_only_inspections_for_key(&(String::new(), None))
+    }
+
+    pub fn read_only_inspections_for(&self, ctx: &crate::tool::ToolContext) -> u32 {
+        self.read_only_inspections_for_key(&(ctx.session_id.clone(), ctx.subagent_id.clone()))
+    }
+
+    fn read_only_inspections_for_key(&self, key: &AgentKey) -> u32 {
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .read_only_inspections
+            .agent_state
+            .get(key)
+            .map_or(0, |agent| agent.read_only_inspections)
     }
 
     /// The text to append to a finished call's result, or `None` to leave
@@ -165,7 +219,25 @@ impl WorkflowReadGuard {
     /// inspection call from the soft ceiling on; a write-capable guard's
     /// results are never touched here. Called after `before_tool` admitted
     /// the call and the tool ran, so the count it names includes this call.
+    #[cfg(test)]
     pub fn result_note(&self, name: &str, input: &Value) -> Option<String> {
+        self.result_note_for_key(&(String::new(), None), name, input)
+    }
+
+    pub fn result_note_for(
+        &self,
+        ctx: &crate::tool::ToolContext,
+        name: &str,
+        input: &Value,
+    ) -> Option<String> {
+        self.result_note_for_key(
+            &(ctx.session_id.clone(), ctx.subagent_id.clone()),
+            name,
+            input,
+        )
+    }
+
+    fn result_note_for_key(&self, key: &AgentKey, name: &str, input: &Value) -> Option<String> {
         if !self.read_only() || !inspection_call(name, command(input)) {
             return None;
         }
@@ -173,11 +245,7 @@ impl WorkflowReadGuard {
         if soft == 0 {
             return None;
         }
-        let made = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .read_only_inspections;
+        let made = self.read_only_inspections_for_key(key);
         (made >= soft).then(|| nudge(made, self.read_only_hard_ceiling))
     }
 

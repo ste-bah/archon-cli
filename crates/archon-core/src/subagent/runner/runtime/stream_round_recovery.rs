@@ -157,6 +157,9 @@ pub(super) fn emergency_projected_request(
             ),
         ),
     );
+    if projected != messages {
+        runner.clear_workflow_read_ranges();
+    }
     request_with_messages(runner, request, projected)
 }
 
@@ -454,7 +457,7 @@ pub(super) async fn compact_messages_for_retry(
     // proactive path (`compact_proactively`) never makes because it does not
     // force.
     let summarised = compacted.as_slice() != messages.as_slice();
-    messages.replace(compacted);
+    messages.replace_for_agent(compacted, &runner.tool_context);
     if summarised {
         let recovery = runner.evidence_recovery_message();
         runner.record_transcript(&recovery);

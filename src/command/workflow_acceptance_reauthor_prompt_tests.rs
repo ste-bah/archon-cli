@@ -122,11 +122,13 @@ fn non_baseline_prompt_keeps_the_refused_check_verbatim() {
         super::ENTRY_SHAPES.to_string(),
         "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.".to_string(),
         "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
-        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name the deciding file by its literal path relative to the check's working directory. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. The host moves aside only inputs it actually moves, never the check's own script, a program it runs, a directory it changes into or a build manifest; the check must still fail on its own assertion, not by crashing, and a move-aside failure proves the guard and is never a counterexample. The named file's assertions are known to the judge only when its content is supplied in named_files. A named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Read the deciding file by its named path.".to_string(),
+        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name the deciding file by its literal path relative to the check's working directory. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. The host moves aside only inputs it actually moves, never the check's own script, a program it runs, a directory it changes into or a build manifest; the check must still fail on its own assertion, not by crashing, and a move-aside failure proves the guard and is never a counterexample. The named file's assertions are known to the judge only when its content is supplied in named_files; supplied content is a redacted, UTF-8-lossy copy that can be read in place of opening the original file. A named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Read the deciding file by its named path only when its content was not supplied.".to_string(),
         format!(
             "Use the exact id {}. Criterion and judgment are host-owned placeholders; gap_permitted stays {}.",
             frozen.id, frozen.gap_permitted
         ),
+        "Files already identified for this check are supplied here when available: []".to_string(),
+        "Answer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.".to_string(),
         format!("The entry being replaced: {current}"),
         format!(
             "Attempt 1; the host stops after {} consecutive attempts that repair no check. Findings to fix, oldest first:\n- {}",
@@ -150,23 +152,6 @@ fn non_baseline_prompt_keeps_the_refused_check_verbatim() {
     )
     .expect("the replacement entry is JSON");
     assert_eq!(entry["check"], serde_json::to_value(&frozen.check).unwrap());
-}
-
-#[test]
-fn candidate_selection_returns_none_found_without_a_matching_existing_path() {
-    use archon_workflow::task_universe::WorkflowV2TaskUniverse;
-
-    let set = frozen_set(&[("AC-F-001", "run", false)]);
-    let mut scope = scope(&set);
-    scope.task_universe = WorkflowV2TaskUniverse {
-        schema_version: "test".into(),
-        source_roots: vec![],
-        tasks: vec![],
-    };
-    assert_eq!(
-        super::author::candidate_files(&scope, &set.contract().acceptance[0]),
-        "none found"
-    );
 }
 
 #[test]

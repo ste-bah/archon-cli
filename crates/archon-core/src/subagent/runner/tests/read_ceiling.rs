@@ -153,3 +153,4 @@ async fn the_request_still_runs_with_no_tools_left_after_filtering() {
     assert_eq!(requests.len(), 2);
     assert!(requests[1].tools.is_empty());
 }
+use crate::test_support::BeforeToolForTest;

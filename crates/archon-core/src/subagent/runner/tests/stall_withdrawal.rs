@@ -206,8 +206,11 @@ async fn repeated_own_evidence_reads_are_withdrawn_before_the_ceiling() {
         "{asked}"
     );
     let guard = runner.tool_context.workflow_read_guard.as_ref().unwrap();
-    assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
-    assert!(!guard.read_only_ceiling_reached());
+    assert_eq!(
+        guard.read_only_inspections_for(&runner.tool_context),
+        ROUNDS_TO_STOP as u32
+    );
+    assert!(!guard.read_only_ceiling_reached_for(&runner.tool_context));
 }
 
 fn author_context_read(path: &std::path::Path) -> Vec<Vec<StreamEvent>> {
@@ -276,14 +279,21 @@ async fn repeated_mistyped_author_context_path_is_withdrawn_without_window_renew
     let guard = runner.tool_context.workflow_read_guard.as_ref().unwrap();
     let before = format!(
         "before the next refusal: reads={} ceiling={} last_progress={:?} refused_calls=0",
-        guard.read_only_inspections(),
+        guard.read_only_inspections_for(&runner.tool_context),
         120,
         clock.last_progress()
     );
-    assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
-    assert!(!guard.read_only_ceiling_reached());
-    assert!(guard.inspection_withdrawn());
-    let refusal = guard.before_tool("Read", &serde_json::json!({"file_path": mistyped}));
+    assert_eq!(
+        guard.read_only_inspections_for(&runner.tool_context),
+        ROUNDS_TO_STOP as u32
+    );
+    assert!(!guard.read_only_ceiling_reached_for(&runner.tool_context));
+    assert!(guard.inspection_withdrawn_for(&runner.tool_context));
+    let refusal = guard.before_tool_for(
+        &runner.tool_context,
+        "Read",
+        &serde_json::json!({"file_path": mistyped}),
+    );
     assert!(
         refusal
             .as_deref()
@@ -291,9 +301,9 @@ async fn repeated_mistyped_author_context_path_is_withdrawn_without_window_renew
     );
     let after = format!(
         "reads={} ceiling={} withdrawn={} refusal=inspection withdrawn last_progress={:?} refused_calls={}",
-        guard.read_only_inspections(),
+        guard.read_only_inspections_for(&runner.tool_context),
         120,
-        guard.inspection_withdrawn(),
+        guard.inspection_withdrawn_for(&runner.tool_context),
         clock.last_progress(),
         clock.refused_calls()
     );
@@ -305,12 +315,16 @@ async fn repeated_mistyped_author_context_path_is_withdrawn_without_window_renew
             .as_deref()
             .is_some_and(|last| last.starts_with("turn 1: new tool call Read"))
     );
-    assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
+    assert_eq!(
+        guard.read_only_inspections_for(&runner.tool_context),
+        ROUNDS_TO_STOP as u32
+    );
 }
 
 /// Expected before running: a correctly named, existing 64-hex context file
 /// is read repeatedly by the same real Read path with its content intact;
-/// the pre-existing repeat-stall policy still withdraws after 16 reads and
+/// the unchanged-result response follows the first returned content, so the
+/// pre-existing repeat-stall policy still withdraws after 17 reads and
 /// preserves the turn-1 window anchor.
 #[tokio::test]
 async fn repeated_correct_author_context_path_keeps_its_read_result_before_withdrawal() {
@@ -319,7 +333,10 @@ async fn repeated_correct_author_context_path_keeps_its_read_result_before_withd
     std::fs::create_dir_all(&context).unwrap();
     let path = context.join(format!("{}.json", "c".repeat(64)));
     std::fs::write(&path, "the actual author context").unwrap();
-    let provider = Arc::new(MockProvider::new(author_context_read(&path)));
+    let mut responses = author_context_read(&path);
+    let input = serde_json::json!({ "file_path": path }).to_string();
+    responses.push(tool_use_response("context-extra", "Read", &input));
+    let provider = Arc::new(MockProvider::new(responses));
     let mut runner = make_runner(provider.clone(), 40);
     runner.tool_context.working_dir = dir.path().to_path_buf();
     runner.tool_context.session_id = "correct-context".into();
@@ -349,21 +366,31 @@ async fn repeated_correct_author_context_path_keeps_its_read_result_before_withd
     );
     let guard = runner.tool_context.workflow_read_guard.as_ref().unwrap();
     let before = format!(
-        "reads={} ceiling={} result=author-context content present last_progress={:?}",
-        guard.read_only_inspections(),
+        "reads={} ceiling={} result=unchanged after initial content last_progress={:?}",
+        guard.read_only_inspections_for(&runner.tool_context),
         120,
         clock.last_progress()
     );
-    assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
-    assert!(guard.inspection_withdrawn());
+    // One explicit final mock read exercises the later unchanged-result text.
+    assert_eq!(
+        guard.read_only_inspections_for(&runner.tool_context),
+        ROUNDS_TO_STOP as u32 + 1
+    );
+    assert!(guard.inspection_withdrawn_for(&runner.tool_context));
     let after = format!(
-        "reads={} ceiling={} withdrawn={} result=author-context content present last_progress={:?}",
-        guard.read_only_inspections(),
+        "reads={} ceiling={} withdrawn={} result=unchanged after initial content last_progress={:?}",
+        guard.read_only_inspections_for(&runner.tool_context),
         120,
-        guard.inspection_withdrawn(),
+        guard.inspection_withdrawn_for(&runner.tool_context),
         clock.last_progress()
     );
-    assert_eq!(requests.len(), ROUNDS_TO_STOP + 1);
+    // The extra admitted read adds its tool-use request and result replay.
+    assert_eq!(requests.len(), ROUNDS_TO_STOP + 2);
+    let later_tool_result = serde_json::to_string(&requests[requests.len() - 1].messages).unwrap();
+    assert!(
+        later_tool_result.contains("unchanged since your earlier Read call"),
+        "{later_tool_result}"
+    );
     eprintln!("EVIDENCE: #396 correct author-context reread BEFORE {before}; AFTER {after}");
     assert!(
         clock

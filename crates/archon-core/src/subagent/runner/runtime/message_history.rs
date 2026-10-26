@@ -44,6 +44,19 @@ impl MessageHistory {
         self.messages = messages;
     }
 
+    /// Replace history and invalidate ranges whose full results may have
+    /// disappeared from the model-visible transcript.
+    pub(super) fn replace_for_agent(
+        &mut self,
+        messages: Vec<serde_json::Value>,
+        context: &archon_tools::tool::ToolContext,
+    ) {
+        if let Some(guard) = &context.workflow_read_guard {
+            guard.clear_ranges_for(context);
+        }
+        self.replace(messages);
+    }
+
     pub(super) fn as_slice(&self) -> &[serde_json::Value] {
         &self.messages
     }

@@ -255,6 +255,7 @@ impl AgentSubagentExecutor {
         let child_working_dir = working_dir.clone();
         ToolContext {
             working_dir,
+            read_result_replay_limit_bytes: parent_ctx.read_result_replay_limit_bytes,
             // The parent's `session_id` is deliberately kept alongside
             // `subagent_id`: the two answer different questions. Hooks,
             // transcripts and activity records key off the session that owns

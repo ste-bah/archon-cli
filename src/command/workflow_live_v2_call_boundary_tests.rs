@@ -397,7 +397,13 @@ async fn a_write_branch_cannot_write_the_hosts_evidence_or_stores() {
     }
     assert!(!paths.refuses(&worktree.join("src/lib.rs")));
     // The file tools are refused by the same sets.
-    let refused = guard.before_tool(
+    let mut ctx = archon_tools::tool::ToolContext {
+        working_dir: worktree.clone(),
+        session_id: "g2-write-boundary".into(),
+        ..archon_tools::tool::ToolContext::default()
+    };
+    let refused = guard.before_tool_for(
+        &ctx,
         "Write",
         &serde_json::json!({"file_path": evidence, "content": "{\"verdict\":\"passed\"}"}),
     );
@@ -406,12 +412,7 @@ async fn a_write_branch_cannot_write_the_hosts_evidence_or_stores() {
         "a file-tool write to the evidence is refused"
     );
     // And the shell, at the OS level, where the platform can bound it.
-    let ctx = archon_tools::tool::ToolContext {
-        working_dir: worktree.clone(),
-        session_id: "g2-write-boundary".into(),
-        workflow_read_guard: Some(std::sync::Arc::new(guard)),
-        ..archon_tools::tool::ToolContext::default()
-    };
+    ctx.workflow_read_guard = Some(std::sync::Arc::new(guard));
     let result = archon_tools::tool::Tool::execute(
         &archon_tools::bash::BashTool::default(),
         serde_json::json!({"command": format!(

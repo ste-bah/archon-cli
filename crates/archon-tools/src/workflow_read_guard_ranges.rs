@@ -1,15 +1,24 @@
-//! The read-range dedup, the read-set sidecar and the write credit of a
-//! write-capable guard. A read-only guard retains no ranges and earns no
-//! credit: every entry point here is a no-op for it.
-use super::{WorkflowReadGuard, records::append_record, thrash};
+//! Shared read-range hashing plus the read-set sidecar and write credit of a
+//! write-capable guard. Both modes retain ranges for each agent session.
+use super::{RangeKey, WorkflowReadGuard, records::append_record, thrash};
 use crate::tool::ToolContext;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
 impl WorkflowReadGuard {
-    /// Empty for a read-only guard, which retains no ranges and has no budget
-    /// to refresh within.
+    /// Forget this agent's ranges when its model-visible history is replaced.
+    pub fn clear_ranges_for(&self, ctx: &ToolContext) {
+        let session = (ctx.session_id.clone(), ctx.subagent_id.clone());
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .ranges
+            .retain(|key, _| key.session != session);
+    }
+
+    /// Empty for a read-only guard, which does not expose orientation and has
+    /// no budget to refresh within.
     pub fn orientation(&self) -> String {
         if self.read_only() {
             return String::new();
@@ -19,8 +28,13 @@ impl WorkflowReadGuard {
             .ranges
             .keys()
             .take(200)
-            .map(|(path, offset, limit)| {
-                format!("{} offset={offset} limit={limit}", path.display())
+            .map(|key| {
+                format!(
+                    "{} offset={} limit={}",
+                    key.path.display(),
+                    key.offset,
+                    key.limit
+                )
             })
             .collect::<Vec<_>>()
             .join("; ");
@@ -38,25 +52,55 @@ impl WorkflowReadGuard {
         offset: usize,
         limit: usize,
         bytes: &[u8],
+        replay_limit_bytes: usize,
+        result_note: Option<&str>,
         force: bool,
     ) -> Result<Option<String>, String> {
-        if self.read_only() {
-            return Ok(None);
-        }
         let hash = format!("{:x}", Sha256::digest(bytes));
+        let agent_key = (ctx.session_id.clone(), ctx.subagent_id.clone());
+        let key = RangeKey {
+            session: agent_key.clone(),
+            path: path.to_path_buf(),
+            offset,
+            limit,
+        };
+        let replay_limit_bytes = if replay_limit_bytes == 0 {
+            crate::READ_REPLAY_CONTEXT_BYTES
+        } else {
+            replay_limit_bytes.min(crate::READ_REPLAY_CONTEXT_BYTES)
+        };
+        let mut replay_result = std::str::from_utf8(bytes).unwrap_or_default().to_string();
+        if let Some(note) = result_note {
+            replay_result.push_str("\n\n");
+            replay_result.push_str(note);
+        }
+        let replay_bytes = serde_json::to_vec(&serde_json::Value::String(replay_result))
+            .map_or(usize::MAX, |serialized| serialized.len());
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let key = (path.to_path_buf(), offset, limit);
         if !force
             && let Some((old_hash, call)) = state.ranges.get(&key)
             && *old_hash == hash
         {
+            if replay_bytes > replay_limit_bytes {
+                return Ok(None);
+            }
+            let budget_note = if self.read_only() {
+                ""
+            } else {
+                " This still consumes the read-before-write budget."
+            };
             return Ok(Some(format!(
-                "{} offset={offset} limit={limit}: unchanged since your read at call {call}; content omitted. If earlier content was compacted away, Read the same range with force_refresh=true. This still consumes the read-before-write budget.",
+                "{} offset={offset} limit={limit}: unchanged since your earlier Read call {call}; content omitted. The earlier result may have been trimmed or compacted; Read the same range with force_refresh=true.{budget_note}",
                 path.display()
             )));
         }
-        let call = state.calls;
-        if let Some(sink) = &self.read_set_path {
+        let call = state
+            .agent_state
+            .get(&agent_key)
+            .map_or(state.calls, |agent| agent.calls);
+        if !self.read_only()
+            && let Some(sink) = &self.read_set_path
+        {
             // Relative paths survive a retry in a fresh worktree. External
             // artifact paths remain absolute because they do not move.
             let root = ctx

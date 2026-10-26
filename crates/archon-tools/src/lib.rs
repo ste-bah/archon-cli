@@ -234,6 +234,10 @@ pub mod read_boundary;
 
 pub mod workflow_read_guard;
 
+/// Read results above the replay budget are trimmed before they are shown
+/// again to the model, so identical results must remain available in full.
+pub const READ_REPLAY_CONTEXT_BYTES: usize = 64_000;
+
 pub mod subagent_session;
 
 /// What of a tool call's input a persisted session trace may keep (#276).

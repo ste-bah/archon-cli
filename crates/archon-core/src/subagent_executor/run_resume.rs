@@ -71,6 +71,14 @@ impl AgentSubagentExecutor {
         }
         self.configure_resume_and_progress(&mut runner, &ids.manager_id)
             .await;
+        if archon_tools::subagent_session::current_for(&ids.manager_id)
+            .is_some_and(|session| session.continuing)
+        {
+            // A cancelled round may have executed ReadTool and recorded its
+            // range before the result was replayed into history. Let the
+            // resumed agent receive that range in full again.
+            runner.clear_workflow_read_ranges();
+        }
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id)
             && session.continuing
             && session

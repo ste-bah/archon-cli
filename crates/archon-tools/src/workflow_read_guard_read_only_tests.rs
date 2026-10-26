@@ -4,6 +4,7 @@ use super::{
     GuardMode, READ_CEILING_MARKER, REFUSAL_RECORD_KIND, TOOL_CALL_RECORD_KIND, WorkflowReadGuard,
     WorkflowReadGuardSettings,
 };
+use crate::tool::ToolContext;
 use serde_json::{Value, json};
 
 fn settings(soft: u32, hard: u32) -> WorkflowReadGuardSettings {
@@ -24,6 +25,83 @@ fn read_input() -> Value {
 
 fn bash_input(command: &str) -> Value {
     json!({"command": command})
+}
+
+#[test]
+fn repeated_requests_still_reach_the_read_tool() {
+    let guard = read_only(0, 2);
+    let ctx = ToolContext {
+        session_id: "AC-X-001".into(),
+        ..ToolContext::default()
+    };
+    let path = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(path.path(), "content").unwrap();
+    let input = json!({"file_path":path.path(),"offset":0,"limit":20});
+    assert_eq!(guard.before_tool_for(&ctx, "Read", &input), None);
+    guard.after_tool("Read", &input, true, "ok");
+    assert_eq!(guard.before_tool_for(&ctx, "Read", &input), None);
+    assert_eq!(guard.read_only_inspections_for(&ctx), 2);
+}
+
+#[test]
+fn ranges_are_admitted_for_read_calls() {
+    let guard = read_only(0, 3);
+    let path = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(path.path(), "abcdefghij").unwrap();
+    let input = |offset, limit| json!({"file_path":path.path(),"offset":offset,"limit":limit});
+    assert_eq!(guard.before_tool("Read", &input(0, 10)), None);
+    guard.after_tool("Read", &input(0, 10), true, "ok");
+    assert_eq!(guard.before_tool("Read", &input(2, 4)), None);
+    assert_eq!(guard.read_only_inspections(), 2);
+}
+
+#[test]
+fn repeated_reads_are_admitted_for_fresh_results() {
+    let guard = read_only(0, 5);
+    let path = tempfile::NamedTempFile::new().unwrap();
+    let first = json!({"pattern":"alpha","path":path.path(),"glob":"*.rs"});
+    assert_eq!(guard.before_tool("Grep", &first), None);
+    guard.after_tool("Grep", &first, true, "ok");
+    assert_eq!(guard.before_tool("Grep", &first), None);
+    assert_eq!(guard.read_only_inspections(), 2);
+    let second = json!({"pattern":"beta","path":path.path(),"glob":"*.rs"});
+    assert_eq!(guard.before_tool("Grep", &second), None);
+    guard.after_tool("Grep", &second, true, "ok");
+    assert_eq!(guard.read_only_inspections(), 3);
+    assert_eq!(guard.before_tool("Grep", &second), None);
+    assert_eq!(guard.read_only_inspections(), 4);
+}
+
+#[test]
+fn changed_files_are_read_again_with_current_content_available() {
+    let guard = read_only(0, 3);
+    let path = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(path.path(), "before").unwrap();
+    let input = json!({"file_path":path.path(),"offset":0,"limit":20});
+    assert_eq!(guard.before_tool("Read", &input), None);
+    guard.after_tool("Read", &input, true, "ok");
+    assert_eq!(guard.before_tool("Read", &input), None);
+    assert_eq!(guard.read_only_inspections(), 2);
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    std::fs::write(path.path(), "after changed").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(path.path()).unwrap(),
+        "after changed"
+    );
+    assert_eq!(guard.before_tool("Read", &input), None);
+    assert_eq!(guard.read_only_inspections(), 3);
+}
+
+#[test]
+fn a_default_read_does_not_block_a_later_range() {
+    let guard = read_only(0, 4);
+    let path = tempfile::NamedTempFile::new().unwrap();
+    let input = json!({"file_path":path.path()});
+    assert_eq!(guard.before_tool("Read", &input), None);
+    guard.after_tool("Read", &input, true, "ok");
+    let later = json!({"file_path":path.path(),"offset":2000,"limit":1});
+    assert_eq!(guard.before_tool("Read", &later), None);
+    assert_eq!(guard.read_only_inspections(), 2);
 }
 
 /// One admitted inspection call: the verdict and the note its result gets.
@@ -287,18 +365,28 @@ async fn a_ceiling_refusal_is_recorded_like_any_other() {
 #[test]
 fn withdrawing_inspection_refuses_reads_and_keeps_build_commands() {
     let guard = read_only(0, 0);
-    assert!(!guard.inspection_withdrawn());
-    assert_eq!(guard.before_tool("Read", &read_input()), None);
+    let context = ToolContext {
+        session_id: "AC-X-001".into(),
+        ..Default::default()
+    };
+    assert!(!guard.inspection_withdrawn_for(&context));
+    assert_eq!(guard.before_tool_for(&context, "Read", &read_input()), None);
 
-    assert!(guard.withdraw_inspection("Your recent tool calls kept returning the same results."));
-    assert!(guard.inspection_withdrawn());
-    assert!(!guard.read_only_ceiling_reached(), "no ceiling was reached");
+    assert!(guard.withdraw_inspection_for(
+        &context,
+        "Your recent tool calls kept returning the same results."
+    ));
+    assert!(guard.inspection_withdrawn_for(&context));
+    assert!(
+        !guard.read_only_ceiling_reached_for(&context),
+        "no ceiling was reached"
+    );
     assert_eq!(
-        guard.withdrawal_reason().as_deref(),
+        guard.withdrawal_reason_for(&context).as_deref(),
         Some("Your recent tool calls kept returning the same results.")
     );
     assert!(
-        !guard.withdraw_inspection("again"),
+        !guard.withdraw_inspection_for(&context, "again"),
         "withdrawn once: a second stall must keep the caller's stop"
     );
     for (tool, input) in [
@@ -309,7 +397,7 @@ fn withdrawing_inspection_refuses_reads_and_keeps_build_commands() {
         ("Bash", bash_input("cat src/lib.rs")),
     ] {
         let refusal = guard
-            .before_tool(tool, &input)
+            .before_tool_for(&context, tool, &input)
             .unwrap_or_else(|| panic!("{tool} admitted after the withdrawal"));
         assert!(
             refusal.starts_with(super::INSPECTION_WITHDRAWN_MARKER),

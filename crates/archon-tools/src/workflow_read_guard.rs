@@ -25,6 +25,8 @@ mod records;
 mod repeat;
 #[path = "workflow_read_guard_run_store.rs"]
 mod run_store;
+#[path = "workflow_read_guard_scopes.rs"]
+mod scopes;
 pub use admission::{AdmissionFence, AdmissionStop, FenceKind, FenceStop, StopKind, drive_fenced};
 #[path = "workflow_read_guard_settings.rs"]
 mod settings;
@@ -47,12 +49,12 @@ pub use read_only::{
 use records::{append_record, clip, first_line, record_head};
 pub use repeat::{IDENTICAL_FAILURES_BEFORE_REFUSAL, REPEATED_FAILURE_MARKER, masked_failure};
 pub use run_store::{AdmittedWrites, RunStoreScope, current_run_store, scope_run_store};
+pub use scopes::{scope_focused_tests, scope_read_set};
 pub use settings::WorkflowReadGuardSettings;
 pub use targets::{DeclaredTargetScope, scope_declared_targets};
 pub use thrash::{MAX_NON_WRITING_CALLS_AFTER_WALL, READ_WALL_THRASH_MARKER};
 
-tokio::task_local! { static READ_SET_PATH: PathBuf; }
-tokio::task_local! { static FOCUSED_TESTS: FocusedTestPlan; }
+use scopes::{FOCUSED_TESTS, READ_SET_PATH};
 
 /// Record kinds this guard appends to the per-call sidecar beside the read
 /// ranges, so the next session of the same branch can be told what this one
@@ -67,20 +69,6 @@ pub const TOOL_CALL_RECORD_KIND: &str = "tool_call";
 /// head is taken from the tool INPUT (command, path, pattern), never from
 /// what the tool returned, so file contents never reach the record.
 pub const RECORD_HEAD_CHARS: usize = 120;
-
-pub async fn scope_read_set<T>(path: PathBuf, work: impl std::future::Future<Output = T>) -> T {
-    READ_SET_PATH.scope(path, work).await
-}
-
-/// The focused tests a write call's task declares, for the guard built inside
-/// `work` to track. Same task-local shape as the read set: the pipeline
-/// constructs the guard per session and cannot be handed the plan directly.
-pub async fn scope_focused_tests<T>(
-    plan: FocusedTestPlan,
-    work: impl std::future::Future<Output = T>,
-) -> T {
-    FOCUSED_TESTS.scope(plan, work).await
-}
 
 /// Command text as the guard compares it: trimmed, whitespace collapsed.
 fn normalise_command(command: &str) -> String {
@@ -104,7 +92,8 @@ struct State {
     /// Every tool call since the last substantive write; bounds classifier misses.
     calls_since_write: u64,
     writes: u32,
-    ranges: BTreeMap<(PathBuf, usize, usize), (String, u64)>,
+    ranges: BTreeMap<RangeKey, (String, u64)>,
+    agent_state: BTreeMap<AgentKey, AgentState>,
     focused: Option<FocusedTests>,
     /// The budget has been refused at least once since the last substantive write (Issue-54).
     wall_hit: bool,
@@ -112,28 +101,38 @@ struct State {
     non_writing_after_wall: u32,
     /// Set once the thrash cutoff is passed: every later call is refused with it.
     terminal: Option<String>,
-    /// Inspection calls a read-only guard has admitted (Issue-58); never
-    /// reset, since nothing a read-only call does can earn more reading.
-    read_only_inspections: u32,
-    /// Why a read-only guard withdrew inspection before its hard ceiling
-    /// (Issue-396): the session kept getting the same results, so it is
-    /// asked for its deliverable instead of being failed.
-    inspection_withdrawn: Option<String>,
     /// Failures of each normalised Bash command since the last substantive
     /// write (Issue-124); see `repeat`.
     failing_runs: BTreeMap<String, u32>,
+}
+
+type AgentKey = (String, Option<String>);
+
+#[derive(Debug, Default)]
+struct AgentState {
+    calls: u64,
+    read_only_inspections: u32,
+    inspection_withdrawn: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RangeKey {
+    session: (String, Option<String>),
+    path: PathBuf,
+    offset: usize,
+    limit: usize,
 }
 
 /// What the guard enforces for one workflow call (Issue-21).
 ///
 /// The shell admissions — release builds, git history/worktree mutation and
 /// tree-wide mutators — protect the canonical checkout every call runs in,
-/// so they apply to every call that can run Bash. The read budget, the
-/// read-range dedup, the freshness orientation and the focused-test submit
-/// nudge exist to make a coder write; a verifier, reviewer or auditor must
-/// be able to read as much as it wants. Live, a verifier ran `cargo build
-/// --release --bin archon` in the canonical checkout for 25 minutes because
-/// no guard was installed for a call without a write tool.
+/// so they apply to every call that can run Bash. The read budget, freshness
+/// orientation and focused-test submit nudge exist to make a coder write.
+/// Read-only calls have their own inspection ceiling; range reuse is keyed by
+/// agent and applies only after the same bytes were returned. Live, a verifier
+/// ran a release build in the canonical checkout for 25 minutes because no
+/// guard was installed for a call without a write tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuardMode {
     /// A call with a file-mutating tool: shell admission plus the write-first
@@ -215,15 +214,31 @@ impl WorkflowReadGuard {
     /// worktree is told not to try the same call again. Live, a retry spent
     /// its first ten minutes re-running the release build and the `git
     /// worktree add` the previous session had already been refused.
+    #[cfg(test)]
     pub fn before_tool(&self, name: &str, input: &Value) -> Option<String> {
+        self.before_tool_for_key((String::new(), None), name, input)
+    }
+
+    /// Common tool-dispatch boundary with the calling agent's identity.
+    pub fn before_tool_for(&self, ctx: &ToolContext, name: &str, input: &Value) -> Option<String> {
+        self.before_tool_for_key(
+            (ctx.session_id.clone(), ctx.subagent_id.clone()),
+            name,
+            input,
+        )
+    }
+
+    fn before_tool_for_key(&self, key: AgentKey, name: &str, input: &Value) -> Option<String> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.calls = state.calls.saturating_add(1);
         state.calls_since_write = state.calls_since_write.saturating_add(1);
+        let agent = state.agent_state.entry(key.clone()).or_default();
+        agent.calls = agent.calls.saturating_add(1);
         let call = state.calls;
         let refusal = match state.terminal.clone() {
             Some(terminal) => terminal,
             None => {
-                let verdict = self.admit(&mut state, name, input);
+                let verdict = self.admit(&mut state, &key, name, input);
                 thrash::observe(&mut state, name, input, verdict)?
             }
         };
@@ -240,7 +255,13 @@ impl WorkflowReadGuard {
         Some(refusal)
     }
 
-    fn admit(&self, state: &mut State, name: &str, input: &Value) -> Option<String> {
+    fn admit(
+        &self,
+        state: &mut State,
+        key: &AgentKey,
+        name: &str,
+        input: &Value,
+    ) -> Option<String> {
         let command = input.get("command").and_then(Value::as_str).unwrap_or("");
         if name == "Bash" && !self.allow_release_builds && shell::release_build(command) {
             let scope = match self.mode {
@@ -318,7 +339,7 @@ impl WorkflowReadGuard {
         // to its own inspection ceilings, never to the budget, the focused
         // submit nudge or the fallback below.
         if self.read_only() {
-            return read_only::admit(self, state, name, input);
+            return read_only::admit(self, state, key, name, input);
         }
         if let Some(refusal) = repeat::admit(state, name, input) {
             return Some(refusal);

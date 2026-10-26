@@ -50,8 +50,15 @@ pub(super) fn guarded_write(
     target: &Path,
     content: &str,
 ) -> Option<String> {
-    let refused = branch_guard(root, run_root, input)
-        .before_tool("Write", &json!({"file_path": target, "content": content}));
+    let context = archon_tools::tool::ToolContext {
+        working_dir: root.to_path_buf(),
+        ..Default::default()
+    };
+    let refused = branch_guard(root, run_root, input).before_tool_for(
+        &context,
+        "Write",
+        &json!({"file_path": target, "content": content}),
+    );
     if refused.is_none() {
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(target, content).unwrap();
