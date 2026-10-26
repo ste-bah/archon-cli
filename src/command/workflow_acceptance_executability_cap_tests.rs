@@ -8,7 +8,7 @@ use archon_workflow::task_set_contract::TrustedCwd;
 
 use super::super::HostProbe;
 use super::super::probe_tests::{Trees, trees};
-use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeIncomplete, FreezeResume};
+use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeResume};
 
 /// Configure the scratch site of `trees` with `timeout_secs` per check.
 pub(super) fn configure(trees: &Trees, timeout_secs: u64) {
@@ -40,11 +40,11 @@ fn the_probe_check_cap_is_the_sites_own_limit() {
 }
 
 #[tokio::test]
-async fn an_unproven_check_ends_a_staged_freeze_resumable_not_failed() {
+async fn a_staged_probe_returns_host_unproven_findings_for_freeze_orchestration() {
     let trees = trees(&[("AC-C-002", "sleep 30; true", TrustedCwd::RepoRoot)]);
     configure(&trees, 3);
     let resume = FreezeResume::saving(FreezeBudget::unlimited(), true);
-    let error = crate::command::workflow_task_set::coverage_gate::pre_implementation_findings(
+    let probed = crate::command::workflow_task_set::coverage_gate::pre_implementation_findings(
         trees.set.project.path(),
         &trees.set.tasks,
         &trees.set.prd,
@@ -52,12 +52,13 @@ async fn an_unproven_check_ends_a_staged_freeze_resumable_not_failed() {
         &resume,
     )
     .await
-    .err()
-    .expect("an unproven check is no finding a staged freeze can publish");
-    let incomplete = FreezeIncomplete::caused(&error).expect("resumable, never a failure");
+    .expect("the probe returns findings before freeze orchestration decides to stall");
     assert!(
-        incomplete.report().contains("AC-C-002"),
-        "{}",
-        incomplete.report()
+        probed.findings.iter().any(|finding| {
+            finding.subject == "AC-C-002"
+                && finding.remediation_scope == archon_workflow::RemediationScope::Operational
+        }),
+        "{:?}",
+        probed.findings
     );
 }

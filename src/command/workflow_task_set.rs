@@ -319,6 +319,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         resource_limits,
     )
     .await?;
+    let host_unproven_reason = probed.host_unproven_reason.clone();
     // Issue 328: the lock records the tree the checks were proven on.
     let baseline_commit = (probed.baseline.as_ref()).map(|runs| runs.commit.clone());
     // Issue 275: nor is one whose failure there is its own setup breaking a
@@ -345,6 +346,24 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         baseline_commit,
         candidate_digest,
     )?;
+    // A staged probe may leave checks unproven. Build every finding first so
+    // authored findings from policy, PRD input, coverage, and passability are
+    // returned in this round. Only an operational-only result stalls.
+    if resume.persist
+        && let Some(reason) = host_unproven_reason
+        && !prepared.findings.is_empty()
+        && prepared.findings.iter().all(|finding| {
+            finding.remediation_scope == archon_workflow::RemediationScope::Operational
+        })
+    {
+        return Err(
+            crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+                reason,
+                &resume.progress,
+            )
+            .into(),
+        );
+    }
     prepared.live_contract_digest = live_contract_digest;
     prepared.result.live_contract_digest = prepared.live_contract_digest.clone();
     Ok(prepared)

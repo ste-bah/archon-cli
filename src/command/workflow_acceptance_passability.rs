@@ -352,10 +352,8 @@ pub(crate) async fn judge_baseline_failures(
     probed: PreImplementation,
     resume: &FreezeResume,
 ) -> Result<Vec<GateFinding>> {
-    let PreImplementation {
-        mut findings,
-        baseline,
-    } = probed;
+    let mut findings = probed.findings;
+    let baseline = probed.baseline;
     // No baseline means every probed check is already unproven, the host's.
     let Some(runs) = baseline else {
         return Ok(findings);

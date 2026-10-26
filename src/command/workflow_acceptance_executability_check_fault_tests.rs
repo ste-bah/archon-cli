@@ -71,18 +71,22 @@ async fn output_past_the_site_limit_is_an_author_finding_under_a_staged_freeze_n
 }
 
 #[tokio::test]
-async fn a_signal_is_resumable_the_first_time_and_its_authors_the_second_under_a_staged_freeze() {
+async fn a_first_signal_stays_operational_and_the_second_is_an_author_finding() {
     let trees = trees(&[("AC-X-001", SIGNALLED, TrustedCwd::ProjectRoot)]);
-    let error = staged(&trees)
+    let first = staged(&trees)
         .await
-        .err()
-        .expect("the first signal may be the host's");
-    let incomplete = FreezeIncomplete::caused(&error).expect("resumable, never a failure");
-    assert!(
-        incomplete.report().contains("AC-X-001"),
-        "{}",
-        incomplete.report()
+        .expect("the probe returns its findings before the freeze decides to stall");
+    let pending = first
+        .findings
+        .iter()
+        .find(|finding| finding.subject == "AC-X-001")
+        .expect("the host-unproven check remains visible to freeze orchestration");
+    assert_eq!(
+        pending.remediation_scope,
+        archon_workflow::RemediationScope::Operational
     );
+    assert!(pending.text.contains("signal TERM"), "{}", pending.text);
+    assert!(first.host_unproven_reason.is_some());
     let finding = author_finding(staged(&trees).await, "AC-X-001");
     assert!(finding.contains("signal"), "{finding}");
 }

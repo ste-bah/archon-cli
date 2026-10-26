@@ -439,6 +439,7 @@ pub(super) async fn reverify_checks(
             crate::command::workflow_task_set::coverage_gate::PreImplementation {
                 findings: Vec::new(),
                 baseline: Some(runs),
+                host_unproven_reason: None,
             },
             &resume,
         )
