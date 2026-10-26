@@ -18,6 +18,7 @@ pub(super) fn entry_key(
 ) -> Option<String> {
     let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     entry_key_with_budget(client, tasks_root, prd_digest, entry, roots, &mut remaining)
+        .map(|(key, _)| key)
 }
 
 fn entry_key_with_budget(
@@ -27,29 +28,32 @@ fn entry_key_with_budget(
     entry: &AcceptanceCriterion,
     roots: &super::judge::JudgeRoots,
     remaining: &mut usize,
-) -> Option<String> {
+) -> Option<(String, String)> {
     let named_file_digest = super::judge::named_files_digest_with_budget(entry, roots, remaining);
     // Freeze-acceptance's closure digest is the authority for the full
     // judgment dependency graph, including prompt and verdict handling.
     let (version, digest, _) =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
-    Some(content_digest(
-        serde_json::json!([
-            "acceptance-entry-judge-v1",
-            tasks_root,
-            prd_digest,
-            entry.criterion,
-            entry.check,
-            entry.covers,
-            entry.gap_permitted,
-            named_file_digest,
-            client.resolve_model_alias("sonnet"),
-            client.provider_id(),
-            version,
-            digest,
-        ])
-        .to_string()
-        .as_bytes(),
+    Some((
+        content_digest(
+            serde_json::json!([
+                "acceptance-entry-judge-v1",
+                tasks_root,
+                prd_digest,
+                entry.criterion,
+                entry.check,
+                entry.covers,
+                entry.gap_permitted,
+                named_file_digest,
+                client.resolve_model_alias("sonnet"),
+                client.provider_id(),
+                version,
+                digest,
+            ])
+            .to_string()
+            .as_bytes(),
+        ),
+        named_file_digest,
     ))
 }
 
@@ -144,7 +148,8 @@ pub(super) fn save_judged_entries(
             continue;
         }
         let key =
-            entry_key_with_budget(client, tasks_root, prd_digest, entry, roots, &mut remaining);
+            entry_key_with_budget(client, tasks_root, prd_digest, entry, roots, &mut remaining)
+                .map(|(key, _)| key);
         if !pinned_ids.contains(&entry.id)
             && entry.judgment.verdict == JudgeDecision::Accepted
             && sampling_matches(client, entry)
@@ -166,10 +171,19 @@ fn entry_cache(project: &Path, key: &str) -> PathBuf {
 pub(super) fn load_entry(
     project: &Path,
     key: &str,
+    identity: &serde_json::Value,
+    named_file_digest: &str,
 ) -> Option<archon_workflow::task_set_contract::JudgeVerdict> {
     let saved: EntryVerdict =
         serde_json::from_slice(&std::fs::read(entry_cache(project, key)).ok()?).ok()?;
-    (saved.key == key).then_some(saved.judgment)
+    let sampling = saved.judgment.sampling.as_ref()?;
+    (saved.key == key
+        && sampling.get("logic_identity") == Some(identity)
+        && sampling
+            .get("named_file_digest")
+            .and_then(serde_json::Value::as_str)
+            == Some(named_file_digest))
+    .then_some(saved.judgment)
 }
 
 fn save_entry(project: &Path, key: &str, entry: &AcceptanceCriterion) -> Result<()> {
@@ -229,7 +243,7 @@ pub(super) async fn judge(
         .chain(&mut contract.supplementary)
     {
         let before_entry = remaining;
-        let Some(key) = entry_key_with_budget(
+        let Some((key, named_file_digest)) = entry_key_with_budget(
             client,
             &tasks_root,
             &contract.prd.digest,
@@ -240,7 +254,10 @@ pub(super) async fn judge(
             continue;
         };
         // The exact task root and PRD digest scope this verdict to its history.
-        if let Some(judgment) = load_entry(project, &key) {
+        let Some(identity) = current_logic_identity(client) else {
+            continue;
+        };
+        if let Some(judgment) = load_entry(project, &key, &identity, &named_file_digest) {
             if judgment.verdict == JudgeDecision::Accepted {
                 entry.judgment = judgment;
                 reused.insert(entry.id.clone());

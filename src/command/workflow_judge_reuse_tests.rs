@@ -337,6 +337,42 @@ fn incremental_key_binds_effective_named_file_content() {
 }
 
 #[test]
+fn an_unstamped_entry_cache_record_is_a_miss() {
+    let temp = tempfile::tempdir().unwrap();
+    let client = RecordingJudge {
+        batches: Mutex::new(vec![]),
+        omit_supplementary: false,
+    };
+    let entry = cache_contract().acceptance[0].clone();
+    let named_digest = super::super::judge::named_files_digest(
+        &entry,
+        &super::super::judge::JudgeRoots::default(),
+    );
+    let key = "seeded-entry";
+    let cache = temp
+        .path()
+        .join(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)
+        .join("judge-entry");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(
+        cache.join(format!("{key}.json")),
+        serde_json::json!({ "key": key, "judgment": entry.judgment }).to_string(),
+    )
+    .unwrap();
+
+    assert!(
+        super::super::incremental::load_entry(
+            temp.path(),
+            key,
+            &expected_logic_identity(&client),
+            &named_digest,
+        )
+        .is_none(),
+        "an unstamped verdict must miss the entry cache"
+    );
+}
+
+#[test]
 fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
     let temp = tempfile::tempdir().unwrap();
     let tasks = temp.path().join("tasks/set");
@@ -389,7 +425,19 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
         &super::super::judge::JudgeRoots::default(),
     )
     .unwrap();
-    assert!(super::super::incremental::load_entry(temp.path(), &key).is_none());
+    let named_digest = super::super::judge::named_files_digest(
+        &current.acceptance[0],
+        &super::super::judge::JudgeRoots::default(),
+    );
+    assert!(
+        super::super::incremental::load_entry(
+            temp.path(),
+            &key,
+            &expected_logic_identity(&client),
+            &named_digest
+        )
+        .is_none()
+    );
 }
 
 #[test]

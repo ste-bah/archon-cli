@@ -85,11 +85,17 @@ impl JudgeStore {
             expected,
             client.resolve_model_alias("sonnet"),
             client.provider_id(),
+            current_logic_identity(client),
         ]);
         Ok(content_digest(input.to_string().as_bytes()))
     }
 
-    fn load(&self, key: &str, subset: &AcceptanceContract) -> Option<AcceptanceContract> {
+    fn load(
+        &self,
+        key: &str,
+        subset: &AcceptanceContract,
+        identity: Option<&serde_json::Value>,
+    ) -> Option<AcceptanceContract> {
         let path = self.dir.join(format!("{key}.json"));
         let saved: Saved = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
         let ids = |contract: &AcceptanceContract| {
@@ -98,8 +104,14 @@ impl JudgeStore {
                 .map(|entry| entry.id.clone())
                 .collect::<Vec<_>>()
         };
-        (saved.schema == SCHEMA && saved.key == key && ids(&saved.judged) == ids(subset))
-            .then_some(saved.judged)
+        let Some(identity) = identity else {
+            return None;
+        };
+        (saved.schema == SCHEMA
+            && saved.key == key
+            && ids(&saved.judged) == ids(subset)
+            && stamps_match(&saved.judged, identity, &self.roots))
+        .then_some(saved.judged)
     }
 
     fn save(&self, key: &str, judged: &AcceptanceContract) -> bool {
@@ -141,7 +153,8 @@ impl JudgeStore {
         // and the chunks it holds count as progress again, so the count the
         // executor reads never goes back.
         let partial = PartialReply::new(&self.dir, &key, &self.progress);
-        let saved = self.load(&key, &subset);
+        let identity = current_logic_identity(client);
+        let saved = self.load(&key, &subset, identity.as_ref());
         partial.count_saved(saved.is_some());
         if let Some(judged) = saved {
             // Repair a crash after verdict persistence but before marking
@@ -178,16 +191,19 @@ impl JudgeStore {
     ) -> Result<AcceptanceContract> {
         let key = Self::key_with_roots(client, &subset, expected, &self.roots)?;
         let partial = PartialReply::new(&self.dir, &key, &self.progress);
-        let saved = self.load(&key, &subset).filter(|judged| {
-            require_judged_prose(judged).is_ok()
-                && judged
-                    .acceptance
-                    .iter()
-                    .chain(&judged.supplementary)
-                    .map(|entry| entry.id.clone())
-                    .collect::<BTreeSet<_>>()
-                    == *expected
-        });
+        let identity = current_logic_identity(client);
+        let saved = self
+            .load(&key, &subset, identity.as_ref())
+            .filter(|judged| {
+                require_judged_prose(judged).is_ok()
+                    && judged
+                        .acceptance
+                        .iter()
+                        .chain(&judged.supplementary)
+                        .map(|entry| entry.id.clone())
+                        .collect::<BTreeSet<_>>()
+                        == *expected
+            });
         partial.count_saved(saved.is_some());
         if let Some(judged) = saved {
             partial.completed();
@@ -210,6 +226,43 @@ impl JudgeStore {
         }
         Ok(judged)
     }
+}
+
+fn current_logic_identity(client: &dyn WorkflowLlmClient) -> Option<serde_json::Value> {
+    crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity().map(
+        |logic| {
+            crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
+                logic,
+                &client.resolve_model_alias("sonnet"),
+                client.provider_id().as_deref(),
+            )
+        },
+    )
+}
+
+fn stamps_match(
+    judged: &AcceptanceContract,
+    identity: &serde_json::Value,
+    roots: &super::judge::JudgeRoots,
+) -> bool {
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    judged
+        .acceptance
+        .iter()
+        .chain(&judged.supplementary)
+        .all(|entry| {
+            let Some(sampling) = entry.judgment.sampling.as_ref() else {
+                return false;
+            };
+            sampling.get("logic_identity") == Some(identity)
+                && sampling
+                    .get("named_file_digest")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(
+                        super::judge::named_files_digest_with_budget(entry, roots, &mut remaining)
+                            .as_str(),
+                    )
+        })
 }
 
 #[cfg(test)]

@@ -92,6 +92,13 @@ fn judged_by(entry: &AcceptanceCriterion) -> Option<(String, String)> {
     ))
 }
 
+fn logic_identity_matches(
+    stored: Option<&serde_json::Value>,
+    current: Option<&serde_json::Value>,
+) -> bool {
+    current.is_some_and(|identity| stored == Some(identity))
+}
+
 /// Add `extension.entries` to the chain frozen beside `request.tasks_root`
 /// and republish it (see the module doc). `request.ids` must be exactly the
 /// added ids.
@@ -150,13 +157,12 @@ fn extend_owned(request: ReauthorRequest<'_>, extension: &Extension) -> Result<R
                         Some(&verified.judge.1),
                     )
                 });
-        if entry
+        let stored_identity = entry
             .judgment
             .sampling
             .as_ref()
-            .and_then(|sampling| sampling.get("logic_identity"))
-            != expected_identity.as_ref()
-        {
+            .and_then(|sampling| sampling.get("logic_identity"));
+        if !logic_identity_matches(stored_identity, expected_identity.as_ref()) {
             return Err(anyhow!(
                 "added check '{}' was judged under different freeze-acceptance logic; author it again",
                 entry.id

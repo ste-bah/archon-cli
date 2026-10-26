@@ -152,6 +152,31 @@ async fn an_unreadable_saved_verdict_is_ignored() {
 /// Round 2 (P1): the partial reply of a truncated judge is saved, so a
 /// resumed freeze continues it instead of asking the judge again, and every
 /// saved chunk counts as progress the executor can see.
+#[test]
+fn an_unstamped_batch_record_is_a_miss() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = CountingJudge {
+        calls: Arc::new(AtomicUsize::new(0)),
+    };
+    let subset = contract("check");
+    let expected = BTreeSet::from(["AC-X-001".to_string()]);
+    let store = JudgeStore::at(dir.path().to_path_buf());
+    let key = JudgeStore::key_with_roots(&client, &subset, &expected, &Default::default()).unwrap();
+    let saved = Saved {
+        schema: SCHEMA,
+        key: key.clone(),
+        judged: subset.clone(),
+    };
+    std::fs::write(
+        dir.path().join(format!("{key}.json")),
+        serde_json::to_vec(&saved).unwrap(),
+    )
+    .unwrap();
+
+    let identity = super::current_logic_identity(&client).unwrap();
+    assert!(store.load(&key, &subset, Some(&identity)).is_none());
+}
+
 #[tokio::test]
 async fn a_resumed_judge_continues_from_the_saved_partial_reply() {
     use super::super::judge::continuation_tests::{HEAD, Scripted, TAIL};

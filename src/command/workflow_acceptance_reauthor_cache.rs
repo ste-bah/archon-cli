@@ -56,10 +56,21 @@ pub(in crate::command::workflow_task_set) fn stamp_judgment(
     provider: Option<&str>,
     roots: &super::judge::JudgeRoots,
 ) {
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    stamp_judgment_with_budget(entry, model, provider, roots, &mut remaining);
+}
+
+pub(in crate::command::workflow_task_set) fn stamp_judgment_with_budget(
+    entry: &mut AcceptanceCriterion,
+    model: &str,
+    provider: Option<&str>,
+    roots: &super::judge::JudgeRoots,
+    remaining: &mut usize,
+) {
     let identity =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
             .map(|logic| acceptance_logic_identity(logic, model, provider));
-    let named_digest = super::judge::named_files_digest(entry, roots);
+    let named_digest = super::judge::named_files_digest_with_budget(entry, roots, remaining);
     let sampling = entry
         .judgment
         .sampling
@@ -68,10 +79,12 @@ pub(in crate::command::workflow_task_set) fn stamp_judgment(
         *sampling = serde_json::json!({});
     }
     let fields = sampling.as_object_mut().expect("sampling is an object");
-    if let Some(identity) = identity {
+    if let Some(identity) = identity.filter(|_| !fields.contains_key("logic_identity")) {
         fields.insert("logic_identity".into(), identity);
     }
-    fields.insert("named_file_digest".into(), serde_json::json!(named_digest));
+    fields
+        .entry("named_file_digest")
+        .or_insert_with(|| serde_json::json!(named_digest));
 }
 
 /// The complete source closure for the static author prompt and candidate

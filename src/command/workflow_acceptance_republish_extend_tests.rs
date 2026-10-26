@@ -7,6 +7,16 @@ use crate::command::workflow_task_set::republish::test_fixture::{
 };
 
 #[test]
+fn an_extension_cannot_match_when_logic_identity_is_unavailable() {
+    let stored: Option<&serde_json::Value> = None;
+    let current: Option<serde_json::Value> = None;
+    assert!(
+        !logic_identity_matches(stored, current.as_ref()),
+        "identity comparison must require a current identity"
+    );
+}
+
+#[test]
 fn an_extension_that_leaves_a_requirement_uncovered_is_refused_by_its_gate() {
     let set = frozen_set_in(
         &[("AC-F-001", "test -f present", true)],
