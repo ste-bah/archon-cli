@@ -120,7 +120,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 61: #518 a path a check names only in message text no longer outranks a movable
         // input class; #519 nested inputs prove without a false unsafe restore; #494
         // re-author prompts prefetch inputs per attempt.
-        version: 61,
+        // 62: batch 26: #520 a pinned or cached verdict counts only under the current judge
+        // identity; #523 the host refutes external-program usage errors; #478 bare . and ..
+        // are whole-tree inputs; #490 a pending skeleton is reported, not compared.
+        version: 62,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -159,7 +162,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // host-unproven checks publish independently from proven siblings.
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
-        sources_digest: "84fc5e4dcef09fed9defd875e516764fbf7182f5dc19f3879a32d725d525313b",
+        sources_digest: "9df9738daafaba9bf57e5380ab8f8da003776c7706d617c011488f35bc1749bd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -191,7 +194,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // Batch 24 re-pin only: skeleton freeze verdicts do not read the acceptance judge, reply extraction or Scratch evidence.
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
-        sources_digest: "84fc5e4dcef09fed9defd875e516764fbf7182f5dc19f3879a32d725d525313b",
+        // Batch 26 re-pin only: skeleton freeze verdicts do not read acceptance judge identity, passability or path classes.
+        sources_digest: "9df9738daafaba9bf57e5380ab8f8da003776c7706d617c011488f35bc1749bd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -231,7 +235,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // with body gating; bumped so no body verdict is reused across it.
         // 28: batch 25 (#494 read-guard ranges and prompt prefetch) shares sources with
         // body gating; bumped so no body verdict is reused across it.
-        version: 28,
+        // 29: batch 26 (#490 landing reconcile, #521 per-agent cutoffs) shares sources with
+        // body gating; bumped so no body verdict is reused across it.
+        version: 29,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -254,7 +260,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        sources_digest: "0ed9331041d3d906ee37e3158bf930938c3c560af4579b21bd984d92580dfe0f",
+        sources_digest: "0d43bd0f3f2cade135cbbd965892bd28c26c9d578d8da33b931f6ba4eba55704",
         build_bound: false,
     },
     CapabilityLogic {
@@ -284,7 +290,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 22: batch 24 (#497 F2 freeze findings, #515 reply extraction) shares sources
         // with set gating; bumped so no set verdict is reused across it.
         // 23: batch 25 (#494) shares sources with set gating; bumped likewise.
-        version: 23,
+        // 24: batch 26 (#520 #521) shares sources with set gating; bumped likewise.
+        version: 24,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -304,7 +311,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        sources_digest: "0ed9331041d3d906ee37e3158bf930938c3c560af4579b21bd984d92580dfe0f",
+        sources_digest: "0d43bd0f3f2cade135cbbd965892bd28c26c9d578d8da33b931f6ba4eba55704",
         build_bound: false,
     },
     CapabilityLogic {
@@ -347,7 +354,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // frozen acceptance re-verification verdicts.
         // 17: #518 and #519 change which inputs a frozen-check mutation proof moves
         // and how it restores them.
-        version: 17,
+        // 18: batch 26 #523 host refutation and #520 judge identity can change reverify verdicts.
+        version: 18,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -370,7 +378,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
-        sources_digest: "4ef6fd3ddabd411d000f4c3a0317e57aa8d8066294473d5eda0bfd0c37f99a7b",
+        sources_digest: "221301ed641a01c09dce55186c539bd935e42111ecae28354dd7731121386e6c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -401,7 +409,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // Batch 24 re-pin only: frozen skeleton verification does not read Scratch evidence or the acceptance judge.
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
-        sources_digest: "4ef6fd3ddabd411d000f4c3a0317e57aa8d8066294473d5eda0bfd0c37f99a7b",
+        // Batch 26 re-pin only: skeleton reverify verdicts do not read passability or acceptance judge identity.
+        sources_digest: "221301ed641a01c09dce55186c539bd935e42111ecae28354dd7731121386e6c",
         build_bound: true,
     },
 ];
