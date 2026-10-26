@@ -141,6 +141,27 @@ fn extend_owned(request: ReauthorRequest<'_>, extension: &Extension) -> Result<R
                 verified.judge.1
             ));
         }
+        let expected_identity =
+            crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+                .map(|logic| {
+                    super::reauthor::cache::acceptance_logic_identity(
+                        logic,
+                        &verified.judge.0,
+                        Some(&verified.judge.1),
+                    )
+                });
+        if entry
+            .judgment
+            .sampling
+            .as_ref()
+            .and_then(|sampling| sampling.get("logic_identity"))
+            != expected_identity.as_ref()
+        {
+            return Err(anyhow!(
+                "added check '{}' was judged under different freeze-acceptance logic; author it again",
+                entry.id
+            ));
+        }
         if let Some(requirement) = supplementary_requirement(&entry.id)
             && !entry.covers.iter().any(|covered| covered == requirement)
         {

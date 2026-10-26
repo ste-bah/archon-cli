@@ -14,8 +14,14 @@ fn workflow_judge_reuse_pinned_verdict_is_not_restored_after_check_or_covers_cha
         old.judgment.sampling = Some(serde_json::json!({
             "model": client.resolve_model_alias("sonnet"),
             "provider": client.provider_id(),
-            "logic_identity": crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(&client.resolve_model_alias("sonnet"), client.provider_id().as_deref())
+            "logic_identity": super::expected_logic_identity(&client)
         }));
+        crate::command::workflow_task_set::reauthor::cache::stamp_judgment(
+            old,
+            &client.resolve_model_alias("sonnet"),
+            client.provider_id().as_deref(),
+            &super::super::judge::JudgeRoots::default(),
+        );
         match field {
             "check" => {
                 current.acceptance[0].check = serde_json::from_value(
@@ -27,8 +33,12 @@ fn workflow_judge_reuse_pinned_verdict_is_not_restored_after_check_or_covers_cha
             _ => unreachable!(),
         }
         current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
-        let restored =
-            super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+        let restored = super::super::incremental::keep_pinned_entries(
+            &mut current,
+            &pinned,
+            &client,
+            &super::super::judge::JudgeRoots::default(),
+        );
         println!(
             "EVIDENCE #419 changed-{field} BEFORE: fresh={:?}, pinned-check={:?}, pinned-covers={:?}",
             current.acceptance[0].judgment.verdict,
@@ -66,8 +76,14 @@ fn workflow_judge_reuse_identical_pinned_fields_restore_but_each_changed_field_k
         old.judgment.sampling = Some(serde_json::json!({
             "model": client.resolve_model_alias("sonnet"),
             "provider": client.provider_id(),
-            "logic_identity": crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(&client.resolve_model_alias("sonnet"), client.provider_id().as_deref())
+            "logic_identity": super::expected_logic_identity(&client)
         }));
+        crate::command::workflow_task_set::reauthor::cache::stamp_judgment(
+            old,
+            &client.resolve_model_alias("sonnet"),
+            client.provider_id().as_deref(),
+            &super::super::judge::JudgeRoots::default(),
+        );
         match field {
             "check" => {
                 current.acceptance[0].check = serde_json::from_value(
@@ -88,8 +104,12 @@ fn workflow_judge_reuse_identical_pinned_fields_restore_but_each_changed_field_k
             pinned.acceptance[0].check,
             pinned.acceptance[0].covers
         );
-        let restored =
-            super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+        let restored = super::super::incremental::keep_pinned_entries(
+            &mut current,
+            &pinned,
+            &client,
+            &super::super::judge::JudgeRoots::default(),
+        );
         println!(
             "EVIDENCE #419 {field} AFTER: restored={}; verdict={:?}",
             restored.contains("AC-1"),

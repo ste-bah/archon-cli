@@ -8,6 +8,15 @@ mod logic_identity_tests;
 #[path = "workflow_judge_reuse_restore_tests.rs"]
 mod restore_tests;
 
+fn expected_logic_identity(client: &dyn WorkflowLlmClient) -> serde_json::Value {
+    crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+            .unwrap(),
+        &client.resolve_model_alias("sonnet"),
+        client.provider_id().as_deref(),
+    )
+}
+
 fn cache_contract() -> AcceptanceContract {
     serde_json::from_value(serde_json::json!({
         "schema_version": 1,
@@ -343,11 +352,22 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
         entry.judgment.sampling = Some(serde_json::json!({
             "model": client.resolve_model_alias("sonnet"),
             "provider": client.provider_id(),
-            "logic_identity": crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(&client.resolve_model_alias("sonnet"), client.provider_id().as_deref())
+            "logic_identity": expected_logic_identity(&client)
         }));
+        crate::command::workflow_task_set::reauthor::cache::stamp_judgment(
+            entry,
+            &client.resolve_model_alias("sonnet"),
+            client.provider_id().as_deref(),
+            &super::super::judge::JudgeRoots::default(),
+        );
     }
     current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
-    let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+    let restored = super::super::incremental::keep_pinned_entries(
+        &mut current,
+        &pinned,
+        &client,
+        &super::super::judge::JudgeRoots::default(),
+    );
     assert!(restored.contains("AC-1"));
     let judged = BTreeSet::from(["AC-1".to_string()]);
     super::super::incremental::save_judged_entries(
@@ -385,10 +405,21 @@ fn pin_reuse_covers_supplementary_checks_too() {
     supplementary.judgment.sampling = Some(serde_json::json!({
         "model": client.resolve_model_alias("sonnet"),
         "provider": client.provider_id(),
-        "logic_identity": crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(&client.resolve_model_alias("sonnet"), client.provider_id().as_deref())
+        "logic_identity": expected_logic_identity(&client)
     }));
+    crate::command::workflow_task_set::reauthor::cache::stamp_judgment(
+        supplementary,
+        &client.resolve_model_alias("sonnet"),
+        client.provider_id().as_deref(),
+        &super::super::judge::JudgeRoots::default(),
+    );
     current.supplementary[0].judgment.verdict = JudgeDecision::Refuted;
-    let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+    let restored = super::super::incremental::keep_pinned_entries(
+        &mut current,
+        &pinned,
+        &client,
+        &super::super::judge::JudgeRoots::default(),
+    );
     assert!(restored.contains("SUP-1"));
     assert_eq!(
         current.supplementary[0].judgment.verdict,

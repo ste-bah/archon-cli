@@ -41,14 +41,37 @@ fn digest(bytes: &[u8]) -> String {
     content_digest(bytes)
 }
 
-fn record_judge_identity(candidate: &mut AcceptanceCriterion, identity: &serde_json::Value) {
-    let sampling = candidate
+pub(crate) fn acceptance_logic_identity(
+    logic: (u32, String, String),
+    model: &str,
+    provider: Option<&str>,
+) -> serde_json::Value {
+    let (version, digest, _this_build) = logic;
+    serde_json::json!([version, digest, model, provider])
+}
+
+pub(in crate::command::workflow_task_set) fn stamp_judgment(
+    entry: &mut AcceptanceCriterion,
+    model: &str,
+    provider: Option<&str>,
+    roots: &super::judge::JudgeRoots,
+) {
+    let identity =
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+            .map(|logic| acceptance_logic_identity(logic, model, provider));
+    let named_digest = super::judge::named_files_digest(entry, roots);
+    let sampling = entry
         .judgment
         .sampling
         .get_or_insert_with(|| serde_json::json!({}));
-    if let Some(fields) = sampling.as_object_mut() {
-        fields.insert("logic_identity".into(), identity.clone());
+    if !sampling.is_object() {
+        *sampling = serde_json::json!({});
     }
+    let fields = sampling.as_object_mut().expect("sampling is an object");
+    if let Some(identity) = identity {
+        fields.insert("logic_identity".into(), identity);
+    }
+    fields.insert("named_file_digest".into(), serde_json::json!(named_digest));
 }
 
 /// The complete source closure for the static author prompt and candidate
@@ -112,18 +135,6 @@ pub(crate) fn prompt_and_judge_source_digest(sources: &[(&str, &[u8])]) -> Strin
         closure.push(0);
     }
     digest(&closure)
-}
-
-pub(crate) fn judge_instruction_identity(model: &str, provider: Option<&str>) -> serde_json::Value {
-    judge_instruction_identity_for_sources(PROMPT_AND_JUDGE_SOURCES, model, provider)
-}
-
-pub(crate) fn judge_instruction_identity_for_sources(
-    sources: &[(&str, &[u8])],
-    model: &str,
-    provider: Option<&str>,
-) -> serde_json::Value {
-    serde_json::json!([prompt_and_judge_source_digest(sources), model, provider])
 }
 
 fn key(
@@ -248,12 +259,7 @@ pub(crate) fn load(
                 frozen.id
             );
         }
-        let mut candidate = record.candidate;
-        record_judge_identity(
-            &mut candidate,
-            &judge_instruction_identity(&expected.judge_model, expected.judge_provider.as_deref()),
-        );
-        return Ok(Some(candidate));
+        return Ok(Some(record.candidate));
     }
     if let Some(reason) = mismatch {
         eprintln!(
@@ -281,9 +287,19 @@ pub(crate) fn store(
         .ok_or_else(|| anyhow!("candidate is absent from its source contract"))?;
     let key = key(frozen, candidate, scope, judge_model, judge_provider, probe)?;
     let mut saved_candidate = candidate.clone();
-    record_judge_identity(
+    stamp_judgment(
         &mut saved_candidate,
-        &judge_instruction_identity(&key.judge_model, key.judge_provider.as_deref()),
+        &key.judge_model,
+        key.judge_provider.as_deref(),
+        &super::judge::JudgeRoots {
+            project: Some(scope.project_root.clone()),
+            repository: Some(scope.repository_root.clone()),
+            task_root: Some(scope.task_root.clone()),
+            repository_commit: scope
+                .baseline
+                .as_ref()
+                .map(|baseline| baseline.commit.clone()),
+        },
     );
     let record = Record {
         key_digest: digest(&serde_json::to_vec(&key)?),

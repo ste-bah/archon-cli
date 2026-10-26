@@ -6,10 +6,45 @@ struct RefutingJudge {
 }
 
 fn expected_logic_identity(client: &dyn WorkflowLlmClient) -> serde_json::Value {
-    crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(
+    crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+        .map(|logic| {
+            crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
+                logic,
+                &client.resolve_model_alias("sonnet"),
+                client.provider_id().as_deref(),
+            )
+        })
+        .unwrap()
+}
+
+fn stamp_for_test(entry: &mut AcceptanceCriterion, client: &dyn WorkflowLlmClient) {
+    entry.judgment.sampling = Some(serde_json::json!({
+        "model": client.resolve_model_alias("sonnet"),
+        "provider": client.provider_id(),
+    }));
+    crate::command::workflow_task_set::reauthor::cache::stamp_judgment(
+        entry,
         &client.resolve_model_alias("sonnet"),
         client.provider_id().as_deref(),
-    )
+        &super::super::judge::JudgeRoots::default(),
+    );
+}
+
+#[test]
+fn stamping_replaces_a_non_object_sampling_value() {
+    let client = RefutingJudge {
+        batches: Mutex::new(Vec::new()),
+    };
+    let mut contract = super::cache_contract();
+    let mut entry = contract.acceptance.remove(0);
+    entry.judgment.sampling = Some(serde_json::json!("legacy"));
+
+    stamp_for_test(&mut entry, &client);
+
+    let sampling = entry.judgment.sampling.unwrap();
+    assert!(sampling.is_object());
+    assert_eq!(sampling["logic_identity"], expected_logic_identity(&client));
+    assert!(sampling.get("named_file_digest").is_some());
 }
 
 fn assert_recorded_current_logic_identity(
@@ -27,31 +62,38 @@ fn assert_recorded_current_logic_identity(
 }
 
 #[test]
-fn pinned_identity_uses_instruction_model_and_provider_across_builds() {
+fn pinned_identity_uses_the_current_logic_helper_across_builds() {
     let client = RefutingJudge {
         batches: Mutex::new(Vec::new()),
     };
     let mut current = super::cache_contract();
+    let base_logic =
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+            .unwrap();
+    let first_build = crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
+        (base_logic.0, base_logic.1.clone(), "build-a".into()),
+        "resolved-judge",
+        Some("provider"),
+    );
+    let second_build =
+        crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
+            (base_logic.0, base_logic.1, "build-b".into()),
+            "resolved-judge",
+            Some("provider"),
+        );
+    assert_eq!(first_build, second_build);
     let mut pinned = current.clone();
     let entry = &mut pinned.acceptance[0];
     entry.judgment.verdict = JudgeDecision::Accepted;
-    let instruction_digest =
-        crate::command::workflow_task_set::reauthor::cache::prompt_and_judge_source_digest(
-            crate::command::workflow_task_set::reauthor::cache::PROMPT_AND_JUDGE_SOURCES,
-        );
-    let identity = serde_json::json!([
-        instruction_digest,
-        client.resolve_model_alias("sonnet"),
-        client.provider_id()
-    ]);
-    entry.judgment.sampling = Some(serde_json::json!({
-        "model": client.resolve_model_alias("sonnet"),
-        "provider": client.provider_id(),
-        "logic_identity": identity
-    }));
+    stamp_for_test(entry, &client);
     current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
 
-    let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+    let restored = super::super::incremental::keep_pinned_entries(
+        &mut current,
+        &pinned,
+        &client,
+        &super::super::judge::JudgeRoots::default(),
+    );
 
     assert!(
         restored.contains(&current.acceptance[0].id),
@@ -64,7 +106,7 @@ fn pinned_identity_uses_instruction_model_and_provider_across_builds() {
 }
 
 #[test]
-fn changed_judge_instruction_keeps_the_fresh_refutation() {
+fn changed_freeze_logic_identity_keeps_the_fresh_refutation() {
     let client = RefutingJudge {
         batches: Mutex::new(Vec::new()),
     };
@@ -72,32 +114,87 @@ fn changed_judge_instruction_keeps_the_fresh_refutation() {
     let mut pinned = current.clone();
     let entry = &mut pinned.acceptance[0];
     entry.judgment.verdict = JudgeDecision::Accepted;
-    let model = client.resolve_model_alias("sonnet");
-    let provider = client.provider_id();
-    let changed_source = [("judge-instruction", b"changed instruction".as_slice())];
-    let prior_identity =
-        crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity_for_sources(
-            &changed_source,
-            &model,
-            provider.as_deref(),
-        );
-    assert_ne!(
-        prior_identity,
-        crate::command::workflow_task_set::reauthor::cache::judge_instruction_identity(
-            &model,
-            provider.as_deref()
-        )
-    );
-    entry.judgment.sampling = Some(serde_json::json!({
-        "model": model,
-        "provider": provider,
-        // A pass 1 pin has no judge instruction binding, so this is the
-        // identity it would carry even after the instruction text changed.
-        "logic_identity": crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity().unwrap()
-    }));
+    stamp_for_test(entry, &client);
+    entry.judgment.sampling.as_mut().unwrap()["logic_identity"][1] =
+        serde_json::json!("prior-freeze-logic-digest");
     current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
 
-    let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);
+    let restored = super::super::incremental::keep_pinned_entries(
+        &mut current,
+        &pinned,
+        &client,
+        &super::super::judge::JudgeRoots::default(),
+    );
+
+    assert!(!restored.contains(&current.acceptance[0].id));
+    assert_eq!(
+        current.acceptance[0].judgment.verdict,
+        JudgeDecision::Refuted
+    );
+}
+
+#[test]
+fn changed_freeze_logic_version_keeps_the_fresh_refutation() {
+    let client = RefutingJudge {
+        batches: Mutex::new(Vec::new()),
+    };
+    let mut current = super::cache_contract();
+    let mut pinned = current.clone();
+    let old = &mut pinned.acceptance[0];
+    old.judgment.verdict = JudgeDecision::Accepted;
+    stamp_for_test(old, &client);
+    old.judgment.sampling.as_mut().unwrap()["logic_identity"][0] = serde_json::json!(0);
+    current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
+
+    let restored = super::super::incremental::keep_pinned_entries(
+        &mut current,
+        &pinned,
+        &client,
+        &super::super::judge::JudgeRoots::default(),
+    );
+
+    assert!(!restored.contains(&current.acceptance[0].id));
+    assert_eq!(
+        current.acceptance[0].judgment.verdict,
+        JudgeDecision::Refuted
+    );
+}
+
+#[test]
+fn changed_named_file_keeps_the_fresh_refutation() {
+    let client = RefutingJudge {
+        batches: Mutex::new(Vec::new()),
+    };
+    let root = tempfile::tempdir().unwrap();
+    let named_file = root.path().join("input");
+    std::fs::write(&named_file, "judge saw this").unwrap();
+    let roots = super::super::judge::JudgeRoots {
+        project: Some(root.path().to_path_buf()),
+        repository: None,
+        task_root: Some(root.path().to_path_buf()),
+        repository_commit: None,
+    };
+    let mut current = super::cache_contract();
+    current.acceptance[0].check = archon_workflow::task_set_contract::AcceptanceCheck::Command {
+        command: "operation input".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    let mut pinned = current.clone();
+    let old = &mut pinned.acceptance[0];
+    old.judgment.verdict = JudgeDecision::Accepted;
+    stamp_for_test(old, &client);
+    // Bind this test's pin to the actual project file named by the check.
+    crate::command::workflow_task_set::reauthor::cache::stamp_judgment(
+        old,
+        &client.resolve_model_alias("sonnet"),
+        client.provider_id().as_deref(),
+        &roots,
+    );
+    current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
+    std::fs::write(&named_file, "changed after the judge").unwrap();
+
+    let restored =
+        super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client, &roots);
 
     assert!(!restored.contains(&current.acceptance[0].id));
     assert_eq!(
