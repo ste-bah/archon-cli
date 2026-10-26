@@ -58,6 +58,7 @@ impl HermeticCopy {
         CopyLayout {
             root: self.root.clone(),
             repository: self.repository.clone(),
+            site_repository: Some(self.repository.clone()),
             project: self.project.clone(),
             siblings: Vec::new(),
             check_siblings: std::collections::BTreeMap::new(),

@@ -16,7 +16,7 @@ use crate::command::workflow_freeze_budget::{
 };
 use crate::command::workflow_task_set::passability::evidence::Redactor;
 
-const SCHEMA: u32 = 4;
+const SCHEMA: u32 = 5;
 
 #[path = "workflow_acceptance_executability_resume_files.rs"]
 mod result_files;
@@ -75,7 +75,9 @@ impl ResultStore {
             .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok());
         match saved {
             Some(saved)
-                if (saved.schema == SCHEMA || (allow_schema3 && saved.schema == 3))
+                if (saved.schema == SCHEMA
+                    || (!allow_schema3 && saved.schema == 4)
+                    || (allow_schema3 && saved.schema == 3))
                     && saved.key == key
                     && saved.result.operational_error.is_none()
                     && saved.result.classification.is_some()
@@ -193,7 +195,7 @@ impl ResultStore {
             .map(|value| {
                 if value["schema"] == 3 {
                     "schema3"
-                } else if value["schema"] == SCHEMA && value["copy_layout"].is_null() {
+                } else if value["schema"] == 4 && value["copy_layout"].is_null() {
                     "schema4-layoutless"
                 } else {
                     "previous"

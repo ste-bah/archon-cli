@@ -203,6 +203,209 @@ async fn scratch_layout_unions_all_checks_and_keeps_each_check_siblings() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn project_root_repository_alias_input_is_moved_and_restored_at_scratch_site() {
+    let repository_alias = format!("repo-{}", uuid::Uuid::new_v4().simple());
+    let command = format!(
+        "cd ../{repository_alias} && test -f tests/focused.rs && grep -q focused tests/focused.rs"
+    );
+    let trees = trees(&[("AC-X-001", &command, TrustedCwd::ProjectRoot)]);
+    let project_parent = trees.set.project.path().parent().unwrap();
+    std::os::unix::fs::symlink(&trees.repo, project_parent.join(&repository_alias)).unwrap();
+    let scratch_parent = trees.outside.path().join("scratch");
+    std::fs::create_dir_all(trees.set.project.path().join(".archon")).unwrap();
+    std::fs::write(
+        trees.set.project.path().join(".archon/config.toml"),
+        format!(
+            "[workflow.acceptance_execution]\nrepository={:?}\nscratch_parent={:?}\nproject_inputs=[]\nproject_repository_view=\"separate\"\ntoolchain_path=\"/usr/bin:/bin:/usr/sbin:/sbin\"\ntimeout_secs=30\noutput_bytes=8192\nscratch_bytes=16777216\n",
+            trees.repo.display().to_string(),
+            scratch_parent.display().to_string(),
+        ),
+    )
+    .unwrap();
+    let copies = tempfile::tempdir().unwrap();
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let probe = HostProbe::for_reverify_with_limits(
+        trees.set.project.path(),
+        &trees.set.tasks,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        &resume,
+    )
+    .with_host_environment(crate::test_environment::probe_host())
+    .with_copy_parent(copies.path().to_path_buf())
+    .without_process_memo();
+    assert!(matches!(probe.site, Site::Scratch(_)));
+
+    let contract = trees.contract();
+    let (baseline_evidence, _, missing, _) = probe
+        .run_reverify_copy(&contract, &trees.ids())
+        .await
+        .expect("the production Scratch observer builds the baseline site");
+    assert!(missing.is_empty(), "{missing:?}");
+    let baseline_check = baseline_evidence
+        .iter()
+        .find(|item| item.acceptance_id == "AC-X-001")
+        .expect("Scratch check evidence");
+    let layout = baseline_check
+        .copy_layout
+        .as_ref()
+        .expect("the production Scratch observer records its site layout");
+    let entry = contract.acceptance.first().unwrap();
+    let discovery = super::super::mutation::input_discovery_for_check(
+        entry,
+        &probe.project,
+        &trees.repo,
+        Some(layout),
+    );
+    assert!(
+        discovery
+            .eligible
+            .iter()
+            .any(|name| name.ends_with("repo/tests/focused.rs")),
+        "repository test file was not discovered: {:?}; candidates: {:?}",
+        discovery.eligible,
+        discovery.candidates
+    );
+    assert!(
+        discovery.candidates.iter().any(|candidate| {
+            candidate.exclusion == Some(super::super::mutation::ExclusionReason::CheckMechanics)
+        }),
+        "cd operand must remain a check mechanic: {:?}",
+        discovery.candidates
+    );
+    assert!(
+        !discovery
+            .eligible
+            .iter()
+            .any(|name| name == &format!("../{repository_alias}"))
+    );
+    assert!(
+        layout.check_siblings["AC-X-001"]
+            .first()
+            .and_then(|sibling| sibling.target.as_ref())
+            .is_some(),
+        "Scratch observer did not capture sibling target: {:?}",
+        layout
+    );
+
+    let baseline = Baseline {
+        commit: trees.base.clone(),
+        repository: trees.repo.clone(),
+    };
+    let digest = super::super::contract_digest(&contract).unwrap();
+    let refs = super::super::refs_for(&contract, &digest, &trees.ids());
+    let findings = super::super::prove::prove(
+        &probe,
+        &baseline,
+        &contract,
+        &digest,
+        &refs,
+        &["AC-X-001".to_string()],
+        &BTreeMap::from([("AC-X-001".to_string(), layout.clone())]),
+    )
+    .await;
+    assert!(
+        findings.is_empty(),
+        "mutated file must fail the check, restore cleanly, and never try to move the cd target: {findings:?}"
+    );
+    assert!(probe.take_unproven().is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn real_repository_sibling_is_moved_in_scratch_and_live_bytes_stay_unchanged() {
+    for cd in ["cd", "cd -P"] {
+        assert_real_repository_sibling_is_moved_in_scratch(cd).await;
+    }
+}
+
+#[cfg(unix)]
+async fn assert_real_repository_sibling_is_moved_in_scratch(cd: &str) {
+    let repository_name = format!("repo-{}", uuid::Uuid::new_v4().simple());
+    let command = format!("{cd} ../{repository_name} && grep -q focused tests/focused.rs");
+    let trees = trees(&[("AC-X-001", &command, TrustedCwd::ProjectRoot)]);
+    let project = trees.set.project.path();
+    let sibling_repository = project.parent().unwrap().join(&repository_name);
+    let cloned = std::process::Command::new("git")
+        .args(["clone", "-q"])
+        .arg(&trees.repo)
+        .arg(&sibling_repository)
+        .output()
+        .unwrap();
+    assert!(
+        cloned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cloned.stderr)
+    );
+    std::fs::create_dir_all(project.join(".archon")).unwrap();
+    let live = sibling_repository.join("tests/focused.rs");
+    let original = std::fs::read(&live).unwrap();
+    let scratch_parent = trees.outside.path().canonicalize().unwrap().join("scratch");
+    std::fs::write(
+        project.join(".archon/config.toml"),
+        format!(
+            "[workflow.acceptance_execution]\nrepository={:?}\nscratch_parent={:?}\nproject_inputs=[]\nproject_repository_view=\"separate\"\ntoolchain_path=\"/usr/bin:/bin:/usr/sbin:/sbin\"\ntimeout_secs=30\noutput_bytes=8192\nscratch_bytes=16777216\n",
+            sibling_repository.display().to_string(), scratch_parent.display().to_string(),
+        ),
+    ).unwrap();
+    let copies = tempfile::tempdir().unwrap();
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let probe = HostProbe::for_reverify_with_limits(
+        &project,
+        &trees.set.tasks,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        &resume,
+    )
+    .with_host_environment(crate::test_environment::probe_host())
+    .with_copy_parent(copies.path().to_path_buf())
+    .without_process_memo();
+    assert!(matches!(probe.site, Site::Scratch(_)));
+    let contract = trees.contract();
+    let baseline = Baseline {
+        commit: trees.base.clone(),
+        repository: sibling_repository,
+    };
+    let digest = super::super::contract_digest(&contract).unwrap();
+    let ids = BTreeSet::from(["AC-X-001".to_string()]);
+    let refs = super::super::refs_for(&contract, &digest, &ids);
+    let (evidence, _, missing, _) = probe.run_reverify_copy(&contract, &ids).await.unwrap();
+    assert!(missing.is_empty(), "{missing:?}");
+    let layout = evidence[0].copy_layout.as_ref().unwrap();
+    assert!(
+        layout
+            .site_repository
+            .as_ref()
+            .is_some_and(|root| layout.check_siblings["AC-X-001"]
+                .iter()
+                .any(|sibling| sibling
+                    .target
+                    .as_ref()
+                    .is_some_and(|target| target.starts_with(root)))),
+        "site repository root was not recorded: {layout:?}"
+    );
+    let finding = super::super::prove::prove(
+        &probe,
+        &baseline,
+        &contract,
+        &digest,
+        &refs,
+        &["AC-X-001".to_string()],
+        &BTreeMap::from([("AC-X-001".to_string(), layout.clone())]),
+    )
+    .await;
+    assert!(
+        finding.is_empty(),
+        "real sibling cd operand should be a mechanic and the copied focused test should be movable: {finding:?}"
+    );
+    assert!(probe.take_unproven().is_empty());
+    assert_eq!(
+        std::fs::read(&live).unwrap(),
+        original,
+        "Scratch prove changed the live repository test"
+    );
+}
+
 #[tokio::test]
 async fn normal_run_saves_and_reuses_evidence_with_an_existing_lock_path() {
     let trees = trees(&[(

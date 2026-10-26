@@ -8,6 +8,8 @@ use super::*;
 pub struct CopyLayout {
     pub root: PathBuf,
     pub repository: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_repository: Option<PathBuf>,
     pub project: PathBuf,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub siblings: Vec<SiblingRevision>,
@@ -24,6 +26,8 @@ pub struct SiblingRevision {
     /// Canonical site target captured before the disposable copy is removed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_repository: Option<PathBuf>,
 }
 
 /// One check result and the copy whose paths gave that result meaning.

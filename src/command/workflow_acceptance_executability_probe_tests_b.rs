@@ -23,8 +23,34 @@ async fn repository_copy_alias_input_is_moved_and_restored_without_touching_live
     let live = trees.repo.join("tests/focused.rs");
     let original = std::fs::read(&live).unwrap();
     let copies = tempfile::tempdir().unwrap();
-    let probe = round_at(&trees, &trees.base, copies.path());
-    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_copy_parent(copies.path().to_path_buf());
+    assert!(matches!(probe.site, super::Site::Hermetic));
+    let contract = trees.contract();
+    let (evidence, _, missing, _) = probe
+        .run_reverify_copy(&contract, &trees.ids())
+        .await
+        .expect("the production Hermetic observer builds the baseline copy");
+    assert!(missing.is_empty(), "{missing:?}");
+    let layout = evidence[0]
+        .copy_layout
+        .as_ref()
+        .expect("Hermetic baseline layout");
+    let discovery = super::mutation::input_discovery_for_check(
+        &contract.acceptance[0],
+        &probe.project,
+        &trees.repo,
+        Some(layout),
+    );
+    assert!(
+        discovery
+            .eligible
+            .iter()
+            .any(|name| name.ends_with("repo/tests/focused.rs")),
+        "repository alias input was not mapped into its copy: {:?}; layout={layout:?}",
+        discovery.candidates,
+    );
+    let findings = probe.script_defects(&contract, &trees.ids()).await;
     assert!(
         findings.is_empty(),
         "the check fails while the copied input is moved: {findings:?}"

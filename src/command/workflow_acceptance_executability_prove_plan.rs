@@ -19,7 +19,7 @@ pub(super) fn plan(
         nonce: markers.nonce().to_string(),
         inputs: names
             .iter()
-            .map(|name| {
+            .filter_map(|name| {
                 let candidate = discovery
                     .candidates
                     .iter()
@@ -37,6 +37,13 @@ pub(super) fn plan(
                     ),
                     _ => (root_name, Path::new(name)),
                 };
+                debug_assert!(
+                    !relative_input.as_os_str().is_empty(),
+                    "input discovery excludes empty paths"
+                );
+                if relative_input.as_os_str().is_empty() {
+                    return None;
+                }
                 let move_path = PathBuf::from(relative_root).join(relative_input);
                 let aside_path = PathBuf::from(format!(
                     "{}.archon-mutated-{}",
@@ -46,12 +53,12 @@ pub(super) fn plan(
                         .get(..12)
                         .expect("mutation nonce is 32 hex digits")
                 ));
-                archon_workflow::acceptance_scratch::MutationInputPlan {
+                Some(archon_workflow::acceptance_scratch::MutationInputPlan {
                     named_path: name.clone(),
                     site_copy_alias: candidate.move_path.is_some(),
                     move_path,
                     aside_path,
-                }
+                })
             })
             .collect(),
     }
