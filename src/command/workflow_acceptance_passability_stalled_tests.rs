@@ -79,3 +79,62 @@ async fn passability_audit_reuses_the_same_evidence_and_rejudges_changed_output(
     .unwrap();
     assert_eq!(client.evidence.load(SeqCst), 2);
 }
+
+#[test]
+fn a_silent_stall_finding_routes_to_reauthoring_and_states_only_what_ran() {
+    let (_project, _repository, tasks, prd) = outside_set("exit 1");
+    let contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap())
+            .unwrap();
+    let audit = tempfile::tempdir().unwrap();
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "AC-X-001".into(),
+        exit_code: Some(1),
+        quota_walk_count: 0,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        environment_note: None,
+        operational_error: None,
+        fault: None,
+        classification: None,
+    };
+    let base = crate::command::workflow_task_set::executability::BaselineRuns {
+        reuse: BTreeMap::new(),
+        commit: "base-tree".into(),
+        failures: BTreeMap::from([(
+            "AC-X-001".into(),
+            crate::command::workflow_task_set::executability::CheckEvidence {
+                result,
+                copy_layout: None,
+            },
+        )]),
+        environment: BTreeMap::new(),
+        forwarded: Vec::new(),
+    };
+    let text = crate::command::workflow_task_set::passability::silent_stall_finding(
+        &EvidenceJudge::default(),
+        "model-x",
+        &contract,
+        "AC-X-001",
+        &base,
+        &std::fs::read_to_string(&prd).unwrap(),
+        audit.path(),
+        2,
+        "implemented-tree",
+    )
+    .unwrap()
+    .expect("a silent stalled check yields a finding");
+    assert!(
+        text.starts_with("check 'AC-X-001': cannot pass as written: it fails without output:"),
+        "{text}"
+    );
+    for fact in [
+        "on the implemented tree (implemented-tree) it failed in 2 trailing round(s)",
+        "on the base tree (base-tree) it failed with exit 1",
+        "printed nothing on stdout or stderr",
+    ] {
+        assert!(text.contains(fact), "missing {fact:?} in {text}");
+    }
+    assert!(!text.contains("rule"), "no rule refused anything: {text}");
+    assert_eq!(std::fs::read_dir(audit.path()).unwrap().count(), 1);
+}

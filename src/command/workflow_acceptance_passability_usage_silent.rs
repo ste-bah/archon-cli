@@ -39,17 +39,20 @@ pub(crate) fn silent_stall_finding(
     let Some(result) = runs.failures.get(id) else {
         return Ok(None);
     };
+    let exit = result
+        .result
+        .exit_code
+        .map_or_else(|| "unknown".to_string(), |code| code.to_string());
+    // The finding starts with the passability marker so the router sends it
+    // to re-authoring; what follows states only what both runs showed.
     let reason = format!(
-        "on the implemented tree ({implemented_commit}) it failed (exit {}) in {trailing_rounds} trailing round(s) without progress and printed nothing on stdout or stderr, so no owner can see what fails; rewrite the check so every failing path prints what it found, and keep every assertion of its criterion",
-        result
-            .result
-            .exit_code
-            .map_or_else(|| "unknown".to_string(), |code| code.to_string())
+        "it fails without output: on the implemented tree ({implemented_commit}) it failed in {trailing_rounds} trailing round(s) without progress, and on the base tree ({}) it failed with exit {exit}; both runs printed nothing on stdout or stderr, so no owner can see what fails; rewrite the check so every failing path prints what it found, and keep every assertion of its criterion",
+        runs.commit
     );
     let decision = Decision {
         verdict: JudgeDecision::Refuted,
-        counterexample: reason.clone(),
-        reason: "the stalled check failed without diagnostic output".into(),
+        counterexample: "the check printed nothing on stdout or stderr".into(),
+        reason: reason.clone(),
         sampling: Some(serde_json::json!({"provenance": "host"})),
     };
     super::super::audit::write(
@@ -60,12 +63,5 @@ pub(crate) fn silent_stall_finding(
         result.result.exit_code,
     )
     .with_context(|| format!("writing silent-stall passability audit for check {id}"))?;
-    let message = format!("check '{id}': fails without output: {reason}");
-    Ok(Some(super::super::evidence::finding_text(
-        id,
-        CANNOT_PASS,
-        &candidate.evidence,
-        &message,
-        &decision.reason,
-    )))
+    Ok(Some(format!("check '{id}': {CANNOT_PASS}: {reason}")))
 }

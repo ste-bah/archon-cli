@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use archon_workflow::error::WorkflowResult;
@@ -19,6 +19,8 @@ use super::*;
 struct Judge {
     calls: AtomicUsize,
     prompts: Mutex<Vec<String>>,
+    author_reply: Mutex<Option<String>>,
+    parser_refutes: AtomicBool,
 }
 
 #[async_trait]
@@ -31,17 +33,22 @@ impl archon_workflow::WorkflowLlmClient for Judge {
         &self,
         call: archon_workflow::llm_client_port::WorkflowAgentCall,
     ) -> WorkflowResult<WorkflowAgentOutcome> {
+        if let Some(content) = self.author_reply.lock().unwrap().clone() {
+            return Ok(WorkflowAgentOutcome {
+                content,
+                stop_reason: Some("end_turn".into()),
+                ..WorkflowAgentOutcome::default()
+            });
+        }
         let entry: Value = call
             .task
             .lines()
             .find_map(|line| line.strip_prefix("The entry being replaced: "))
             .map(|line| serde_json::from_str(line).unwrap())
             .expect("the re-author request includes its entry");
+        let replacement = "test -f absent";
         Ok(WorkflowAgentOutcome {
-            content: crate::command::workflow_task_set::reauthor::test_client::command_entry(
-                &entry,
-                "test -f absent",
-            ),
+            content: crate::command::workflow_task_set::reauthor::test_client::command_entry(&entry, &replacement),
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })
@@ -80,7 +87,9 @@ impl archon_workflow::WorkflowLlmClient for Judge {
             .iter()
             .map(|check| {
                 let output = check["baseline"]["stderr"].as_str().unwrap_or_default();
-                let refuted = output.contains("below required minimum");
+                let refuted = output.contains("below required minimum")
+                    || (self.parser_refutes.load(Ordering::SeqCst)
+                        && output.contains("unrecognized argument"));
                 serde_json::json!({
                     "id": check["id"],
                     "verdict": if refuted { "refuted" } else { "accepted" },
@@ -178,9 +187,47 @@ fn with_check(mut fixture: Fixture, command: &str) -> Fixture {
     fixture
 }
 
+fn without_recorded_model(fixture: &Fixture) {
+    let contract_path = fixture.task_root.join(ACCEPTANCE_CONTRACT_FILE);
+    let mut contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(&contract_path).unwrap()).unwrap();
+    contract.acceptance[0].judgment.sampling = None;
+    let contract_bytes = serde_json::to_vec_pretty(&contract).unwrap();
+    std::fs::write(&contract_path, &contract_bytes).unwrap();
+    let acceptance_digest = content_digest(&contract_bytes);
+    let lock_path = fixture.task_root.join(ACCEPTANCE_LOCK_FILE);
+    let mut lock: AcceptanceLock = serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+    lock.digest = acceptance_digest.clone();
+    std::fs::write(lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+    let skeleton_path = fixture.task_root.join(TASK_SKELETON_FILE);
+    let mut skeleton: TaskSkeleton = serde_json::from_slice(&std::fs::read(&skeleton_path).unwrap()).unwrap();
+    skeleton.acceptance_digest = acceptance_digest.clone();
+    let skeleton_bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
+    std::fs::write(&skeleton_path, &skeleton_bytes).unwrap();
+    let skeleton_digest = content_digest(&skeleton_bytes);
+    let skeleton_lock_path = fixture.task_root.join(TASK_SKELETON_LOCK_FILE);
+    let mut skeleton_lock: TaskSkeletonLock = serde_json::from_slice(&std::fs::read(&skeleton_lock_path).unwrap()).unwrap();
+    skeleton_lock.digest = skeleton_digest.clone();
+    skeleton_lock.acceptance_digest = acceptance_digest.clone();
+    std::fs::write(skeleton_lock_path, serde_json::to_vec_pretty(&skeleton_lock).unwrap()).unwrap();
+    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(fixture.project.path(), &fixture.task_root);
+    let mut pin: AcceptancePin = serde_json::from_slice(&std::fs::read(&pin_path).unwrap()).unwrap();
+    pin.acceptance_digest = acceptance_digest;
+    pin.skeleton_digest = Some(skeleton_digest);
+    std::fs::write(pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
+}
+
 async fn until_stall(fixture: &Fixture, client: &Judge) -> (u32, String) {
-    for round in 1..=5 {
-        let execution = execution(round, 5, &[]);
+    until_stall_with_rounds(fixture, client, 5).await
+}
+
+async fn until_stall_with_rounds(
+    fixture: &Fixture,
+    client: &Judge,
+    max_rounds: u32,
+) -> (u32, String) {
+    for round in 1..=max_rounds {
+        let execution = execution(round, max_rounds, &[]);
         let generation = fixture.store.load_state(&fixture.run_id).unwrap().generation;
         match run_acceptance_stage(
             &fixture.runtime,
@@ -348,4 +395,98 @@ async fn a_script_invocation_with_external_parser_output_stays_on_the_judge_path
         &fixture.store.run_dir(&fixture.run_id),
     ).unwrap().unwrap().0.contract_repairs;
     assert!(repairs.iter().all(|repair| repair.repaired == false));
+}
+
+#[tokio::test]
+async fn a_stalled_silent_check_is_refuted_without_calling_the_judge() {
+    let fixture = with_check(super::tests::fixture(true), "test -f absent");
+    let client = Judge::default();
+    for round in 1..=5 {
+        let execution = execution(round, 5, &[]);
+        let generation = fixture.store.load_state(&fixture.run_id).unwrap().generation;
+        let result = run_acceptance_stage(
+            &fixture.runtime, &execution, &fixture.store, &fixture.run_id,
+            archon_workflow::control_pause::PauseOwner::Generation(generation),
+            Some(&fixture.universe), Some(&client),
+        ).await;
+        if let Ok(result) = result {
+            let repairs = result.data["contract_repairs"].as_array().unwrap();
+            if !repairs.is_empty() {
+                assert_eq!(repairs[0]["repaired"], true, "{repairs:?}");
+                assert!(client.calls.load(Ordering::SeqCst) <= 2, "silent check reached the judge path: {:?}", client.prompts.lock().unwrap());
+                return;
+            }
+        }
+    }
+    let record = archon_workflow::v2::acceptance_stage::latest_round_record(
+        &fixture.store.run_dir(&fixture.run_id),
+    ).unwrap().unwrap().0;
+    panic!("silent failed check did not reach host re-authoring: {record:?}");
+}
+
+#[tokio::test]
+async fn stalled_refutation_without_base_corroboration_pauses_with_the_check_named() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = with_check(super::tests::fixture(true), "sh scripts/check.sh");
+    std::fs::create_dir_all(fixture.repo.path().join("scripts")).unwrap();
+    std::fs::write(fixture.repo.path().join("scripts/check.sh"), "test -f trigger && fakecheck --badflag\n").unwrap();
+    for args in [vec!["add", "scripts/check.sh"], vec!["commit", "-m", "add check script"]] {
+        let output = std::process::Command::new("git").arg("-C").arg(fixture.repo.path()).args(args).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+    std::fs::write(fixture.repo.path().join("trigger"), "present").unwrap();
+    let external = tempfile::tempdir().unwrap();
+    let program = external.path().join("fakecheck");
+    std::fs::write(&program, "#!/bin/sh\necho 'fakecheck: error: unrecognized argument: --badflag' >&2\necho 'Usage: fakecheck [OPTIONS]' >&2\nexit 2\n").unwrap();
+    let mut permissions = std::fs::metadata(&program).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&program, permissions).unwrap();
+    let old_path = std::env::var_os("PATH");
+    let _restore = RestorePath(old_path.clone());
+    let mut paths = vec![external.path().to_path_buf()];
+    if let Some(old_path) = old_path { paths.extend(std::env::split_paths(&old_path)); }
+    unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+    let client = Judge::default();
+    client.parser_refutes.store(true, Ordering::SeqCst);
+    let (_, message) = until_stall(&fixture, &client).await;
+    assert!(message.contains("AC-X-001") && message.contains("not corroborated on the base tree"), "{message}");
+    assert!(client.calls.load(Ordering::SeqCst) > 0, "implemented-tree parser evidence is judged");
+}
+
+#[tokio::test]
+async fn a_reauthor_reply_that_cannot_be_published_is_reported_at_the_pause() {
+    let fixture = with_check(super::tests::fixture(true), "echo 'fixture observed rows below required minimum' >&2; exit 1");
+    let client = Judge::default();
+    *client.author_reply.lock().unwrap() = Some("not a valid authored entry".into());
+    let (round, message) = until_stall(&fixture, &client).await;
+    assert!(message.contains("republish") || message.contains("re-author"), "{message}");
+    assert!(message.contains("AC-X-001"), "{message}");
+    let judged = client.calls.load(Ordering::SeqCst);
+    assert!(judged > 0, "the refutation was judged before re-authoring");
+    archon_workflow::LifecycleController::new(fixture.store.clone())
+        .apply(&fixture.run_id, archon_workflow::LifecycleAction::Resume)
+        .unwrap();
+    let generation = fixture.store.load_state(&fixture.run_id).unwrap().generation;
+    let _ = run_acceptance_stage(
+        &fixture.runtime, &execution(round, 5, &[]), &fixture.store, &fixture.run_id,
+        archon_workflow::control_pause::PauseOwner::Generation(generation),
+        Some(&fixture.universe), Some(&client),
+    ).await;
+    assert_eq!(client.calls.load(Ordering::SeqCst), judged, "same evidence caused another judge call");
+}
+
+#[tokio::test]
+async fn stalled_pause_reports_missing_judge_model_and_context_resolution_errors() {
+    let fixture = with_check(super::tests::fixture(true), "test -f absent");
+    without_recorded_model(&fixture);
+    let client = Judge::default();
+    let (_, message) = until_stall(&fixture, &client).await;
+    assert!(message.contains("no recorded judge model"), "{message}");
+
+    let mut broken = with_check(super::tests::fixture(true), "test -f absent");
+    let missing_root = broken.project.path().join("missing-repository");
+    broken.runtime.target_repository_root = Some(missing_root.display().to_string());
+    let (_, message) = until_stall(&broken, &Judge::default()).await;
+    assert!(message.contains(&missing_root.display().to_string()), "{message}");
+    assert!(message.contains("acceptance stage"), "{message}");
 }
