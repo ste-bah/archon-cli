@@ -61,6 +61,7 @@ pub(super) async fn validate(
                     client,
                     model,
                     &site.context.repository,
+                    &site.run_dir,
                     &contract,
                     &ids,
                     &runs,

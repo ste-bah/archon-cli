@@ -390,12 +390,24 @@ pub(crate) async fn judge_baseline_failures(
     let mut refuted = BTreeMap::new();
     let mut pending = Vec::new();
     for candidate in candidates {
-        if let Some((program, rejected_line)) =
-            usage::external_usage_error(&runs, &candidate.id, repository_root)
-        {
+        let Some(command) = usage::check_command(contract, &candidate.id) else {
+            pending.push(candidate);
+            continue;
+        };
+        if let Some((program, path, rejected_line)) = usage::external_usage_error(
+            &runs,
+            &candidate.id,
+            repository_root,
+            project_root,
+            command,
+        ) {
             let rejected_line = evidence::inert(&rejected_line);
+            let rule = format!(
+                "{program} ({}, outside the repository) rejected the check's command line: {rejected_line}",
+                path.display()
+            );
             let reason = format!(
-                "{program} rejected the check's own command: {rejected_line}; no implementation can change how {program} parses its arguments; fix the invocation"
+                "nothing the repository implements can change how {program} parses its arguments; fix the invocation"
             );
             let decision = Decision {
                 verdict: JudgeDecision::Refuted,
@@ -413,7 +425,13 @@ pub(crate) async fn judge_baseline_failures(
                 )
                 .with_context(|| format!("writing passability audit for check {}", candidate.id))?;
             }
-            let text = format!("check '{}': {CANNOT_PASS}: {reason}", candidate.id);
+            let text = evidence::finding_text(
+                &candidate.id,
+                CANNOT_PASS,
+                &candidate.evidence,
+                &rule,
+                &reason,
+            );
             refuted.insert(candidate.id.clone(), (decision, text));
         } else {
             pending.push(candidate);

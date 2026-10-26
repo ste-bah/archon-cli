@@ -17,9 +17,13 @@ async fn an_external_argument_parser_rejection_is_refuted_by_the_host() {
     let found = cannot_pass(&prepared, "AC-X-001");
     assert_eq!(found.len(), 1, "{:?}", prepared.findings);
     assert!(
-        found[0]
-            .text
-            .contains("cargo rejected the check's own command")
+        found[0].text.contains("cargo (")
+            && found[0]
+                .text
+                .contains("outside the repository) rejected the check's command line")
+            && found[0].text.contains(
+                "nothing the repository implements can change how cargo parses its arguments"
+            )
     );
     assert_eq!(
         client.evidence.load(SeqCst),
