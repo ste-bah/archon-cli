@@ -308,6 +308,7 @@ fn repository_binaries_and_truncated_usage_excerpts_stay_on_the_judge_path() {
     );
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_declared_binary_reaches_the_reauthor_passability_judge() {
     let repository = tempfile::tempdir().unwrap();
