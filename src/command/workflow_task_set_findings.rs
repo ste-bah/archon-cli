@@ -469,7 +469,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
     )?;
     // Every saved repair is in the prepared contract now.
     if kept {
-        super::reauthor::cache::remove(tasks_root)?;
+        super::reauthor::cache::archive(tasks_root, &prepared.result.acceptance_digest)?;
     }
     Ok(prepared)
 }

@@ -442,8 +442,10 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
     match published {
         Ok(event) => {
             repair.repaired = true;
-            repair.freeze_event_id = event;
-            repair.diagnostics.extend(Staged::clear(site.run_dir));
+            repair.freeze_event_id = event.freeze_event_id;
+            repair
+                .diagnostics
+                .extend(Staged::clear(site.run_dir, &event.acceptance_digest));
             Ok(Some(Authored {
                 repair: Some(repair),
                 errors: Vec::new(),

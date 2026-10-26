@@ -99,6 +99,7 @@ async fn an_incomplete_batch_keeps_its_decided_verdicts_and_defers_only_the_rest
         &Redactor::from_vars(Vec::new(), &[]),
         Some(&store),
         &resume,
+        None,
     )
     .await
     .err()

@@ -6,6 +6,11 @@ use serde::{Deserialize, Serialize};
 use super::*;
 
 const RECORDS: &str = "acceptance-reauthor-candidates";
+pub(crate) const CONSUMED: &str = "acceptance-reauthor-candidates-consumed";
+
+pub(crate) fn passability_audit_dir(state_dir: &Path) -> PathBuf {
+    state_dir.join(CONSUMED).join("passability")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Key {
@@ -49,6 +54,22 @@ pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
     (
         "workflow_acceptance_reauthor.rs",
         include_bytes!("workflow_acceptance_reauthor.rs"),
+    ),
+    (
+        "workflow_acceptance_passability.rs",
+        include_bytes!("workflow_acceptance_passability.rs"),
+    ),
+    (
+        "workflow_acceptance_passability_judge.rs",
+        include_bytes!("workflow_acceptance_passability_judge.rs"),
+    ),
+    (
+        "workflow_acceptance_passability_audit.rs",
+        include_bytes!("workflow_acceptance_passability_audit.rs"),
+    ),
+    (
+        "workflow_acceptance_passability_evidence.rs",
+        include_bytes!("workflow_acceptance_passability_evidence.rs"),
     ),
     (
         "workflow_acceptance_live_root.rs",
@@ -242,7 +263,7 @@ pub(crate) fn store(
     write_atomic(&target, &bytes)
 }
 
-fn write_atomic(target: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     let parent = target.parent().expect("cache path has parent");
     std::fs::create_dir_all(parent)?;
@@ -274,13 +295,27 @@ pub(crate) fn forget(state_dir: &Path, id: &str) -> Result<()> {
         return Ok(());
     }
     let prefix = format!("{}.", digest(id.as_bytes()));
+    let mut forgotten = Vec::new();
     for item in std::fs::read_dir(&directory)? {
         let path = item?.path();
         if (path.file_name().and_then(|name| name.to_str()))
             .is_some_and(|name| name.starts_with(&prefix))
         {
-            std::fs::remove_file(&path)?;
+            forgotten.push(path);
         }
+    }
+    if forgotten.is_empty() {
+        return Ok(());
+    }
+    let archive = state_dir
+        .join(CONSUMED)
+        .join(format!("forgotten.{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&archive)?;
+    for path in forgotten {
+        std::fs::rename(
+            &path,
+            archive.join(path.file_name().expect("record filename")),
+        )?;
     }
     Ok(())
 }
@@ -290,11 +325,27 @@ pub(crate) fn saved(state_dir: &Path) -> bool {
     std::fs::read_dir(state_dir.join(RECORDS)).is_ok_and(|mut entries| entries.next().is_some())
 }
 
+#[cfg(test)]
 pub(crate) fn remove(state_dir: &Path) -> Result<()> {
     let records = state_dir.join(RECORDS);
     if records.exists() {
         std::fs::remove_dir_all(records)?;
     }
+    Ok(())
+}
+
+pub(crate) fn archive(state_dir: &Path, publish_digest: &str) -> Result<()> {
+    let records = state_dir.join(RECORDS);
+    if !records.exists() {
+        return Ok(());
+    }
+    let archive_root = state_dir.join(CONSUMED);
+    std::fs::create_dir_all(&archive_root)?;
+    let destination = archive_root.join(format!(
+        "{publish_digest}.{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::rename(records, destination)?;
     Ok(())
 }
 
@@ -317,4 +368,62 @@ fn atomic_candidate_replacement_never_exposes_partial_bytes() {
         write_atomic(&target, if index % 2 == 0 { &second } else { &first }).unwrap();
     }
     reader.join().unwrap();
+}
+
+#[cfg(test)]
+#[test]
+fn archive_twice_with_the_same_publish_digest_preserves_both_records() {
+    let dir = tempfile::tempdir().unwrap();
+    for marker in ["first", "second"] {
+        let records = dir.path().join(RECORDS);
+        std::fs::create_dir_all(&records).unwrap();
+        std::fs::write(records.join("record"), marker).unwrap();
+        archive(dir.path(), "same-digest").unwrap();
+    }
+    let archives = std::fs::read_dir(dir.path().join(CONSUMED))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(archives.len(), 2);
+    let contents = archives
+        .iter()
+        .map(|archive| std::fs::read_to_string(archive.join("record")).unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        contents,
+        ["first", "second"].into_iter().map(str::to_owned).collect()
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn forgetting_a_check_archives_its_saved_accepted_judgment() {
+    let dir = tempfile::tempdir().unwrap();
+    let records = dir.path().join(RECORDS);
+    std::fs::create_dir_all(&records).unwrap();
+    let path = records.join(format!("{}.key.json", digest(b"AC-X-001")));
+    std::fs::write(
+        &path,
+        serde_json::json!({"verdict": "accepted", "check_id": "AC-X-001"}).to_string(),
+    )
+    .unwrap();
+
+    forget(dir.path(), "AC-X-001").unwrap();
+
+    assert_eq!(
+        std::fs::read_dir(&records).unwrap().count(),
+        0,
+        "forgotten judgments leave the active cache"
+    );
+    let archived = dir.path().join(CONSUMED);
+    let record = std::fs::read_dir(archived)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert_eq!(
+        std::fs::read_to_string(record.join(path.file_name().unwrap())).unwrap(),
+        serde_json::json!({"verdict": "accepted", "check_id": "AC-X-001"}).to_string()
+    );
 }

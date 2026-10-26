@@ -158,8 +158,8 @@ pub(crate) async fn reauthor_and_republish(
     result.unproven = progress.unproven;
     result.authored_pending = progress.authored_pending;
     if result.unproven.is_empty() {
-        reauthor::cache::remove(&state_dir)
-            .with_context(|| "removing consumed acceptance re-author candidates")?;
+        reauthor::cache::archive(&state_dir, &result.acceptance_digest)
+            .with_context(|| "archiving consumed acceptance re-author candidates")?;
     }
     Ok(result)
 }

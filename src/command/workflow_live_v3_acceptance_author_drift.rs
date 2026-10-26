@@ -160,9 +160,11 @@ pub(super) async fn heal_drift(
     Ok(Some(match published {
         Ok(result) => {
             repair.repaired = true;
-            repair.freeze_event_id = result.freeze_event_id;
+            repair.freeze_event_id = result.freeze_event_id.clone();
             repair.diagnostics.extend(result.diagnostics);
-            repair.diagnostics.extend(Staged::clear(site.run_dir));
+            repair
+                .diagnostics
+                .extend(Staged::clear(site.run_dir, &result.acceptance_digest));
             Authored {
                 repair: Some(repair),
                 errors: Vec::new(),
