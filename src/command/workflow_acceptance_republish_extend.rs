@@ -92,6 +92,13 @@ fn judged_by(entry: &AcceptanceCriterion) -> Option<(String, String)> {
     ))
 }
 
+fn logic_identity_matches(
+    stored: Option<&serde_json::Value>,
+    current: Option<&serde_json::Value>,
+) -> bool {
+    current.is_some_and(|identity| stored == Some(identity))
+}
+
 /// Add `extension.entries` to the chain frozen beside `request.tasks_root`
 /// and republish it (see the module doc). `request.ids` must be exactly the
 /// added ids.
@@ -139,6 +146,26 @@ fn extend_owned(request: ReauthorRequest<'_>, extension: &Extension) -> Result<R
                 entry.id,
                 verified.judge.0,
                 verified.judge.1
+            ));
+        }
+        let expected_identity =
+            crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+                .map(|logic| {
+                    super::reauthor::cache::acceptance_logic_identity(
+                        logic,
+                        &verified.judge.0,
+                        Some(&verified.judge.1),
+                    )
+                });
+        let stored_identity = entry
+            .judgment
+            .sampling
+            .as_ref()
+            .and_then(|sampling| sampling.get("logic_identity"));
+        if !logic_identity_matches(stored_identity, expected_identity.as_ref()) {
+            return Err(anyhow!(
+                "added check '{}' was judged under different freeze-acceptance logic; author it again",
+                entry.id
             ));
         }
         if let Some(requirement) = supplementary_requirement(&entry.id)

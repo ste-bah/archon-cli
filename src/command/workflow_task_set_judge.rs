@@ -439,6 +439,7 @@ async fn judge_batch(
         model,
         validate,
         partial,
+        roots,
     )
     .await
 }
@@ -455,7 +456,16 @@ pub(crate) async fn judge_prompted(
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<AcceptanceContract> {
-    judge_prompted_with_roots(client, contract, prompt, model, validate, partial).await
+    judge_prompted_with_roots(
+        client,
+        contract,
+        prompt,
+        model,
+        validate,
+        partial,
+        &JudgeRoots::default(),
+    )
+    .await
 }
 
 fn subset_with_ids(contract: &AcceptanceContract, ids: &BTreeSet<String>) -> AcceptanceContract {

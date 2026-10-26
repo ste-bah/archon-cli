@@ -4,6 +4,9 @@ use crate::command::workflow_task_set::reauthor::cache::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "workflow_acceptance_republish_cache_identity_tests.rs"]
+mod identity_tests;
+
 #[test]
 fn prompt_and_judge_digest_covers_every_static_source_contributor() {
     let listed = PROMPT_AND_JUDGE_SOURCES
@@ -154,37 +157,6 @@ fn save_with_probe(
         probe,
     )
     .unwrap();
-}
-
-#[tokio::test]
-async fn a_matching_saved_candidate_skips_author_and_candidate_judge_calls() {
-    let set = frozen_set(&[("AC-F-001", "false", false)]);
-    let named = ids(&["AC-F-001"]);
-    let scope =
-        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
-    let contract = set.contract();
-    let saved = candidate(&contract.acceptance[0]);
-    crate::command::workflow_task_set::reauthor::cache::remove(&set.tasks).unwrap();
-    save(&set, &contract, &scope, &saved);
-    let client = ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "false"), |_, _| true);
-    let repaired = crate::command::workflow_task_set::reauthor::reauthor_with_cache(
-        &client,
-        &contract,
-        &named,
-        &scope,
-        super::super::test_fixture::FIXTURE_JUDGE_MODEL,
-        &set.gate(),
-        Some(&set.tasks),
-    )
-    .await
-    .unwrap();
-    assert_eq!(client.authored(), 0);
-    assert_eq!(
-        *client.judged_ids.lock().unwrap(),
-        ["AC-F-001"],
-        "only the passability judge runs after the probe"
-    );
-    assert_eq!(repaired.acceptance[0].check, saved.check);
 }
 
 #[tokio::test]

@@ -41,6 +41,52 @@ fn digest(bytes: &[u8]) -> String {
     content_digest(bytes)
 }
 
+pub(crate) fn acceptance_logic_identity(
+    logic: (u32, String, String),
+    model: &str,
+    provider: Option<&str>,
+) -> serde_json::Value {
+    let (version, digest, _this_build) = logic;
+    serde_json::json!([version, digest, model, provider])
+}
+
+pub(in crate::command::workflow_task_set) fn stamp_judgment(
+    entry: &mut AcceptanceCriterion,
+    model: &str,
+    provider: Option<&str>,
+    roots: &super::judge::JudgeRoots,
+) {
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    stamp_judgment_with_budget(entry, model, provider, roots, &mut remaining);
+}
+
+pub(in crate::command::workflow_task_set) fn stamp_judgment_with_budget(
+    entry: &mut AcceptanceCriterion,
+    model: &str,
+    provider: Option<&str>,
+    roots: &super::judge::JudgeRoots,
+    remaining: &mut usize,
+) {
+    let identity =
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+            .map(|logic| acceptance_logic_identity(logic, model, provider));
+    let named_digest = super::judge::named_files_digest_with_budget(entry, roots, remaining);
+    let sampling = entry
+        .judgment
+        .sampling
+        .get_or_insert_with(|| serde_json::json!({}));
+    if !sampling.is_object() {
+        *sampling = serde_json::json!({});
+    }
+    let fields = sampling.as_object_mut().expect("sampling is an object");
+    if let Some(identity) = identity.filter(|_| !fields.contains_key("logic_identity")) {
+        fields.insert("logic_identity".into(), identity);
+    }
+    fields
+        .entry("named_file_digest")
+        .or_insert_with(|| serde_json::json!(named_digest));
+}
+
 /// The complete source closure for the static author prompt and candidate
 /// judge instruction. `author.rs` assembles the prompt, `reauthor.rs` owns
 /// `ENTRY_SHAPES`, and `live_root.rs` supplies the shared root guidance.
@@ -253,10 +299,25 @@ pub(crate) fn store(
         .find(|entry| entry.id == candidate.id)
         .ok_or_else(|| anyhow!("candidate is absent from its source contract"))?;
     let key = key(frozen, candidate, scope, judge_model, judge_provider, probe)?;
+    let mut saved_candidate = candidate.clone();
+    stamp_judgment(
+        &mut saved_candidate,
+        &key.judge_model,
+        key.judge_provider.as_deref(),
+        &super::judge::JudgeRoots {
+            project: Some(scope.project_root.clone()),
+            repository: Some(scope.repository_root.clone()),
+            task_root: Some(scope.task_root.clone()),
+            repository_commit: scope
+                .baseline
+                .as_ref()
+                .map(|baseline| baseline.commit.clone()),
+        },
+    );
     let record = Record {
         key_digest: digest(&serde_json::to_vec(&key)?),
         key,
-        candidate: candidate.clone(),
+        candidate: saved_candidate,
     };
     let target = record_path(state_dir, &candidate.id, &record.key_digest);
     let bytes = serde_json::to_vec(&record)?;

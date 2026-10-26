@@ -7,6 +7,16 @@ use crate::command::workflow_task_set::republish::test_fixture::{
 };
 
 #[test]
+fn an_extension_cannot_match_when_logic_identity_is_unavailable() {
+    let stored: Option<&serde_json::Value> = None;
+    let current: Option<serde_json::Value> = None;
+    assert!(
+        !logic_identity_matches(stored, current.as_ref()),
+        "identity comparison must require a current identity"
+    );
+}
+
+#[test]
 fn an_extension_that_leaves_a_requirement_uncovered_is_refused_by_its_gate() {
     let set = frozen_set_in(
         &[("AC-F-001", "test -f present", true)],
@@ -17,6 +27,17 @@ fn an_extension_that_leaves_a_requirement_uncovered_is_refused_by_its_gate() {
     let frozen = set.contract();
     let mut sup = criterion("SUP-REQ-F-001", "test -f present", true);
     sup.covers = vec!["REQ-F-001".into()];
+    crate::command::workflow_task_set::reauthor::cache::stamp_judgment(
+        &mut sup,
+        crate::command::workflow_task_set::republish::test_fixture::FIXTURE_JUDGE_MODEL,
+        Some(crate::command::workflow_task_set::reauthor::test_client::SCRIPTED_PROVIDER),
+        &super::judge::JudgeRoots {
+            project: Some(set.project.path().to_path_buf()),
+            repository: None,
+            task_root: Some(set.tasks.clone()),
+            repository_commit: None,
+        },
+    );
     let extension = Extension {
         entries: vec![sup],
         prd_digest: frozen.prd.digest.clone(),

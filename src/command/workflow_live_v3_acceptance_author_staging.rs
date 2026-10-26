@@ -102,10 +102,20 @@ impl Staged {
         client: &dyn WorkflowLlmClient,
         model: &str,
     ) -> String {
+        let identity =
+            crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+                .map(|logic| {
+                    crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
+                        logic,
+                        &client.resolve_model_alias(model),
+                        client.provider_id().as_deref(),
+                    )
+                });
         content_digest(
             serde_json::json!([
                 SCHEMA,
                 self.prd_digest,
+                identity,
                 entry,
                 baseline,
                 client.resolve_model_alias(model),

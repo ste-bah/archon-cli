@@ -72,6 +72,46 @@ fn named_inputs_report_absence_exclusion_and_shared_budget_status() {
     );
 }
 
+#[test]
+fn a_budget_exhausted_entry_is_stamped_with_its_prompt_digest() {
+    let root = tempfile::tempdir().unwrap();
+    let large = "a".repeat(archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES);
+    std::fs::write(root.path().join("first"), large).unwrap();
+    std::fs::write(root.path().join("second"), "second content").unwrap();
+    let roots = roots_at(root.path());
+    let mut first = command_check("operation first", TrustedCwd::ProjectRoot)
+        .acceptance
+        .remove(0);
+    let mut second = command_check("operation second", TrustedCwd::ProjectRoot)
+        .acceptance
+        .remove(0);
+    first.id = "AC-X-001".into();
+    second.id = "AC-X-002".into();
+    let subject = AcceptanceContract {
+        acceptance: vec![first, second.clone()],
+        ..contract()
+    };
+    let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
+    let prompt_digest =
+        named_files_digest_for_list(prompt_json(&prompt)[1]["named_files"].as_array().unwrap());
+
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    let _ = named_files_digest_with_budget(&subject.acceptance[0], &roots, &mut remaining);
+    crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_budget(
+        &mut second,
+        "model-x",
+        Some("provider-x"),
+        &roots,
+        &mut remaining,
+    );
+
+    assert_eq!(
+        second.judgment.sampling.as_ref().unwrap()["named_file_digest"],
+        prompt_digest,
+        "the stamp must describe the budgeted evidence the prompt supplied"
+    );
+}
+
 fn roots_at(root: &std::path::Path) -> JudgeRoots {
     JudgeRoots {
         project: Some(root.to_path_buf()),
