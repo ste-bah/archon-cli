@@ -138,6 +138,76 @@ fn message_only_paths_stay_excluded_as_check_mechanics() {
 }
 
 #[test]
+fn directory_tokens_are_excluded_with_a_specific_reason() {
+    let project = tempfile::tempdir().unwrap();
+    for token in ["..", "."] {
+        let result = input_discovery(
+            &entry(&format!("probe {token}"), "project_root"),
+            project.path(),
+            project.path(),
+        );
+        let candidate = result
+            .candidates
+            .iter()
+            .find(|candidate| candidate.path == token)
+            .unwrap_or_else(|| panic!("directory token {token} missing: {:?}", result.candidates));
+        assert!(
+            !result.eligible.iter().any(|path| path == token),
+            "directory token was eligible: {:?}",
+            result.candidates
+        );
+        assert!(
+            candidate
+                .exclusion
+                .unwrap()
+                .label()
+                .contains("whole directory tree"),
+            "untrue diagnostic: {:?}",
+            candidate
+        );
+    }
+}
+
+#[test]
+fn sibling_suffixes_match_the_shared_path_scanner() {
+    let parent = tempfile::tempdir().unwrap();
+    let project = parent.path().join("project");
+    let sibling = parent.path().join("sib");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    for name in ["pkg+", "a@b", "café"] {
+        std::fs::write(sibling.join(name), "x").unwrap();
+    }
+    for path in ["../sib/pkg+", "../sib/a@b", "../sib/café"] {
+        let result = input_discovery(
+            &entry(&format!("probe {path}"), "project_root"),
+            &project,
+            &project,
+        );
+        assert!(
+            result
+                .candidates
+                .iter()
+                .any(|candidate| candidate.path == path),
+            "mutation scanner missed {path}: {:?}",
+            result.candidates
+        );
+        let siblings = archon_workflow::acceptance_sibling_paths::discover_with_diagnostics(
+            &project,
+            &[format!("probe {path}")],
+        );
+        assert!(
+            siblings
+                .candidates
+                .iter()
+                .any(|candidate| candidate.path == Path::new(path)),
+            "sibling scanner missed {path}: {:?}",
+            siblings
+        );
+    }
+}
+
+#[test]
 fn cd_pipeline_does_not_turn_pipe_into_a_path_operand() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("pipe"), "input\n").unwrap();

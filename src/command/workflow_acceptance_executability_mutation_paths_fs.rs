@@ -1,5 +1,22 @@
 use std::path::{Path, PathBuf};
 
+pub fn diagnostic_path(
+    token: &str,
+    mapped_sibling: Option<String>,
+    manifest_sibling: Option<String>,
+    paths: (&Path, &Path),
+) -> String {
+    if matches!(token, "." | "..") {
+        token.to_string()
+    } else {
+        mapped_sibling.or(manifest_sibling).unwrap_or_else(|| {
+            relative_path(paths.0, paths.1)
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
+}
+
 pub fn normalize_absolute(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {

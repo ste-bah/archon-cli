@@ -87,6 +87,7 @@ pub(super) enum ExclusionReason {
     CheckRecreatedPathObserved,
     OutsideCopiedTree,
     CheckMechanics,
+    WholeDirectoryTree,
 }
 
 impl ExclusionReason {
@@ -108,6 +109,7 @@ impl ExclusionReason {
             Self::CheckRecreatedPathObserved => "the check recreated a moved input while it ran",
             Self::OutsideCopiedTree => "outside the copied check tree",
             Self::CheckMechanics => "check mechanics or command output",
+            Self::WholeDirectoryTree => "whole directory tree at/above selected root; not movable",
         }
     }
 }
@@ -335,11 +337,12 @@ pub(super) fn input_discovery_for_check(
                 .iter()
                 .any(|word| Path::new(word).starts_with(path));
             let has_manifest_sibling = manifest_sibling.is_some();
-            let mapped = mapped_sibling.or(manifest_sibling).unwrap_or_else(|| {
-                paths::relative_path(&cwd, &resolved_path)
-                    .to_string_lossy()
-                    .into_owned()
-            });
+            let mapped = paths::diagnostic_path(
+                &token,
+                mapped_sibling,
+                manifest_sibling,
+                (&cwd, &resolved_path),
+            );
             let canonical_move = direct_copy_move.or_else(|| {
                 if repository_copy_alias {
                     sibling_root.and_then(|sibling| {
@@ -360,6 +363,8 @@ pub(super) fn input_discovery_for_check(
                 Some(ExclusionReason::CheckWritesPathInText)
             } else if manifest {
                 Some(ExclusionReason::ManifestOrSetup)
+            } else if matches!(token.as_str(), "." | "..") {
+                Some(ExclusionReason::WholeDirectoryTree)
             } else if mechanics {
                 Some(ExclusionReason::CheckMechanics)
             } else if repository_root {
