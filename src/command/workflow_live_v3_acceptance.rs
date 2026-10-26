@@ -1,17 +1,12 @@
 //! The authored run's acceptance stage: host side of `acceptance-contract-run`.
 //!
-//! Obs-32. The v3 script's final primitive, `await acceptance()`, asks the host to run every check
-//! in the task set's frozen `acceptance-contract.json` against the repository as the run left it.
-//! This is that host call: it resolves where the checks run (`workflow_live_v3_acceptance_exec`),
-//! runs the WHOLE contract every round (the script's `checkIds` are validated but never narrow the
-//! run), maps each failing check to the tasks whose `implements` list names it, writes an
-//! append-only round record under `v2/acceptance/<round>/`, and answers the script with the
-//! failing checks and whether the round is final. The finalizer reads the record the last round's
-//! own call record names; the script cannot mark anything passed.
+//! Obs-32. The v3 script's `await acceptance()` asks the host to run the task set's frozen
+//! `acceptance-contract.json` on the repository tree. The host resolves the execution site,
+//! runs the whole contract each round, routes failures to implementing tasks, and writes an
+//! append-only round record under `v2/acceptance/<round>/`. The script's `checkIds` are validated
+//! but never narrow the run; only the finalizer reads the round record named by the call record.
 //!
-//! A persisted script call, but never a replayed one: the host re-executes every acceptance round,
-//! on resume too, as a stored round describes a repository that may since have changed; a pause
-//! re-enters it on resume.
+//! Every round, including resumed ones, re-executes because its evidence may describe an old tree.
 
 use std::path::Path;
 
@@ -64,6 +59,8 @@ mod result;
 use check_rec::check_record;
 #[path = "workflow_live_v3_acceptance_sources.rs"]
 mod sources;
+#[path = "workflow_live_v3_acceptance_stalled.rs"]
+mod stalled;
 #[cfg(test)]
 use archon_workflow::v2::acceptance_stage::ACCEPTANCE_STAGE_TOOL;
 use output::{with_frozen_identity, write_output_files, write_repairs};
@@ -178,19 +175,23 @@ pub(super) async fn run_acceptance_stage(
         task_set,
         Some(&reservation),
     )?;
-    // Issue 262: a stall (or the runaway guard) pauses the run with the
-    // round's record as evidence; it never ends the loop or fails the run.
+    // Issue 262: pause on a stalled round with its record as evidence.
     if let Some(cause) = decision.pause {
-        let record_path = relative_record_path(&run_dir, &path);
-        return Err(result::pause_on_stall(
+        return stalled::on_pause(
+            runtime,
             store,
             run_id,
             owner,
-            &record,
-            &record_path,
+            task_universe,
+            llm,
+            &run_dir,
+            &mut record,
+            &mut frozen,
+            &path,
             &decision,
             cause,
-        ));
+        )
+        .await;
     }
     let mut result = result_for(&record, &relative_record_path(&run_dir, &path), &decision);
     result::with_task_scope(&mut result, task_universe, &record);

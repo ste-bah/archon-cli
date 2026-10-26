@@ -7,7 +7,7 @@ use super::evidence::{Redactor, STDERR_BYTES, STDOUT_BYTES};
 use super::executability::BaselineRuns;
 use super::*;
 
-/// Findings for replacement checks that cannot pass on their baseline tree.
+/// Findings for checks that cannot pass on the evidence tree they ran against.
 pub(crate) async fn cannot_pass_findings(
     client: &dyn WorkflowLlmClient,
     model: &str,
@@ -31,6 +31,21 @@ pub(crate) async fn cannot_pass_findings(
     let mut refuted = BTreeMap::new();
     let mut pending = Vec::new();
     for candidate in candidates {
+        if let Some(decision) = audit_dir
+            .and_then(|directory| super::audit::load(directory, &candidate.key, &candidate.id))
+        {
+            if decision.verdict == JudgeDecision::Refuted {
+                let text = super::evidence::finding_text(
+                    &candidate.id,
+                    CANNOT_PASS,
+                    &candidate.evidence,
+                    &decision.counterexample,
+                    &decision.reason,
+                );
+                refuted.insert(candidate.id.clone(), (decision, text));
+            }
+            continue;
+        }
         let Some(command) = check_command(contract, &candidate.id) else {
             pending.push(candidate);
             continue;
@@ -139,7 +154,11 @@ fn external_usage_error_on_path(
         .iter()
         .enumerate()
         .find(|(_, line)| parser_error(line))?;
-    if invokes_script_or_module(command) {
+    let invoked = command.split_whitespace().next()?;
+    let invoked = Path::new(invoked).file_name()?.to_str()?;
+    if invokes_script_or_module(command)
+        && (error_prefix(error) == Some(invoked) || error_prefix(error) == script_program(command))
+    {
         return None;
     }
     let usage = (0..lines.len())
@@ -187,6 +206,16 @@ fn invokes_script_or_module(command: &str) -> bool {
     words
         .next()
         .is_some_and(|argument| argument == "-m" || argument.contains('/'))
+}
+
+fn script_program(command: &str) -> Option<&str> {
+    let mut words = command.split_whitespace();
+    words.next()?;
+    let argument = words.next()?;
+    if argument.starts_with('-') || !argument.contains('/') {
+        return None;
+    }
+    Path::new(argument).file_stem()?.to_str()
 }
 
 fn parser_error(line: &str) -> bool {

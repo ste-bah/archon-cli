@@ -249,8 +249,13 @@ pub(super) fn pause_on_stall(
             record.operational_errors.join("; ")
         )
     } else {
+        let verdicts = record
+            .operational_errors
+            .iter()
+            .find(|error| error.starts_with("passability re-judge verdicts:"))
+            .map_or_else(String::new, |error| format!("; {error}"));
         format!(
-            "acceptance round {} (attempt {}) made no progress ({cause}: {} trailing round(s) without progress, {} check(s) still failing: {}); the run is paused, not failed. The evidence is {record_path}; fix what it names, then {resume}",
+            "acceptance round {} (attempt {}) made no progress ({cause}: {} trailing round(s) without progress, {} check(s) still failing: {}){verdicts}; the run is paused, not failed. The evidence is {record_path}; fix what it names, then {resume}",
             record.round,
             record.attempt,
             decision.stalled_rounds,

@@ -180,7 +180,7 @@ async fn a_missing_passability_id_is_reasked_with_the_passability_prompt() {
     let calls = client.calls();
     let reask = calls[1][0]["content"].as_str().expect("user prompt");
     assert!(
-        reask.contains("Each acceptance check below already ran once"),
+        reask.contains("Each acceptance check below already ran on the evidence tree"),
         "missing passability prompt sentence: {reask}"
     );
     assert!(
