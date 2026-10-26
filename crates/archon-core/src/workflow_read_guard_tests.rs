@@ -95,7 +95,9 @@ async fn workflow_read_guard_dedup_is_range_and_hash_aware_with_force_refresh() 
     assert!(first.content.contains("fn old()"));
     let repeat = registry.dispatch("Read", input.clone(), &ctx).await;
     assert!(
-        repeat.content.contains("unchanged since your read at call")
+        repeat
+            .content
+            .contains("unchanged since your earlier Read call")
             && !repeat.content.contains("fn old()")
     );
     let next = registry
