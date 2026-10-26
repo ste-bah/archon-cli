@@ -31,7 +31,7 @@ impl MockProvider {
         }
     }
 
-    fn requests(&self) -> Vec<LlmRequest> {
+    pub(super) fn requests(&self) -> Vec<LlmRequest> {
         self.requests.lock().unwrap().clone()
     }
 }
@@ -142,7 +142,11 @@ pub(super) fn text_response(text: &str) -> Vec<StreamEvent> {
     ]
 }
 
-fn tool_use_response(tool_id: &str, tool_name: &str, input_json: &str) -> Vec<StreamEvent> {
+pub(super) fn tool_use_response(
+    tool_id: &str,
+    tool_name: &str,
+    input_json: &str,
+) -> Vec<StreamEvent> {
     vec![
         StreamEvent::MessageStart {
             id: "msg-tool".into(),

@@ -120,22 +120,21 @@ async fn history_replacement_restores_an_oversized_read_until_budget_exhaustion(
 }
 
 #[tokio::test]
-async fn a_child_thrashing_sets_the_shared_terminal_and_fails_the_parent_runner() {
+async fn a_parent_thrashing_ends_the_parent_runner() {
     use archon_llm::streaming::StreamEvent;
 
     let guard = Arc::new(WorkflowReadGuard::new(0, 0, false, false));
-    let child = ToolContext {
+    let parent = ToolContext {
         session_id: "AC-X-001".into(),
-        subagent_id: Some("TASK-X-001".into()),
         workflow_read_guard: Some(guard.clone()),
         ..ToolContext::default()
     };
     for _ in 0..=archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL {
-        let _ = guard.before_tool_for(&child, "Read", &json!({"file_path":"data.txt"}));
+        let _ = guard.before_tool_for(&parent, "Read", &json!({"file_path":"data.txt"}));
     }
     let terminal = guard
-        .terminal_failure()
-        .expect("child call should set terminal");
+        .terminal_failure_for(&parent)
+        .expect("parent call should set its terminal verdict");
     let call = vec![
         StreamEvent::MessageStart {
             id: "m".into(),
@@ -159,9 +158,150 @@ async fn a_child_thrashing_sets_the_shared_terminal_and_fails_the_parent_runner(
         call,
         crate::subagent::runner::tests::text_response("done"),
     ]));
-    let mut parent = crate::subagent::runner::tests::make_runner(provider, 3);
-    parent.tool_context.workflow_read_guard = Some(guard);
+    let mut runner = crate::subagent::runner::tests::make_runner(provider, 3);
+    runner.tool_context = parent;
 
-    let error = parent.run("continue").await.unwrap_err().to_string();
+    let error = runner.run("continue").await.unwrap_err().to_string();
     assert!(error.contains(&terminal), "{error}");
+}
+
+#[tokio::test]
+async fn child_thrashing_returns_an_error_to_the_child_caller_and_parent_continues() {
+    use archon_tools::tool::{PermissionLevel, ToolCapability, ToolResult};
+
+    let guard = Arc::new(WorkflowReadGuard::new(0, 0, false, false));
+    let child = ToolContext {
+        session_id: "AC-X-001".into(),
+        subagent_id: Some("TASK-X-001".into()),
+        workflow_read_guard: Some(guard.clone()),
+        ..ToolContext::default()
+    };
+    let parent = ToolContext {
+        session_id: "AC-X-001".into(),
+        workflow_read_guard: Some(guard.clone()),
+        ..ToolContext::default()
+    };
+    let child_responses = (0..=archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL)
+        .map(|index| {
+            crate::subagent::runner::tests::tool_use_response(
+                &format!("AC-X-{index:03}"),
+                "Read",
+                r#"{"file_path":"data.txt"}"#,
+            )
+        })
+        .chain(std::iter::once(
+            crate::subagent::runner::tests::text_response("child should stop before this response"),
+        ))
+        .collect();
+    let child_provider = Arc::new(crate::subagent::runner::tests::MockProvider::new(
+        child_responses,
+    ));
+    let mut child_runner = crate::subagent::runner::tests::make_runner(child_provider, 20);
+    child_runner.tool_context = child.clone();
+
+    struct ChildFailure(crate::subagent::runner::SubagentRunner);
+    #[async_trait::async_trait]
+    impl Tool for ChildFailure {
+        fn name(&self) -> &str {
+            "AC-X-002"
+        }
+        fn description(&self) -> &str {
+            ""
+        }
+        fn input_schema(&self) -> Value {
+            json!({"type":"object"})
+        }
+        async fn execute(&self, _input: Value, _context: &ToolContext) -> ToolResult {
+            match self.0.run("continue").await {
+                Ok(result) => ToolResult::success(result),
+                Err(error) => ToolResult::error(error.to_string()),
+            }
+        }
+        fn permission_level(&self, _input: &Value) -> PermissionLevel {
+            PermissionLevel::Safe
+        }
+        fn capability(&self) -> ToolCapability {
+            ToolCapability::HostLocal
+        }
+    }
+
+    let provider = Arc::new(crate::subagent::runner::tests::MockProvider::new(vec![
+        crate::subagent::runner::tests::tool_use_response("t1", "AC-X-002", "{}"),
+        crate::subagent::runner::tests::text_response("parent continued"),
+    ]));
+    let mut runner = crate::subagent::runner::tests::make_runner(provider.clone(), 3);
+    runner.tool_context = parent.clone();
+    runner.registry = Arc::new({
+        let mut tools = crate::dispatch::ToolRegistry::new();
+        tools.register(Box::new(ChildFailure(child_runner)));
+        tools
+    });
+
+    let result = runner.run("continue").await;
+    assert_eq!(result.unwrap(), "parent continued");
+    let terminal = guard
+        .terminal_failure_for(&child)
+        .expect("child invocation should retain its terminal verdict");
+    let delivered = serde_json::to_string(&provider.requests()[1].messages).unwrap();
+    assert!(delivered.contains(&terminal), "{delivered}");
+    assert!(delivered.contains("\"is_error\":true"), "{delivered}");
+    assert_eq!(guard.terminal_failure_for(&parent), None);
+}
+
+#[test]
+fn one_thrashing_sibling_does_not_end_another_sibling() {
+    let guard = Arc::new(WorkflowReadGuard::new(0, 0, false, false));
+    let sibling_a = ToolContext {
+        session_id: "AC-X-001".into(),
+        subagent_id: Some("TASK-X-001".into()),
+        workflow_read_guard: Some(guard.clone()),
+        ..ToolContext::default()
+    };
+    let sibling_b = ToolContext {
+        subagent_id: Some("TASK-X-002".into()),
+        ..sibling_a.clone()
+    };
+    let inspection = archon_tools::workflow_read_guard::READ_ONLY_INSPECTION_TOOLS[0];
+    for _ in 0..=archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL {
+        let _ = guard.before_tool_for(&sibling_a, inspection, &json!({"file_path":"data.txt"}));
+    }
+    assert!(guard.terminal_failure_for(&sibling_a).is_some());
+    for _ in 0..archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL {
+        let verdict =
+            guard.before_tool_for(&sibling_b, inspection, &json!({"file_path":"data.txt"}));
+        assert!(verdict.is_some_and(|reason| {
+            !reason.starts_with(archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER)
+        }));
+    }
+    let terminal = guard.before_tool_for(&sibling_b, inspection, &json!({"file_path":"data.txt"}));
+    assert!(terminal.is_some_and(|reason| {
+        reason.starts_with(archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER)
+    }));
+
+    assert!(guard.terminal_failure_for(&sibling_a).is_some());
+    assert!(guard.terminal_failure_for(&sibling_b).is_some());
+}
+
+#[test]
+fn terminal_verdict_stays_with_invocation_after_sibling_write() {
+    let guard = WorkflowReadGuard::new(0, 0, false, false);
+    let thrashing = ToolContext {
+        session_id: "AC-X-001".into(),
+        subagent_id: Some("TASK-X-001".into()),
+        ..ToolContext::default()
+    };
+    let sibling = ToolContext {
+        subagent_id: Some("TASK-X-002".into()),
+        ..thrashing.clone()
+    };
+    let inspection = archon_tools::workflow_read_guard::READ_ONLY_INSPECTION_TOOLS[0];
+    for _ in 0..=archon_tools::workflow_read_guard::MAX_NON_WRITING_CALLS_AFTER_WALL {
+        let _ = guard.before_tool_for(&thrashing, inspection, &json!({"file_path":"data.txt"}));
+    }
+    let terminal = guard.terminal_failure_for(&thrashing).unwrap();
+
+    guard.record_write(b"before", b"after");
+
+    assert_eq!(guard.terminal_failure_for(&thrashing), Some(terminal));
+    assert_eq!(guard.terminal_failure_for(&sibling), None);
 }

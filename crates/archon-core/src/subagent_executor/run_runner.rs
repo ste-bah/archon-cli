@@ -267,6 +267,7 @@ impl AgentSubagentExecutor {
             // string used for the manager entry, the worktree/memory caches
             // and every hook payload (see `run_prepare::register_subagent_run`).
             subagent_id: Some(ids.cache_id.clone()),
+            parent_subagent_id: parent_ctx.subagent_id.clone(),
             // Inherited, not minted: a child's whole run happens inside one
             // parent turn, so under `sandbox.scope = "turn"` it belongs to that
             // turn's lifetime. Its own working directory still keys the sandbox

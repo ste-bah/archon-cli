@@ -97,10 +97,6 @@ struct State {
     focused: Option<FocusedTests>,
     /// The budget has been refused at least once since the last substantive write (Issue-54).
     wall_hit: bool,
-    /// Calls counted as thrash since the wall was hit; see `thrash`.
-    non_writing_after_wall: u32,
-    /// Set once the thrash cutoff is passed: every later call is refused with it.
-    terminal: Option<String>,
     /// Failures of each normalised Bash command since the last substantive
     /// write (Issue-124); see `repeat`.
     failing_runs: BTreeMap<String, u32>,
@@ -113,6 +109,11 @@ struct AgentState {
     calls: u64,
     read_only_inspections: u32,
     inspection_withdrawn: Option<String>,
+    /// Calls counted after the shared branch read wall, scoped to this agent.
+    non_writing_after_wall: u32,
+    /// Terminal thrash verdict for this invocation only.
+    terminal: Option<String>,
+    terminal_charged_to_parent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,30 +217,41 @@ impl WorkflowReadGuard {
     /// worktree add` the previous session had already been refused.
     #[cfg(test)]
     pub fn before_tool(&self, name: &str, input: &Value) -> Option<String> {
-        self.before_tool_for_key((String::new(), None), name, input)
+        self.before_tool_for_key((String::new(), None), false, name, input)
     }
 
     /// Common tool-dispatch boundary with the calling agent's identity.
     pub fn before_tool_for(&self, ctx: &ToolContext, name: &str, input: &Value) -> Option<String> {
         self.before_tool_for_key(
             (ctx.session_id.clone(), ctx.subagent_id.clone()),
+            ctx.parent_subagent_id.is_some(),
             name,
             input,
         )
     }
 
-    fn before_tool_for_key(&self, key: AgentKey, name: &str, input: &Value) -> Option<String> {
+    fn before_tool_for_key(
+        &self,
+        key: AgentKey,
+        child: bool,
+        name: &str,
+        input: &Value,
+    ) -> Option<String> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.calls = state.calls.saturating_add(1);
         state.calls_since_write = state.calls_since_write.saturating_add(1);
         let agent = state.agent_state.entry(key.clone()).or_default();
         agent.calls = agent.calls.saturating_add(1);
         let call = state.calls;
-        let refusal = match state.terminal.clone() {
+        let terminal = state
+            .agent_state
+            .get(&key)
+            .and_then(|agent| agent.terminal.clone());
+        let refusal = match terminal {
             Some(terminal) => terminal,
             None => {
                 let verdict = self.admit(&mut state, &key, name, input);
-                thrash::observe(&mut state, name, input, verdict)?
+                thrash::observe(&mut state, &key, name, input, verdict)?
             }
         };
         drop(state);
@@ -247,10 +259,12 @@ impl WorkflowReadGuard {
         let reason = first_line(&refusal);
         self.remember(json!({
             "kind": REFUSAL_RECORD_KIND, "call": call, "tool": name, "head": head, "reason": reason,
+            "agent_id": key.1.clone(), "child": child,
         }));
         self.remember(json!({
             "kind": TOOL_CALL_RECORD_KIND, "call": call, "tool": name, "head": head,
             "status": format!("refused: {reason}"),
+            "agent_id": key.1.clone(), "child": child,
         }));
         Some(refusal)
     }
@@ -472,14 +486,58 @@ impl WorkflowReadGuard {
         Some(focused.submit_instruction())
     }
 
-    /// The text the session must end with, once the thrash cutoff is passed
-    /// (Issue-54). Read by the subagent runner after each tool round.
+    /// Any agent's terminal thrash verdict, for diagnostics and tests over the
+    /// whole guard. Agent runners use [`Self::terminal_failure_for`], so one
+    /// agent's verdict never ends another (Issue-521).
     pub fn terminal_failure(&self) -> Option<String> {
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .terminal
-            .clone()
+            .agent_state
+            .values()
+            .find_map(|agent| agent.terminal.clone())
+    }
+
+    /// The terminal thrash verdict for the calling agent invocation.
+    pub fn terminal_failure_for(&self, ctx: &ToolContext) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .agent_state
+            .get(&(ctx.session_id.clone(), ctx.subagent_id.clone()))
+            .and_then(|agent| agent.terminal.clone())
+    }
+
+    /// Count a terminal child invocation as one non-writing call for its
+    /// caller, so repeated respawns eventually reach the same cutoff.
+    pub fn charge_terminal_to_parent(&self, ctx: &ToolContext) {
+        if ctx.subagent_id.is_none() {
+            return;
+        }
+        if self.terminal_failure_for(ctx).is_none() {
+            return;
+        }
+        let child_key = (ctx.session_id.clone(), ctx.subagent_id.clone());
+        let parent_key = (ctx.session_id.clone(), ctx.parent_subagent_id.clone());
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let charged = state.agent_state.entry(child_key).or_default();
+        if charged.terminal_charged_to_parent {
+            return;
+        }
+        charged.terminal_charged_to_parent = true;
+        if !state.wall_hit {
+            return;
+        }
+        let non_writing = {
+            let parent = state.agent_state.entry(parent_key.clone()).or_default();
+            parent.non_writing_after_wall = parent.non_writing_after_wall.saturating_add(1);
+            parent.non_writing_after_wall
+        };
+        if non_writing > MAX_NON_WRITING_CALLS_AFTER_WALL {
+            let terminal =
+                thrash::terminal_message(non_writing, state.writes, state.focused.as_ref());
+            state.agent_state.entry(parent_key).or_default().terminal = Some(terminal);
+        }
     }
 }
 
