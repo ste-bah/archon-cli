@@ -30,6 +30,28 @@ pub fn mark_v2_call_running(
     store.save_state_preserving_control(&run)
 }
 
+/// Reconcile a saved call result when restart finds the stage still running.
+/// This crash window occurs after the result is durable but before its stage
+/// projection is updated.
+pub fn reconcile_running_v2_call_stage(
+    store: &WorkflowStore,
+    run_id: &str,
+    call_id: &str,
+    status: WorkflowV2Status,
+) -> crate::WorkflowResult<()> {
+    let mut run = store.load_state(run_id)?;
+    if !run
+        .stages
+        .get(call_id)
+        .is_some_and(|stage| stage.status == StageStatus::Running)
+    {
+        return Ok(());
+    }
+    sync_call_stage(&mut run, call_id, status);
+    run.mark_updated();
+    store.save_state_preserving_control(&run)
+}
+
 /// Persist a terminal run status to state.json on the paths that never reach
 /// `sync_v2_summary_to_run`.
 ///
