@@ -3,6 +3,8 @@ use archon_workflow::task_set_contract::JudgeDecision;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
+#[path = "workflow_judge_logic_identity_tests.rs"]
+mod logic_identity_tests;
 #[path = "workflow_judge_reuse_restore_tests.rs"]
 mod restore_tests;
 
@@ -26,6 +28,7 @@ struct RecordingJudge {
     batches: Mutex<Vec<Vec<String>>>,
     omit_supplementary: bool,
 }
+
 #[async_trait]
 impl WorkflowLlmClient for RecordingJudge {
     /// Scripted replies stand for one continued session (#241).
@@ -119,6 +122,7 @@ async fn frozen() -> (
     judge.batches.lock().unwrap().clear();
     (temp, tasks, prd, contract, judge)
 }
+
 #[tokio::test]
 async fn judge_reuse_skips_unchanged_and_judges_only_changed_entry() {
     let (temp, tasks, prd, mut contract, judge) = frozen().await;
@@ -171,6 +175,7 @@ async fn judge_reuse_skips_unchanged_and_judges_only_changed_entry() {
     let result: AcceptanceContract = serde_json::from_slice(&prepared.contract_bytes).unwrap();
     assert_eq!(result.acceptance[0].judgment, old);
 }
+
 #[tokio::test]
 async fn judge_reuse_never_skips_whole_contract_consistency() {
     let (temp, tasks, prd, mut contract, judge) = frozen().await;
@@ -337,7 +342,8 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
     for entry in &mut pinned.acceptance {
         entry.judgment.sampling = Some(serde_json::json!({
             "model": client.resolve_model_alias("sonnet"),
-            "provider": client.provider_id()
+            "provider": client.provider_id(),
+            "logic_identity": crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity().unwrap()
         }));
     }
     current.acceptance[0].judgment.verdict = JudgeDecision::Refuted;
@@ -378,7 +384,8 @@ fn pin_reuse_covers_supplementary_checks_too() {
     supplementary.judgment.verdict = JudgeDecision::Accepted;
     supplementary.judgment.sampling = Some(serde_json::json!({
         "model": client.resolve_model_alias("sonnet"),
-        "provider": client.provider_id()
+        "provider": client.provider_id(),
+        "logic_identity": crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity().unwrap()
     }));
     current.supplementary[0].judgment.verdict = JudgeDecision::Refuted;
     let restored = super::super::incremental::keep_pinned_entries(&mut current, &pinned, &client);

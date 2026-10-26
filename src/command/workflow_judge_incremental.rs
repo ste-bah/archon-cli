@@ -58,6 +58,21 @@ fn sampling_matches(client: &dyn WorkflowLlmClient, entry: &AcceptanceCriterion)
     })
 }
 
+fn current_logic_identity() -> Option<serde_json::Value> {
+    crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+        .map(|identity| serde_json::json!(identity))
+}
+
+fn record_logic_identity(entry: &mut AcceptanceCriterion, identity: &serde_json::Value) {
+    let sampling = entry
+        .judgment
+        .sampling
+        .get_or_insert_with(|| serde_json::json!({}));
+    if let Some(fields) = sampling.as_object_mut() {
+        fields.insert("logic_identity".into(), identity.clone());
+    }
+}
+
 pub(super) fn keep_pinned_entries(
     contract: &mut AcceptanceContract,
     base: &AcceptanceContract,
@@ -66,6 +81,9 @@ pub(super) fn keep_pinned_entries(
     if contract.prd.digest != base.prd.digest {
         return BTreeSet::new();
     }
+    let Some(identity) = current_logic_identity() else {
+        return BTreeSet::new();
+    };
     let mut restored = BTreeSet::new();
     for entry in contract
         .acceptance
@@ -84,6 +102,12 @@ pub(super) fn keep_pinned_entries(
             continue;
         };
         if old.judgment.verdict == JudgeDecision::Accepted
+            && old
+                .judgment
+                .sampling
+                .as_ref()
+                .and_then(|sampling| sampling.get("logic_identity"))
+                == Some(&identity)
             && old.criterion == entry.criterion
             && old.check == entry.check
             && old.covers == entry.covers
@@ -212,6 +236,9 @@ pub(super) async fn judge(
         if let Some(judgment) = load_entry(project, &key) {
             if judgment.verdict == JudgeDecision::Accepted {
                 entry.judgment = judgment;
+                if let Some(identity) = current_logic_identity() {
+                    record_logic_identity(entry, &identity);
+                }
                 reused.insert(entry.id.clone());
                 remaining = before_entry;
             }
@@ -245,6 +272,16 @@ pub(super) async fn judge(
             }
         };
         merge_judgments(&mut contract, &judged);
+        if let Some(identity) = current_logic_identity() {
+            for entry in contract
+                .acceptance
+                .iter_mut()
+                .chain(&mut contract.supplementary)
+                .filter(|entry| judged_ids.contains(&entry.id))
+            {
+                record_logic_identity(entry, &identity);
+            }
+        }
     }
     let mut pinned_ids = BTreeSet::new();
     if let Some(base) = &base {
