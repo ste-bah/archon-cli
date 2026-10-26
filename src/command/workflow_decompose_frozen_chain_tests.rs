@@ -486,3 +486,6 @@ fn the_staged_verify_child_reports_through_the_envelope_and_publishes_nothing() 
 
 #[path = "workflow_decompose_frozen_chain_launch_args_tests.rs"]
 mod launch_args_tests;
+
+#[path = "workflow_decompose_frozen_chain_landing_pending_tests.rs"]
+mod landing_pending_tests;

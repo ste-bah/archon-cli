@@ -335,6 +335,19 @@ pub(crate) fn reconcile_task_root(
             "landing reconciliation: no frozen skeleton yet; nothing landed".into(),
         ]);
     }
+    match crate::command::workflow_skeleton_pending::is_pending(task_root, &pin) {
+        Ok(true) => {
+            return Ok(vec![
+                "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; nothing landed".into(),
+            ]);
+        }
+        Err(error) => {
+            return Ok(vec![format!(
+                "landing reconciliation: the frozen chain does not validate ({error}); no body was compared"
+            )]);
+        }
+        Ok(false) => {}
+    }
     let skeleton = match archon_workflow::task_skeleton::validate_full_chain(task_root, &pin) {
         Ok(skeleton) => skeleton,
         // The frozen-chain decision after this reports the chain itself; no
