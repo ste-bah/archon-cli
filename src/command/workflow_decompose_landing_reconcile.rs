@@ -338,12 +338,12 @@ pub(crate) fn reconcile_task_root(
     match crate::command::workflow_skeleton_pending::is_pending(task_root, &pin) {
         Ok(true) => {
             return Ok(vec![
-                "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; nothing landed".into(),
+                "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; no body was compared".into(),
             ]);
         }
         Err(error) => {
             return Ok(vec![format!(
-                "landing reconciliation: the frozen chain does not validate ({error}); no body was compared"
+                "landing reconciliation: the frozen chain does not validate ({error:#}); no body was compared"
             )]);
         }
         Ok(false) => {}

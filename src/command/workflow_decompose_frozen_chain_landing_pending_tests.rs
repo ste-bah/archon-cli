@@ -33,7 +33,7 @@ fn landing_reconciliation_reports_a_pending_skeleton_without_manual_instructions
     assert_eq!(
         lines,
         vec![
-            "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; nothing landed"
+            "landing reconciliation: the task skeleton waits to be frozen again after the newer acceptance freeze; no body was compared"
         ]
     );
     assert!(
