@@ -31,21 +31,6 @@ pub(crate) async fn cannot_pass_findings(
     let mut refuted = BTreeMap::new();
     let mut pending = Vec::new();
     for candidate in candidates {
-        if let Some(decision) = audit_dir
-            .and_then(|directory| super::audit::load(directory, &candidate.key, &candidate.id))
-        {
-            if decision.verdict == JudgeDecision::Refuted {
-                let text = super::evidence::finding_text(
-                    &candidate.id,
-                    CANNOT_PASS,
-                    &candidate.evidence,
-                    &decision.counterexample,
-                    &decision.reason,
-                );
-                refuted.insert(candidate.id.clone(), (decision, text));
-            }
-            continue;
-        }
         let Some(command) = check_command(contract, &candidate.id) else {
             pending.push(candidate);
             continue;
@@ -85,9 +70,24 @@ pub(crate) async fn cannot_pass_findings(
                 &reason,
             );
             refuted.insert(candidate.id.clone(), (decision, text));
-        } else {
-            pending.push(candidate);
+            continue;
         }
+        if let Some(decision) = audit_dir
+            .and_then(|directory| super::audit::load(directory, &candidate.key, &candidate.id))
+        {
+            if decision.verdict == JudgeDecision::Refuted {
+                let text = super::evidence::finding_text(
+                    &candidate.id,
+                    CANNOT_PASS,
+                    &candidate.evidence,
+                    &decision.counterexample,
+                    &decision.reason,
+                );
+                refuted.insert(candidate.id.clone(), (decision, text));
+            }
+            continue;
+        }
+        pending.push(candidate);
     }
     if !pending.is_empty() {
         refuted.extend(
@@ -102,6 +102,10 @@ pub(crate) async fn cannot_pass_findings(
         .map(|(id, (_, text))| (id, text))
         .collect())
 }
+
+#[path = "workflow_acceptance_passability_usage_silent.rs"]
+mod silent;
+pub(crate) use silent::silent_stall_finding;
 
 pub(super) fn check_command<'a>(contract: &'a AcceptanceContract, id: &str) -> Option<&'a str> {
     super::entries(contract)
@@ -154,11 +158,7 @@ fn external_usage_error_on_path(
         .iter()
         .enumerate()
         .find(|(_, line)| parser_error(line))?;
-    let invoked = command.split_whitespace().next()?;
-    let invoked = Path::new(invoked).file_name()?.to_str()?;
-    if invokes_script_or_module(command)
-        && (error_prefix(error) == Some(invoked) || error_prefix(error) == script_program(command))
-    {
+    if invokes_script_or_module(command) {
         return None;
     }
     let usage = (0..lines.len())
@@ -206,16 +206,6 @@ fn invokes_script_or_module(command: &str) -> bool {
     words
         .next()
         .is_some_and(|argument| argument == "-m" || argument.contains('/'))
-}
-
-fn script_program(command: &str) -> Option<&str> {
-    let mut words = command.split_whitespace();
-    words.next()?;
-    let argument = words.next()?;
-    if argument.starts_with('-') || !argument.contains('/') {
-        return None;
-    }
-    Path::new(argument).file_stem()?.to_str()
 }
 
 fn parser_error(line: &str) -> bool {

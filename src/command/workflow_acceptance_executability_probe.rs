@@ -4,6 +4,9 @@
 use super::*;
 use crate::command::workflow_task_set::live_root;
 
+#[path = "workflow_acceptance_executability_stalled_tree.rs"]
+mod stalled_tree;
+
 impl HostProbe {
     #[cfg(test)]
     pub(super) fn inject_prove_run(&self, run: repairs::TreeRun, markers: mutation::Markers) {

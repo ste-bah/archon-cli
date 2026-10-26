@@ -250,7 +250,6 @@ pub(crate) struct HostProbe {
 mod baseline;
 #[path = "workflow_acceptance_executability_check_fault.rs"]
 mod check_fault;
-#[cfg(all(test, unix))]
 pub(crate) use baseline::Original;
 #[cfg(test)]
 pub(crate) use baseline::is_placeholder;

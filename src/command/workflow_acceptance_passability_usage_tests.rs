@@ -83,6 +83,10 @@ fn only_resolved_external_programs_with_parser_errors_are_host_refuted() {
             "usage: worker [--value VALUE]\nworker: error: unrecognized arguments: --new-flag\n",
         ),
         (
+            "repo-script-external-looking",
+            "tool: error: unrecognized arguments: --new-flag\nUsage: tool [OPTIONS]\n",
+        ),
+        (
             "cargo-implicit",
             "error: unexpected argument '--new-flag' found\nUsage: tool [OPTIONS]\n",
         ),
@@ -97,7 +101,7 @@ fn only_resolved_external_programs_with_parser_errors_are_host_refuted() {
     ] {
         let case_repository = tempfile::tempdir().unwrap();
         match name {
-            "repo-script" => {
+            "repo-script" | "repo-script-external-looking" => {
                 std::fs::create_dir_all(case_repository.path().join("scripts")).unwrap();
                 std::fs::write(case_repository.path().join("scripts/worker"), "").unwrap();
             }
@@ -126,7 +130,8 @@ fn only_resolved_external_programs_with_parser_errors_are_host_refuted() {
                 case_repository.path(),
                 case_repository.path(),
                 match name {
-                    "repo-script" => "runner scripts/worker --new-flag",
+                    "repo-script" | "repo-script-external-looking" =>
+                        "runner scripts/worker --new-flag",
                     "poetry" => "poetry-tool --new-flag",
                     "scoped-npm" => "tool --new-flag",
                     _ => "tool --new-flag",
@@ -332,7 +337,7 @@ async fn a_declared_binary_reaches_the_reauthor_passability_judge() {
     let judge = super::super::super::passability_tests::EvidenceJudge::default();
     let findings = super::cannot_pass_findings(
         &judge,
-        "model-x",
+        "reviewer",
         repository.path(),
         repository.path(),
         &contract,
@@ -427,6 +432,9 @@ async fn external_parser_refusal_uses_bounded_evidence_and_the_audit_gate() {
     .unwrap();
     assert_eq!(record["verdict"], "refuted");
 }
+
+#[path = "workflow_acceptance_passability_usage_regression_tests.rs"]
+mod regression_tests;
 
 #[test]
 fn the_usage_line_nearest_the_parser_error_names_the_rejecting_program() {

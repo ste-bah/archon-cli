@@ -276,7 +276,7 @@ async fn an_accepted_stalled_check_is_named_with_its_verdict_and_audit_reuses_it
         Some(&client),
     )
     .await;
-    assert_eq!(client.calls.load(Ordering::SeqCst), judged);
+    assert_eq!(client.calls.load(Ordering::SeqCst), judged, "prompts: {:?}", client.prompts.lock().unwrap());
 }
 
 struct RestorePath(Option<std::ffi::OsString>);
@@ -295,7 +295,7 @@ impl Drop for RestorePath {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn an_external_parser_error_on_the_round_tree_is_host_refuted_without_the_judge() {
+async fn a_script_invocation_with_external_parser_output_stays_on_the_judge_path() {
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = with_check(
@@ -335,55 +335,17 @@ async fn an_external_parser_error_on_the_round_tree_is_host_refuted_without_the_
     }
     unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
     let client = Judge::default();
-    for round in 1..=5 {
-        let call = execution(round, 5, &[]);
-        let generation = fixture.store.load_state(&fixture.run_id).unwrap().generation;
-        let outcome = run_acceptance_stage(
-            &fixture.runtime,
-            &call,
-            &fixture.store,
-            &fixture.run_id,
-            archon_workflow::control_pause::PauseOwner::Generation(generation),
-            Some(&fixture.universe),
-            Some(&client),
-        )
-        .await;
-        let result = match outcome {
-            Ok(result) => result,
-            Err(error) => {
-                let record = archon_workflow::v2::acceptance_stage::latest_round_record(
-                    &fixture.store.run_dir(&fixture.run_id),
-                )
-                .unwrap()
-                .unwrap()
-                .0;
-                panic!("unexpected acceptance error {error}; checks={:?}", record.checks);
-            }
-        };
-        if result.data["contract_repairs"]
-            .as_array()
-            .is_some_and(|repairs| repairs.iter().any(|repair| repair["repaired"] == true))
-        {
-            let audit_dir = crate::command::workflow_task_set::reauthor::cache::passability_audit_dir(
-                &fixture.store.run_dir(&fixture.run_id).join("v2"),
-            );
-            let records: Vec<Value> = std::fs::read_dir(audit_dir)
-                .unwrap()
-                .map(|entry| serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap())
-                .collect();
-            assert!(records.iter().any(|record| {
-                record["check_id"] == "AC-X-001"
-                    && record["verdict"] == "refuted"
-                    && record["reason"].as_str().unwrap_or_default().contains("nothing the repository implements can change how fakecheck parses its arguments")
-            }));
-            assert!(client
-                .prompts
-                .lock()
-                .unwrap()
-                .iter()
-                .all(|prompt| !prompt.contains("unrecognized argument: --badflag")));
-            return;
-        }
-    }
-    panic!("the host parser rule did not repair the stalled check");
+    let (_, message) = until_stall(&fixture, &client).await;
+    assert!(message.contains("AC-X-001: Accepted"), "{message}");
+    assert!(client.calls.load(Ordering::SeqCst) > 0);
+    assert!(client
+        .prompts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|prompt| prompt.contains("unrecognized argument: --badflag")));
+    let repairs = archon_workflow::v2::acceptance_stage::latest_round_record(
+        &fixture.store.run_dir(&fixture.run_id),
+    ).unwrap().unwrap().0.contract_repairs;
+    assert!(repairs.iter().all(|repair| repair.repaired == false));
 }

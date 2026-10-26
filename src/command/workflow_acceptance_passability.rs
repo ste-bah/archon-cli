@@ -53,7 +53,7 @@ pub(super) use audit::verdict_key;
 #[cfg(test)]
 pub(crate) use evidence::test_secret;
 use evidence::{Evidence, Redactor};
-pub(crate) use usage::cannot_pass_findings;
+pub(crate) use usage::{cannot_pass_findings, silent_stall_finding};
 
 /// What every finding for a check that cannot pass says, after its id.
 pub(crate) const CANNOT_PASS: &str = "cannot pass as written";
