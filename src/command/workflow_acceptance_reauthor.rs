@@ -384,6 +384,10 @@ pub(crate) async fn reauthor_partial_with_cache(
                         &sound,
                         &runs,
                         &prd_text,
+                        Some(cache::passability_audit_dir(
+                            state_dir.unwrap_or(scope.task_root.as_path()),
+                        ))
+                        .as_deref(),
                     )
                     .await
                     {

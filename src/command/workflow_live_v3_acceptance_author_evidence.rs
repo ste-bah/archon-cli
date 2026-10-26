@@ -55,14 +55,27 @@ pub(super) async fn validate(
             let runs = probe
                 .take_baseline_runs()
                 .expect("the author probe has a baseline");
-            let cannot_pass = if findings.is_empty() {
-                match cannot_pass_findings(client, model, &contract, &ids, &runs, &prd_text).await {
+            let cannot_pass =
+                if findings.is_empty() {
+                    match cannot_pass_findings(
+                    client,
+                    model,
+                    &contract,
+                    &ids,
+                    &runs,
+                    &prd_text,
+                    Some(&crate::command::workflow_task_set::reauthor::cache::passability_audit_dir(
+                        &site.run_dir.join("v2"),
+                    )),
+                )
+                .await
+                {
                     Ok(findings) => findings,
                     Err(error) => return Ok(Err(format!("{error:#}"))),
                 }
-            } else {
-                BTreeMap::new()
-            };
+                } else {
+                    BTreeMap::new()
+                };
             if let Some(why) = findings.get(id).or_else(|| cannot_pass.get(id)) {
                 staged.reject(id, why);
             } else {

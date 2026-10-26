@@ -16,6 +16,11 @@ pub(in super::super) struct Refused {
     pub(in super::super) stale_contract: bool,
 }
 
+pub(in super::super) struct FreshPublication {
+    pub(in super::super) freeze_event_id: String,
+    pub(in super::super) acceptance_digest: String,
+}
+
 /// Freeze `contract` exactly as `workflow freeze-acceptance` publishes, under
 /// the enforce gate: every finding refuses it. The lock records
 /// `baseline_commit`, the tree its checks were proven on (Issue 328).
@@ -25,7 +30,7 @@ pub(in super::super) fn publish_fresh(
     contract: &AcceptanceContract,
     baseline_commit: Option<String>,
     live_contract_digest: Option<String>,
-) -> Result<String, Refused> {
+) -> Result<FreshPublication, Refused> {
     archon_workflow::stage_write::with_write(|| {
         archon_workflow::WorkflowResult::Ok(publish_fresh_owned(
             context,
@@ -48,7 +53,7 @@ fn publish_fresh_owned(
     contract: &AcceptanceContract,
     baseline_commit: Option<String>,
     live_contract_digest: Option<String>,
-) -> Result<String, Refused> {
+) -> Result<FreshPublication, Refused> {
     use crate::command::workflow_gate::{GateEvaluation, GateId, run_sync_gate};
     let refused = |error: anyhow::Error| Refused {
         findings: Vec::new(),
@@ -95,5 +100,8 @@ fn publish_fresh_owned(
     let result = crate::command::workflow_task_set::publish_acceptance_freeze(prepared, permit)
         .map_err(refused)?;
     debug_assert!(context.task_root.join(ACCEPTANCE_CONTRACT_FILE).exists());
-    Ok(result.freeze_event_id)
+    Ok(FreshPublication {
+        freeze_event_id: result.freeze_event_id,
+        acceptance_digest: result.acceptance_digest,
+    })
 }

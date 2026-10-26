@@ -167,14 +167,14 @@ impl Staged {
     }
 
     /// Clear everything once it is published; why it could not be, if so.
-    pub(in super::super) fn clear(run_dir: &Path) -> Option<String> {
+    pub(in super::super) fn clear(run_dir: &Path, acceptance_digest: &str) -> Option<String> {
         archon_workflow::stage_write::with_write(|| {
-            archon_workflow::WorkflowResult::Ok(Self::clear_owned(run_dir))
+            archon_workflow::WorkflowResult::Ok(Self::clear_owned(run_dir, acceptance_digest))
         })
         .unwrap_or_else(|error| Some(error.to_string()))
     }
 
-    fn clear_owned(run_dir: &Path) -> Option<String> {
+    fn clear_owned(run_dir: &Path, acceptance_digest: &str) -> Option<String> {
         let staged_error = match std::fs::remove_file(staging_path(run_dir)) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
                 "the published checks' staging {} could not be cleared: {error}",
@@ -182,12 +182,14 @@ impl Staged {
             )),
             _ => None,
         };
-        let cache_error =
-            crate::command::workflow_task_set::reauthor::cache::remove(&run_dir.join("v2"))
-                .err()
-                .map(|error| {
-                    format!("the published checks' candidate records could not be cleared: {error}")
-                });
+        let cache_error = crate::command::workflow_task_set::reauthor::cache::archive(
+            &run_dir.join("v2"),
+            acceptance_digest,
+        )
+        .err()
+        .map(|error| {
+            format!("the published checks' candidate records could not be archived: {error}")
+        });
         staged_error.or(cache_error)
     }
 }

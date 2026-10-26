@@ -401,6 +401,32 @@ async fn resumed_unstamped_entry(extension: bool) {
             |_, check| !check["command"].as_str().unwrap().contains("refusing rule"),
         );
         let (_, record) = stage(&run, &client).await;
+        let audit_dir = run
+            .store
+            .run_dir(&run.run_id)
+            .join("v2")
+            .join(crate::command::workflow_task_set::reauthor::cache::CONSUMED)
+            .join("passability");
+        assert_eq!(
+            std::fs::read_dir(&audit_dir).unwrap().count(),
+            2,
+            "the re-author and staged evidence audits are stored under run state"
+        );
+        assert!(
+            !run.set
+                .project
+                .path()
+                .join(crate::command::workflow_task_set::reauthor::cache::CONSUMED)
+                .exists(),
+            "authoring must not create audit data in the project tree"
+        );
+        assert!(
+            !run.set
+                .tasks
+                .join(crate::command::workflow_task_set::reauthor::cache::CONSUMED)
+                .exists(),
+            "authoring must keep audit data out of the task root"
+        );
         assert_eq!(
             client.authored(),
             1,

@@ -12,6 +12,22 @@ use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
 };
 
+#[test]
+fn saved_candidates_hash_the_passability_judge_and_audit_sources() {
+    let names = crate::command::workflow_task_set::reauthor::cache::PROMPT_AND_JUDGE_SOURCES
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<BTreeSet<_>>();
+    for name in [
+        "workflow_acceptance_passability.rs",
+        "workflow_acceptance_passability_judge.rs",
+        "workflow_acceptance_passability_audit.rs",
+        "workflow_acceptance_passability_evidence.rs",
+    ] {
+        assert!(names.contains(name), "missing source digest input: {name}");
+    }
+}
+
 fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest<'a> {
     ReauthorRequest {
         project_root: set.project.path(),
@@ -84,6 +100,22 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
         !set.tasks.join("acceptance-reauthor-candidates").exists(),
         "published ledger consumes its saved candidates"
     );
+    let archive_root = set.tasks.join("acceptance-reauthor-candidates-consumed");
+    let archived = std::fs::read_dir(&archive_root)
+        .expect("published candidates are archived")
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.file_name().is_some_and(|name| name != "passability"))
+        .expect("one publish archive beside the audit directory");
+    let archived_record = std::fs::read_dir(archived)
+        .unwrap()
+        .next()
+        .expect("the consumed candidate is preserved")
+        .unwrap()
+        .path();
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(archived_record).unwrap()).unwrap();
+    assert_eq!(record["candidate"]["id"], "AC-F-002");
+    assert_eq!(record["candidate"]["judgment"]["verdict"], "accepted");
     assert_eq!(
         *client.resolved_agents.lock().unwrap(),
         vec![archon_core::agents::harness::ACCEPTANCE_REAUTHOR_AGENT.to_string()],

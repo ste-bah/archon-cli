@@ -1,11 +1,13 @@
 //! Issue 275 through the staged freeze: a check's own failure on the tree
 //! before any implementation is judged for whether the check can pass.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 use archon_workflow::error::WorkflowResult;
 use archon_workflow::llm_client_port::WorkflowAgentOutcome;
+use archon_workflow::task_set_contract::JudgeDecision;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -397,6 +399,69 @@ async fn the_reauthoring_freeze_shows_the_output_and_accepts_the_correction() {
         &contract.acceptance[0].check,
         archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } if command == ABSENT
     ));
+}
+
+#[tokio::test]
+async fn reauthor_decisions_are_written_to_the_audit_directory() {
+    use crate::command::workflow_task_set::executability::CheckEvidence;
+    use archon_workflow::acceptance_scratch::CheckResult;
+
+    let mut contract = crate::command::workflow_task_set::judge::continuation_tests::contract();
+    contract.acceptance[0].judgment.verdict = JudgeDecision::Accepted;
+    let failed = CheckResult {
+        fault: None,
+        acceptance_id: "AC-X-001".into(),
+        environment_note: None,
+        exit_code: Some(7),
+        quota_walk_count: 0,
+        stdout: Vec::new(),
+        stderr: b"baseline output below required minimum".to_vec(),
+        operational_error: None,
+        classification: None,
+    };
+    let runs = crate::command::workflow_task_set::executability::BaselineRuns {
+        reuse: Default::default(),
+        commit: "baseline-x".into(),
+        failures: BTreeMap::from([(
+            "AC-X-001".into(),
+            CheckEvidence {
+                result: failed,
+                copy_layout: None,
+            },
+        )]),
+        environment: Default::default(),
+        forwarded: Vec::new(),
+    };
+    let judge = EvidenceJudge::default();
+    let audit = tempfile::tempdir().unwrap();
+    let findings = super::passability::cannot_pass_findings(
+        &judge,
+        "sonnet",
+        &contract,
+        &BTreeSet::from(["AC-X-001".into()]),
+        &runs,
+        "",
+        Some(audit.path()),
+    )
+    .await
+    .unwrap();
+    assert!(findings.contains_key("AC-X-001"));
+    let path = std::fs::read_dir(audit.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let record: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(record["check_id"], "AC-X-001");
+    assert_eq!(record["verdict"], "refuted");
+    assert!(
+        record["reason"]
+            .as_str()
+            .unwrap()
+            .contains("below the minimum")
+    );
+    assert_eq!(record["baseline_exit_code"], 7);
 }
 
 #[path = "workflow_acceptance_passability_tests_b.rs"]
