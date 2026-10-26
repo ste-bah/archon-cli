@@ -24,7 +24,7 @@ fn stamp() -> FreezeGateStamp {
     }
 }
 
-fn criterion(id: &str, command: &str) -> AcceptanceCriterion {
+pub(super) fn criterion(id: &str, command: &str) -> AcceptanceCriterion {
     AcceptanceCriterion {
         id: id.into(),
         criterion: format!("criterion {id}"),
@@ -57,7 +57,7 @@ pub(super) struct Fixture {
 /// A project with a frozen two-task set whose repository has `present` but
 /// not `missing`: REQ-1 passes, REQ-2 (owned by TASK-F-002) fails, REQ-9 (no
 /// owner) fails.
-fn fixture(freeze: bool) -> Fixture {
+pub(super) fn fixture(freeze: bool) -> Fixture {
     fixture_with(freeze, "test -f missing")
 }
 

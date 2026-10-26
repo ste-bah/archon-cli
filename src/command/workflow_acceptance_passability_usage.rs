@@ -7,7 +7,7 @@ use super::evidence::{Redactor, STDERR_BYTES, STDOUT_BYTES};
 use super::executability::BaselineRuns;
 use super::*;
 
-/// Findings for replacement checks that cannot pass on their baseline tree.
+/// Findings for checks that cannot pass on the evidence tree they ran against.
 pub(crate) async fn cannot_pass_findings(
     client: &dyn WorkflowLlmClient,
     model: &str,
@@ -70,9 +70,24 @@ pub(crate) async fn cannot_pass_findings(
                 &reason,
             );
             refuted.insert(candidate.id.clone(), (decision, text));
-        } else {
-            pending.push(candidate);
+            continue;
         }
+        if let Some(decision) = audit_dir
+            .and_then(|directory| super::audit::load(directory, &candidate.key, &candidate.id))
+        {
+            if decision.verdict == JudgeDecision::Refuted {
+                let text = super::evidence::finding_text(
+                    &candidate.id,
+                    CANNOT_PASS,
+                    &candidate.evidence,
+                    &decision.counterexample,
+                    &decision.reason,
+                );
+                refuted.insert(candidate.id.clone(), (decision, text));
+            }
+            continue;
+        }
+        pending.push(candidate);
     }
     if !pending.is_empty() {
         refuted.extend(
@@ -87,6 +102,10 @@ pub(crate) async fn cannot_pass_findings(
         .map(|(id, (_, text))| (id, text))
         .collect())
 }
+
+#[path = "workflow_acceptance_passability_usage_silent.rs"]
+mod silent;
+pub(crate) use silent::silent_stall_finding;
 
 pub(super) fn check_command<'a>(contract: &'a AcceptanceContract, id: &str) -> Option<&'a str> {
     super::entries(contract)

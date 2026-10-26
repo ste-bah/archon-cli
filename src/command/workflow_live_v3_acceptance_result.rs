@@ -249,8 +249,13 @@ pub(super) fn pause_on_stall(
             record.operational_errors.join("; ")
         )
     } else {
+        let diagnostics = if record.operational_errors.is_empty() {
+            String::new()
+        } else {
+            format!("; {}", record.operational_errors.join("; "))
+        };
         format!(
-            "acceptance round {} (attempt {}) made no progress ({cause}: {} trailing round(s) without progress, {} check(s) still failing: {}); the run is paused, not failed. The evidence is {record_path}; fix what it names, then {resume}",
+            "acceptance round {} (attempt {}) made no progress ({cause}: {} trailing round(s) without progress, {} check(s) still failing: {}){diagnostics}; the run is paused, not failed. The evidence is {record_path}; fix what it names, then {resume}",
             record.round,
             record.attempt,
             decision.stalled_rounds,

@@ -13,6 +13,9 @@ mod refused_tests;
 #[path = "workflow_live_v3_acceptance_repair_tests.rs"]
 mod repair_tests;
 #[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_stalled_tests.rs"]
+mod stalled_tests;
+#[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_replay_tests.rs"]
 mod replay_tests;
 #[cfg(all(test, unix))]

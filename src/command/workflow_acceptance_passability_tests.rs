@@ -471,3 +471,14 @@ async fn reauthor_decisions_are_written_to_the_audit_directory() {
 mod b;
 #[path = "evidence_418_tests.rs"]
 mod evidence_418_tests;
+#[path = "workflow_acceptance_passability_stalled_tests.rs"]
+mod stalled_audit_tests;
+
+#[test]
+fn passability_instruction_identifies_the_evidence_tree_instead_of_assuming_baseline() {
+    assert!(
+        !super::passability::INSTRUCTION.contains("BEFORE any implementation"),
+        "implemented-tree evidence must not be described as baseline evidence"
+    );
+    assert!(super::passability::INSTRUCTION.contains("evidence tree"));
+}
