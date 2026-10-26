@@ -165,6 +165,11 @@ fn missing_check_fields(candidate: &str, content: &str, markers: &[String]) -> O
     let _ = super::resolve_command_block_with_markers(&mut value, content, markers);
     let check = value.get_mut("check")?.as_object_mut()?;
     let mut missing = Vec::new();
+    let missing_field = |error: &str| {
+        error
+            .split_once("missing field `")
+            .and_then(|(_, rest)| rest.split_once('`').map(|(field, _)| field.to_string()))
+    };
     loop {
         match serde_json::from_value::<archon_workflow::task_set_contract::AcceptanceCheck>(
             Value::Object(check.clone()),
@@ -172,14 +177,29 @@ fn missing_check_fields(candidate: &str, content: &str, markers: &[String]) -> O
             Ok(_) => break,
             Err(error) => {
                 let error = error.to_string();
-                let Some(field) = error
-                    .split_once("missing field `")
-                    .and_then(|(_, rest)| rest.split_once('`').map(|(field, _)| field))
-                else {
+                let Some(field) = missing_field(&error) else {
                     break;
                 };
+                // A field the check already holds is missing deeper down (a
+                // nested object), so filling it here cannot end the loop.
+                if check.contains_key(&field) {
+                    break;
+                }
                 missing.push(format!("check.{field}"));
                 check.insert(field.to_string(), Value::String(String::new()));
+                if let Err(error) = serde_json::from_value::<
+                    archon_workflow::task_set_contract::AcceptanceCheck,
+                >(Value::Object(check.clone()))
+                {
+                    let error = error.to_string();
+                    let still_missing = missing_field(&error).as_deref() == Some(field.as_str());
+                    let now_unknown = error.contains(&format!("unknown field `{field}`"));
+                    if still_missing || now_unknown {
+                        missing.pop();
+                        check.remove(&field);
+                        break;
+                    }
+                }
             }
         }
     }

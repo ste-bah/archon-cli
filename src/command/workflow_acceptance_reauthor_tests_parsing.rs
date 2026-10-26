@@ -459,3 +459,27 @@ fn command_block_accepts_absent_command_and_refuses_empty_command() {
         "acceptance entry AC-F-001 returned both check.command and check.command_block — remove check.command from the JSON when you use the check block"
     );
 }
+
+#[test]
+fn nested_missing_field_in_an_early_closed_entry_does_not_hang() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let frozen = &set.contract().acceptance[0];
+    // The floor variant's `contract` is an object whose own fields are
+    // missing; filling them at the check's top level never satisfies serde.
+    let reply = r#"{"id":"AC-X-001","check":{"kind":"floor","contract":{"kind":"x"}}},"gap_permitted":false}"#;
+    let error = candidate_entry(reply, frozen).expect_err("early close is diagnosed");
+    assert!(error.contains("before \"gap_permitted\""), "{error}");
+    // The nested field is not a check field: naming it would be false.
+    assert!(!error.contains("check.artifact_path"), "{error}");
+    assert!(!error.contains("check.kind"), "{error}");
+
+    let command_reply = r#"{"id":"AC-X-001","check":{"kind":"command"}},"gap_permitted":false}"#;
+    let command_error =
+        candidate_entry(command_reply, frozen).expect_err("early close is diagnosed");
+    assert!(command_error.contains("check.command"), "{command_error}");
+    assert!(command_error.contains("check.cwd"), "{command_error}");
+
+    let floor_reply = r#"{"id":"AC-X-001","check":{"kind":"floor"}},"gap_permitted":false}"#;
+    let floor_error = candidate_entry(floor_reply, frozen).expect_err("early close is diagnosed");
+    assert!(floor_error.contains("check.contract"), "{floor_error}");
+}
