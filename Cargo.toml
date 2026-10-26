@@ -92,7 +92,7 @@ urlencoding = "2"
 which = "7"
 notify = "7"
 pulldown-cmark = "0.12"
-lopdf = "0.36"
+lopdf = "0.42"
 tree-sitter = "0.25"
 tree-sitter-highlight = "0.25"
 tree-sitter-rust = "0.24"
@@ -130,7 +130,7 @@ aws-credential-types = "1"
 jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 hmac = "0.12"
 semver = { version = "1", features = ["serde"] }
-russh = "0.63.3"
+russh = "0.64.1"
 # "multipart" is for the workbench upload endpoint: a browser posts a dropped
 # file as multipart/form-data and there is no other wire format for it.
 axum = { version = "0.8", features = ["ws", "multipart"] }

@@ -355,7 +355,10 @@ async fn connect_with_handler(
         read_buf: Mutex::new(String::new()),
     };
 
-    tracing::info!("ssh: session established session_id={}", config.session_id);
+    tracing::info!(
+        "ssh: session established session_tag={}",
+        super::session_tag(&config.session_id)
+    );
 
     Ok(RemoteSession {
         session_id: config.session_id.clone(),

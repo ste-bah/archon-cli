@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "../../../tests/support/host_toolchain.rs"]
+mod host_toolchain;
+
 macro_rules! ordinary {
     ($id:ident, $text:expr) => {
         #[test]
@@ -166,10 +169,9 @@ fn r3_configured_host_offline_cargo_dependency() {
         forwarded: vec!["FIXTURE_API_KEY".into()],
     };
     let environment = CommandEnvironment::from_host(&host, Some(&policy)).unwrap();
-    let cargo = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap()
-        .join(".cargo/bin/cargo");
+    let cargo =
+        host_toolchain::cargo_on_path(policy.toolchain_path.as_deref().expect("policy PATH"))
+            .expect("host cargo on policy PATH");
     let output = environment
         .command(cargo)
         .args([

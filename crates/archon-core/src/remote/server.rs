@@ -134,7 +134,8 @@ fn extract_bearer_token(headers: &HeaderMap, query_token: &Option<String>) -> Op
 }
 
 async fn handle_ws(mut socket: WebSocket, session_id: String, state: ServerState) {
-    tracing::info!("ws: new session {session_id}");
+    let session_tag = super::session_tag(&session_id);
+    tracing::info!("ws: new session session_tag={session_tag}");
     state.sessions.lock().await.insert(session_id.clone(), ());
 
     while let Some(Ok(msg)) = socket.recv().await {
@@ -152,7 +153,7 @@ async fn handle_ws(mut socket: WebSocket, session_id: String, state: ServerState
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("ws: invalid message from {session_id}: {e}");
+                        tracing::warn!("ws: invalid message from session_tag={session_tag}: {e}");
                     }
                 }
             }
@@ -162,7 +163,7 @@ async fn handle_ws(mut socket: WebSocket, session_id: String, state: ServerState
     }
 
     state.sessions.lock().await.remove(&session_id);
-    tracing::info!("ws: session {session_id} closed");
+    tracing::info!("ws: session session_tag={session_tag} closed");
 }
 
 /// WebSocket handler for IDE extension connections (`GET /ws/ide`).
@@ -273,7 +274,10 @@ async fn delete_session_handler(
 ) -> StatusCode {
     let mut sessions = state.sessions.lock().await;
     if sessions.remove(&id).is_some() {
-        tracing::info!("ws: session {id} terminated via API");
+        tracing::info!(
+            "ws: session session_tag={} terminated via API",
+            super::session_tag(&id)
+        );
         StatusCode::OK
     } else {
         StatusCode::NOT_FOUND
