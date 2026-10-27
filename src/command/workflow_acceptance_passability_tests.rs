@@ -103,7 +103,7 @@ impl WorkflowLlmClient for EvidenceJudge {
                 serde_json::json!({
                     "id": check["id"],
                     "verdict": if refused { "refuted" } else { "accepted" },
-                    "counterexample": if refused { "observed rows below the required minimum" } else { "none is constructible" },
+                    "counterexample": if refused { "the output says \"observed rows 40 below required minimum 400\"" } else { "none is constructible" },
                     "reason": format!("{}{quote}", if refused { "its own fixture is below the minimum the product enforces; supply enough rows" } else { "the failure is the absent feature" }),
                 })
             })
@@ -471,6 +471,8 @@ async fn reauthor_decisions_are_written_to_the_audit_directory() {
 mod b;
 #[path = "evidence_418_tests.rs"]
 mod evidence_418_tests;
+#[path = "workflow_acceptance_passability_grounding_tests.rs"]
+mod grounding_tests;
 #[path = "workflow_acceptance_passability_stalled_tests.rs"]
 mod stalled_audit_tests;
 
