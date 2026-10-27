@@ -17,20 +17,23 @@ pub(super) fn entry_key(
     entry: &AcceptanceCriterion,
     roots: &super::judge::JudgeRoots,
 ) -> Option<String> {
-    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
-    entry_key_with_budget(client, tasks_root, prd_digest, entry, roots, &mut remaining)
-        .map(|(key, _)| key)
+    entry_key_with_named_digest(
+        client,
+        tasks_root,
+        prd_digest,
+        entry,
+        super::judge::named_files_content_digest(entry, roots),
+    )
+    .map(|(key, _)| key)
 }
 
-fn entry_key_with_budget(
+fn entry_key_with_named_digest(
     client: &dyn WorkflowLlmClient,
     tasks_root: &Path,
     prd_digest: &str,
     entry: &AcceptanceCriterion,
-    roots: &super::judge::JudgeRoots,
-    remaining: &mut usize,
+    named_file_digest: String,
 ) -> Option<(String, String)> {
-    let named_file_digest = super::judge::named_files_digest_with_budget(entry, roots, remaining);
     // Freeze-acceptance's closure digest is the authority for the full
     // judgment dependency graph, including prompt and verdict handling.
     let (version, digest, _) =
@@ -90,7 +93,6 @@ pub(super) fn keep_pinned_entries(
         return BTreeSet::new();
     };
     let mut restored = BTreeSet::new();
-    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     let old_named_file_digests: BTreeMap<_, _> = base
         .acceptance
         .iter()
@@ -98,7 +100,7 @@ pub(super) fn keep_pinned_entries(
         .map(|old| {
             (
                 old.id.clone(),
-                super::judge::named_files_digest_with_budget(old, roots, &mut remaining),
+                super::judge::named_files_content_digest(old, roots),
             )
         })
         .collect();
@@ -156,14 +158,18 @@ pub(super) fn save_judged_entries(
     pinned_ids: &BTreeSet<String>,
     roots: &super::judge::JudgeRoots,
 ) -> Result<()> {
-    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     for entry in contract.acceptance.iter().chain(&contract.supplementary) {
         if !judged_ids.contains(&entry.id) {
             continue;
         }
-        let key =
-            entry_key_with_budget(client, tasks_root, prd_digest, entry, roots, &mut remaining)
-                .map(|(key, _)| key);
+        let key = entry_key_with_named_digest(
+            client,
+            tasks_root,
+            prd_digest,
+            entry,
+            super::judge::named_files_content_digest(entry, roots),
+        )
+        .map(|(key, _)| key);
         if !pinned_ids.contains(&entry.id)
             && entry.judgment.verdict == JudgeDecision::Accepted
             && sampling_matches(client, entry)
@@ -250,20 +256,18 @@ pub(super) async fn judge(
         .and_then(|pin| validate_acceptance_bundle(tasks, Some(&pin), expected).ok());
     drop(read);
     let mut reused = BTreeSet::new();
-    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     for entry in contract
         .acceptance
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
-        let before_entry = remaining;
-        let Some((key, named_file_digest)) = entry_key_with_budget(
+        let named_file_digest = super::judge::named_files_content_digest(entry, roots);
+        let Some((key, named_file_digest)) = entry_key_with_named_digest(
             client,
             &tasks_root,
             &contract.prd.digest,
             entry,
-            roots,
-            &mut remaining,
+            named_file_digest,
         ) else {
             continue;
         };
@@ -275,7 +279,6 @@ pub(super) async fn judge(
             if judgment.verdict == JudgeDecision::Accepted {
                 entry.judgment = judgment;
                 reused.insert(entry.id.clone());
-                remaining = before_entry;
             }
         }
     }

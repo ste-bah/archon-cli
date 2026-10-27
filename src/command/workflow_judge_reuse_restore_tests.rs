@@ -128,7 +128,7 @@ fn workflow_judge_reuse_identical_pinned_fields_restore_but_each_changed_field_k
 }
 
 #[test]
-fn pinned_restore_matches_the_batch_digest_past_the_shared_source_byte_budget() {
+fn pinned_restore_matches_full_named_content_past_the_shared_source_byte_budget() {
     let root = tempfile::tempdir().unwrap();
     let limit = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     let content = "x".repeat(limit * 3 / 4);
@@ -160,19 +160,17 @@ fn pinned_restore_matches_the_batch_digest_past_the_shared_source_byte_budget() 
     current.acceptance = vec![first, second];
     current.supplementary.clear();
     let mut pinned = current.clone();
-    let mut remaining = limit;
     for entry in &mut pinned.acceptance {
         entry.judgment.verdict = JudgeDecision::Accepted;
         entry.judgment.sampling = Some(serde_json::json!({
             "model": client.resolve_model_alias("sonnet"),
             "provider": client.provider_id(),
         }));
-        crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_budget(
+        crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_content_digest(
             entry,
             &client.resolve_model_alias("sonnet"),
             client.provider_id().as_deref(),
             &roots,
-            &mut remaining,
         );
     }
     for entry in &mut current.acceptance {

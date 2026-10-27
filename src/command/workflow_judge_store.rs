@@ -245,7 +245,6 @@ fn stamps_match(
     identity: &serde_json::Value,
     roots: &super::judge::JudgeRoots,
 ) -> bool {
-    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     judged
         .acceptance
         .iter()
@@ -258,10 +257,7 @@ fn stamps_match(
                 && sampling
                     .get("named_file_digest")
                     .and_then(serde_json::Value::as_str)
-                    == Some(
-                        super::judge::named_files_digest_with_budget(entry, roots, &mut remaining)
-                            .as_str(),
-                    )
+                    == Some(super::judge::named_files_content_digest(entry, roots).as_str())
         })
 }
 

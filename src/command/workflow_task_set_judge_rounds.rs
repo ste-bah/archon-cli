@@ -100,8 +100,6 @@ pub(super) async fn judge_prompted_with_roots(
                 );
                 last_kind = JudgeIncompleteKind::AuthoredReply;
                 if missing.is_empty() {
-                    let mut remaining =
-                        archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
                     for entry in judged_contract
                         .acceptance
                         .iter_mut()
@@ -111,12 +109,11 @@ pub(super) async fn judge_prompted_with_roots(
                             "temperature": 0.0, "model": client.resolve_model_alias(model),
                             "provider": client.provider_id(),
                         }));
-                        crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_budget(
+                        crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_content_digest(
                             entry,
                             &client.resolve_model_alias(model),
                             client.provider_id().as_deref(),
                             roots,
-                            &mut remaining,
                         );
                     }
                     return Ok(judged_contract);

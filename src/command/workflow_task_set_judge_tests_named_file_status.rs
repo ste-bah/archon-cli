@@ -73,7 +73,7 @@ fn named_inputs_report_absence_exclusion_and_shared_budget_status() {
 }
 
 #[test]
-fn a_budget_exhausted_entry_is_stamped_with_its_prompt_digest() {
+fn a_budget_exhausted_entry_is_stamped_with_its_full_content_digest() {
     let root = tempfile::tempdir().unwrap();
     let large = "a".repeat(archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES);
     std::fs::write(root.path().join("first"), large).unwrap();
@@ -92,23 +92,24 @@ fn a_budget_exhausted_entry_is_stamped_with_its_prompt_digest() {
         ..contract()
     };
     let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
-    let prompt_digest =
-        named_files_digest_for_list(prompt_json(&prompt)[1]["named_files"].as_array().unwrap());
+    assert_eq!(
+        prompt_json(&prompt)[1]["named_files"][0]["status"],
+        "not_supplied"
+    );
 
     let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     let _ = named_files_digest_with_budget(&subject.acceptance[0], &roots, &mut remaining);
-    crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_budget(
+    crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_content_digest(
         &mut second,
         "model-x",
         Some("provider-x"),
         &roots,
-        &mut remaining,
     );
 
     assert_eq!(
         second.judgment.sampling.as_ref().unwrap()["named_file_digest"],
-        prompt_digest,
-        "the stamp must describe the budgeted evidence the prompt supplied"
+        super::named_files_content_digest(&subject.acceptance[1], &roots),
+        "the stamp must identify full input content independently of prompt budget"
     );
 }
 
