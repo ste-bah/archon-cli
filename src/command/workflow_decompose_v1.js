@@ -266,6 +266,62 @@ function bodyPolicy(subject, initialFeedback) {
 // attempts replay as history and a repair never overwrites a recorded call.
 const AUTHOR_CALLS = new Map();
 
+// Describe only patterns visible in the incomplete reply. Character counts
+// use Unicode code points, and empty content has no lines.
+function incompleteReplyFeedback(content) {
+  const text = typeof content === "string" ? content : "";
+  const characters = Array.from(text).length;
+  const lines = text === "" ? [] : text.split(/\r\n|\r|\n/);
+  const groups = new Map();
+  const fieldType = (value) => {
+    const field = value.trim();
+    if (field === "") return "empty";
+    if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(field)) return "number";
+    if (/^(?:true|false|null)$/i.test(field)) return field.toLowerCase();
+    return "text";
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    let key = null;
+    let kind = null;
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      try {
+        const value = JSON.parse(trimmed);
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          const fields = Object.keys(value).sort().map((name) => {
+            const item = value[name];
+            const type = item === null ? "null" : Array.isArray(item) ? "array" : typeof item;
+            return `${name}:${type}`;
+          }).join(",");
+          key = `json:${fields}`;
+          kind = "one-object-per-line JSON";
+        }
+      } catch (_) { /* A malformed line is not a JSON data row. */ }
+    }
+    if (key === null) {
+      for (const delimiter of [",", "\t"]) {
+        const fields = line.split(delimiter);
+        if (fields.length < 2) continue;
+        key = `delimited:${delimiter}:${fields.length - 1}:${fields.map(fieldType).join(":")}`;
+        kind = delimiter === "," ? "CSV" : "TSV";
+        break;
+      }
+    }
+    if (key !== null) {
+      const group = groups.get(key) || {count:0, kind};
+      group.count++;
+      groups.set(key, group);
+    }
+  }
+  let largest = null;
+  for (const group of groups.values()) if (!largest || group.count > largest.count) largest = group;
+  const size = `The provider cut off an incomplete reply of ${characters} characters across ${lines.length} lines`;
+  if (largest && largest.count > lines.length / 2) {
+    return `${size}; ${largest.count} of ${lines.length} lines share the same literal ${largest.kind} shape. Generate large or repetitive fixture data inside the check with a loop or small program, and keep only what the criterion needs.`;
+  }
+  return `${size}; return a shorter complete artifact.`;
+}
+
 // One subject's author loop, limited by progress (Issue 261): an attempt that
 // makes progress keeps it going; STALL_ATTEMPTS in a row without progress
 // pause the run with evidence, and a resumed run continues from the pause
@@ -339,7 +395,7 @@ async function authorCandidate(w, policy) {
     attempt += 1;
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
       feedback = [authored.stopReason === "max_tokens"
-        ? "The provider cut off the reply at its output limit; make the check shorter and return one complete artifact."
+        ? incompleteReplyFeedback(authored.content)
         : `Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
       recordAnswered(progress, call, "incomplete", false, !measuredReplies);
