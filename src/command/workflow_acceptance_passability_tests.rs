@@ -100,10 +100,12 @@ impl WorkflowLlmClient for EvidenceJudge {
             .map(|check| {
                 let stderr = check["baseline"]["stderr"].as_str().unwrap_or_default();
                 let refused = stderr.contains(RULE);
+                // A correct judge quotes the refusing line exactly as printed (#526).
+                let line = stderr.lines().find(|line| line.contains(RULE)).unwrap_or_default().trim();
                 serde_json::json!({
                     "id": check["id"],
                     "verdict": if refused { "refuted" } else { "accepted" },
-                    "counterexample": if refused { "the output says \"observed rows 40 below required minimum 400\"" } else { "none is constructible" },
+                    "counterexample": if refused { format!("the output says \"{line}\"") } else { "none is constructible".to_string() },
                     "reason": format!("{}{quote}", if refused { "its own fixture is below the minimum the product enforces; supply enough rows" } else { "the failure is the absent feature" }),
                 })
             })
