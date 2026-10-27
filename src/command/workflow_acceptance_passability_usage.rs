@@ -72,9 +72,10 @@ pub(crate) async fn cannot_pass_findings(
             refuted.insert(candidate.id.clone(), (decision, text));
             continue;
         }
-        if let Some(decision) = audit_dir
+        if let Some(mut decision) = audit_dir
             .and_then(|directory| super::audit::load(directory, &candidate.key, &candidate.id))
         {
+            super::evidence::ground_refutation(&mut decision, &candidate.evidence);
             if decision.verdict == JudgeDecision::Refuted {
                 let text = super::evidence::finding_text(
                     &candidate.id,

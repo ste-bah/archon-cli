@@ -39,7 +39,7 @@ impl WorkflowLlmClient for DecidesOnlyTheFirst {
         let decisions: Vec<_> = (ids.iter())
             .filter(|id| id.as_str() == "AC-X-001")
             .map(|id| {
-                serde_json::json!({"id": id, "verdict": "refuted", "counterexample": "its own fixture is refused", "reason": "the output states the refusing rule"})
+                serde_json::json!({"id": id, "verdict": "refuted", "counterexample": "the output says \"refused\"", "reason": "the output states the refusing rule"})
             })
             .collect();
         Ok(WorkflowAgentOutcome {

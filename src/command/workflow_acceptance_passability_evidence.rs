@@ -6,6 +6,8 @@ use archon_workflow::acceptance_scratch::CheckResult;
 use serde::Serialize;
 
 use super::super::executability::BaselineRuns;
+use super::Decision;
+use archon_workflow::task_set_contract::JudgeDecision;
 
 /// Bytes of the baseline stderr, then stdout, the judge and the author see.
 pub(crate) const STDERR_BYTES: usize = 2_000;
@@ -154,6 +156,94 @@ impl Evidence {
             evidence_reference: reuse.and_then(|audit| audit.evidence.clone()),
         }
     }
+
+    /// The output excerpts inside the fences shown to the judge.
+    pub(crate) fn judge_output(&self) -> Vec<String> {
+        [&self.stderr, &self.stdout]
+            .into_iter()
+            .map(|text| {
+                text.strip_prefix(&format!("{BEGIN}\n"))
+                    .and_then(|text| text.strip_suffix(&format!("\n{END}")))
+                    .unwrap_or(text)
+                    .to_string()
+            })
+            .collect()
+    }
+}
+
+/// Demote a judge refutation unless its quoted rule is in the exact bounded
+/// output excerpt that was included in this candidate's prompt.
+pub(crate) fn ground_refutation(decision: &mut Decision, evidence: &Evidence) {
+    if decision.verdict != JudgeDecision::Refuted {
+        return;
+    }
+    let fragments = quoted_fragments(&decision.counterexample);
+    let output: Vec<String> = evidence
+        .judge_output()
+        .iter()
+        .map(|text| normalized(text))
+        .collect();
+    let mut had_quoted_fragment = false;
+    for fragment in fragments {
+        had_quoted_fragment = true;
+        let missing = fragment.split(["...", "…"]).find(|part| {
+            let part = normalized(part);
+            !part.is_empty() && !output.iter().any(|text| text.contains(&part))
+        });
+        if let Some(missing) = missing {
+            let missing = missing.split_whitespace().collect::<Vec<_>>().join(" ");
+            decision.verdict = JudgeDecision::Accepted;
+            decision.counterexample =
+                "no quoted rule from the output refused the check's own setup".into();
+            decision.reason =
+                format!("the refutation quoted text the output does not contain: '{missing}'");
+            return;
+        }
+    }
+    if !had_quoted_fragment {
+        decision.verdict = JudgeDecision::Accepted;
+        decision.counterexample =
+            "no quoted rule from the output refused the check's own setup".into();
+        decision.reason = "the refutation contained no quoted fragment, so the output does not contain a quoted refusing rule".into();
+    }
+}
+
+fn quoted_fragments(text: &str) -> Vec<String> {
+    let mut fragments = Vec::new();
+    let mut opening: Option<(char, String)> = None;
+    let chars: Vec<char> = text.chars().collect();
+    for (index, ch) in chars.iter().copied().enumerate() {
+        if let Some((start, content)) = opening.as_mut() {
+            let closes = match *start {
+                '\'' => {
+                    ch == '\'' && (index + 1 == chars.len() || !chars[index + 1].is_alphanumeric())
+                }
+                '"' => ch == '"',
+                '‘' => ch == '’',
+                '“' => ch == '”',
+                _ => false,
+            };
+            if closes {
+                fragments.push(std::mem::take(content));
+                opening = None;
+            } else {
+                content.push(ch);
+            }
+        } else if matches!(ch, '\'' | '"' | '‘' | '“') {
+            let previous_is_alphanumeric = index > 0 && chars[index - 1].is_alphanumeric();
+            if ch != '\'' || !previous_is_alphanumeric {
+                opening = Some((ch, String::new()));
+            }
+        }
+    }
+    fragments
+}
+
+fn normalized(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Program output is redacted before excerpting, then fenced and inert.
