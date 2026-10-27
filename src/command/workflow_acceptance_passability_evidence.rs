@@ -171,9 +171,13 @@ impl Evidence {
     }
 }
 
-/// Demote a judge refutation unless its quoted rule is in the exact bounded
-/// output excerpt that was included in this candidate's prompt.
-pub(crate) fn ground_refutation(decision: &mut Decision, evidence: &Evidence) {
+/// Demote a judge refutation unless each quoted part is in the exact bounded
+/// output excerpt or check text included in this candidate's prompt.
+pub(crate) fn ground_refutation(
+    decision: &mut Decision,
+    evidence: &Evidence,
+    check: &serde_json::Value,
+) {
     if decision.verdict != JudgeDecision::Refuted {
         return;
     }
@@ -183,28 +187,47 @@ pub(crate) fn ground_refutation(decision: &mut Decision, evidence: &Evidence) {
         .iter()
         .map(|text| normalized(text))
         .collect();
+    let mut judge_input = output;
+    check_texts(check, &mut judge_input);
     let mut had_quoted_fragment = false;
     for fragment in fragments {
         had_quoted_fragment = true;
         let missing = fragment.split(["...", "…"]).find(|part| {
             let part = normalized(part);
-            !part.is_empty() && !output.iter().any(|text| text.contains(&part))
+            !part.is_empty() && !judge_input.iter().any(|text| text.contains(&part))
         });
         if let Some(missing) = missing {
             let missing = missing.split_whitespace().collect::<Vec<_>>().join(" ");
             decision.verdict = JudgeDecision::Accepted;
             decision.counterexample =
-                "no quoted rule from the output refused the check's own setup".into();
+                "no quoted rule from the judge input refused the check's own setup".into();
             decision.reason =
-                format!("the refutation quoted text the output does not contain: '{missing}'");
+                format!("the refutation quoted text the judge input does not contain: '{missing}'");
             return;
         }
     }
     if !had_quoted_fragment {
         decision.verdict = JudgeDecision::Accepted;
         decision.counterexample =
-            "no quoted rule from the output refused the check's own setup".into();
-        decision.reason = "the refutation contained no quoted fragment, so the output does not contain a quoted refusing rule".into();
+            "no quoted rule from the judge input refused the check's own setup".into();
+        decision.reason = "the refutation contained no quoted fragment from the judge input".into();
+    }
+}
+
+fn check_texts(value: &serde_json::Value, texts: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => texts.push(normalized(text)),
+        serde_json::Value::Array(values) => {
+            for value in values {
+                check_texts(value, texts);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for value in values.values() {
+                check_texts(value, texts);
+            }
+        }
+        _ => {}
     }
 }
 

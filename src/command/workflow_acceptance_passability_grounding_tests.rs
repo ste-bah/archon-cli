@@ -92,7 +92,21 @@ async fn judge(
     output: &[u8],
     counterexample: &'static str,
 ) -> (BTreeMap<String, String>, Option<serde_json::Value>) {
+    judge_with_check(output, "true", counterexample).await
+}
+
+async fn judge_with_check(
+    output: &[u8],
+    check_text: &str,
+    counterexample: &'static str,
+) -> (BTreeMap<String, String>, Option<serde_json::Value>) {
     let (contract, runs) = fixture(output);
+    contract.acceptance[0].check = serde_json::from_value(serde_json::json!({
+        "kind": "command",
+        "command": check_text,
+        "cwd": "project_root"
+    }))
+    .unwrap();
     let client = QuotedJudge {
         verdict: "refuted",
         counterexample,
@@ -133,7 +147,7 @@ async fn fabricated_quote_is_accepted_without_a_finding_and_records_the_missing_
     );
     let reason = record.unwrap()["reason"].as_str().unwrap().to_string();
     assert!(
-        reason.contains("minimum 400 rows") && reason.contains("output does not contain"),
+        reason.contains("minimum 400 rows") && reason.contains("judge input does not contain"),
         "missing quote reason: {reason}"
     );
 }
@@ -156,6 +170,52 @@ async fn a_present_quote_keeps_the_refutation_and_finding() {
     .await;
     assert!(findings["AC-X-001"].contains("cannot pass as written"));
     assert!(findings["AC-X-001"].contains("minimum 400 rows"));
+}
+
+#[tokio::test]
+async fn a_quote_found_only_in_the_check_text_keeps_the_refutation() {
+    let (findings, _) = judge_with_check(
+        b"test result: ok. 2 passed; 0 failed",
+        "run 2>&1 | grep -Eq '1 passed'",
+        "the assertion is impossible because it expects \"1 passed\"",
+    )
+    .await;
+    assert!(findings["AC-X-001"].contains("cannot pass as written"));
+    assert!(findings["AC-X-001"].contains("1 passed"));
+}
+
+#[tokio::test]
+async fn a_paraphrase_absent_from_output_and_check_is_accepted_with_missing_fragment_reason() {
+    let (findings, record) = judge_with_check(
+        b"warning: unrecognized environment variable",
+        "run the command and inspect its result",
+        "the delivered program \"refuses unrecognized environment variables\"",
+    )
+    .await;
+    assert!(findings.is_empty(), "ungrounded paraphrase: {findings:?}");
+    assert!(
+        record.unwrap()["reason"]
+            .as_str()
+            .unwrap()
+            .contains("judge input does not contain")
+    );
+}
+
+#[tokio::test]
+async fn each_elided_quote_part_must_appear_in_output_or_check_text() {
+    let (findings, record) = judge_with_check(
+        b"the observed state is rejected",
+        "assert!(result.is_rejected())",
+        "the setup fails for \"result ... absent rule\"",
+    )
+    .await;
+    assert!(findings.is_empty(), "missing quote part: {findings:?}");
+    assert!(
+        record.unwrap()["reason"]
+            .as_str()
+            .unwrap()
+            .contains("absent rule")
+    );
 }
 
 #[tokio::test]
