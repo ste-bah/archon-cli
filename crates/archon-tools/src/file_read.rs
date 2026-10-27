@@ -107,6 +107,7 @@ impl Tool for ReadTool {
             match guard.read_result(
                 ctx,
                 &path,
+                file_path,
                 offset,
                 end - offset,
                 numbered.as_bytes(),
