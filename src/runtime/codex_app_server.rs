@@ -3,7 +3,7 @@
 use archon_core::config::CodexProviderConfig;
 use reqwest::Url;
 
-const APP_SERVER_URL_ENV: &str = "ARCHON_CODEX_APP_SERVER_URL";
+pub(crate) const APP_SERVER_URL_ENV: &str = "ARCHON_CODEX_APP_SERVER_URL";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CodexAppServerDiscovery {

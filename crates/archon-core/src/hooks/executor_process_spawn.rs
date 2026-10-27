@@ -104,9 +104,9 @@ impl SpawnRequest {
             .arg(shell.command_arg)
             .arg(&self.command)
             .current_dir(&self.cwd)
-            .env("ARCHON_SESSION_ID", &self.session_id)
-            .env("ARCHON_CWD", &self.cwd)
-            .env("ARCHON_HOOK_EVENT", &self.event_name)
+            .env(crate::env_vars::HOOK_SESSION_ID_ENV, &self.session_id)
+            .env(crate::env_vars::HOOK_CWD_ENV, &self.cwd)
+            .env(crate::env_vars::HOOK_EVENT_ENV, &self.event_name)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

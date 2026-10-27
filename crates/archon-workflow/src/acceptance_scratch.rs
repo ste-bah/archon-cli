@@ -18,6 +18,7 @@ pub use direct::{
 mod inputs;
 #[path = "acceptance_scratch_siblings.rs"]
 mod siblings;
+pub use siblings::SCRATCH_SITE_ROOT_ENV;
 #[path = "acceptance_scratch_site_path.rs"]
 mod site_path;
 use control::git;

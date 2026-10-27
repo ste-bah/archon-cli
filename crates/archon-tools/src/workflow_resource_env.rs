@@ -66,11 +66,7 @@ pub fn apply_workflow_resource_defaults(
     limits: &CargoResourceLimits,
 ) {
     // Archon's own variable, not a toolchain's — every command gets it.
-    ensure_env_default(
-        env,
-        "ARCHON_WORKFLOW_RESOURCE_CLASS",
-        &limits.resource_class,
-    );
+    ensure_env_default(env, WORKFLOW_RESOURCE_CLASS_ENV, &limits.resource_class);
     if !uses_cargo(command, repository_root) {
         return;
     }
@@ -97,6 +93,9 @@ fn uses_cargo(command: &str, repository_root: &std::path::Path) -> bool {
 }
 
 use crate::bash::bash_env::ensure_env_default;
+
+/// Resource class passed to commands running workflow checks.
+pub const WORKFLOW_RESOURCE_CLASS_ENV: &str = "ARCHON_WORKFLOW_RESOURCE_CLASS";
 
 fn contains_shell_word(command: &str, needle: &str) -> bool {
     command.match_indices(needle).any(|(idx, _)| {
