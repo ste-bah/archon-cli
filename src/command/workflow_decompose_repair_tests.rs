@@ -84,6 +84,9 @@ fn run_js(driver: &str) -> String {
         "isDeterministic",
         "stageOf",
         "attemptMeasure",
+        // Issue 529: a strictly shrinking failing-subject set is progress.
+        "failingSubjectKey",
+        "isStrictSubset",
         "isBetter",
         "newProgress",
         // Issue 357: the per-entry shape-repair frontier.

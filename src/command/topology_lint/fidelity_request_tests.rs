@@ -130,10 +130,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // O3 at launch: a skeleton verified in place keys kept bodies on the launcher's frozen entries and on-disk bodies.
     // H1: an operational (host-unproven) finding beside an authored finding stops nothing; alone it still stops the phase.
     // Issue 495: check-path guidance reflects the copied repository sibling alias.
+    // Issues 529/530: a shrinking failing-subject set is progress; a max_tokens retry names its size.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "b061164b55da0c936c5052c5e556cc2313212b48efcf2520458d17adc00676d6"
+        "67f5fa337f7d1f46a85634e39a69ce02259848ff3f36beb63f784ff6f5ba6e4f"
     );
 }

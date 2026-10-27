@@ -90,10 +90,13 @@ impl archon_workflow::WorkflowLlmClient for Judge {
                 let refuted = output.contains("below required minimum")
                     || (self.parser_refutes.load(Ordering::SeqCst)
                         && output.contains("unrecognized argument"));
+                // A correct judge quotes the refusing line exactly as printed (#526).
+                let rule = if output.contains("below required minimum") { "below required minimum" } else { "unrecognized argument" };
+                let line = output.lines().find(|line| line.contains(rule)).unwrap_or_default().trim();
                 serde_json::json!({
                     "id": check["id"],
                     "verdict": if refuted { "refuted" } else { "accepted" },
-                    "counterexample": if refuted { "the check's fixture is below required minimum" } else { "no setup rule refused the check" },
+                    "counterexample": if refuted { format!("the output says \"{line}\"") } else { "no setup rule refused the check".to_string() },
                     "reason": if refuted { "the check supplies too little data for the required minimum" } else { "the output shows the feature is absent" }
                 })
             })

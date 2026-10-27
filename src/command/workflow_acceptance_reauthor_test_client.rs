@@ -242,10 +242,15 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
                 let id = check["id"].as_str().expect("id").to_string();
                 self.judged_ids.lock().unwrap().push(id.clone());
                 let accepted = (self.judge)(&id, &check["check"]);
+                // A correct judge quotes the refused text exactly as shown to it (#526).
+                let refuted = match check["check"]["command"].as_str() {
+                    Some(command) => format!("the check runs \"{}\"", command.trim()),
+                    None => "a passing state where the criterion is false".to_string(),
+                };
                 serde_json::json!({
                     "id": id,
                     "verdict": if accepted { "accepted" } else { "refuted" },
-                    "counterexample": if accepted { "none is constructible" } else { "a passing state where the criterion is false" },
+                    "counterexample": if accepted { "none is constructible".to_string() } else { refuted },
                     "reason": if accepted { "the check fails whenever the criterion is false" } else { "the check misses a branch of the criterion" },
                 })
             })
