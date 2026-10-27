@@ -101,14 +101,69 @@ jobs:
       # intercepts `cargo build` with `unexpected argument 'build' found`.
       # Delete it so PATH deterministically resolves to the dtolnay-installed
       # `$HOME/.cargo/bin/cargo`. Safe on ephemeral GH runners.
-      - name: Neutralize macOS rustup-init cargo shim
+      - name: Select usable rustup and remove macOS tool shims
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          sudo rm -f /usr/local/bin/cargo /usr/local/bin/rustc /usr/local/bin/rustup
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustup" default stable
+          candidates=()
+          candidate_versions=()
+          rustup_path=""
+
+          add_candidate() {
+            local candidate="$1" version index
+            [[ -x "$candidate" ]] || return 0
+            for index in "${!candidates[@]}"; do
+              [[ "${candidates[$index]}" == "$candidate" ]] && return 0
+            done
+            version="$("$candidate" --version 2>/dev/null || true)"
+            candidates+=("$candidate")
+            candidate_versions+=("$version")
+            if [[ -z "$rustup_path" && "$version" =~ ^rustup\ [0-9] ]]; then
+              rustup_path="$candidate"
+            fi
+          }
+
+          add_candidate "$HOME/.cargo/bin/rustup"
+          IFS=: read -r -a path_dirs <<< "$PATH"
+          for path_dir in "${path_dirs[@]}"; do
+            [[ -n "$path_dir" ]] || path_dir="."
+            add_candidate "$path_dir/rustup"
+          done
+
+          if [[ -z "$rustup_path" ]]; then
+            printf 'No usable rustup found. Candidates checked:\n' >&2
+            for index in "${!candidates[@]}"; do
+              printf '  %s: %s\n' "${candidates[$index]}" "${candidate_versions[$index]:-<no version output>}" >&2
+            done
+            exit 1
+          fi
+
+          rustup_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$rustup_path")"
+          for file in /usr/local/bin/cargo /usr/local/bin/rustc; do
+            [[ -e "$file" || -L "$file" ]] || continue
+            version="$("$file" --version 2>/dev/null || true)"
+            command_name="${file##*/}"
+            if [[ ! "$version" =~ ^${command_name}\  ]]; then
+              sudo rm -f "$file"
+            fi
+          done
+
+          file=/usr/local/bin/rustup
+          if [[ -e "$file" || -L "$file" ]]; then
+            version="$("$file" --version 2>/dev/null || true)"
+            file_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$file")"
+            if [[ ! "$version" =~ ^rustup\ [0-9] && "$file_real" != "$rustup_real" ]]; then
+              sudo rm -f "$file"
+            fi
+          fi
+
+          rustup_dir="$(dirname "$rustup_path")"
+          echo "$rustup_dir" >> "$GITHUB_PATH"
+          export PATH="$rustup_dir:$PATH"
+          rustup default stable
+          command -v cargo
           cargo --version
+          rustup --version
 
       # The `targets:` input on the toolchain action adds the target to
       # *stable*, but rust-toolchain.toml pins the channel and rustup honours

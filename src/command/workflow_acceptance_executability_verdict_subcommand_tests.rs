@@ -10,24 +10,12 @@ use archon_workflow::acceptance_scratch::CheckResult;
 use super::super::{Context, may_be_host_failure, no_verdict};
 use super::{LIST_STALL, unresolved_on_path};
 
+#[path = "../../tests/support/host_toolchain.rs"]
+pub(super) mod host_toolchain;
+
 /// The host's own `cargo`, if it has one.
 pub(super) fn host_cargo() -> Option<PathBuf> {
-    // A rustup proxy finds no toolchain under the fixture's empty HOME, so
-    // the fixture links the toolchain's own cargo when rustup names one.
-    let toolchain = std::process::Command::new("rustup")
-        .args(["which", "cargo"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
-        .filter(|cargo| cargo.is_file());
-    if toolchain.is_some() {
-        return toolchain;
-    }
-    let path = std::env::var("PATH").ok()?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join("cargo"))
-        .find(|cargo| cargo.is_file())
+    host_toolchain::bin_host_cargo()
 }
 
 /// A search path: a fresh bin directory holding `cargo` (a link to the
