@@ -20,36 +20,8 @@ use archon_tools::workflow_read_guard::{WorkflowReadGuard, WorkflowReadGuardSett
 
 use crate::dispatch::ToolRegistry;
 
-#[tokio::test]
-async fn a_repeated_read_reaches_the_tool_through_attempt_dispatch() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("data.txt");
-    std::fs::write(&path, "alpha\nbeta").unwrap();
-    let guard = Arc::new(WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings {
-        read_only_hard_call_ceiling: 8,
-        ..Default::default()
-    }));
-    let ctx = ToolContext {
-        working_dir: dir.path().to_path_buf(),
-        session_id: "AC-X-001".into(),
-        workflow_read_guard: Some(guard),
-        ..Default::default()
-    };
-    let tool = archon_tools::file_read::ReadTool;
-    let input = serde_json::json!({"file_path": path});
-
-    let first =
-        crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &ctx, false).await;
-    let repeat = crate::tool_run_admission::execute_tool_attempt(&tool, input, &ctx, false).await;
-    assert_eq!(first.content, "1\talpha\n2\tbeta");
-    assert!(
-        repeat
-            .content
-            .contains("unchanged since your earlier Read call 1")
-    );
-    assert!(repeat.content.contains(path.to_str().unwrap()));
-    assert!(repeat.content.contains("force_refresh=true"));
-}
+#[path = "tool_run_admission_repeat_tool_path_tests.rs"]
+mod path_tests;
 
 #[tokio::test]
 async fn child_read_ceiling_does_not_spend_the_parent_allowance() {

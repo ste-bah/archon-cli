@@ -29,11 +29,14 @@ impl WorkflowReadGuard {
             .keys()
             .take(200)
             .map(|key| {
+                let requested_path = state
+                    .ranges
+                    .get(key)
+                    .map(|(_, _, requested_path)| requested_path.as_str())
+                    .unwrap_or_else(|| key.path.to_str().unwrap_or("<path>"));
                 format!(
                     "{} offset={} limit={}",
-                    key.path.display(),
-                    key.offset,
-                    key.limit
+                    requested_path, key.offset, key.limit
                 )
             })
             .collect::<Vec<_>>()
@@ -49,6 +52,7 @@ impl WorkflowReadGuard {
         &self,
         ctx: &ToolContext,
         path: &Path,
+        requested_path: &str,
         offset: usize,
         limit: usize,
         bytes: &[u8],
@@ -78,7 +82,7 @@ impl WorkflowReadGuard {
             .map_or(usize::MAX, |serialized| serialized.len());
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !force
-            && let Some((old_hash, call)) = state.ranges.get(&key)
+            && let Some((old_hash, call, _)) = state.ranges.get(&key)
             && *old_hash == hash
         {
             if replay_bytes > replay_limit_bytes {
@@ -91,7 +95,7 @@ impl WorkflowReadGuard {
             };
             return Ok(Some(format!(
                 "{} offset={offset} limit={limit}: unchanged since your earlier Read call {call}; content omitted. The earlier result may have been trimmed or compacted; Read the same range with force_refresh=true.{budget_note}",
-                path.display()
+                requested_path
             )));
         }
         let call = state
@@ -114,7 +118,9 @@ impl WorkflowReadGuard {
             append_record(sink, &record).map_err(|error| format!(
                 "Failed to retain workflow read-set at {}: {error}. Read content withheld rather than silently losing retry evidence.", sink.display()))?;
         }
-        state.ranges.insert(key, (hash, call));
+        state
+            .ranges
+            .insert(key, (hash, call, requested_path.to_owned()));
         Ok(None)
     }
 

@@ -92,7 +92,7 @@ struct State {
     /// Every tool call since the last substantive write; bounds classifier misses.
     calls_since_write: u64,
     writes: u32,
-    ranges: BTreeMap<RangeKey, (String, u64)>,
+    ranges: BTreeMap<RangeKey, (String, u64, String)>,
     agent_state: BTreeMap<AgentKey, AgentState>,
     focused: Option<FocusedTests>,
     /// The budget has been refused at least once since the last substantive write (Issue-54).

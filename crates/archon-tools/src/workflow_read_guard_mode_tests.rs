@@ -126,11 +126,31 @@ fn read_only_guard_dedups_from_returned_bytes_without_credits_or_nudges() {
     let ctx = ToolContext::default();
     let path = std::path::Path::new("/repo/src/lib.rs");
     assert_eq!(
-        guard.read_result(&ctx, path, 0, 10, b"same bytes", 64_000, None, false,),
+        guard.read_result(
+            &ctx,
+            path,
+            path.to_str().unwrap(),
+            0,
+            10,
+            b"same bytes",
+            64_000,
+            None,
+            false,
+        ),
         Ok(None)
     );
     let repeated = guard
-        .read_result(&ctx, path, 0, 10, b"same bytes", 64_000, None, false)
+        .read_result(
+            &ctx,
+            path,
+            path.to_str().unwrap(),
+            0,
+            10,
+            b"same bytes",
+            64_000,
+            None,
+            false,
+        )
         .unwrap()
         .unwrap();
     assert!(repeated.contains("unchanged since your earlier Read call"));
@@ -181,6 +201,7 @@ async fn read_only_guard_records_shell_refusals_and_nothing_else() {
         guard.read_result(
             &ctx,
             std::path::Path::new("src/lib.rs"),
+            "src/lib.rs",
             0,
             5,
             b"secret",
