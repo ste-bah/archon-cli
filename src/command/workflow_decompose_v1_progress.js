@@ -459,8 +459,8 @@ function progressOperationalComponents(history) {
 
 // Pauses a loop that `stallReason` stopped, then opens its fresh window.
 async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra) {
-  await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings),
-    ...(reason === "operational_no_progress" ? {last_findings: lastFindings.slice()} : {}), ...(extra || {}) });
+  // loopEvidence bounds last_findings; the recovery text reuses that bounded list.
+  await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings), ...(extra || {}) });
   progress.stalled = 0;
   progress.stalledOperational = 0;
   // The fresh window is also the episode's floor; its per-entry bests stay.
