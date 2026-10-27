@@ -135,6 +135,15 @@ pub(crate) fn extra_known_env_vars() -> Vec<&'static str> {
         .iter()
         .copied()
         .chain([archon_shell::progress::SUPERVISED_ENV])
+        .chain([
+            archon_tools::workflow_resource_env::WORKFLOW_RESOURCE_CLASS_ENV,
+            archon_tools::workflow_run_env::RUN_ID_ENV,
+            archon_tools::ARCHON_CARGO_TARGET_DIR_ENV,
+            archon_workflow::acceptance_scratch::SCRATCH_SITE_ROOT_ENV,
+            archon_llm::replay::MODE_ENV,
+            archon_llm::replay::DIR_ENV,
+            crate::runtime::codex_app_server::APP_SERVER_URL_ENV,
+        ])
         .chain(
             crate::command::workflow_test_seams::known_env_vars()
                 .iter()
@@ -271,6 +280,41 @@ pub fn generate_session_id() -> String {
 
 #[cfg(test)]
 mod extra_known_env_tests {
+    #[test]
+    fn archon_owned_child_environment_names_are_recognized() {
+        let known_names = [
+            archon_tools::workflow_resource_env::WORKFLOW_RESOURCE_CLASS_ENV,
+            archon_workflow::acceptance_scratch::SCRATCH_SITE_ROOT_ENV,
+            archon_tools::workflow_run_env::RUN_ID_ENV,
+            archon_tools::ARCHON_CARGO_TARGET_DIR_ENV,
+            archon_shell::progress::SUPERVISED_ENV,
+            archon_core::env_vars::HOOK_SESSION_ID_ENV,
+            archon_core::env_vars::HOOK_CWD_ENV,
+            archon_core::env_vars::HOOK_EVENT_ENV,
+            "ARCHON_TOOL_CHILD",
+            "ARCHON_MEMORY_EMBEDDING_BASE_URL",
+            "ARCHON_MEMORY_EMBEDDING_MODEL",
+            crate::runtime::codex_app_server::APP_SERVER_URL_ENV,
+            archon_llm::replay::MODE_ENV,
+            archon_llm::replay::DIR_ENV,
+        ];
+        for name in known_names {
+            let env = [(name.to_string(), "1".to_string())].into();
+            let unrecognized = archon_core::env_vars::warn_unrecognized_archon_vars(
+                &env,
+                &super::extra_known_env_vars(),
+            );
+            assert!(unrecognized.is_empty(), "{name} was reported unrecognized");
+        }
+
+        let env = [("ARCHON_FOO_UNKNOWN".to_string(), "1".to_string())].into();
+        let unrecognized = archon_core::env_vars::warn_unrecognized_archon_vars(
+            &env,
+            &super::extra_known_env_vars(),
+        );
+        assert_eq!(unrecognized, vec!["ARCHON_FOO_UNKNOWN".to_string()]);
+    }
+
     #[test]
     fn the_supervised_progress_marker_is_not_reported_unrecognized() {
         let env: std::collections::HashMap<String, String> = [

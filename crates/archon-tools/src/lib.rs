@@ -84,8 +84,8 @@ mod tool_capability_compile_contract {
 pub(crate) mod bash_observability;
 pub(crate) mod cargo_target_env;
 pub use cargo_target_env::{
-    MAX_TIMEOUT_EXEMPT_CARGO_WAIT, capped_cargo_wait_credit, current_timeout_exempt_cargo_wait,
-    take_timeout_exempt_cargo_wait,
+    ARCHON_CARGO_TARGET_DIR_ENV, MAX_TIMEOUT_EXEMPT_CARGO_WAIT, capped_cargo_wait_credit,
+    current_timeout_exempt_cargo_wait, take_timeout_exempt_cargo_wait,
 };
 pub mod concurrency;
 pub mod config_tool;

@@ -7,6 +7,7 @@
 use super::*;
 
 const OMIT: &[&str] = &[".git", "target", "node_modules"];
+pub const SCRATCH_SITE_ROOT_ENV: &str = "ARCHON_SCRATCH_SITE_ROOT";
 
 #[path = "acceptance_scratch_sibling_helpers.rs"]
 mod helpers;
@@ -22,7 +23,7 @@ impl super::ScratchRoots {
         env.extend(self.host_environment.clone());
         if let Ok(root) = std::fs::canonicalize(&self.root) {
             env.insert(
-                "ARCHON_SCRATCH_SITE_ROOT".into(),
+                SCRATCH_SITE_ROOT_ENV.into(),
                 root.to_string_lossy().into_owned(),
             );
         }

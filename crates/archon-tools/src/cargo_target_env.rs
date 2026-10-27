@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
+pub const ARCHON_CARGO_TARGET_DIR_ENV: &str = "ARCHON_CARGO_TARGET_DIR";
+
 static TARGET_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
 static EXEMPT_WAITS: OnceLock<std::sync::Mutex<HashMap<String, CargoWaitState>>> = OnceLock::new();
 
@@ -53,10 +55,10 @@ pub(crate) async fn apply_cargo_target_dir_guard(
         );
         return Ok(None);
     }
-    env.retain(|(key, _)| key != "CARGO_TARGET_DIR" && key != "ARCHON_CARGO_TARGET_DIR");
+    env.retain(|(key, _)| key != "CARGO_TARGET_DIR" && key != ARCHON_CARGO_TARGET_DIR_ENV);
     let target_dir_value = target_dir.display().to_string();
     env.push(("CARGO_TARGET_DIR".to_string(), target_dir_value.clone()));
-    env.push(("ARCHON_CARGO_TARGET_DIR".to_string(), target_dir_value));
+    env.push((ARCHON_CARGO_TARGET_DIR_ENV.to_string(), target_dir_value));
     let mut wait = CargoWaitRegistration::begin(session_id);
     let mut lock = lock_target_dir(target_dir, cancel).await?;
     lock.repair_incomplete_tree_sitter = incomplete_tree_sitter_build_output(&lock.target_dir);
