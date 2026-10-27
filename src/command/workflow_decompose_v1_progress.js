@@ -5,13 +5,17 @@
 // A loop is limited by attempts that make NO progress, never by its total.
 // An attempt is measured as (tier, first failing deterministic stage,
 // distinct deterministic defects across ALL stages), and it makes progress
-// only when that measure beats every earlier attempt: a higher tier, a later
+// when that measure beats every earlier attempt: a higher tier, a later
 // first failing stage (fixing a stage lets the next one run, and it may
 // report more defects than the last did), or, at the same first failing
 // stage, fewer defects in total -- a repair at a later stage while an earlier
 // defect remains is a real, independent repair. Deterministic validators own the identities and stages; their
-// diagnostics and submitted values cannot reset a window. The judge's
-// free-text findings are not measured at all: they neither credit nor block.
+// diagnostics and submitted values cannot reset a window. An attempt also
+// carries the set of failing subjects (judged or deterministic): a strictly
+// smaller set than every earlier attempt's is progress too (#529). Trading a
+// defect adds a subject, so it cannot shrink the set; the judge's free-text
+// never credits progress by itself, and a subject that changes reasons
+// remains the same failure.
 // A stall PAUSES the run and resume opens a fresh window while preserving the
 // best measure reconstructed by replay.
 //
@@ -106,7 +110,24 @@ function attemptMeasure(findings) {
   const tier = findingTier(findings);
   const deterministic = findings.filter(isDeterministic);
   const stage = deterministic.reduce((first, finding) => Math.min(first, stageOf(finding)), PASSED_STAGE);
-  return { tier, stage, count: new Set(deterministic.map(findingKey)).size };
+  return {
+    tier, stage, count: new Set(deterministic.map(findingKey)).size,
+    failingSubjects: new Set(findings.map(failingSubjectKey))
+  };
+}
+
+function failingSubjectKey(finding) {
+  const defect = finding && finding.deterministic_defect;
+  const subject = defect && typeof defect.subject === "string" && defect.subject.length > 0
+    ? defect.subject : finding && typeof finding.subject === "string" && finding.subject.length > 0
+      ? finding.subject : null;
+  return subject === null ? findingKey(finding) : subject;
+}
+
+function isStrictSubset(set, best) {
+  if (set.size >= best.size) return false;
+  for (const value of set) if (!best.has(value)) return false;
+  return true;
 }
 
 function isBetter(measure, best) {
@@ -135,6 +156,7 @@ function findingKey(finding) {
 function newProgress(_seed) {
   return {
     best: null,
+    bestFailing: null,
     repair: newRepairEpisode(0),
     history: [],
     stalled: 0,
@@ -187,9 +209,10 @@ function authorRoundReport(policy, state) {
   return { passed: state.roundPassed, outage: state.roundOutage };
 }
 
-// Only a measure that beats every earlier attempt is progress. Trading,
-// renaming, rewording or revisiting defects cannot reset the window, and
-// neither can anything the judge says. The entries that passed in the clean
+// Only a strictly smaller failing-subject set or a measure that beats every
+// earlier attempt is progress. Trading defects cannot shrink the set, and
+// renaming or rewording within the same subjects cannot reset the window. The
+// entries that passed in the clean
 // round that made this candidate are credited first (creditPassed): that
 // restores the window to the episode floor, and the judged measure is then
 // recorded as usual, so a candidate the judge keeps refusing still raises
@@ -199,8 +222,12 @@ function recordAttempt(progress, call, findings, answered = true, round = NO_ROU
   const credited = creditPassed(progress.repair, round.passed);
   if (credited.length > 0) restoreFloor(progress);
   const measure = attemptMeasure(findings);
-  const better = isBetter(measure, progress.best);
-  if (better) progress.best = measure;
+  const oldMeasureBetter = isBetter(measure, progress.best);
+  const hasFailingBaseline = progress.bestFailing instanceof Set;
+  const subsetBetter = hasFailingBaseline && isStrictSubset(measure.failingSubjects, progress.bestFailing);
+  const better = oldMeasureBetter || subsetBetter;
+  if (oldMeasureBetter) progress.best = measure;
+  if (!hasFailingBaseline || subsetBetter) progress.bestFailing = measure.failingSubjects;
   const entry = {
     call,
     kind: ["packaging", "refused", "judged"][measure.tier],
@@ -388,6 +415,7 @@ function loopEvidence(progress, reason, lastFindings) {
     author_calls: progress.calls,
     answered_attempts: progress.answered,
     stall_window: STALL_ATTEMPTS,
+    best_failing: progress.bestFailing instanceof Set ? [...progress.bestFailing] : [],
     progress_history: progress.history.slice(-PAUSE_EVIDENCE_HISTORY),
     progress_history_total: progress.history.length,
     last_findings: boundFindings(lastFindings),
