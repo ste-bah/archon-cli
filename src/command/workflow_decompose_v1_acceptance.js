@@ -49,6 +49,7 @@ function acceptanceReplyFormat() {
     "Every fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.",
     "Choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.",
     "For a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.",
+    "Generate large or repetitive fixture data with code rather than writing it literally.",
     "The entry shapes earlier in this task are examples only; return one entry.",
     "Return exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
   ].join("\n");
@@ -365,7 +366,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   if (result.stopReason !== "end_turn") {
     if (result.stopReason === "max_tokens") {
       return malformedAcceptanceFailure(id,
-        "the provider cut off the reply at its output limit; make the check shorter and return one complete artifact",
+        incompleteReplyFeedback(result.content),
         "stop-max-tokens");
     }
     return malformedAcceptanceFailure(id, `expected stop reason end_turn, got ${result.stopReason || "missing"}`,

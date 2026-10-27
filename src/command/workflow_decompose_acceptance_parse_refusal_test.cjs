@@ -316,7 +316,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   const trimmedLive = JSON.parse(fs.readFileSync(`${root}/fixtures/acceptance_author_unclosed_check_reply.json`, 'utf8')).content;
   assert.throws(() => json.extractJsonObject(trimmedLive), /the ```check block opened at line 2 is never closed/);
   const maxTokenRefusal = await refusal('{"id":"A"}', 'max_tokens');
-  assert.match(maxTokenRefusal.summary, /cut off the reply at its output limit; make the check shorter/);
+  assert.match(maxTokenRefusal.summary, /cut off an incomplete reply of \d+ characters across \d+ lines/);
   assert.equal(maxTokenRefusal.malformedClass, 'stop-max-tokens');
   const missingStopRefusal = await refusal('{"id":"A"}', null);
   assert.match(missingStopRefusal.summary, /expected stop reason end_turn, got missing/);

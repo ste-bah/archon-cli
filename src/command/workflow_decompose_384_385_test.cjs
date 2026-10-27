@@ -101,7 +101,69 @@ async function wrongStopReasonIsSpecific() {
   const out = await ctx.authorAcceptanceEntries({agent:async () => ({
     status:'accepted',stopReason:'max_tokens',content:'{"id":"A"}'
   })}, 'author', 1, {entries:new Map(),retryIds:new Set(['A'])});
-  assert.match(out.summary, /cut off the reply at its output limit; make the check shorter/);
+  assert.match(out.summary, /cut off an incomplete reply of 10 characters across 1 lines/);
+}
+
+async function maxTokenFeedbackMeasuresReplyShape() {
+  const ctx = context();
+  const csv = ['week,open,high,low,close,volume', ...Array.from({length: 8}, (_, i) =>
+    `2026-01-${String(i + 1).padStart(2, '0')},1,2,0,1,100`)].join('\n');
+  const out = await ctx.authorAcceptanceEntries({agent:async () => ({
+    status:'accepted',stopReason:'max_tokens',content:csv
+  })}, 'author', 1, {entries:new Map(),retryIds:new Set(['A'])});
+  assert.match(out.summary, /(?:\d+) characters/);
+  assert.match(out.summary, /9 lines/);
+  assert.match(out.summary, /8 of 9 lines/);
+  assert.match(out.summary, /generate.*inside the check with a loop or small program/i);
+  assert.match(out.summary, /keep only what the criterion needs/i);
+  const jsonLines = Array.from({length: 4}, (_, i) => JSON.stringify({week:`2026-W${i + 1}`, value:i})).join('\n');
+  const jsonOut = await ctx.authorAcceptanceEntries({agent:async () => ({
+    status:'accepted',stopReason:'max_tokens',content:jsonLines
+  })}, 'author', 1, {entries:new Map(),retryIds:new Set(['A'])});
+  assert.match(jsonOut.summary, /4 of 4 lines share the same literal one-object-per-line JSON shape/);
+}
+
+async function maxTokenFeedbackDoesNotMislabelProseOrEmpty() {
+  const ctx = context();
+  const invoke = content => ctx.authorAcceptanceEntries({agent:async () => ({
+    status:'accepted',stopReason:'max_tokens',content
+  })}, 'author', 1, {entries:new Map(),retryIds:new Set(['A'])});
+  const proseText = 'éé\nThese are ordinary words.\nStill prose.';
+  const prose = await invoke(proseText);
+  assert.ok(prose.summary.includes(`${Array.from(proseText).length} characters`));
+  assert.match(prose.summary, /3 lines/);
+  assert.doesNotMatch(prose.summary, /repeated|CSV|generate.*loop/i);
+  const empty = await invoke('');
+  assert.match(empty.summary, /0 characters/);
+  assert.match(empty.summary, /0 lines/);
+  assert.doesNotMatch(empty.summary, /repeated|CSV|generate.*loop/i);
+}
+
+async function replyFormatGuidesGeneratedFixtures() {
+  const format = context().acceptanceReplyFormat();
+  assert.ok(format.includes('Generate large or repetitive fixture data with code rather than writing it literally.'));
+}
+
+async function candidateLoopUsesMeasuredMaxTokenFeedback() {
+  const ctx = context();
+  const tasks = [];
+  let calls = 0;
+  const outcome = await ctx.authorCandidate({
+    agent:async (_id, options) => {
+      tasks.push(options.task);
+      calls++;
+      return calls === 1
+        ? {status:'accepted',stopReason:'max_tokens',content:'row,a,b\n1,2,3\n2,3,4'}
+        : {status:'accepted',stopReason:'end_turn',content:'{}'};
+    },
+    hostCommand:async () => ({publicationReceipt:{call_id:'freeze'},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}}),
+    pause:async () => { throw new Error('unexpected pause'); },
+  }, {phase:'skeleton',prompt:()=> 'author',retryScopes:new Set(['candidate_artifact'])});
+  assert.equal(outcome.postcondition.satisfied, true);
+  assert.equal(tasks.length, 2);
+  assert.match(tasks[1], /3 lines/);
+  assert.match(tasks[1], /2 of 3 lines/);
+  assert.match(tasks[1], /generate.*inside the check with a loop or small program/i);
 }
 
 async function missingContentIsSpecific() {
@@ -115,6 +177,10 @@ async function missingContentIsSpecific() {
 (async () => {
   for (const [name, test] of [['prompt rules',promptRules],['reply format last on first and repair attempts',replyFormatIsTheLastTaskSection],['gate outage candidate reuse',gateOutageReusesCandidate],
     ['wrong id measured refusal',wrongIdRefusalHasSpecificMeasuredProgress],['specific stop reason',wrongStopReasonIsSpecific],
+    ['measured max token feedback',maxTokenFeedbackMeasuresReplyShape],
+    ['prose and empty max token feedback',maxTokenFeedbackDoesNotMislabelProseOrEmpty],
+    ['generated fixture reply format',replyFormatGuidesGeneratedFixtures],
+    ['candidate loop measured feedback',candidateLoopUsesMeasuredMaxTokenFeedback],
     ['specific missing content',missingContentIsSpecific]]) {
     await test(); console.log(`PASS ${name}`);
   }
