@@ -173,7 +173,7 @@ impl Evidence {
 
 /// Demote a judge refutation unless each quoted part is in the exact bounded
 /// output excerpt or check text included in this candidate's prompt.
-pub(crate) fn ground_refutation(
+pub(super) fn ground_refutation(
     decision: &mut Decision,
     evidence: &Evidence,
     check: &serde_json::Value,
@@ -192,7 +192,8 @@ pub(crate) fn ground_refutation(
     let mut had_quoted_fragment = false;
     for fragment in fragments {
         had_quoted_fragment = true;
-        let missing = fragment.split(["...", "…"]).find(|part| {
+        let fragment = fragment.replace('…', "...");
+        let missing = fragment.split("...").find(|part| {
             let part = normalized(part);
             !part.is_empty() && !judge_input.iter().any(|text| text.contains(&part))
         });

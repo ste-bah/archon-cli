@@ -5,7 +5,8 @@ use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 use archon_workflow::task_set_contract::{AcceptanceContract, JudgeDecision};
 use async_trait::async_trait;
 
-use super::*;
+use crate::command::workflow_task_set::executability::BaselineRuns;
+use crate::command::workflow_task_set::passability::cannot_pass_findings;
 
 struct QuotedJudge {
     verdict: &'static str,
@@ -100,7 +101,7 @@ async fn judge_with_check(
     check_text: &str,
     counterexample: &'static str,
 ) -> (BTreeMap<String, String>, Option<serde_json::Value>) {
-    let (contract, runs) = fixture(output);
+    let (mut contract, runs) = fixture(output);
     contract.acceptance[0].check = serde_json::from_value(serde_json::json!({
         "kind": "command",
         "command": check_text,

@@ -1,4 +1,5 @@
 use super::*;
+use archon_workflow::task_set_contract::AcceptanceCriterion;
 
 fn roots(temp: &tempfile::TempDir, tasks: &Path) -> super::super::judge::JudgeRoots {
     super::super::judge::JudgeRoots {
@@ -217,7 +218,7 @@ async fn oversized_named_input_key_is_independent_of_other_entries() {
         target_key, next_round_key,
         "a different oversized earlier input cannot change this key"
     );
-    run_judge(&temp, &tasks, contract, &client, &roots).await;
+    run_judge(&temp, &tasks, contract.clone(), &client, &roots).await;
     assert_eq!(
         *client.batches.lock().unwrap(),
         vec![vec!["AC-X-003".to_string()]],
