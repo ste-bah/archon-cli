@@ -164,7 +164,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // 63: #526 a judge refutation counts only when its quoted rule is in the output or check text the judge saw; #528 the per-entry reuse key uses each entry's own named-file content.
-        sources_digest: "7d1566a69aa5445ace66160fdcd80fdeff4e3a3e62afdad6539590853270bf86",
+        sources_digest: "ff2e507dd133846f5fbbf4741191d42e037c2a51569a7e78d2a279cbf42abc09",
         build_bound: false,
     },
     CapabilityLogic {
@@ -198,7 +198,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton freeze verdicts do not read acceptance judge identity, passability or path classes.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "7d1566a69aa5445ace66160fdcd80fdeff4e3a3e62afdad6539590853270bf86",
+        sources_digest: "ff2e507dd133846f5fbbf4741191d42e037c2a51569a7e78d2a279cbf42abc09",
         build_bound: false,
     },
     CapabilityLogic {
