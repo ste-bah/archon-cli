@@ -16,11 +16,20 @@ async function author(findings, resumed = [], mode = 'enforce', initialFeedback 
   const ctx = { args: { gateMode: mode } };
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
+  const original = ctx.recordAttempt;
+  const history = [];
+  ctx.recordAttempt = (progress, ...params) => {
+    const result = original(progress, ...params);
+    history.push(JSON.parse(JSON.stringify(progress.history.at(-1))));
+    return result;
+  };
   let calls = 0;
-  const pauses = [];
+  const pauses = [], rungs = [], prompts = [];
   const w = {
-    agent: async () => {
-      if (++calls > 1000) throw new Error('rename spin exceeded 1000 calls');
+    checkpoint: async (_id, options) => { rungs.push({text:options.task, calls, history:history.slice()}); },
+    agent: async (_id, options) => {
+      prompts.push(options.task);
+      if (++calls > 1000) throw new Error('renamingDefectsAdvancesWithoutProgress spin exceeded 1000 calls');
       return { status: 'accepted', stopReason: 'end_turn', content: '{}' };
     },
     hostCommand: async () => ({ publicationReceipt: { call_id: 'r' }, postcondition: { satisfied: true },
@@ -33,14 +42,21 @@ async function author(findings, resumed = [], mode = 'enforce', initialFeedback 
   let error;
   try { await ctx.authorCandidate(w, { phase: 'skeleton', prompt: () => 'author',
     retryScopes: new Set(['candidate_artifact']), initialFeedback }); } catch (e) { error = e.message; }
-  return { calls, pauses, error };
+  return { calls, pauses, error, rungs, prompts };
 }
-const flags = out => Array.from(out.pauses.at(-1).evidence.progress_history, e => e.progress);
-async function rename() {
-  const out = await author(n => [defect('TASK-X-001', `bad${n}`)]);
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
-  assert.deepEqual(flags(out), [true, false, false, false]);
+const flags = out => out.rungs[0].history.map(e => e.progress);
+const untilClean = findings => n => n <= 13 ? findings(n) : [];
+function assertFirstWindow(out, expected = [true,false,false,false]) {
+  assert.equal(out.error, undefined);
+  assert.equal(out.calls, 14);
+  assert.equal(out.pauses.length, 0);
+  assert.equal(out.rungs[0].calls, 4);
+  assert.deepEqual(flags(out), expected);
+  assert.deepEqual(out.rungs.map(rung => /r\d/.exec(rung.text)[0]), ['r2','r3','r4','r2']);
+}
+async function renamingDefectsAdvancesWithoutProgress() {
+  const out = await author(untilClean(n => [defect('TASK-X-001', `bad${n}`)]));
+  assertFirstWindow(out);
 }
 async function seventy() {
   const out = await author(n => Array.from({ length: Math.max(71 - n, 0) }, (_, i) =>
@@ -59,51 +75,39 @@ async function shapeThenSeventy() {
   assert.equal(out.calls, 72);
   assert.equal(out.pauses.length, 0);
 }
-async function rewording() {
-  const out = await author(n => [{ text: `parser is weak observation ${n}`, remediation_scope: 'candidate_artifact' }]);
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
+async function rewordedFindingsAdvanceWithoutProgress() {
+  const out = await author(untilClean(n => [{text:`parser is weak observation ${n}`,remediation_scope:'candidate_artifact'}]));
+  assertFirstWindow(out);
 }
-async function oscillation() {
-  const out = await author(n => [defect(n % 2 ? 'TASK-X-001' : 'TASK-X-002')]);
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
-  assert.deepEqual(flags(out), [true, false, false, false]);
+async function oscillatingSubjectsAdvanceWithoutProgress() {
+  const out = await author(untilClean(n => [defect(n % 2 ? 'TASK-X-001' : 'TASK-X-002')]));
+  assertFirstWindow(out);
 }
-async function resume() {
-  const out = await author(n => [defect(n > 4 && n % 2 ? 'TASK-X-002' : 'TASK-X-001')], ['pause-skeleton-1']);
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 7);
-  assert.deepEqual(flags(out), [true, false, false, false, false, false, false]);
-  assert.equal(out.pauses.length, 2);
+async function laterRungsPreserveTheBestMeasure() {
+  const out = await author(untilClean(n => [defect(n > 4 && n % 2 ? 'TASK-X-002' : 'TASK-X-001')]));
+  assertFirstWindow(out);
+  assert.deepEqual(out.rungs[1].history.map(step=>step.progress), [true,false,false,false,false,false,false]);
 }
 // Round 7: a committed artifact with outstanding findings still pauses.
-async function observeStall() {
-  const out = await author(() => [defect('TASK-X-001')], [], 'observe');
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
-  assert.equal(out.pauses.length, 1);
-  assert.equal(out.pauses[0].evidence.last_findings.length, 1);
+async function observeCommittedFindingsAdvanceTheLadder() {
+  const out = await author(untilClean(() => [defect('TASK-X-001')]), [], 'observe');
+  assertFirstWindow(out);
+  assert.match(out.prompts[4], /file_name/);
 }
-async function observeSeededStall() {
-  const out = await author(() => [defect('TASK-X-001')], [], 'observe', ['seeded repair remains']);
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
-  assert.equal(out.pauses.length, 1);
-  assert(out.pauses[0].evidence.last_findings.length > 0);
+async function observeSeededFindingsSurviveTheLadder() {
+  const out = await author(untilClean(() => [defect('TASK-X-001')]), [], 'observe', ['seeded repair remains']);
+  assertFirstWindow(out);
+  assert(out.prompts.every(prompt=>prompt.includes('seeded repair remains')));
 }
-async function observeChangingFindingStall() {
-  const out = await author(n => [defect(n % 2 ? 'TASK-X-001' : 'TASK-X-002')], [], 'observe');
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
-  assert.equal(out.pauses.length, 1);
+async function observeChangingFindingsAdvanceWithoutProgress() {
+  const out = await author(untilClean(n => [defect(n % 2 ? 'TASK-X-001' : 'TASK-X-002')]), [], 'observe');
+  assertFirstWindow(out);
 }
-async function duplicates() {
-  const out = await author(n => n === 1 ? [defect('TASK-X-001'), defect('TASK-X-001', 'bad2')]
-    : [defect('TASK-X-001', `bad${n}`)]);
-  assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
-  assert.equal(out.pauses[0].evidence.progress_history[0].findings, 1);
+async function duplicateIdentitiesDoNotEarnLadderCredit() {
+  const out = await author(untilClean(n => n === 1 ? [defect('TASK-X-001'),defect('TASK-X-001','bad2')]
+    : [defect('TASK-X-001',`bad${n}`)]));
+  assertFirstWindow(out);
+  assert.equal(out.rungs[0].history[0].findings, 1);
 }
 (async () => {
   if (process.argv[2]) {
@@ -116,10 +120,10 @@ async function duplicates() {
     return;
   }
   let failed = 0;
-  for (const [name, test, guard] of [['rename spin', rename], ['70 to 0', seventy, true], ['shape to 70 defects is a higher tier', shapeThenSeventy, true],
-    ['judged rewording', rewording], ['oscillation', oscillation], ['resume best preserved', resume],
-    ['distinct identity count', duplicates], ['observe committed finding pauses', observeStall],
-    ['observe seeded finding pauses', observeSeededStall], ['observe changing findings pause', observeChangingFindingStall]]) {
+  for (const [name, test, guard] of [['renamingDefectsAdvancesWithoutProgress spin', renamingDefectsAdvancesWithoutProgress], ['70 to 0', seventy, true], ['shape to 70 defects is a higher tier', shapeThenSeventy, true],
+    ['judged rewordedFindingsAdvanceWithoutProgress', rewordedFindingsAdvanceWithoutProgress], ['oscillatingSubjectsAdvanceWithoutProgress', oscillatingSubjectsAdvanceWithoutProgress], ['laterRungsPreserveTheBestMeasure best preserved', laterRungsPreserveTheBestMeasure],
+    ['distinct identity count', duplicateIdentitiesDoNotEarnLadderCredit], ['observe committed findings advance the ladder', observeCommittedFindingsAdvanceTheLadder],
+    ['observe seeded findings survive the ladder', observeSeededFindingsSurviveTheLadder], ['observe changing findings advance the ladder', observeChangingFindingsAdvanceWithoutProgress]]) {
     try { await test(); console.log(`PASS ${name}${guard ? ' (guard; validator completeness tested in Rust)' : ''}`); }
     catch (e) { failed++; console.error(`FAIL ${name}: ${e.message}`); }
   }

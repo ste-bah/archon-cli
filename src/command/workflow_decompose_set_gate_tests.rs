@@ -40,9 +40,10 @@ const prompts = {{}};
 let lintCalls = 0;
 const traceRounds = globalThis.args.traceRounds || [[]];
 let traceCalls = 0;
+globalThis.__archonHost = async (_method, payload) => {{ throw new Error(JSON.parse(payload).reason); }};
 let finalInputs = null;
 const pauses = [];
-const w = {{
+const w = {{ checkpoint: async () => {{}},
   pause: async (id, evidence) => {{
     pauses.push({{ id, evidence }});
     if ((globalThis.args.resumedPauses || []).includes(id)) return {{ resumed: true, pause_id: id }};
@@ -58,11 +59,13 @@ const w = {{
     hostCalls.push(capability);
     let findings = [];
     if (capability === "task-set-lint") {{
-      findings = lintRounds[Math.min(lintCalls, lintRounds.length - 1)];
+      findings = globalThis.args.clearAfter !== undefined && lintCalls >= globalThis.args.clearAfter
+        ? [] : lintRounds[Math.min(lintCalls, lintRounds.length - 1)];
       lintCalls += 1;
     }}
     if (capability === "requirements-trace") {{
-      findings = traceRounds[Math.min(traceCalls, traceRounds.length - 1)];
+      findings = globalThis.args.clearAfter !== undefined && traceCalls >= globalThis.args.clearAfter
+        ? [] : traceRounds[Math.min(traceCalls, traceRounds.length - 1)];
       traceCalls += 1;
     }}
     const callId = capability + "-" + hostCalls.length;
@@ -98,7 +101,11 @@ fn run(script: &str) -> serde_json::Value {
         "driver failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    serde_json::from_slice(&out.stdout).expect("driver json")
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .and_then(|line| serde_json::from_str(line).ok())
+        .expect("driver json after progress events")
 }
 
 fn body_finding(task: &str, source_path: &str) -> String {
@@ -176,33 +183,15 @@ fn a_set_gate_body_finding_re_authors_the_task_it_names_with_the_finding_then_re
 /// without progress, and the third such round PAUSES the run with the
 /// findings as evidence. It used to fail the run.
 #[test]
-fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_listed() {
+fn a_plateau_escalates_and_cycles_the_repair_ladder_until_clear() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
-    let out = run(&driver("{}", &format!("[[{finding}]]"), ""));
-    let error = out["error"].as_str().expect("the run must stop");
-    assert!(error.contains("workflow paused by run control"), "{error}");
-    assert_eq!(out["pauses"][0]["id"], "pause-set-gates-1", "{out}");
-    let evidence = &out["pauses"][0]["evidence"];
-    assert_eq!(evidence["subject"], "set-gates", "{evidence}");
-    assert_eq!(evidence["reason"], "no_progress", "{evidence}");
-    assert_eq!(evidence["rounds"], 4, "{evidence}");
+    let out = run(&driver("{ clearAfter: 12 }", &format!("[[{finding}]]"), ""));
+    assert!(out.get("error").is_none(), "{out}");
+    assert!(out["pauses"].as_array().unwrap().is_empty(), "{out}");
+    assert!(count(&out, "hostCalls", "task-set-lint") >= 13, "{out}");
     assert!(
-        evidence["last_findings"][0]
-            .as_str()
-            .is_some_and(|text| text.contains("the other task waives it")),
-        "{evidence}"
-    );
-    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 4);
-    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 4);
-    assert_eq!(
-        count(&out, "hostCalls", "freeze-skeleton"),
-        2,
-        "the first freeze and one escalation: {out}"
-    );
-    assert_eq!(
-        count(&out, "hostCalls", "land-task-body"),
-        2 + 1 + 1 + 2,
-        "two bodies, one re-author per round, both bodies at the escalation: {out}"
+        count(&out, "hostCalls", "freeze-skeleton") >= 2,
+        "the skeleton rung reauthor is visible: {out}"
     );
 }
 
@@ -211,19 +200,20 @@ fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_l
 /// judge's own: it counts in the ordinary no-progress window and pauses as
 /// `no_progress`, never charging the host's operational window.
 #[test]
-fn an_authored_judge_reply_from_the_set_gate_pauses_as_no_progress_not_operational() {
+fn an_authored_judge_reply_reauthors_while_host_faults_keep_the_operational_window() {
     let rounds = |kind: &str| {
         format!(
             r#"[{{ "operational_error": {{ "kind": "{kind}", "text": "critic reply unusable" }} }}]"#
         )
     };
-    let authored = run(&driver("{}", &rounds("authored_judge_reply"), ""));
-    assert_eq!(
-        authored["pauses"][0]["id"], "pause-set-gates-1",
-        "{authored}"
-    );
-    assert_eq!(
-        authored["pauses"][0]["evidence"]["reason"], "no_progress",
+    let authored = run(&driver(
+        "{ clearAfter: 12 }",
+        &rounds("authored_judge_reply"),
+        "",
+    ));
+    assert!(authored.get("error").is_none(), "{authored}");
+    assert!(
+        authored["pauses"].as_array().unwrap().is_empty(),
         "{authored}"
     );
     let host = run(&driver("{}", &rounds("gate_operational"), ""));
@@ -231,21 +221,27 @@ fn an_authored_judge_reply_from_the_set_gate_pauses_as_no_progress_not_operation
         host["pauses"][0]["evidence"]["reason"], "operational_no_progress",
         "{host}"
     );
+    let recovery = host["pauses"][0]["evidence"]["recovery"].as_str().unwrap();
+    assert!(
+        recovery.contains("critic reply unusable") && recovery.contains("retries"),
+        "{host}"
+    );
+    assert!(!recovery.contains("resume"), "{host}");
 }
 
 /// Issue 261: a resumed run passes the set-gate pause and starts a fresh
 /// window that repairs before it judges, never a re-pause on the evidence it
 /// was resumed past.
 #[test]
-fn a_resumed_set_gate_pause_starts_a_fresh_window_and_can_accept() {
+fn a_replayed_set_gate_rung_sequence_can_accept_without_a_pause() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver(
-        r#"{ resumedPauses: ["pause-set-gates-1"] }"#,
+        "{}",
         &format!("[[{finding}], [{finding}], [{finding}], [{finding}], [{finding}], []]"),
         "",
     ));
     assert!(out.get("error").is_none(), "{out}");
-    assert_eq!(out["pauses"].as_array().unwrap().len(), 1, "{out}");
+    assert!(out["pauses"].as_array().unwrap().is_empty(), "{out}");
     assert_eq!(count(&out, "hostCalls", "freeze-skeleton"), 2, "{out}");
     assert_eq!(count(&out, "hostCalls", "task-set-lint"), 6);
 }
@@ -253,16 +249,15 @@ fn a_resumed_set_gate_pause_starts_a_fresh_window_and_can_accept() {
 /// Observe mode no longer accepts a stalled set gate: findings open pause
 /// the run in either mode.
 #[test]
-fn observe_mode_never_accepts_a_set_with_findings_open() {
+fn observe_mode_reauthors_a_set_with_findings_open_until_clear() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver(
-        r#"{ gateMode: "observe" }"#,
+        r#"{ gateMode: "observe", clearAfter: 12 }"#,
         &format!("[[{finding}]]"),
         "",
     ));
-    let error = out["error"].as_str().expect("observe must not accept it");
-    assert!(error.contains("workflow paused by run control"), "{error}");
-    assert_eq!(out["pauses"][0]["id"], "pause-set-gates-1", "{out}");
+    assert!(out.get("error").is_none(), "{out}");
+    assert!(out["pauses"].as_array().unwrap().is_empty(), "{out}");
 }
 
 #[test]

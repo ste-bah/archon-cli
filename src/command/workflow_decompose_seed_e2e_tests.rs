@@ -472,3 +472,6 @@ mod history;
 
 #[path = "workflow_decompose_seed_completed_phase_tests.rs"]
 mod completed_phase_tests;
+
+#[path = "workflow_decompose_runtime_repair_tests.rs"]
+mod runtime_repair;

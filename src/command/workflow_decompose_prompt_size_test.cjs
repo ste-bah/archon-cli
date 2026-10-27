@@ -141,50 +141,58 @@ async function multibyteRecordsAreCutByBytes() {
   assert(listed.includes('\n- AC-040: '), 'the entry\'s own neighbourhood is listed');
 }
 
-// A host that cannot write the context never yields a prompt that names
-// bytes that are not there: the entry's call is an outage, no agent is
-// called, and outages pause the loop. A missing binding is a host fault.
-async function unwritableContextIsAnOutageAndAMissingBindingThrows() {
-  const all = { 'AC-001': 'one', 'AC-002': 'two' };
+// Unwritten context never reaches an author. The host retry window keeps
+// the entry's original round and sibling; a missing binding is a host fault.
+async function unwritableContextRetainsEntryUntilHostRetryWindowAndMissingBindingThrows() {
+  const all = { 'AC-X-001': 'one', 'AC-X-002': 'two' };
   const failing = () => { throw new Error('disk full'); };
   const ctx = context({ acceptanceCriteria: all, authorMaxParallelism: 1, gateMode: 'enforce' }, failing);
-  const agents = [];
-  const w = { agent: async (id) => { agents.push(id); return { status: 'failed', summary: 'unreached' }; } };
-  const kept = { id: 'AC-001', check: { kind: 'command', command: 'true' } };
-  const state = { entries: new Map([['AC-001', kept]]), retryIds: new Set(['AC-002']) };
-  const out = await ctx.authorAcceptanceEntries(w, 'author', 2, state);
-  assert.equal(agents.length, 0, 'no provider call');
-  assert.equal(out.status, 'failed');
-  assert.notEqual(out.malformed, true, 'an outage, not a refusal');
-  assert.match(out.summary, /AC-002: author context could not be written: disk full/);
-  assert.equal(state.roundOutage, true);
-  assert.equal(state.roundCalls, 0);
+  const agents = [], pauses = [];
+  const w = {
+    agent: async (id) => { agents.push(id); throw new Error('unreached'); },
+    pause: async (_id, evidence) => {
+      pauses.push(evidence);
+      const error = new Error('controlled cancellation'); error.code = 'workflow_control'; error.kind = 'cancel'; throw error;
+    }
+  };
+  const kept = { id: 'AC-X-001', check: { kind: 'command', command: 'true' } };
+  const state = { entries: new Map([['AC-X-001', kept]]), retryIds: new Set(['AC-X-002']) };
+  await assert.rejects(ctx.authorAcceptanceEntries(w, 'author', 2, state), /controlled cancellation/);
+  assert.equal(agents.length, 0, 'no provider call can reference unwritten context');
+  assert.equal(pauses.length, 1);
+  assert.equal(pauses[0].reason, 'operational_no_progress');
+  assert.match(pauses[0].recovery, /AC-X-002: author context could not be written: disk full/);
+  assert.match(pauses[0].recovery, /retries/);
+  assert.doesNotMatch(pauses[0].recovery, /resume/i);
+  assert.equal(state.entries.get('AC-X-001'), kept, 'the completed sibling stays intact');
+  assert.equal(state.roundCalls, 0, 'preparation does not consume a dispatch');
   const bare = context({ acceptanceCriteria: all, authorMaxParallelism: 1 });
   delete bare.__archonAuthorContext;
-  await assert.rejects(bare.authorAcceptanceEntries(w, 'author', 2, { entries: new Map([['AC-001', kept]]), retryIds: new Set(['AC-002']) }), /author-context binding is missing/);
+  await assert.rejects(bare.authorAcceptanceEntries(w, 'author', 2,
+    { entries: new Map([['AC-X-001', kept]]), retryIds: new Set(['AC-X-002']) }), /author-context binding is missing/);
 }
 
-// The current findings are never cut, whatever their size; a prompt whose
-// mandatory text alone passes the dispatch limit pauses instead of sending.
-async function currentFindingsStayWholeAndOversizedPromptsPause() {
-  const ctx = context({ acceptanceCriteria: { 'AC-001': 'one' }, authorMaxParallelism: 1, gateMode: 'enforce' });
-  const big = Array.from({ length: 40 }, (_, i) => `check 'AC-001' finding ${i}: ${words(i, 2000)}`);
+// Oversized mandatory text is moved intact into host-written context and
+// dispatch continues with a compact pointer.
+async function oversizedPromptUsesCompleteHostContext() {
+  const files = new Map();
+  const ctx = context({ acceptanceCriteria: { 'AC-X-001': 'one' }, authorMaxParallelism: 1, gateMode: 'enforce' }, (extension, text) => {
+    const path = `/context/${files.size + 1}.${extension}`;
+    files.set(path, text);
+    return JSON.stringify({ path, sha256: 'a'.repeat(64) });
+  });
+  const big = Array.from({ length: 40 }, (_, i) => `check 'AC-X-001' finding ${i}: ${words(i, 2000)}`);
   const prompt = ctx.authorPrompt('author', 2, big, [{ attempt: 1, findings: big }]);
   for (const finding of big) assert(prompt.includes(finding), 'a current finding is shown whole');
-  const huge = Array.from({ length: 200 }, (_, i) => `check 'AC-001' finding ${i}: ${words(i, 2000)}`);
-  const pauses = [];
-  let agents = 0;
+  const huge = Array.from({ length: 200 }, (_, i) => `check 'AC-X-001' finding ${i}: ${words(i, 2000)}`);
+  let seen = '';
   const w = {
-    agent: async () => { agents += 1; return { status: 'failed', summary: 'unreached' }; },
-    pause: async (id, evidence) => { pauses.push({ id, evidence }); if (pauses.length === 2) throw new Error('paused'); return { resumed: true }; },
+    agent: async (_id, options) => { seen = options.task; return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id: 'AC-X-001', check: { kind: 'command', command: 'true' } }) }; },
   };
-  await assert.rejects(ctx.authorAcceptanceEntries(w, ctx.authorPrompt('author', 2, huge, []), 1, { entries: new Map(), retryIds: null }), /paused/);
-  assert.equal(agents, 0, 'never sent');
-  assert.deepEqual(pauses.map((p) => p.id), ['pause-acceptance-prompt-AC-001-1', 'pause-acceptance-prompt-AC-001-2'], 'a resumed loop that still measures it pauses again');
-  assert.equal(pauses[0].evidence.reason, 'author_prompt_oversized');
-  assert.match(pauses[0].evidence.remedy, /raise AUTHOR_PROMPT_LIMIT/);
-  assert.match(pauses[0].evidence.remedy, /resuming alone pauses again/);
-  assert(pauses[0].evidence.prompt_bytes > pauses[0].evidence.limit_bytes);
+  await ctx.authorAcceptanceEntries(w, ctx.authorPrompt('author', 2, huge, []), 1, { entries: new Map(), retryIds: null });
+  assert.match(seen, /complete subject contract/);
+  const stored = [...files.values()].join('\n');
+  for (const finding of huge) assert(stored.includes(finding), 'every oversized finding reaches host context');
 }
 
 // The findings a phase was opened with (attempt 0) were unbounded: a set
@@ -257,33 +265,33 @@ function seededFindingStays() {
   assert(prompt.includes(`the set gate, before this body was sent back: ${seed}`), prompt.slice(-2000));
 }
 
-const CUT = "workflow v2 call 'acceptance-author-AC-002-1' failed: subagent inactivity timeout: no model output, tool call or tool result for 3600s (inactivity limit 3600s); the host ended the session inside its wall clock";
+const CUT = "workflow v2 call 'acceptance-author-AC-X-002-1' failed: subagent inactivity timeout: no model output, tool call or tool result for 3600s (inactivity limit 3600s); the host ended the session inside its wall clock";
 
-// Round 1 keeps AC-001 and is cut on AC-002: retained work does not reset the
-// operational window. Three cuts, including that mixed round, pause; resume
-// opens a fresh operational window and completes.
-async function inactivityCutWithProgressKeepsTheWindow() {
-  const ctx = context({ acceptanceCriteria: { 'AC-001': 'one', 'AC-002': 'two' }, authorMaxParallelism: 1, gateMode: 'enforce' });
-  let cuts = 0;
+// Operational outcomes reach the host stop path with the component detail.
+async function operationalAuthorWindowKeepsHostEvidenceAndRetries() {
+  const ctx = context({ acceptanceCriteria: { 'AC-X-001': 'one', 'AC-X-002': 'two' }, authorMaxParallelism: 1, gateMode: 'enforce' });
   const pauses = [];
+  let cuts = 0;
+  ctx.__archonHost = async () => { throw new Error("unexpected terminal stop"); };
   const w = {
     agent: async (_id, options) => {
       const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
-      if (id === 'AC-002' && cuts < 4) { cuts += 1; return { status: 'failed', summary: CUT }; }
+      if (id === 'AC-X-002' && cuts < 4) { cuts += 1; return { status: 'failed', summary: CUT }; }
       return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id, check: { kind: 'command', command: 'true' } }) };
     },
-    pause: async (id, evidence) => { pauses.push({ id, evidence, cuts }); return { resumed: true }; },
     hostCommand: async (cap) => ({ publicationReceipt: { call_id: cap }, postcondition: { satisfied: true }, gateEnvelope: { policy_findings: [] } }),
   };
-  const outcome = await ctx.authorCandidate(w, { phase: 'acceptance', author: ctx.authorAcceptanceEntries, capability: 'freeze-acceptance', retryScopes: new Set(['candidate_artifact']), prompt: () => 'author' });
-  assert.equal(outcome.publicationReceipt.call_id, 'freeze-acceptance');
-  assert.equal(pauses.length, 1, JSON.stringify(pauses));
-  assert.equal(pauses[0].cuts, 3, 'the mixed cut and two more fill the operational window');
-  assert.equal(pauses[0].evidence.reason, 'operational_no_progress');
+  w.pause = async (_id, evidence) => { pauses.push(evidence); };
+  await ctx.authorCandidate(w, {phase:'acceptance',author:ctx.authorAcceptanceEntries,capability:'freeze-acceptance',retryScopes:new Set(['candidate_artifact']),prompt:()=> 'author'});
+  assert.equal(pauses.length, 1);
+  assert.equal(pauses[0].reason, 'operational_no_progress');
+  assert.match(JSON.stringify(pauses), /acceptance-author-AC-X-002/);
+  assert.match(pauses[0].recovery, /retries/);
+  assert.doesNotMatch(JSON.stringify(pauses), /resume/i);
 }
 
 (async () => {
-  for (const test of [priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsStayWholeAndOversizedPromptsPause, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
+  for (const test of [priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextRetainsEntryUntilHostRetryWindowAndMissingBindingThrows, oversizedPromptUsesCompleteHostContext, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, operationalAuthorWindowKeepsHostEvidenceAndRetries]) {
     try { await test(); } catch (error) { console.error(`${test.name}: ${error.message}`); process.exitCode = 1; }
   }
 })();

@@ -24,25 +24,23 @@ function context() {
   return value;
 }
 
-async function evidenceWrongIdIsMeasuredByItsFailureClass() {
-  const ctx = context();
-  let calls = 0;
-  const pauses = [];
-  const before = `author_calls=${calls}, captured_pauses=${pauses.length}`;
-  await assert.rejects(ctx.authorCandidate({
-    agent: async () => { calls++; return { status: 'accepted', stopReason: 'end_turn', content: '{"id":"B"}' }; },
-    hostCommand: async () => { throw new Error('refused candidate must not reach freeze'); },
-    pause: async (_phase, evidence) => { pauses.push(evidence); throw new Error('pause captured'); },
-  }, {
-    phase: 'acceptance', prompt: () => '', author: ctx.authorAcceptanceEntries,
-    capability: 'freeze-acceptance', retryScopes: new Set(['candidate_artifact']),
-  }), /pause captured/);
-  const refusal = pauses[0].last_findings.join(' ');
-  const steps = Array.from(pauses[0].progress_history, step => step.progress);
-  const after = `author_calls=${calls}, refusal=${JSON.stringify(refusal)}, progress=${JSON.stringify(steps)}`;
-  console.log(`EVIDENCE #385 author-wrong-id BEFORE: ${before} AFTER: ${after}`);
-  assert.match(refusal, /expected id A, got id "B"/);
-  assert.deepEqual(steps, [true, false, false, false]);
+async function wrongIdEvidenceComesFromTheLadderTransition() {
+  const ctx = context(); let calls = 0; const rungs = [], history = [];
+  const original = ctx.recordRepairs;
+  ctx.recordRepairs = (progress, ...params) => {
+    const result = original(progress, ...params);
+    history.push(JSON.parse(JSON.stringify(progress.history.at(-1)))); return result;
+  };
+  await ctx.authorCandidate({
+    checkpoint: async (_id, options) => { rungs.push({text:options.task,calls,history:history.slice()}); },
+    agent: async () => ({status:'accepted',stopReason:'end_turn',content: ++calls <= 13 ? '{"id":"B"}' : '{"id":"A"}'}),
+    hostCommand: async () => ({publicationReceipt:{call_id:'published'},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}}),
+    pause: async () => {throw new Error('unexpected authored pause');}
+  }, {phase:'acceptance',prompt:()=>'',author:ctx.authorAcceptanceEntries,capability:'freeze-acceptance',retryScopes:new Set(['candidate_artifact'])});
+  assert.equal(calls,14);
+  assert.equal(rungs[0].calls,4);
+  assert.deepEqual(rungs[0].history.map(step=>[step.findings,step.progress]), [[1,true],[1,false],[1,false],[1,false]]);
+  assert(rungs[0].history.every(step=>step.entries[0].malformed_class === 'wrong-id'));
 }
 
 async function evidenceMissingContentHasSpecificRefusal() {
@@ -83,7 +81,7 @@ async function evidenceGateOutageReusesTheSameAuthoredCandidate() {
 }
 
 (async () => {
-  await evidenceWrongIdIsMeasuredByItsFailureClass();
+  await wrongIdEvidenceComesFromTheLadderTransition();
   await evidenceMissingContentHasSpecificRefusal();
   await evidenceGateOutageReusesTheSameAuthoredCandidate();
   console.log('test result: ok. 3 evidence cases');

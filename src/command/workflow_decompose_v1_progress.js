@@ -11,13 +11,12 @@
 // stage, fewer defects in total -- a repair at a later stage while an earlier
 // defect remains is a real, independent repair. Deterministic validators own the identities and stages; their
 // diagnostics and submitted values cannot reset a window. An attempt also
-// carries the set of failing subjects (judged or deterministic): a strictly
-// smaller set than every earlier attempt's is progress too (#529). Trading a
-// defect adds a subject, so it cannot shrink the set; the judge's free-text
-// never credits progress by itself, and a subject that changes reasons
-// remains the same failure.
-// A stall PAUSES the run and resume opens a fresh window while preserving the
-// best measure reconstructed by replay.
+// carries the set of failing subjects (judged or deterministic): fewer
+// subjects than the lowest earlier judged count is progress too (#529),
+// even if membership changes. Packaging and shape refusals cannot lower that frontier. Trading defects at the same count and rewording a
+// subject's findings cannot credit progress by themselves.
+// An authored stall advances its repair rung. Operational failures remain
+// separate from authored progress and retain their operational retry window.
 //
 // Issue 357: an entry the author step refuses for its shape is measured in its
 // own repair frontier, not against the candidate best: a judged candidate is a
@@ -124,12 +123,6 @@ function failingSubjectKey(finding) {
   return subject === null ? findingKey(finding) : subject;
 }
 
-function isStrictSubset(set, best) {
-  if (set.size >= best.size) return false;
-  for (const value of set) if (!best.has(value)) return false;
-  return true;
-}
-
 function isBetter(measure, best) {
   if (!best) return true;
   if (measure.tier !== best.tier) return measure.tier > best.tier;
@@ -209,8 +202,8 @@ function authorRoundReport(policy, state) {
   return { passed: state.roundPassed, outage: state.roundOutage };
 }
 
-// Only a strictly smaller failing-subject set or a measure that beats every
-// earlier attempt is progress. Trading defects cannot shrink the set, and
+// Only a lower failing-subject count or a measure that beats every
+// earlier attempt is progress. Trading defects at the same count and
 // renaming or rewording within the same subjects cannot reset the window. The
 // entries that passed in the clean
 // round that made this candidate are credited first (creditPassed): that
@@ -224,10 +217,12 @@ function recordAttempt(progress, call, findings, answered = true, round = NO_ROU
   const measure = attemptMeasure(findings);
   const oldMeasureBetter = isBetter(measure, progress.best);
   const hasFailingBaseline = progress.bestFailing instanceof Set;
-  const subsetBetter = hasFailingBaseline && isStrictSubset(measure.failingSubjects, progress.bestFailing);
-  const better = oldMeasureBetter || subsetBetter;
+  // An empty result is a complete pass, with no refusal to mask subjects.
+  const judged = measure.tier === JUDGED_TIER || findings.length === 0;
+  const countBetter = judged && hasFailingBaseline && measure.failingSubjects.size < progress.bestFailing.size;
+  const better = oldMeasureBetter || countBetter;
   if (oldMeasureBetter) progress.best = measure;
-  if (!hasFailingBaseline || subsetBetter) progress.bestFailing = measure.failingSubjects;
+  if (judged && (!hasFailingBaseline || countBetter)) progress.bestFailing = measure.failingSubjects;
   const entry = {
     call,
     kind: ["packaging", "refused", "judged"][measure.tier],
@@ -436,10 +431,9 @@ const PAUSES = new Map();
 async function pauseLoop(w, subject, evidence) {
   const ordinal = (PAUSES.get(subject) || 0) + 1;
   PAUSES.set(subject, ordinal);
-  const components = progressOperationalComponents(evidence.progress_history);
   const recovery = evidence.reason === "operational_no_progress"
-    ? `The run is paused, not failed. Restore the host ${components.join(" and ") || "gate/provider"} component, then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`
-    : `The run is paused, not failed. Repair what the last findings name (the PRD, a gate, the provider), then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`;
+    ? `${subject}: ${(evidence.last_findings || []).join(" | ")}. The run retries this component with the recorded inputs.`
+    : "The run keeps the subject pending for repair.";
   await w.pause(`pause-${subject}-${ordinal}`, {
     subject,
     ordinal,
@@ -465,7 +459,8 @@ function progressOperationalComponents(history) {
 
 // Pauses a loop that `stallReason` stopped, then opens its fresh window.
 async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra) {
-  await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings), ...(extra || {}) });
+  await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings),
+    ...(reason === "operational_no_progress" ? {last_findings: lastFindings.slice()} : {}), ...(extra || {}) });
   progress.stalled = 0;
   progress.stalledOperational = 0;
   // The fresh window is also the episode's floor; its per-entry bests stay.

@@ -20,9 +20,8 @@
 // author loop follows (workflow_decompose_v1_progress.js, Issue 261): a round
 // makes progress when its distinct defect count sets a new best, a
 // round of SET_GATE_ESCALATE_AFTER without progress escalates the repair to a
-// skeleton re-author with every open finding, and STALL_ATTEMPTS rounds in a
-// row without progress PAUSE the run with the findings listed. A resumed run
-// starts a fresh window and may escalate again.
+// skeleton re-author with every open finding, and STALL_ATTEMPTS rounds
+// without progress advance the authored repair rung.
 const SET_GATE_ESCALATE_AFTER = 2;
 
 // How many authors run at once: the run's max parallelism, which the host
@@ -122,26 +121,21 @@ async function authorBodies(w, work, bodies) {
     (index) => {
       const policy = bodyPolicy(work[index][0], work[index][1]);
       policy.deferAuthoredPending = true;
+      if (Number.isInteger(work[index][2])) policy.initialRung = work[index][2];
       return authorCandidate(w, policy);
     });
   const pending = [];
   settled.forEach((result, index) => {
     if (result && result.status === "fulfilled") {
-      if (result.value?.pendingAuthor) pending.push([work[index][0], result.value.findings, work[index][1] || []]);
+      if (result.value?.pendingAuthor) pending.push([work[index][0], result.value.findings, work[index][1] || [], result.value.pendingRung]);
       else bodies.set(work[index][0].fileName, result.value);
     }
   });
   const failure = settled.find((result) => result && result.status === "rejected");
   if (failure) throw failure.reason;
   if (pending.length > 0) {
-    await pauseLoop(w, "authored-pending", {
-      reason: "authored_pending",
-      pending_subjects: pending.map(([subject]) => subject.taskId),
-      last_findings: pending.flatMap(([, findings]) => findings).slice(0, PAUSE_EVIDENCE_FINDINGS),
-      recovery: "The run is paused with authored subjects pending. Resume to retry these subjects; completed independent bodies remain published."
-    });
-    await authorBodies(w, pending.map(([subject, findings, priorFeedback]) => [
-      subject, [...priorFeedback, ...findings]
+    await authorBodies(w, pending.map(([subject, findings, priorFeedback, rung]) => [
+      subject, [...priorFeedback, ...findings], rung
     ]), bodies);
   }
 }
@@ -151,9 +145,11 @@ async function authorBodies(w, work, bodies) {
 async function runSetGateLoop(w, chain, bodies) {
   const progress = newProgress([]);
   let escalated = false;
+  let repairRung = 1;
+  let repairCycle = 1;
   for (let round = 1; ; round += 1) {
-    const taskSetLint = await runSetGate(w, "task-set-lint");
-    const requirementsTrace = await runSetGate(w, "requirements-trace");
+    const taskSetLint = await runSetGate(w, "task-set-lint", chain.subjects);
+    const requirementsTrace = await runSetGate(w, "requirements-trace", chain.subjects);
     const gates = [taskSetLint, requirementsTrace];
     progress.calls = round;
     const failed = gates.find((gate) => gate.routed.operational);
@@ -161,13 +157,29 @@ async function runSetGateLoop(w, chain, bodies) {
       // A gate that could not run judged nothing: a round without progress.
       // A judge reply it could not use is the judge's own (D5): it counts in
       // the ordinary no-progress window, never the host's operational one.
-      const summary = `${failed.capability}: ${failed.routed.operational}`;
       const authoredReply = failed.routed.operationalKind === "authored_judge_reply";
+      if (!authoredReply) recordOperational(progress, round, failed.routed.operational, false, NO_ROUND, failed.capability);
       if (authoredReply) recordAnswered(progress, round, "authored_judge_reply", false, true, NO_ROUND);
-      else recordOperational(progress, round, summary, false, NO_ROUND, "gate");
       const lead = authoredReply ? "set gate judge reply unusable" : "host gate operational failure";
+      if (authoredReply) {
+        await reauthorSkeleton(w, chain, bodies, [{
+          text: `${lead}: ${failed.routed.operational}`,
+          remediation_scope: "skeleton"
+        }], [], repairRung);
+      }
       const stall = stallReason(progress);
-      if (stall) await pauseAuthorLoop(w, "set-gates", progress, stall, [`${lead}: ${summary}`], { rounds: round });
+      if (stall === "operational_no_progress") {
+        await pauseAuthorLoop(w, "set-gates", progress, stall, [`${failed.capability}: ${failed.routed.operational}`]);
+        continue;
+      }
+      if (stall) {
+        repairRung = repairRung === 4 ? 2 : repairRung + 1;
+        if (repairRung === 2) repairCycle += 1;
+        await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
+        progress.stalled = 0;
+        progress.stalledOperational = 0;
+        progress.repair.stalled = 0;
+      }
       continue;
     }
     const open = gates.flatMap((gate) => gate.routed.all);
@@ -187,17 +199,21 @@ async function runSetGateLoop(w, chain, bodies) {
     }
     const stall = stallReason(progress);
     if (stall) {
-      // Resumed past the pause: a fresh window, which repairs before it judges.
-      await pauseAuthorLoop(w, "set-gates", progress, stall, open, { rounds: round });
+      repairRung = repairRung === 4 ? 2 : repairRung + 1;
+      if (repairRung === 2) repairCycle += 1;
+      await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
+      progress.stalled = 0;
+      progress.stalledOperational = 0;
+      progress.repair.stalled = 0;
       escalated = false;
     }
     if (!escalated && progress.stalled >= SET_GATE_ESCALATE_AFTER) {
       escalated = true;
-      await reauthorSkeleton(w, chain, bodies, gates.flatMap((gate) => gate.routed.allFindings), bodyFindings);
+      await reauthorSkeleton(w, chain, bodies, gates.flatMap((gate) => gate.routed.allFindings), bodyFindings, repairRung);
       continue;
     }
     if (skeletonFindings.length > 0) {
-      await reauthorSkeleton(w, chain, bodies, skeletonFindings, bodyFindings);
+      await reauthorSkeleton(w, chain, bodies, skeletonFindings, bodyFindings, repairRung);
       continue;
     }
     // Re-authored the way they were authored: in the bounded pool, each body alone
@@ -205,7 +221,7 @@ async function runSetGateLoop(w, chain, bodies) {
     const work = [];
     for (const [fileName, findings] of groupFindingsBySubject(bodyFindings, chain.subjects)) {
       const subject = chain.subjects.find((candidate) => candidate.fileName === fileName);
-      work.push([subject, findings.map((finding) => findingText(finding))]);
+      work.push([subject, findings.map((finding) => findingText(finding)), repairRung]);
     }
     await authorBodies(w, work, bodies);
   }
@@ -222,9 +238,10 @@ async function runSetGateLoop(w, chain, bodies) {
 // found on disk is one on hand like a body this run authored. When either
 // skeleton's frozen fields are unknown to the script (a launch argument
 // without them, or a candidate it cannot read), every body is re-authored.
-async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
+async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repairRung) {
   const prior = SKELETON_TASKS.get(chain.outcome);
-  const outcome = await authorCandidate(w, skeletonPolicy(findings.map((finding) => findingText(finding))));
+  const outcome = await authorCandidate(w, skeletonPolicy(
+    findings.map((finding) => findingText(finding)), repairRung));
   if (!Array.isArray(outcome.subjects) || outcome.subjects.length === 0) {
     throw new Error("re-frozen skeleton returned zero host-read task subjects");
   }
@@ -249,7 +266,7 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
   const note = "The frozen skeleton was re-authored to repair set-gate findings; copy this task's frozen fields from the current skeleton exactly.";
   await authorBodies(w, chain.subjects.filter(reached).map((subject) => [
     subject,
-    [note, ...(grouped.get(subject.fileName) || []).map((finding) => findingText(finding))]
+    [note, ...(grouped.get(subject.fileName) || []).map((finding) => findingText(finding))], repairRung
   ]), bodies);
 }
 
@@ -415,16 +432,18 @@ async function verifyFrozenStage(w, capability) {
     const outcome = await w.hostCommand(capability, { stdin: null });
     const routed = routeFindings(outcome, new Set(), new Set());
     if (!routed.operational) {
-      if (routed.fatal.length > 0) await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+      if (routed.all.length > 0) {
+        await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+      }
       requireCommitted(outcome, capability);
       const tasks = capability === "verify-frozen-skeleton" ? frozenChain().tasks : null;
       if (tasks) SKELETON_TASKS.set(outcome, tasks);
       return outcome;
     }
     progress.calls = attempt;
-    recordOperational(progress, attempt, routed.operational, false, NO_ROUND, "gate");
+    recordOperational(progress, attempt, routed.operational, false, NO_ROUND, capability);
     const stall = stallReason(progress);
-    if (stall) await pauseAuthorLoop(w, capability, progress, stall, [`host gate operational failure: ${routed.operational}`]);
+    if (stall) await pauseAuthorLoop(w, capability, progress, stall, [`${capability}: ${routed.operational}`]);
   }
 }
 

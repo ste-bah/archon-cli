@@ -84,9 +84,8 @@ fn run_js(driver: &str) -> String {
         "isDeterministic",
         "stageOf",
         "attemptMeasure",
-        // Issue 529: a strictly shrinking failing-subject set is progress.
+        // Issue 529: a new lowest failing-subject count is progress.
         "failingSubjectKey",
-        "isStrictSubset",
         "isBetter",
         "newProgress",
         // Issue 357: the per-entry shape-repair frontier.
@@ -116,6 +115,7 @@ fn run_js(driver: &str) -> String {
         "PACKAGING_REFUSAL",
         "AUTHOR_CALLS",
         "routeFindings",
+        "authoredSourceMatches",
         "stopFixed",
         "requireCommitted",
         "authorPrompt",
@@ -135,7 +135,9 @@ fn run_js(driver: &str) -> String {
         "historyKey",
         "earlierFindings",
         "requireDispatchable",
+        "repairEvent",
         "authorCandidate",
+        "verifyFrozenStage",
         "acceptanceRepairIds",
     ] {
         script.push_str(&decl(name));
@@ -168,7 +170,12 @@ async function __archonHost(method, payload) {
         "driver failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 /// A committed artifact carrying a repairable finding must be re-authored.
@@ -185,7 +192,7 @@ const committed = (findings) => ({
   postcondition: { satisfied: true },
   gateEnvelope: { policy_findings: findings },
 });
-const w = {
+const w = { checkpoint: async () => {},
   agent: async () => {
     authorCalls += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{\"candidate\":true}" };
@@ -218,6 +225,33 @@ fn a_repairable_finding_on_a_committed_artifact_drives_another_author_attempt() 
     );
 }
 
+#[test]
+fn frozen_stage_non_operational_findings_stop_with_the_named_artifact() {
+    let driver = r#"
+globalThis.args = {gateMode:"enforce"};
+const w = {hostCommand:async()=>({gateEnvelope:{policy_findings:[{
+  text:"artifact /subjects/acceptance-contract.json is incompatible; replace the artifact",
+  remediation_scope:"candidate_artifact"
+}]}})};
+verifyFrozenStage(w,"verify-frozen-acceptance").then(()=>{throw Error("unexpected reopen");},error=>{
+  if (!error.message.includes("/subjects/acceptance-contract.json")) throw error;
+  console.log("named artifact stops");
+});
+"#;
+    assert_eq!(run_js(driver), "named artifact stops");
+
+    let corrupt = r#"
+globalThis.args = { gateMode: "enforce", frozenChain: { acceptance: true } };
+globalThis.__archonHost = async (_method, payload) => { throw new Error(JSON.parse(payload).reason); };
+const w = { checkpoint: async () => {},  hostCommand: async () => ({ gateEnvelope: { policy_findings: [{ text: "frozen artifact digest mismatch at /run/acceptance.lock", remediation_scope: "host_state" }] } }) };
+verifyFrozenStage(w, "verify-frozen-acceptance").then(() => { throw new Error("corrupt state was reopened"); }, error => {
+  if (!error.message.includes("/run/acceptance.lock")) throw error;
+  console.log("corrupt state stops with exact artifact");
+});
+"#;
+    assert_eq!(run_js(corrupt), "corrupt state stops with exact artifact");
+}
+
 fn driver(first_findings: &str, attempts: u32, always_dirty: bool) -> String {
     format!(
         r#"
@@ -228,14 +262,14 @@ const committed = (findings) => ({{
   postcondition: {{ satisfied: true }},
   gateEnvelope: {{ policy_findings: findings }},
 }});
-const w = {{
+const w = {{ checkpoint: async () => {{}},
   agent: async () => {{
     authorCalls += 1;
     return {{ status: "accepted", stopReason: "end_turn", content: "{{}}" }};
   }},
   pause: async () => {{ throw new Error("paused"); }},
   hostCommand: async () =>
-    ({always_dirty} || authorCalls === 1) ? committed({first_findings}) : committed([]),
+    (({always_dirty} && authorCalls <= 13) || authorCalls === 1) ? committed({first_findings}) : committed([]),
 }};
 const policy = {{
   phase: "acceptance",
@@ -281,15 +315,15 @@ fn a_prd_input_finding_stops_the_phase_in_observe_mode() {
 /// used to fall back), and never fails the run. Issue 261: one baseline
 /// attempt and the stall window, not a fixed budget.
 #[test]
-fn observe_pauses_instead_of_returning_the_committed_artifact_when_the_loop_stalls() {
+fn observe_reauthors_a_stalled_committed_artifact_until_it_clears() {
     let out = run_js(&driver(
         r#"[{ "text": "floor is not falsifiable", "remediation_scope": "candidate_artifact" }]"#,
         2,
         true,
     ));
     assert_eq!(
-        out, r#"{"authorCalls":4,"error":"paused","terminalStops":[]}"#,
-        "observe must repair until the loop stalls and then pause: {out}"
+        out, r#"{"authorCalls":14,"committed":true}"#,
+        "observe must keep repairing until the finding clears: {out}"
     );
 }
 
@@ -298,7 +332,7 @@ fn observe_pauses_instead_of_returning_the_committed_artifact_when_the_loop_stal
 /// committed artifact). Every publication replaces the live tree, so an
 /// earlier round with fewer findings would describe a tree that is gone.
 #[test]
-fn a_stalled_observe_loop_pauses_with_the_latest_findings() {
+fn a_stalled_observe_loop_reauthors_until_findings_clear() {
     let driver = r#"
 globalThis.args = { gateMode: "observe" };
 let call = 0;
@@ -306,7 +340,7 @@ let paused = null;
 const finding = (n) => Array.from({ length: n }, (_, i) => ({
   text: "defect " + i, remediation_scope: "candidate_artifact",
 }));
-const w = {
+const w = { checkpoint: async () => {},
   agent: async () => {
     call += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{}" };
@@ -316,7 +350,7 @@ const w = {
   hostCommand: async () => ({
     publicationReceipt: { id: "commit-" + call },
     postcondition: { satisfied: true },
-    gateEnvelope: { policy_findings: finding(call === 2 ? 1 : 2) },
+    gateEnvelope: { policy_findings: call <= 13 ? finding(call === 2 ? 1 : 2) : [] },
   }),
 };
 const policy = {
@@ -333,8 +367,8 @@ authorCandidate(w, policy).then(
 "#;
     assert_eq!(
         run_js(driver),
-        r#"{"error":"paused","calls":4,"last":["defect 0","defect 1"]}"#,
-        "the stalled phase must pause with the findings of the live tree"
+        r#"{"kept":"commit-14"}"#,
+        "the stalled phase must repair until the live tree has no finding"
     );
 }
 
@@ -375,7 +409,7 @@ fn repair_feedback_carries_what_earlier_attempts_already_tried() {
 globalThis.args = { gateMode: "observe" };
 let prompts = [];
 let call = 0;
-const w = {
+const w = { checkpoint: async () => {},
   agent: async (_id, opts) => {
     prompts.push(opts.task);
     call += 1;
@@ -407,5 +441,21 @@ authorCandidate(w, policy).then(() => {
         r#"{"sees_both":true}"#,
         "by the third attempt the author must see both findings it has already \
          triggered, or it will keep alternating between them"
+    );
+}
+
+#[test]
+fn host_repair_regressions_drive_the_embedded_script() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_host_repair_test.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

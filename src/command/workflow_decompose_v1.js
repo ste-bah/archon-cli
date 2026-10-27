@@ -155,12 +155,13 @@ function requireFixedArgs() {
 // re-authors it because the set gate found an obligation no task claims or
 // a claim the PRD does not define (Batch O). `initialFeedback` carries the
 // set gate's exact findings into the first attempt.
-function skeletonPolicy(initialFeedback) {
+function skeletonPolicy(initialFeedback, initialRung) {
   return {
     phase: "skeleton",
     capability: "freeze-skeleton",
     retryScopes: new Set(["candidate_artifact", "skeleton"]),
     initialFeedback,
+    ...(Number.isInteger(initialRung) ? { initialRung } : {}),
     prompt: () => [
       "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
       `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
@@ -176,48 +177,12 @@ function skeletonPolicy(initialFeedback) {
       "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
       "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
       "The host overwrites acceptance_digest: send the placeholder shown.",
+      "Generate large or repetitive fixture data with code rather than writing it literally.",
       "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
       "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
       "Do not run commands or write files."
     ].join("\n")
   };
-}
-
-// Where the authors read code (Issue-55). The repository root is the ONLY
-// place source paths, test names, module layout and "exists / does not exist"
-// claims are verified; projectRoot holds the PRD, the task root and .mcp.json
-// and nothing an author may cite as source. Before this the authors were told
-// to read "repository source under the project root", which was the working
-// directory: where that is not the code repository they globbed an empty
-// tree (105 live runs read the repository 0-3 times each) and wrote tasks
-// claiming that files which exist "do not exist".
-function groundingRules() {
-  return [
-    `The code repository is ${args.repositoryRoot}. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.`,
-    `${args.projectRoot} is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.`
-  ].join("\n");
-}
-
-// The observation every deliverable path must carry (Issue-56). The host lint
-// (`topology_lint/repository_observations.rs`) parses exactly this grammar and
-// checks it against the checkout, line count included: a path with no
-// observation, an inexact count, or "not observed" wording is a blocking
-// finding, so the words here and the parser there must agree.
-function observationRule() {
-  return [
-    `Every path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (\`${args.repositoryRoot}/<relative path>\` or the repository-relative path), exactly one of these three observations and nothing in their place:`,
-    "  \`<path>\` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);",
-    "  \`<path>\` — exists (directory)   for a directory;",
-    "  \`<path>\` — absent   for a path that is not in the repository.",
-    "The host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root."
-  ].join("\n");
-}
-
-// Directory names the host says are not worth reading, joined for a prompt.
-// Sourced from args so the engine's canonical list stays the single definition.
-function excludedDirs() {
-  const list = Array.isArray(args.excludedDirs) ? args.excludedDirs : [];
-  return list.length > 0 ? list.join(', ') : '.git, node_modules, target';
 }
 
 // One body policy, whether the body is authored fresh after the skeleton or
@@ -254,6 +219,7 @@ function bodyPolicy(subject, initialFeedback) {
       "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
       "Preserve every frozen tuple field exactly.",
       "The yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.",
+      "Generate large or repetitive fixture data with code rather than writing it literally.",
       "Your entire reply must be the TASK file itself, as raw UTF-8 Markdown.",
       "Wrap the reply in no outer code fence, and add no commentary before or after it.",
       "Do not run commands or write files."
@@ -266,66 +232,9 @@ function bodyPolicy(subject, initialFeedback) {
 // attempts replay as history and a repair never overwrites a recorded call.
 const AUTHOR_CALLS = new Map();
 
-// Describe only patterns visible in the incomplete reply. Character counts
-// use Unicode code points, and empty content has no lines.
-function incompleteReplyFeedback(content) {
-  const text = typeof content === "string" ? content : "";
-  const characters = Array.from(text).length;
-  const lines = text === "" ? [] : text.split(/\r\n|\r|\n/);
-  const groups = new Map();
-  const fieldType = (value) => {
-    const field = value.trim();
-    if (field === "") return "empty";
-    if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(field)) return "number";
-    if (/^(?:true|false|null)$/i.test(field)) return field.toLowerCase();
-    return "text";
-  };
-  for (const line of lines) {
-    const trimmed = line.trim();
-    let key = null;
-    let kind = null;
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-      try {
-        const value = JSON.parse(trimmed);
-        if (value && typeof value === "object" && !Array.isArray(value)) {
-          const fields = Object.keys(value).sort().map((name) => {
-            const item = value[name];
-            const type = item === null ? "null" : Array.isArray(item) ? "array" : typeof item;
-            return `${name}:${type}`;
-          }).join(",");
-          key = `json:${fields}`;
-          kind = "one-object-per-line JSON";
-        }
-      } catch (_) { /* A malformed line is not a JSON data row. */ }
-    }
-    if (key === null) {
-      for (const delimiter of [",", "\t"]) {
-        const fields = line.split(delimiter);
-        if (fields.length < 2) continue;
-        key = `delimited:${delimiter}:${fields.length - 1}:${fields.map(fieldType).join(":")}`;
-        kind = delimiter === "," ? "CSV" : "TSV";
-        break;
-      }
-    }
-    if (key !== null) {
-      const group = groups.get(key) || {count:0, kind};
-      group.count++;
-      groups.set(key, group);
-    }
-  }
-  let largest = null;
-  for (const group of groups.values()) if (!largest || group.count > largest.count) largest = group;
-  const size = `The provider cut off an incomplete reply of ${characters} characters across ${lines.length} lines`;
-  if (largest && largest.count > lines.length / 2) {
-    return `${size}; ${largest.count} of ${lines.length} lines share the same literal ${largest.kind} shape. Generate large or repetitive fixture data inside the check with a loop or small program, and keep only what the criterion needs.`;
-  }
-  return `${size}; return a shorter complete artifact.`;
-}
-
 // One subject's author loop, limited by progress (Issue 261): an attempt that
 // makes progress keeps it going; STALL_ATTEMPTS in a row without progress
-// pause the run with evidence, and a resumed run continues from the pause
-// with a fresh window.
+// advances the authored repair rung. Rung progress follows replayed calls.
 async function authorCandidate(w, policy) {
   let feedback = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
   // Seeded feedback is attempt 0 of the history: every later prompt in this
@@ -334,6 +243,10 @@ async function authorCandidate(w, policy) {
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
+  const allFindings = feedback.slice();
+  let judgeFeedback = [];
+  let repairRung = Number.isInteger(policy.initialRung) ? policy.initialRung : 1;
+  let repairCycle = 1;
   const progress = newProgress(feedback);
   const authorState = { entries: new Map(), retryIds: null };
   // Issue 360: after an upgrade, start from the latest durable candidate (workflow_decompose_v1_seed.js).
@@ -345,30 +258,78 @@ async function authorCandidate(w, policy) {
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
-      // A single task body is authored work. Return its latest findings to
-      // the body pool so independent subjects can finish before this phase
-      // opens a resumable pending window.
-      if (policy.deferAuthoredPending && stall === "no_progress") {
-        return { pendingAuthor: true, findings: lastFindings.slice() };
+      if (stall === "no_progress") {
+        if (repairRung === 3 && policy.deferAuthoredPending) {
+          await repairEvent(w, policy.phase, 4, repairCycle, call, progress.calls);
+          return { pendingAuthor: true, pendingRung: 4, findings: lastFindings.slice() };
+        }
+        repairRung = repairRung === 4 ? 2 : repairRung + 1;
+        if (repairRung === 2) {
+          repairCycle += 1;
+          // Entry authors keep their own refusal in authorState; do not copy
+          // a sibling's finding into another entry's fresh-context prompt.
+          feedback = policy.author ? judgeFeedback.slice()
+            : [...new Set([...allFindings, ...lastFindings])];
+          history.length = 0;
+        }
+        await repairEvent(w, policy.phase, repairRung, repairCycle, call, progress.calls);
+        progress.stalled = 0;
+        progress.repair.stalled = 0;
+        continue;
       }
-      // A stalled artifact is never accepted, even in observe mode. Keep the
-      // run resumable so repair findings remain attached to the author loop.
+      // A host fault is not an authored finding and cannot be repaired here.
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
+      continue;
     }
     const carry = carried;
     carried = null;
-    if (carry === null) { call += 1; progress.calls += 1; AUTHOR_CALLS.set(policy.phase, call); }
+    const nextCall = carry === null ? call + 1 : call;
     const addedBefore = authorState.added || 0;
-    const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
-    const authored = carry !== null ? { status: "accepted", stopReason: "end_turn", content: carry } : policy.author
-      ? await policy.author(w, prompt, call, authorState)
-      : await w.agent(`${policy.phase}-author-${call}`, {
-          task: await requireDispatchable(w, `${policy.phase}-prompt`, prompt), tier: "planner", resultMode: "rawOutcome",
-          ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
-        });
+    const rungInstruction = repairRung === 1 ? ""
+      : repairRung === 2 ? "\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding."
+      : repairRung === 3 ? "\nReturn a complete replacement. Work through the findings in smaller groups while preserving every finding from this and earlier attempts."
+      : "\nThis subject is deferred while independent subjects settle. Return a complete replacement when re-entered with the latest findings.";
+    const midpoint = Math.ceil(feedback.length / 2);
+    const groupFeedback = repairRung === 3 && feedback.length > 1
+      ? (nextCall % 2 === 1 ? feedback.slice(0, midpoint) : feedback.slice(midpoint))
+      : feedback;
+    const promptFeedback = [...new Set([...(policy.initialFeedback || []), ...groupFeedback])];
+    let authored;
+    try {
+      const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
+      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}`, attempt + 1, promptFeedback, history);
+      if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
+      else {
+        // Context writes are not journaled. Reserve no ordinal until the
+        // complete prompt is ready, so recovery and replay dispatch identically.
+        const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
+        if (policy.author) {
+          authored = await policy.author(w, task, nextCall, authorState);
+          if (authorState.roundCalls > 0 || authored.status !== "failed") {
+            call = nextCall;
+            AUTHOR_CALLS.set(policy.phase, call);
+          }
+        } else {
+          progress.calls += 1;
+          call = nextCall;
+          AUTHOR_CALLS.set(policy.phase, call);
+          authored = await w.agent(`${policy.phase}-author-${call}`, {
+            task, tier: "planner", resultMode: "rawOutcome",
+            ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
+          });
+        }
+      }
+    } catch (error) {
+      if (!error || error.authorContext !== true) throw error;
+      authorState.roundCalls = 0;
+      authorState.roundAnswered = 0;
+      authorState.roundPassed = [];
+      authorState.roundOutage = true;
+      authored = { status: "failed", summary: error.message };
+    }
     const measuredReplies = policy.author && authorState.roundCalls !== undefined;
     if (measuredReplies) {
-      progress.calls += authorState.roundCalls - 1;
+      progress.calls += authorState.roundCalls;
       progress.answered += authorState.roundAnswered;
     }
     // A round without a candidate can still retain work when a sibling fails:
@@ -390,14 +351,19 @@ async function authorCandidate(w, policy) {
         recordOperational(progress, call, authored.summary, advanced, round, "provider");
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
+      if (authored.refusals || authored.malformed) {
+        attempt += 1;
+        for (const finding of lastFindings) if (!allFindings.includes(finding)) allFindings.push(finding);
+      }
       continue;
     }
-    attempt += 1;
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
+      attempt += 1;
       feedback = [authored.stopReason === "max_tokens"
         ? incompleteReplyFeedback(authored.content)
         : `Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
+      for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
       recordAnswered(progress, call, "incomplete", false, !measuredReplies);
       continue;
     }
@@ -410,29 +376,60 @@ async function authorCandidate(w, policy) {
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (routed.operational) {
       if (routed.operationalKind === "authored_judge_reply") {
-        // The candidate is intact; only its judge reply was unusable. Retry
-        // the same freeze without charging the host operational no-progress
-        // window, but count it in the ordinary no-progress window so a judge
-        // that never answers usably pauses the loop with evidence instead of
-        // retrying forever. Provider and other host failures keep the normal
-        // path.
+        // The judge could not use this candidate. Feed its reason to the
+        // author so the next call creates a replacement.
+        if (policy.author) {
+          const named = /still have no [^(]*\(([^)]*)\)/.exec(routed.operational);
+          const namedIds = new Set(named ? named[1].split(",").map(id => id.trim()) : []);
+          const retryIds = (authorState.order || []).filter(id => namedIds.has(id));
+          authorState.retryIds = retryIds.length > 0 ? new Set(retryIds) : null;
+        }
         recordAnswered(progress, call, "authored_judge_reply", advanced, !measuredReplies, round);
-        lastFindings = [`freeze judge reply unusable: ${routed.operational}`];
-        carried = authored.content;
+        feedback = [`freeze judge reply unusable: ${routed.operational}`];
+        judgeFeedback = feedback.slice();
+        lastFindings = feedback.slice();
+        for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
         continue;
       }
       // The gate never judged the candidate; only the round that made it can
       // be progress: a pass in it, or a previously missing entry it added.
       if (!measuredReplies) progress.answered += 1;
-      recordOperational(progress, call, routed.operational, advanced, round, "gate");
-      lastFindings = [`host gate operational failure: ${routed.operational}`];
+      recordOperational(progress, call, routed.operational, advanced, round, policy.capability);
+      lastFindings = [`${policy.capability}: ${routed.operational}`];
       carried = authored.content;
       continue;
     }
+    const ownedFatal = routed.fatalFindings.filter((finding) => {
+      if (finding.remediation_scope === "operational") return false;
+      const source = typeof finding.source_path === "string" ? finding.source_path.replace(/\\/g, "/") : "";
+      if (policy.target && authoredSourceMatches(source, policy.target.fileName)) return true;
+      return policy.phase === "acceptance" && (source === `${String(args.taskRoot || "").replace(/\\/g, "/")}/acceptance-contract.json` || source === "acceptance-contract.json")
+        && typeof finding.subject === "string"
+        && (Object.prototype.hasOwnProperty.call(args.acceptanceCriteria || {}, finding.subject)
+          || authorState.entries.has(finding.subject));
+    });
+    if (ownedFatal.length > 0) {
+      const owned = new Set(ownedFatal);
+      const ownedText = ownedFatal.map((finding) => String(finding.text || "unnamed policy finding"));
+      routed.fatal = routed.fatal.filter((_, index) => !owned.has(routed.fatalFindings[index]));
+      routed.fatalOperational = routed.fatalOperational.filter((_, index) => !owned.has(routed.fatalFindings[index]));
+      routed.fatalFindings = routed.fatalFindings.filter((finding) => !owned.has(finding));
+      routed.retry.push(...ownedText);
+      routed.retryFindings.push(...ownedFatal);
+    }
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
-      const repair = (outcome.gateEnvelope?.policy_findings || [])
-        .filter(finding => policy.retryScopes.has(finding.remediation_scope));
+      const repair = routed.retryFindings;
+      if (!authorState.gateFindings) authorState.gateFindings = new Map();
+      for (const finding of repair) {
+        const selected = ids.has(finding.subject) ? new Set([finding.subject])
+          : acceptanceRepairIds([finding], ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+        for (const id of selected || authorState.entries.keys()) {
+          const prior = authorState.gateFindings.get(id) || [];
+          if (!prior.includes(finding.text)) prior.push(finding.text);
+          authorState.gateFindings.set(id, prior);
+        }
+      }
       const stale = repair.find(finding => finding?.deterministic_defect?.code === "stale_acceptance_contract");
       if (stale) {
         // The contract changed after this freeze was prepared: rebuild the
@@ -448,12 +445,14 @@ async function authorCandidate(w, policy) {
           continue;
         }
       } else {
-        authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+        const selected = repair.map(finding => ownedFatal.includes(finding)
+          ? {...finding, text: `check '${finding.subject}': ${finding.text}`} : finding);
+        authorState.retryIds = acceptanceRepairIds(selected, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
       }
     }
     // A committed artifact is not the finished one: repairable findings are
     // still fed back below in either mode, and a loop that stalls on them
-    // pauses (resumable) in either mode. A check the host could not prove
+    // re-authors in either mode. A check the host could not prove
     // (an operational finding) beside findings the author can repair stops
     // nothing: it blocks publication, the author repairs its own, and the
     // next freeze probes the unproven check again.
@@ -468,120 +467,14 @@ async function authorCandidate(w, policy) {
       if (policy.phase === "skeleton") recordSkeletonTasks(outcome, authored.content);
       return outcome;
     }
+    attempt += 1;
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
     lastFindings = routed.retry.slice();
+    for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
     // `advanced` is not credited here on purpose: the gate measured the whole
     // candidate, and that measure decides (Issue 261).
     recordAttempt(progress, call, routed.retryFindings, !measuredReplies, round);
     openRepairEpisode(progress);
-  }
-}
-
-// The set gate's retry scopes. Every body was judged alone against its own
-// claims; a finding that only the whole set reveals (an obligation task A
-// claims, hollowed by text in task B) is still a body defect, and Issue-46
-// sends it back to the body it names instead of ending the run.
-const SET_GATE_RETRY_SCOPES = new Set(["body", "candidate_artifact"]);
-
-async function runSetGate(w, capability) {
-  const outcome = await w.hostCommand(capability, { stdin: null });
-  // Set-level skeleton findings are routed to a skeleton re-author by the
-  // loop (Batch O), never shadowed past.
-  const routed = routeFindings(outcome, SET_GATE_RETRY_SCOPES, new Set(["skeleton"]));
-  if (routed.fatal.length > 0) {
-    await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
-  }
-  return { capability, outcome, routed };
-}
-
-// Protocol v1 deliberately changes the embedded script digest for a planned release.
-// Only an actual validated host request makes this stop terminal; error text cannot.
-async function stopFixed(reason) {
-  await __archonHost("terminalStop", JSON.stringify({ schemaVersion: 1, reason: String(reason).slice(0, 4096) }));
-  throw new Error("host returned without honoring the terminal stop");
-}
-
-// Batch O: a set gate is accepted only with no finding open, in either
-// mode. Observe used to accept one with findings and build on it.
-function acceptSetGate(gate) {
-  if (gate.routed.all.length > 0) {
-    throw new Error(`${gate.capability} cannot be accepted with findings open: ${gate.routed.all.join(" | ")}`);
-  }
-  requireCommitted(gate.outcome, gate.capability);
-  return gate.outcome;
-}
-
-// A gate operational error (a truncated judge reply, a preparation failure)
-// is returned as `operational`, never thrown: the caller's loop counts it as
-// an attempt without progress and pauses the run when its window closes.
-function routeFindings(outcome, retryScopes, shadowScopes) {
-  if (!outcome || typeof outcome !== "object") throw new Error("host command returned no typed outcome");
-  const routed = {
-    retry: [], retryFindings: [], fatal: [], inherited: [], inheritedFindings: [],
-    shadow: [], shadowFindings: [], all: [], allFindings: [], operational: null,
-    fatalOperational: []
-  };
-  if (outcome.gateEnvelope?.operational_error) {
-    routed.operational = String(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
-    routed.operationalKind = String(outcome.gateEnvelope.operational_error.kind || "");
-    return routed;
-  }
-  const findings = Array.isArray(outcome.gateEnvelope?.policy_findings)
-    ? outcome.gateEnvelope.policy_findings
-    : [];
-  const shadows = shadowScopes || new Set();
-  for (const finding of findings) {
-    const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
-    const scope = finding.remediation_scope;
-    routed.all.push(text);
-    routed.allFindings.push(finding);
-    if (scope === "prd_input" || scope === "operational") {
-      routed.fatal.push(text);
-      routed.fatalOperational[routed.fatal.length - 1] = scope === "operational";
-    }
-    else if (scope === "inherited_predecessor") { routed.inherited.push(text); routed.inheritedFindings.push(finding); }
-    else if (retryScopes.has(scope)) { routed.retry.push(text); routed.retryFindings.push(finding); }
-    else if (shadows.has(scope)) { routed.shadow.push(text); routed.shadowFindings.push(finding); }
-    // Every remaining finding stops the phase. A missing or unrecognised scope
-    // is operational by contract, and a scope this phase cannot act on means
-    // something the candidate does not own changed underneath it. Falling
-    // through here silently left retry and fatal both empty, so the phase
-    // accepted the artifact and reported success.
-    else routed.fatal.push(`scope '${scope || "missing"}' is not actionable in this phase: ${text}`);
-  }
-  return routed;
-}
-
-function requireCommitted(outcome, phase) {
-  if (!outcome.publicationReceipt) throw new Error(`${phase} returned no committed publication receipt`);
-  if (!outcome.postcondition || outcome.postcondition.satisfied !== true) {
-    throw new Error(`${phase} authoritative postcondition is not satisfied`);
-  }
-}
-
-// `authored` is the number of body outcomes this run carries: acceptance,
-// skeleton, one per subject this run authored or re-authored, and the two set
-// gates. A body the frozen chain supplied and the set gates never sent back
-// has no author outcome; the two committed set-gate outcomes, whose
-// postcondition compares every task on disk to the frozen skeleton, are its
-// evidence.
-function reconcile(evidence, authored) {
-  if (!Array.isArray(evidence) || evidence.length !== authored + 4) {
-    throw new Error("Phase E evidence cardinality does not match frozen subjects");
-  }
-  for (const [index, outcome] of evidence.entries()) {
-    requireCommitted(outcome, `Phase E evidence ${index + 1}`);
-    const receiptId = outcome.publicationReceipt.call_id;
-    const recordedId = outcome.result?.data?.publicationReceipt?.call_id;
-    if (typeof receiptId !== "string" || receiptId.length === 0 || receiptId !== recordedId) {
-      throw new Error(`Phase E receipt identity mismatch at evidence ${index + 1}`);
-    }
-  }
-}
-
-function requireSubject(subject) {
-  if (!subject || typeof subject.taskId !== "string" || typeof subject.fileName !== "string") {
-    throw new Error("frozen skeleton returned a malformed host-read subject");
   }
 }
