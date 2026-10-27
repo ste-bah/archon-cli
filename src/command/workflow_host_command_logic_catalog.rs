@@ -164,7 +164,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // 63: #526 a judge refutation counts only when its quoted rule is in the output or check text the judge saw; #528 the per-entry reuse key uses each entry's own named-file content.
-        sources_digest: "2d719e0a3b64a63edafdda5fef8c898f81462013ce568f72daf46e9805da2912",
+        sources_digest: "7d1566a69aa5445ace66160fdcd80fdeff4e3a3e62afdad6539590853270bf86",
         build_bound: false,
     },
     CapabilityLogic {
@@ -197,8 +197,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 24 re-pin only: skeleton freeze verdicts do not read the acceptance judge, reply extraction or Scratch evidence.
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton freeze verdicts do not read acceptance judge identity, passability or path classes.
-        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop): no verdict rule changed.
-        sources_digest: "2d719e0a3b64a63edafdda5fef8c898f81462013ce568f72daf46e9805da2912",
+        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
+        sources_digest: "7d1566a69aa5445ace66160fdcd80fdeff4e3a3e62afdad6539590853270bf86",
         build_bound: false,
     },
     CapabilityLogic {
@@ -263,8 +263,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
-        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop): no verdict rule changed.
-        sources_digest: "56bf4ca2cade2b31c8475d1146a266f22c1113935507969337e298120f6bd33c",
+        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
+        sources_digest: "06b04ef2a771cf931b99cd38a659db17dcfb89eb13306023d7a6de61fcbebb98",
         build_bound: false,
     },
     CapabilityLogic {
@@ -315,8 +315,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #386 #387 #425 #424 #369 #383 #438 #442 #441 #447 #446 #448 #464 #467 #466 #469 #471 #472
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
-        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop): no verdict rule changed.
-        sources_digest: "56bf4ca2cade2b31c8475d1146a266f22c1113935507969337e298120f6bd33c",
+        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
+        sources_digest: "06b04ef2a771cf931b99cd38a659db17dcfb89eb13306023d7a6de61fcbebb98",
         build_bound: false,
     },
     CapabilityLogic {
@@ -334,7 +334,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 7,
         // Re-pinned only (verdict rules unchanged): #434 #417 #438 #441 #424 #369 #383 #440 #420 #447 #446 #464 #466 #469
         // Batch 25 re-pin only: the shared Scratch path helper moved; trace verdicts do not read mutation proofs.
-        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop): no verdict rule changed.
+        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         sources_digest: "dccd9f66ccb11b8d48d90be735e7781b6b9aa44eb528a1c7dd51569cdf1f4384",
         build_bound: true,
     },
@@ -384,8 +384,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #496 re-pin only: in-round host-unproven state remains outside frozen verification.
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
-        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop): no verdict rule changed.
-        sources_digest: "95163a81b35d738d995b87ee19fea51a21032ef92c98a2d079d5da7dcd273067",
+        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
+        sources_digest: "7dc1b86f935fffea49a9c152e827ac0066f49c22674517e4dfd0ac6177779508",
         build_bound: true,
     },
     CapabilityLogic {
@@ -417,8 +417,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 24 re-pin only: frozen skeleton verification does not read Scratch evidence or the acceptance judge.
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton reverify verdicts do not read passability or acceptance judge identity.
-        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop): no verdict rule changed.
-        sources_digest: "95163a81b35d738d995b87ee19fea51a21032ef92c98a2d079d5da7dcd273067",
+        // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
+        sources_digest: "7dc1b86f935fffea49a9c152e827ac0066f49c22674517e4dfd0ac6177779508",
         build_bound: true,
     },
 ];

@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use super::coverage_gate::PreImplementation;
 use super::executability::BaselineRuns;
 use super::*;
-use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeIncomplete, FreezeResume};
+use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeResume};
 
 #[path = "workflow_acceptance_passability_audit.rs"]
 mod audit;
@@ -292,22 +292,6 @@ async fn assess(
     }
     Ok(refuted)
 }
-pub(super) fn incomplete_judge_error(
-    error: anyhow::Error,
-    resume: &FreezeResume,
-    deferred: Vec<String>,
-) -> anyhow::Error {
-    let authored_reply = super::judge::JudgeIncomplete::caused(&error)
-        .is_some_and(super::judge::JudgeIncomplete::is_authored_reply);
-    let cause = archon_observability::redaction::redact_text(&format!("{error:#}"));
-    let incomplete =
-        FreezeIncomplete::awaiting_judge(&resume.budget, &resume.progress, deferred, cause);
-    if authored_reply {
-        incomplete.authored_judge_reply().into()
-    } else {
-        incomplete.into()
-    }
-}
 /// The candidates among `ids` of `contract` that failed in `runs`.
 fn candidates(
     client: &dyn WorkflowLlmClient,
@@ -499,6 +483,7 @@ pub(crate) async fn judge_baseline_failures(
 #[path = "workflow_acceptance_passability_judge.rs"]
 mod passability_judge;
 use passability_judge::ask;
+pub(super) use passability_judge::incomplete_judge_error;
 #[cfg(test)]
 #[path = "workflow_acceptance_passability_partial_tests.rs"]
 mod partial_tests;

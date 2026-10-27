@@ -333,7 +333,9 @@ authorCandidate(w, policy).then(
 "#;
     assert_eq!(
         run_js(driver),
-        r#"{"error":"paused","calls":4,"last":["defect 0","defect 1"]}"#,
+        // Issue 529: the shrink to one failing finding at call 2 is progress,
+        // so the window closes after calls 3-5.
+        r#"{"error":"paused","calls":5,"last":["defect 0","defect 1"]}"#,
         "the stalled phase must pause with the findings of the live tree"
     );
 }
