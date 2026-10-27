@@ -16,6 +16,8 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 #[path = "workflow_task_set_judge_named_files.rs"]
 mod named_files;
 #[cfg(test)]
+pub(crate) use named_files::budget_tests::body_reads;
+#[cfg(test)]
 use named_files::named_files;
 pub(super) use named_files::named_files_content_digest;
 #[cfg(test)]
@@ -31,26 +33,15 @@ pub(crate) struct ReauthorPrefetchCache(named_files::PrefetchSourceCache);
 
 pub(crate) fn named_files_for_reauthor_cached(
     criterion: &AcceptanceCriterion,
-    project: &Path,
-    repository: &Path,
-    task_root: &Path,
-    repository_commit: Option<String>,
+    roots: &JudgeRoots,
     extra_inputs: &[String],
+    remaining: &mut usize,
     cache: &mut ReauthorPrefetchCache,
 ) -> Vec<serde_json::Value> {
-    let roots = JudgeRoots {
-        project: Some(project.to_path_buf()),
-        repository: Some(repository.to_path_buf()),
-        task_root: Some(task_root.to_path_buf()),
-        repository_commit,
-    };
-    // The author prompt enters the subagent request history, where the normal
-    // context-window fit keeps the request within its configured budget.
-    let mut remaining = usize::MAX;
     named_files::named_files_for_inputs_with_budget_cached(
         criterion,
-        &roots,
-        &mut remaining,
+        roots,
+        remaining,
         extra_inputs,
         &mut cache.0,
     )
@@ -94,7 +85,7 @@ struct JudgeResponse {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct JudgeRoots {
+pub(crate) struct JudgeRoots {
     pub project: Option<PathBuf>,
     pub repository: Option<PathBuf>,
     pub task_root: Option<PathBuf>,

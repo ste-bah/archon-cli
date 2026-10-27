@@ -103,6 +103,13 @@ pub(super) fn admit(
     None
 }
 
+/// Return the admission charge when the cached answer omits already-visible bytes.
+pub(super) fn refund_inspection(state: &mut State, key: &AgentKey) {
+    if let Some(agent) = state.agent_state.get_mut(key) {
+        agent.read_only_inspections = agent.read_only_inspections.saturating_sub(1);
+    }
+}
+
 impl WorkflowReadGuard {
     /// Whether this read-only call has exhausted its configured inspection
     /// allowance. Write-capable guards and a disabled hard ceiling never

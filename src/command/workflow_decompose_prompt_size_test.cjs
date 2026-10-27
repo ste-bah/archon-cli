@@ -282,8 +282,36 @@ async function inactivityCutWithProgressKeepsTheWindow() {
   assert.equal(pauses[0].evidence.reason, 'operational_no_progress');
 }
 
+async function emptyNamedFilesStayWithinTheDispatchBudget() {
+  const id = 'AC-X-001';
+  const criteria = { [id]: 'criterion' };
+  const ctx = context({ acceptanceCriteria: criteria });
+  ctx.__archonNamedFiles = () => '[]';
+  const prompts = [];
+  const w = {
+    agent: async (_id, options) => { prompts.push(options.task); return { status: 'failed', summary: 'answered' }; },
+    pause: async (_id, evidence) => { throw new Error(`oversized:${evidence.prompt_bytes}`); },
+  };
+  const call = (prompt) => ctx.authorOne(w, prompt, 0, id, criteria[id], [], criteria, { entries: new Map(), order: [id] });
+  await call('');
+  const baseBytes = Buffer.byteLength(prompts.pop()) - Buffer.byteLength('[]');
+  const limit = vm.runInContext('AUTHOR_PROMPT_LIMIT', ctx);
+  const failures = [];
+  for (const spare of [0, 1, 2, 3]) {
+    const prompt = 'x'.repeat(limit - baseBytes - spare);
+    try {
+      await call(prompt);
+      const bytes = Buffer.byteLength(prompts.pop());
+      assert(bytes <= limit, `spare=${spare}: ${bytes} exceeds ${limit}`);
+    } catch (error) {
+      failures.push(`spare=${spare}: ${error.message}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+}
+
 (async () => {
-  for (const test of [priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsStayWholeAndOversizedPromptsPause, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
+  for (const test of [emptyNamedFilesStayWithinTheDispatchBudget, priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsStayWholeAndOversizedPromptsPause, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
     try { await test(); } catch (error) { console.error(`${test.name}: ${error.message}`); process.exitCode = 1; }
   }
 })();

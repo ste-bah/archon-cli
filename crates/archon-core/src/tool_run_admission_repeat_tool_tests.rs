@@ -50,9 +50,17 @@ async fn child_read_ceiling_does_not_spend_the_parent_allowance() {
         crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &child, false).await;
     let second =
         crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &parent, false).await;
+    let refreshed = crate::tool_run_admission::execute_tool_attempt(
+        &tool,
+        serde_json::json!({"file_path":path,"force_refresh":true}),
+        &parent,
+        false,
+    )
+    .await;
     let refused =
         crate::tool_run_admission::execute_tool_attempt(&tool, input, &parent, false).await;
 
+    assert_eq!(refreshed.content, "1\talpha");
     assert_eq!(first.content, "1\talpha");
     assert_eq!(child_read.content, "1\talpha");
     assert!(

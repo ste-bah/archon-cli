@@ -268,3 +268,79 @@ async fn an_empty_scope_field_fails_by_name_before_the_author_is_spawned() {
         "the author was spawned"
     );
 }
+
+#[tokio::test]
+async fn read_guard_dispatched_author_receives_prefetch_stop_rule_and_free_repeats() {
+    use archon_core::dispatch::ToolRegistry;
+    use archon_tools::workflow_read_guard::{WorkflowReadGuard, WorkflowReadGuardSettings};
+    use std::sync::Arc;
+
+    let set = frozen_set(&[("AC-X-001", "inspect src/decision.data", false)]);
+    let path = set.project.path().join("src/decision.data");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "decision is correct\n").unwrap();
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let client = Capture::default();
+    let _ = super::reauthor(
+        &client,
+        &set.contract(),
+        &BTreeSet::from(["AC-X-001".into()]),
+        &scope,
+        "default",
+        &set.gate(),
+    )
+    .await;
+    let calls = client.0.into_inner().unwrap();
+    assert!(!calls.is_empty());
+    for call in calls {
+        assert!(call.task.contains("decision is correct"), "{}", call.task);
+        assert!(call.task.contains("Answer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself."));
+        assert!(
+            call.messages
+                .iter()
+                .any(|message| message["content"].as_str() == Some(call.task.as_str()))
+        );
+        let guard = Arc::new(WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings {
+            read_only_soft_call_ceiling: 0,
+            read_only_hard_call_ceiling: 3,
+            ..Default::default()
+        }));
+        let mut ctx = bounded_context(&call);
+        ctx.session_id = call.session_id;
+        ctx.workflow_read_guard = Some(guard.clone());
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(archon_tools::file_read::ReadTool));
+        registry.register(Box::new(archon_tools::grep::GrepTool));
+        let input = serde_json::json!({"file_path":path});
+        let first = registry.dispatch("Read", input.clone(), &ctx).await;
+        assert_eq!(first.content, "1\tdecision is correct");
+        let repeated = registry.dispatch("Read", input, &ctx).await;
+        assert!(
+            repeated
+                .content
+                .contains("unchanged since your earlier Read call 1")
+        );
+        assert_eq!(
+            guard.read_only_inspections_for(&ctx),
+            1,
+            "the dispatched cached reply must be free"
+        );
+        let search = serde_json::json!({"path":path,"pattern":"decision","output_mode":"content"});
+        assert!(
+            registry
+                .dispatch("Grep", search.clone(), &ctx)
+                .await
+                .content
+                .contains(":1:decision is correct")
+        );
+        assert!(
+            registry
+                .dispatch("Grep", search, &ctx)
+                .await
+                .content
+                .contains("unchanged since your earlier Grep call 3")
+        );
+        assert_eq!(guard.read_only_inspections_for(&ctx), 2);
+    }
+}
