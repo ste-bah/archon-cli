@@ -17,6 +17,7 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 mod named_files;
 #[cfg(test)]
 use named_files::named_files;
+pub(super) use named_files::named_files_content_digest;
 pub(super) use named_files::named_files_digest;
 #[cfg(test)]
 pub(super) use named_files::named_files_digest_for_list;

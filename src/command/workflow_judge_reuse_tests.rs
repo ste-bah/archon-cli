@@ -464,3 +464,6 @@ fn supplementary_only_candidate(contract: &mut AcceptanceContract) {
 
 #[path = "workflow_judge_reuse_evidence_378_tests.rs"]
 mod evidence_378;
+
+#[path = "workflow_judge_reuse_content_key_tests.rs"]
+mod content_key_tests;

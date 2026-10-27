@@ -45,6 +45,48 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
     extra_inputs: &[String],
     cache: &mut PrefetchSourceCache,
 ) -> Vec<serde_json::Value> {
+    resolve_named_files(criterion, roots, extra_inputs, cache)
+        .into_iter()
+        .map(|file| match file.bytes {
+            Some(bytes) => supplied(&file.path, &bytes, remaining),
+            None => serde_json::json!({"path": file.path, "status": file.status}),
+        })
+        .collect()
+}
+
+struct ResolvedNamedFile {
+    path: String,
+    bytes: Option<Vec<u8>>,
+    status: &'static str,
+}
+
+impl ResolvedNamedFile {
+    fn supplied(path: String, bytes: Vec<u8>) -> Self {
+        Self {
+            path,
+            bytes: Some(bytes),
+            status: "supplied",
+        }
+    }
+
+    fn unavailable(path: String, status: &'static str) -> Self {
+        Self {
+            path,
+            bytes: None,
+            status,
+        }
+    }
+}
+
+/// Resolve paths and complete raw bytes once for both the prompt digest and
+/// the full-content judgment reuse key. The caller chooses how to render the
+/// supplied bytes (budgeted and redacted for prompts, hashed raw for reuse).
+fn resolve_named_files(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+    extra_inputs: &[String],
+    cache: &mut PrefetchSourceCache,
+) -> Vec<ResolvedNamedFile> {
     let root = match &criterion.check {
         archon_workflow::task_set_contract::AcceptanceCheck::Command {
             cwd: archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
@@ -92,12 +134,12 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
     inputs.dedup();
     inputs
         .into_iter()
-        .filter_map(|relative| {
+        .map(|relative| {
             let Some(path) = normalize_named_path(Path::new(&relative)) else {
-                return Some(serde_json::json!({
-                    "path": archon_shell::paths::stored_text(Path::new(&relative)),
-                    "status": "not_supplied"
-                }));
+                return ResolvedNamedFile::unavailable(
+                    archon_shell::paths::stored_text(Path::new(&relative)),
+                    "not_supplied",
+                );
             };
             let absolute = root.join(&path);
             let path_text = archon_shell::paths::stored_text(&path);
@@ -109,13 +151,8 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
                 }
             ) {
                 let Some(commit) = roots.repository_commit.as_deref() else {
-                    return Some(repository_missing_entry(
-                        &path_text,
-                        &repository,
-                        None,
-                        &path_text,
-                        &path,
-                    ));
+                    let status = repository_missing_status(&repository, None, &path_text, &path);
+                    return ResolvedNamedFile::unavailable(path_text, status);
                 };
                 let stored_path = archon_shell::paths::stored_text(&path);
                 let resolved_path = repository.join(&path);
@@ -135,29 +172,23 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
                     Some(bytes)
                 });
                 let Some(content_bytes) = content_bytes else {
-                    return Some(repository_missing_entry(
-                        &path_text,
-                        &repository,
-                        Some(commit),
-                        &stored_path,
-                        &path,
-                    ));
+                    let status =
+                        repository_missing_status(&repository, Some(commit), &stored_path, &path);
+                    return ResolvedNamedFile::unavailable(path_text, status);
                 };
-                return Some(supplied(&path_text, &content_bytes, remaining));
+                return ResolvedNamedFile::supplied(path_text, content_bytes);
             } else {
                 match absolute.symlink_metadata() {
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        return Some(serde_json::json!({"path": path_text, "status": "absent"}));
+                        return ResolvedNamedFile::unavailable(path_text, "absent");
                     }
                     Err(_) => {
-                        return Some(
-                            serde_json::json!({"path": path_text, "status": "not_supplied"}),
-                        );
+                        return ResolvedNamedFile::unavailable(path_text, "not_supplied");
                     }
                     Ok(_) => {}
                 }
                 let Ok(relative) = absolute.strip_prefix(&project) else {
-                    return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                    return ResolvedNamedFile::unavailable(path_text, "not_supplied");
                 };
                 if project_input_excludes.as_ref().is_none_or(|excludes| {
                     archon_workflow::acceptance_scratch::acceptance_input_excluded(
@@ -173,23 +204,23 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
                         .any(|component| component.as_os_str() == ".git")
                     || !project_file_is_copied(&project, relative)
                 {
-                    return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                    return ResolvedNamedFile::unavailable(path_text, "not_supplied");
                 }
             }
             let canonical = match absolute.canonicalize() {
                 Ok(canonical) => canonical,
                 Err(_) => {
-                    return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                    return ResolvedNamedFile::unavailable(path_text, "not_supplied");
                 }
             };
             if !canonical.starts_with(&root) || !canonical.is_file() {
-                return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                return ResolvedNamedFile::unavailable(path_text, "not_supplied");
             }
             // A file the host cannot read is reported, never dropped.
             let Ok(bytes) = std::fs::read(&canonical) else {
-                return Some(serde_json::json!({"path": path_text, "status": "not_supplied"}));
+                return ResolvedNamedFile::unavailable(path_text, "not_supplied");
             };
-            Some(supplied(&path_text, &bytes, remaining))
+            ResolvedNamedFile::supplied(path_text, bytes)
         })
         .collect()
 }
@@ -213,21 +244,20 @@ fn supplied(path: &str, bytes: &[u8], remaining: &mut usize) -> serde_json::Valu
     serde_json::json!({"path": path, "status": "supplied", "content": content})
 }
 
-fn repository_missing_entry(
-    path: &str,
+fn repository_missing_status(
     repository: &Path,
     commit: Option<&str>,
     stored_path: &str,
     relative: &Path,
-) -> serde_json::Value {
+) -> &'static str {
     let working_path = repository.join(relative);
     if commit.is_some_and(|commit| repository_tree_entry(repository, commit, stored_path).is_some())
         || working_path.symlink_metadata().is_ok()
         || working_path.exists()
     {
-        serde_json::json!({"path": path, "status": "not_supplied"})
+        "not_supplied"
     } else {
-        serde_json::json!({"path": path, "status": "absent"})
+        "absent"
     }
 }
 
@@ -238,6 +268,47 @@ pub(in crate::command::workflow_task_set) fn named_files_digest(
 ) -> String {
     let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     named_files_digest_with_budget(criterion, roots, &mut remaining)
+}
+
+/// Digest each named input's complete raw content for judgment reuse. Prompt
+/// redaction and the batch source budget affect only what a new judge sees.
+pub(in crate::command::workflow_task_set) fn named_files_content_digest(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+) -> String {
+    let mut resolved_roots = roots.clone();
+    if resolved_roots.repository_commit.is_none() {
+        if let Some(repository) = resolved_roots
+            .repository
+            .as_deref()
+            .and_then(|path| path.canonicalize().ok())
+        {
+            let output = archon_shell::spawn::command("git")
+                .arg("-C")
+                .arg(repository)
+                .args(["rev-parse", "HEAD"])
+                .output();
+            resolved_roots.repository_commit = output.ok().and_then(|output| {
+                output
+                    .status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            });
+        }
+    }
+    let mut cache = PrefetchSourceCache::default();
+    let files = resolve_named_files(criterion, &resolved_roots, &[], &mut cache)
+        .into_iter()
+        .map(|file| match file.bytes {
+            Some(bytes) => serde_json::json!({
+                "path": file.path,
+                "status": file.status,
+                "content_digest": format!("{:x}", Sha256::digest(bytes))
+            }),
+            None => serde_json::json!({"path": file.path, "status": file.status}),
+        })
+        .collect::<Vec<_>>();
+    named_files_digest_for_list(&files)
 }
 
 pub(in crate::command::workflow_task_set) fn named_files_digest_with_budget(

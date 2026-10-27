@@ -56,21 +56,19 @@ pub(in crate::command::workflow_task_set) fn stamp_judgment(
     provider: Option<&str>,
     roots: &super::judge::JudgeRoots,
 ) {
-    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
-    stamp_judgment_with_budget(entry, model, provider, roots, &mut remaining);
+    stamp_judgment_with_content_digest(entry, model, provider, roots);
 }
 
-pub(in crate::command::workflow_task_set) fn stamp_judgment_with_budget(
+pub(in crate::command::workflow_task_set) fn stamp_judgment_with_content_digest(
     entry: &mut AcceptanceCriterion,
     model: &str,
     provider: Option<&str>,
     roots: &super::judge::JudgeRoots,
-    remaining: &mut usize,
 ) {
     let identity =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
             .map(|logic| acceptance_logic_identity(logic, model, provider));
-    let named_digest = super::judge::named_files_digest_with_budget(entry, roots, remaining);
+    let named_digest = super::judge::named_files_content_digest(entry, roots);
     let sampling = entry
         .judgment
         .sampling
@@ -182,7 +180,7 @@ fn key(
         judge_model: judge_model.to_string(),
         judge_provider: judge_provider.map(str::to_string),
         prompt_and_judge_source_digest: prompt_and_judge_source_digest(PROMPT_AND_JUDGE_SOURCES),
-        named_file_digest: super::judge::named_files_digest(candidate, &roots),
+        named_file_digest: super::judge::named_files_content_digest(candidate, &roots),
     })
 }
 
