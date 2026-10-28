@@ -15,6 +15,23 @@ pub(crate) fn without_heredocs(command: &str) -> String {
 }
 
 fn stripped(command: &str) -> (String, bool) {
+    stripped_with_programs(command, None)
+}
+
+/// Preserve each here-document's program at its command's position for path scanning.
+pub(crate) fn with_heredoc_programs(command: &str) -> (String, String) {
+    // Compare lexer output so quoting and continuations cannot assemble the
+    // synthetic word from an actual argument.
+    let words = words(command);
+    let mut flag = "--stdin-program".to_owned();
+    while words.contains(&flag) {
+        flag.push('_');
+    }
+    (stripped_with_programs(command, Some(&flag)).0, flag)
+}
+
+fn stripped_with_programs(command: &str, program_flag: Option<&str>) -> (String, bool) {
+    let command = without_continuations(command);
     let mut any = false;
     let lines: Vec<&str> = command.lines().collect();
     let mut out = Vec::new();
@@ -39,7 +56,14 @@ fn stripped(command: &str) -> (String, bool) {
             .flatten();
         match close {
             Some(close) => {
-                out.push(line[..at].to_string());
+                out.push(if let Some(flag) = program_flag {
+                    let body = lines[index..close].join("\n").replace('\'', "'\\''");
+                    // Preserve stdin origin; inline flags and heredoc receivers
+                    // have different rules for whether their text is executable.
+                    format!("{} {flag} '{body}'", &line[..at])
+                } else {
+                    line[..at].to_string()
+                });
                 index = close + 1;
                 any = true;
             }
@@ -51,25 +75,46 @@ fn stripped(command: &str) -> (String, bool) {
 
 /// Shell words, quotes removed; operators as their own words.
 pub(crate) fn words(command: &str) -> Vec<String> {
+    words_with_certainty(command)
+        .into_iter()
+        .map(|(word, _, _)| word)
+        .collect()
+}
+
+/// Flags preserve literal certainty and shell-operator identity independently.
+/// Quoted or escaped operator spellings are ordinary words.
+pub(crate) fn words_with_certainty(command: &str) -> Vec<(String, bool, bool)> {
     let command = without_heredocs(command);
     let mut out = Vec::new();
     let mut word = String::new();
+    let mut literal = true;
     let mut quote: Option<char> = None;
     let mut chars = command.chars().peekable();
     while let Some(c) = chars.next() {
         match quote {
             Some(q) if c == q => quote = None,
-            Some('"') if c == '\\' => word.extend(chars.next()),
+            Some('"') if c == '\\' => {
+                let escaped = chars.next();
+                literal &= escaped.is_some_and(|c| matches!(c, '$' | '`' | '"' | '\\'));
+                word.extend(escaped);
+            }
+            Some('"') if matches!(c, '$' | '`') => {
+                literal = false;
+                word.push(c);
+            }
             Some(_) => word.push(c),
-            None if c == '\\' => word.extend(chars.next()),
+            None if c == '\\' => match chars.next() {
+                Some(c) => word.push(c),
+                None => literal = false,
+            },
             None if c == '\'' || c == '"' => quote = Some(c),
             None if c == '\n' => {
-                flush(&mut word, &mut out);
-                out.push(";".into());
+                flush(&mut word, &mut literal, &mut out);
+                out.push((";".into(), true, true));
             }
-            None if c.is_whitespace() => flush(&mut word, &mut out),
+            None if c.is_whitespace() => flush(&mut word, &mut literal, &mut out),
             None if matches!(c, '|' | '&' | ';' | '(' | ')' | '>' | '<') => {
-                flush(&mut word, &mut out);
+                flush(&mut word, &mut literal, &mut out);
                 let mut op = c.to_string();
                 if let Some(&next) = chars.peek()
                     && matches!(c, '|' | '&' | '>')
@@ -78,19 +123,56 @@ pub(crate) fn words(command: &str) -> Vec<String> {
                     op.push(next);
                     chars.next();
                 }
-                out.push(op);
+                out.push((op, true, true));
+            }
+            None if matches!(c, '$' | '`' | '*' | '?')
+                || (c == '['
+                    && chars
+                        .clone()
+                        .take_while(|c| !c.is_whitespace())
+                        .any(|c| c == ']')) =>
+            {
+                literal = false;
+                word.push(c);
             }
             None => word.push(c),
         }
     }
-    flush(&mut word, &mut out);
+    literal &= quote.is_none();
+    flush(&mut word, &mut literal, &mut out);
     out
 }
 
-fn flush(word: &mut String, out: &mut Vec<String>) {
+fn flush(word: &mut String, literal: &mut bool, out: &mut Vec<(String, bool, bool)>) {
     if !word.is_empty() {
-        out.push(std::mem::take(word));
+        out.push((std::mem::take(word), *literal, false));
     }
+    *literal = true;
+}
+
+/// POSIX removes escaped newlines before recognizing words, except in single quotes.
+fn without_continuations(command: &str) -> String {
+    let mut out = String::new();
+    let mut quote = None;
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && quote != Some('\'') {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            } else {
+                out.push(c);
+                out.extend(chars.next());
+            }
+            continue;
+        }
+        if quote == Some(c) {
+            quote = None;
+        } else if quote.is_none() && matches!(c, '\'' | '"') {
+            quote = Some(c);
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Simple commands, split on control operators, redirections removed.
@@ -115,7 +197,7 @@ pub(super) fn segments(words: &[String]) -> Vec<Vec<String>> {
 /// A simple command without its environment assignments and the wrappers
 /// that only run the rest (`env`, `timeout N`, `time`, `nice`, `exec`,
 /// `command`).
-pub(super) fn strip_wrappers(segment: &[String]) -> Vec<String> {
+pub(crate) fn strip_wrappers(segment: &[String]) -> Vec<String> {
     let mut rest = segment;
     loop {
         match rest.first().map(String::as_str) {

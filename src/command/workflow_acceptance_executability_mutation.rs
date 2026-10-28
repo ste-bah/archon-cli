@@ -363,7 +363,7 @@ pub(super) fn input_discovery_for_check(
                 Some(ExclusionReason::CheckWritesPathInText)
             } else if manifest {
                 Some(ExclusionReason::ManifestOrSetup)
-            } else if matches!(token.as_str(), "." | "..") {
+            } else if paths::whole_tree_target(&mapped, &cwd, resolved.as_deref()) {
                 Some(ExclusionReason::WholeDirectoryTree)
             } else if mechanics {
                 Some(ExclusionReason::CheckMechanics)
