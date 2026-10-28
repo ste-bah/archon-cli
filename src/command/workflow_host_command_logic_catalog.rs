@@ -124,7 +124,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // identity; #523 the host refutes external-program usage errors; #478 bare . and ..
         // are whole-tree inputs; #490 a pending skeleton is reported, not compared.
         // #524 the can-pass instruction names the evidence tree, not only the pre-implementation tree.
-        version: 63,
+        version: 64,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -164,7 +164,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // 63: #526 a judge refutation counts only when its quoted rule is in the output or check text the judge saw; #528 the per-entry reuse key uses each entry's own named-file content.
-        sources_digest: "ff2e507dd133846f5fbbf4741191d42e037c2a51569a7e78d2a279cbf42abc09",
+        // 64: #533 a listing probe stopped before any output is a transient host fault, never an author finding; a silent scratch overrun says the host could not tell.
+        sources_digest: "21f9a951e2b3e1e832bbdc9ccce91845bf059623b59823cf7fd63602a6838706",
         build_bound: false,
     },
     CapabilityLogic {
@@ -198,7 +199,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton freeze verdicts do not read acceptance judge identity, passability or path classes.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "ff2e507dd133846f5fbbf4741191d42e037c2a51569a7e78d2a279cbf42abc09",
+        // #533 re-pin only: skeleton freeze verdicts do not run subcommand listing probes.
+        sources_digest: "21f9a951e2b3e1e832bbdc9ccce91845bf059623b59823cf7fd63602a6838706",
         build_bound: false,
     },
     CapabilityLogic {
@@ -361,7 +363,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #518 and #519 change which inputs a frozen-check mutation proof moves
         // and how it restores them.
         // 18: batch 26 #523 host refutation and #520 judge identity can change reverify verdicts.
-        version: 18,
+        version: 19,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -385,7 +387,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "7dc1b86f935fffea49a9c152e827ac0066f49c22674517e4dfd0ac6177779508",
+        // 19: #533 a listing probe stopped before any output is a transient host fault, never an author finding.
+        sources_digest: "4d4641b44d9a08d79a58be9c60eaa4fe9bf96c2a0404630e9ce2516296f30719",
         build_bound: true,
     },
     CapabilityLogic {
@@ -418,7 +421,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton reverify verdicts do not read passability or acceptance judge identity.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "7dc1b86f935fffea49a9c152e827ac0066f49c22674517e4dfd0ac6177779508",
+        // #533 re-pin only: skeleton reverify verdicts do not run subcommand listing probes.
+        sources_digest: "4d4641b44d9a08d79a58be9c60eaa4fe9bf96c2a0404630e9ce2516296f30719",
         build_bound: true,
     },
 ];

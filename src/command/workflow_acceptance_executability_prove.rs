@@ -343,10 +343,21 @@ pub(super) async fn prove(
             .collect::<Vec<_>>()
             .join("\n")
             .into_bytes();
-        let crashed = !super::crash_findings(contract, [&raw_mutation_result]).is_empty()
-            || super::silent::silent_failure_off_thread(&mutated, result, &at)
-                .await
-                .is_some();
+        let crashed = !super::crash_findings(contract, [&raw_mutation_result]).is_empty();
+        let silent = if crashed {
+            None
+        } else {
+            super::silent::silent_failure_off_thread(&mutated, result, &at).await
+        };
+        if let Some((why, cause @ UnprovenCause::TransientHost)) = &silent {
+            probe.unproven_as(
+                id,
+                format!("the host could not decide the mutation proof: {why}"),
+                *cause,
+            );
+            continue;
+        }
+        let crashed = crashed || silent.is_some();
         if moved.is_empty() {
             findings.insert(
                 id.clone(),
