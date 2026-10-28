@@ -69,7 +69,7 @@ async fn assert_once(fault: LlmError) {
 fn status_fault(status: u16, remedy: &str) -> LlmError {
     LlmError::Server {
         status,
-        message: format!("request timed out; {remedy}"),
+        message: format!("request timed out; {remedy}").into(),
         pipeline_retry_after_secs: None,
     }
 }

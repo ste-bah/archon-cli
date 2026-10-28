@@ -137,7 +137,7 @@ pub(super) fn map_codex_error(status: u16, body: String, refreshed: bool) -> Llm
         },
         500..=599 => LlmError::Server {
             status,
-            message: crate::provider_fault::diagnostic_message(&body),
+            message: body.into(),
             pipeline_retry_after_secs: None,
         },
         _ => error,

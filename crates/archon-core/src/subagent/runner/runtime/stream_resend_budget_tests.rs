@@ -85,7 +85,7 @@ async fn the_stop_names_the_last_provider_error_bounded_and_redacted() {
     let server = || {
         anyhow::Error::new(LlmError::Server {
             status: 500,
-            message: body.clone(),
+            message: body.clone().into(),
             pipeline_retry_after_secs: None,
         })
     };

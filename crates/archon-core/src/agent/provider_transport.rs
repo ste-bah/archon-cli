@@ -43,7 +43,7 @@ pub(crate) async fn open(
             // already received. Keep existing typed request rejections intact.
             Err(LlmError::Server {
                 status,
-                message,
+                message: message.into(),
                 pipeline_retry_after_secs: hint,
             })
         }

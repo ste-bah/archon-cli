@@ -13,7 +13,7 @@ pub async fn run_codex_tls_preflight_url(
             Err(
                 crate::transport_http::response_error(r, |status, message| LlmError::Server {
                     status,
-                    message,
+                    message: message.into(),
                     pipeline_retry_after_secs: None,
                 })
                 .await,

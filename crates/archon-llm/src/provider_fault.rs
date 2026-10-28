@@ -12,7 +12,7 @@ pub(crate) fn diagnostic_suffix(message: &str) -> String {
     if message.is_empty() {
         String::new()
     } else {
-        format!(": {message}")
+        format!(": {}", diagnostic_message(message))
     }
 }
 
@@ -242,7 +242,7 @@ pub fn from_status(status: u16, headers: &reqwest::header::HeaderMap, body: Stri
         },
         _ => LlmError::Server {
             status,
-            message: diagnostic_message(&body),
+            message: body.into(),
             pipeline_retry_after_secs: hint,
         },
     }
@@ -420,4 +420,14 @@ mod diagnostic_redaction_tests {
         super::from_status(status, &Default::default(), body.into())
     }
     include!("provider_fault_redaction_cases.rs");
+}
+
+#[cfg(test)]
+#[test]
+fn server_redaction_provider_fault_forwarder() {
+    crate::server_redaction_tests::check(into_api(LlmError::Server {
+        status: 500,
+        message: crate::server_redaction_tests::BODY.into(),
+        pipeline_retry_after_secs: Some(7),
+    }));
 }

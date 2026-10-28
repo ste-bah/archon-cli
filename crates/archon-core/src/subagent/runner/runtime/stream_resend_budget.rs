@@ -278,7 +278,7 @@ fn redacted(error: anyhow::Error) -> anyhow::Error {
             pipeline_retry_after_secs,
         } => LlmError::Server {
             status,
-            message: clean(message),
+            message: clean(message.into()).into(),
             pipeline_retry_after_secs,
         },
         LlmError::Rejected {

@@ -157,16 +157,18 @@ pub(crate) fn large_request_retry_body_bytes(config: &crate::config::ContextConf
 pub(crate) fn is_rate_limited_error(error: &archon_llm::provider::LlmError) -> bool {
     match error {
         archon_llm::provider::LlmError::RateLimited { .. } => true,
-        archon_llm::provider::LlmError::Http(message)
-        | archon_llm::provider::LlmError::Server { message, .. } => {
-            let lower = message.to_ascii_lowercase();
-            lower.contains("429")
-                || lower.contains("rate limit")
-                || lower.contains("rate_limited")
-                || lower.contains("rate_limit_error")
-        }
+        archon_llm::provider::LlmError::Http(message) => rate_limit_message(message),
+        archon_llm::provider::LlmError::Server { message, .. } => rate_limit_message(message),
         _ => false,
     }
+}
+
+fn rate_limit_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("429")
+        || lower.contains("rate limit")
+        || lower.contains("rate_limited")
+        || lower.contains("rate_limit_error")
 }
 
 #[cfg(test)]

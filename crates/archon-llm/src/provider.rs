@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::{AnthropicClient, MessageRequest};
+pub use crate::provider_diagnostic::DiagnosticMessage;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
@@ -20,10 +21,10 @@ use crate::types::Usage;
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum LlmError {
-    #[error("HTTP error: {0}")]
+    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
     Http(String),
 
-    #[error("authentication error: {0}")]
+    #[error("authentication error: {}", crate::provider_fault::diagnostic_message(.0))]
     Auth(String),
 
     /// `from_provider` is true when the provider named the wait (a
@@ -43,7 +44,7 @@ pub enum LlmError {
     /// The provider rejected the request itself (an error event such as
     /// `invalid_request_error`, `permission_error` or `not_found_error`).
     /// Sending it again cannot help. No HTTP status is known.
-    #[error("provider rejected the request ({error_type}): {message}")]
+    #[error("provider rejected the request ({}): {}", crate::provider_fault::diagnostic_message(.error_type), crate::provider_fault::diagnostic_message(.message))]
     Rejected { error_type: String, message: String },
 
     /// Provider status and optional Retry-After metadata; this error keeps the
@@ -59,35 +60,35 @@ pub enum LlmError {
     #[error("server error ({status}): {message}")]
     Server {
         status: u16,
-        message: String,
+        message: DiagnosticMessage,
         /// Provider wait hint consumed by the pipeline outer retry loop only.
         /// RetryProvider and inline retry policy continue to use `status`.
         pipeline_retry_after_secs: Option<u64>,
     },
 
-    #[error("serialization error: {0}")]
+    #[error("serialization error: {}", crate::provider_fault::diagnostic_message(.0))]
     Serialize(String),
 
-    #[error("feature not supported: {0}")]
+    #[error("feature not supported: {}", crate::provider_fault::diagnostic_message(.0))]
     Unsupported(String),
 
     #[error("provider '{name}' not found — available: [{available}]")]
     ProviderNotFound { name: String, available: String },
 
-    #[error("quota exceeded: {0}")]
+    #[error("quota exceeded: {}", crate::provider_fault::diagnostic_message(.0))]
     QuotaExceeded(String),
 
     #[error("request aborted")]
     Aborted,
 
-    #[error("context window exceeded: {provider_message}")]
+    #[error("context window exceeded: {}", crate::provider_fault::diagnostic_message(.provider_message))]
     ContextWindowExceeded {
         provider_message: String,
         provider: Option<String>,
         model: Option<String>,
     },
 
-    #[error("HTTP error: {0}")]
+    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
     Transport(String),
 }
 

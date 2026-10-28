@@ -46,13 +46,13 @@ pub enum ApiError {
     #[error("provider transport read-idle backstop expired; resumable")]
     IdleTimeout,
 
-    #[error("HTTP error: {0}")]
+    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
     HttpError(String),
 
-    #[error("authentication error: {0}")]
+    #[error("authentication error: {}", crate::provider_fault::diagnostic_message(.0))]
     AuthError(String),
 
-    #[error("request rejected ({error_type}): {message}")]
+    #[error("request rejected ({}): {}", crate::provider_fault::diagnostic_message(.error_type), crate::provider_fault::diagnostic_message(.message))]
     Rejected { error_type: String, message: String },
 
     /// `from_provider`: see [`crate::provider::LlmError::RateLimited`].
@@ -72,14 +72,14 @@ pub enum ApiError {
     #[error("server error ({status}): {message}")]
     ServerError {
         status: u16,
-        message: String,
+        message: crate::provider::DiagnosticMessage,
         retry_after_secs: Option<u64>,
     },
 
-    #[error("serialization error: {0}")]
+    #[error("serialization error: {}", crate::provider_fault::diagnostic_message(.0))]
     SerializeError(String),
 
-    #[error("HTTP error: {0}")]
+    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
     Transport(String),
 }
 
@@ -401,7 +401,7 @@ pub(crate) fn classify_error(
         },
         408 | 500..=599 => ApiError::ServerError {
             status,
-            message: crate::provider_fault::diagnostic_message(body),
+            message: body.into(),
             retry_after_secs: retry_after_header
                 .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
         },

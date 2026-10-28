@@ -4,11 +4,11 @@ fn check(status: u16) {
     let error = convert(status, BODY);
     let message = match &error {
         crate::provider::LlmError::RateLimited { message, .. }
-        | crate::provider::LlmError::Overloaded { message, .. }
-        | crate::provider::LlmError::Server { message, .. } => message,
+        | crate::provider::LlmError::Overloaded { message, .. } => message.as_str(),
+        crate::provider::LlmError::Server { message, .. } => message.as_str(),
         other => panic!("unexpected classification: {other:?}"),
     };
-    for text in [message.as_str(), &error.to_string()] {
+    for text in [message, &error.to_string()] {
         assert!(
             !text.contains("sk-abcdefghijklmnopqrstuvwxyz123456"),
             "API key leaked at status {status}"
