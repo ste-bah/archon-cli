@@ -155,8 +155,9 @@ async fn bounded_glob_with_state_roots(
         .into_iter()
         .map(|root| root.canonicalize().unwrap_or(root))
         .collect::<Vec<_>>();
-    let full = base.join(pattern);
-    let pattern_path = std::path::Path::new(pattern);
+    let pattern = prefix::normalize_absolute_pattern(pattern);
+    let full = base.join(pattern.as_ref());
+    let pattern_path = std::path::Path::new(pattern.as_ref());
     let targeted_roots = state_roots
         .iter()
         .map(|root| root_targeted_by_pattern(&comparison_base, pattern_path, root))
