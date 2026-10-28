@@ -391,17 +391,17 @@ pub(crate) fn classify_error(
             ApiError::RateLimited {
                 retry_after_secs: named.unwrap_or(DEFAULT_RATE_LIMIT_WAIT_SECS),
                 from_provider: named.is_some(),
-                message: body.to_string(),
+                message: crate::provider_fault::diagnostic_message(body),
             }
         }
         529 => ApiError::Overloaded {
             retry_after_secs: retry_after_header
                 .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
-            message: body.to_string(),
+            message: crate::provider_fault::diagnostic_message(body),
         },
         408 | 500..=599 => ApiError::ServerError {
             status,
-            message: body.to_string(),
+            message: crate::provider_fault::diagnostic_message(body),
             retry_after_secs: retry_after_header
                 .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
         },
@@ -480,3 +480,7 @@ mod rejection_tests;
 #[cfg(test)]
 #[path = "anthropic_header_recovery_tests.rs"]
 mod header_recovery_tests;
+
+#[cfg(test)]
+#[path = "anthropic_diagnostic_redaction_tests.rs"]
+mod diagnostic_redaction_tests;

@@ -133,11 +133,11 @@ pub(super) fn map_codex_error(status: u16, body: String, refreshed: bool) -> Llm
             retry_after_secs: 1,
             from_provider: false,
             pipeline_retry_after_secs: None,
-            message: body,
+            message: crate::provider_fault::diagnostic_message(&body),
         },
         500..=599 => LlmError::Server {
             status,
-            message: body,
+            message: crate::provider_fault::diagnostic_message(&body),
             pipeline_retry_after_secs: None,
         },
         _ => error,
@@ -146,4 +146,12 @@ pub(super) fn map_codex_error(status: u16, body: String, refreshed: bool) -> Llm
 
 pub(super) fn auth_to_llm_error(err: AuthError) -> LlmError {
     err.into()
+}
+
+#[cfg(test)]
+mod diagnostic_redaction_tests {
+    fn convert(status: u16, body: &str) -> crate::provider::LlmError {
+        super::map_codex_error(status, body.into(), false)
+    }
+    include!("../../provider_fault_redaction_cases.rs");
 }

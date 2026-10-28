@@ -1,6 +1,12 @@
 //! Operational recovery semantics, independent of bounded interactive retries.
 use crate::provider::LlmError;
 
+/// Construct a stored diagnostic with the same redactor used for stream faults.
+/// Sanitize before storage so both error fields and human output are safe.
+pub(crate) fn diagnostic_message(message: &str) -> String {
+    archon_observability::redaction::redact_text(message)
+}
+
 /// Append a supplied diagnostic without changing message-less fault display.
 pub(crate) fn diagnostic_suffix(message: &str) -> String {
     if message.is_empty() {
@@ -232,11 +238,11 @@ pub fn from_status(status: u16, headers: &reqwest::header::HeaderMap, body: Stri
             retry_after_secs: 0,
             from_provider: false,
             pipeline_retry_after_secs: hint,
-            message: body,
+            message: diagnostic_message(&body),
         },
         _ => LlmError::Server {
             status,
-            message: body,
+            message: diagnostic_message(&body),
             pipeline_retry_after_secs: hint,
         },
     }
@@ -264,7 +270,7 @@ pub(crate) fn body_read_error(
 /// interactive stream decorator retains its existing pre-content diagnostics.
 /// Preserve the producer's event class through completion and turn adapters.
 pub fn from_stream_error(kind: &str, message: &str) -> LlmError {
-    let message = archon_observability::redaction::redact_text(message);
+    let message = diagnostic_message(message);
     match kind {
         "aborted" => LlmError::Aborted,
         "network" | "http_error" | "transport" | "connection_error" | "timeout_error" => {
@@ -386,7 +392,7 @@ fn into_api(error: LlmError) -> crate::anthropic::ApiError {
         } => ApiError::RateLimited {
             retry_after_secs: pipeline_retry_after_secs.unwrap_or(retry_after_secs),
             from_provider: from_provider || pipeline_retry_after_secs.is_some(),
-            message,
+            message: diagnostic_message(&message),
         },
         LlmError::Rejected {
             error_type,
@@ -406,4 +412,12 @@ pub(crate) fn native_transport_event(
     error: impl std::fmt::Display,
 ) -> crate::streaming::StreamEvent {
     error_event(from_native_transport(error))
+}
+
+#[cfg(test)]
+mod diagnostic_redaction_tests {
+    fn convert(status: u16, body: &str) -> crate::provider::LlmError {
+        super::from_status(status, &Default::default(), body.into())
+    }
+    include!("provider_fault_redaction_cases.rs");
 }

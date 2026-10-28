@@ -54,13 +54,21 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
             retry_after_secs: 60,
             from_provider: false,
             pipeline_retry_after_secs: None,
-            message: body,
+            message: crate::provider_fault::diagnostic_message(&body),
         },
         500 | 503 => LlmError::Overloaded {
             status: Some(status),
             retry_after_secs: None,
-            message: body,
+            message: crate::provider_fault::diagnostic_message(&body),
         },
         _ => error,
     }
+}
+
+#[cfg(test)]
+mod diagnostic_redaction_tests {
+    fn convert(status: u16, body: &str) -> crate::provider::LlmError {
+        super::map_http_error(status, body.into())
+    }
+    include!("../provider_fault_redaction_cases.rs");
 }

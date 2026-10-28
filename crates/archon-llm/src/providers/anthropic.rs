@@ -46,7 +46,7 @@ impl From<ApiError> for LlmError {
                 retry_after_secs,
                 from_provider,
                 pipeline_retry_after_secs: from_provider.then_some(retry_after_secs),
-                message,
+                message: crate::provider_fault::diagnostic_message(&message),
             },
             ApiError::Overloaded {
                 retry_after_secs,
@@ -54,7 +54,7 @@ impl From<ApiError> for LlmError {
             } => LlmError::Overloaded {
                 status: Some(529),
                 retry_after_secs,
-                message,
+                message: crate::provider_fault::diagnostic_message(&message),
             },
             ApiError::ServerError {
                 status,
