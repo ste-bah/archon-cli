@@ -168,7 +168,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 65: #515 a re-author reply whose first entry is followed by a misplaced closing brace is refused, naming the continued field.
         // 66: #213 #466 #478 #498 #501 the acceptance site refuses only a closed list of operands that leave it (redirections, path-reading programs, cd/pushd targets, program-text file-open literals); a data heredoc for a text tool is not refused.
         // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
-        sources_digest: "e07ea1eb1215abffc8dfc9ff67ad0bd1408231b88041d26e0d9443570af5d16e",
+        sources_digest: "f1a80c94854ea0c00e38ab1528fa8d658f07bf82968eeba0a7ba90ebfe3cc6a5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -206,7 +206,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #514/#515/#527 re-pin only: skeleton freeze verdicts do not read the acceptance re-author reply parser.
         // #213/#466/#478/#498/#501 re-pin only: skeleton freeze verdicts do not run the acceptance site path policy; freeze-acceptance 66 counts the change.
         // #364 re-pin only: typed provider faults and outage backoff do not change skeleton freeze verdicts.
-        sources_digest: "e07ea1eb1215abffc8dfc9ff67ad0bd1408231b88041d26e0d9443570af5d16e",
+        sources_digest: "f1a80c94854ea0c00e38ab1528fa8d658f07bf82968eeba0a7ba90ebfe3cc6a5",
         build_bound: false,
     },
     CapabilityLogic {
