@@ -16,8 +16,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              65,
-              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+              66,
+              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -68,8 +68,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              65,
-              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+              66,
+              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -99,8 +99,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              65,
-              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+              66,
+              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -554,8 +554,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
-            "logicVersion": 65,
+            "logicDigest": "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
+            "logicVersion": 66,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -565,7 +565,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "931c1b47bc2fd60838bd6e46c69f1baa80116bbb2cf663638c0c208fa99b7e0d",
+                  "blake3": "8fa9d19bd1183a4917b99a3405d42baa282c6e43f4a1279f2299182ffc9d10f2",
                   "content": {
                     "acceptance": [
                       {
@@ -583,8 +583,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              65,
-                              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                              66,
+                              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -636,8 +636,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              65,
-                              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                              66,
+                              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -667,8 +667,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              65,
-                              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                              66,
+                              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -686,11 +686,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "ea121c1ad6e99262898840c996c6389bf444aac7e1f47d7d58ba5ccbae17c667",
+                  "blake3": "04631c78f0063cc8f905739f1122baa369ff430203a659f244b502174939a677",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+                    "digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -702,18 +702,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422",
+                  "blake3": "b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe",
                   "content": {
-                    "acceptance_digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+                    "acceptance_digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-a03e4a8dcd87",
+                    "freeze_event_id": "acceptance-freeze-5a8112dfc4c5",
                     "lineage_recording": 1,
-                    "skeleton_digest": "0587eb52f9bf7873093c784edbab65cbbdd43ba3aee86fc1ff711b54fac25412",
+                    "skeleton_digest": "7ea1b1de6900a29fb3aa01653f9307d87a7bb5bc4d3915b62b014839b3270ed3",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -842,8 +842,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
-            "logicVersion": 65,
+            "logicDigest": "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
+            "logicVersion": 66,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -853,7 +853,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "931c1b47bc2fd60838bd6e46c69f1baa80116bbb2cf663638c0c208fa99b7e0d",
+                  "blake3": "8fa9d19bd1183a4917b99a3405d42baa282c6e43f4a1279f2299182ffc9d10f2",
                   "content": {
                     "acceptance": [
                       {
@@ -871,8 +871,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              65,
-                              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                              66,
+                              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -924,8 +924,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              65,
-                              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                              66,
+                              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -955,8 +955,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              65,
-                              "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                              66,
+                              "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -975,11 +975,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "ea121c1ad6e99262898840c996c6389bf444aac7e1f47d7d58ba5ccbae17c667",
+                  "blake3": "04631c78f0063cc8f905739f1122baa369ff430203a659f244b502174939a677",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+                    "digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -992,18 +992,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422",
+                  "blake3": "b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe",
                   "content": {
-                    "acceptance_digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+                    "acceptance_digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-a03e4a8dcd87",
+                    "freeze_event_id": "acceptance-freeze-5a8112dfc4c5",
                     "lineage_recording": 1,
-                    "skeleton_digest": "0587eb52f9bf7873093c784edbab65cbbdd43ba3aee86fc1ff711b54fac25412",
+                    "skeleton_digest": "7ea1b1de6900a29fb3aa01653f9307d87a7bb5bc4d3915b62b014839b3270ed3",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1032,7 +1032,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\nacceptance judge batch completed checks=2\n",
             "stderrBytes": 579,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"931c1b47bc2fd60838bd6e46c69f1baa80116bbb2cf663638c0c208fa99b7e0d\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"ea121c1ad6e99262898840c996c6389bf444aac7e1f47d7d58ba5ccbae17c667\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"ee17378086a473b9c489f314a6d0c420f7ffe25b1a9fc30a16055d508040a0cc\",\"exists\":true},\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8fa9d19bd1183a4917b99a3405d42baa282c6e43f4a1279f2299182ffc9d10f2\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"04631c78f0063cc8f905739f1122baa369ff430203a659f244b502174939a677\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"4222e46580883a1c450168503a726d53dc7c3eadf28e80f3d3d0571e35c39c3a\",\"exists\":true},\"schema_version\":1}",
             "stdoutBytes": 799,
             "stdoutTruncated": false,
             "timedOut": false
@@ -1106,7 +1106,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+            "logicDigest": "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
             "logicVersion": 5,
             "postcondition": {
               "satisfied": true,
@@ -1117,18 +1117,18 @@
               "command_id": "freeze-skeleton",
               "entries": [
                 {
-                  "blake3": "aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422",
+                  "blake3": "b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe",
                   "content": {
-                    "acceptance_digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+                    "acceptance_digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-a03e4a8dcd87",
+                    "freeze_event_id": "acceptance-freeze-5a8112dfc4c5",
                     "lineage_recording": 1,
-                    "skeleton_digest": "0587eb52f9bf7873093c784edbab65cbbdd43ba3aee86fc1ff711b54fac25412",
+                    "skeleton_digest": "7ea1b1de6900a29fb3aa01653f9307d87a7bb5bc4d3915b62b014839b3270ed3",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1152,9 +1152,9 @@
                   "relative_path": "gate-envelope.json"
                 },
                 {
-                  "blake3": "f927508f560389358af404a60e8e2cff0acdbe232af768e2db6df3fd19cd4419",
+                  "blake3": "9e407ac2a85aa2052d11b0f3822c97706dcb959357274dbf708d8e7d18facc8b",
                   "content": {
-                    "acceptance_digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+                    "acceptance_digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
                     "schema_version": 1,
                     "tasks": [
                       {
@@ -1231,11 +1231,11 @@
                   "relative_path": "task-skeleton.json"
                 },
                 {
-                  "blake3": "79a987401ca447fbd1106b579adbe861a898528702de1bfa26053d73b30d59ab",
+                  "blake3": "534061452b63d215b78c86ec4958caaa3837612a9cfe7288a5b43b8db48a2ed2",
                   "content": {
-                    "acceptance_digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+                    "acceptance_digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
                     "algorithm": "blake3",
-                    "digest": "0587eb52f9bf7873093c784edbab65cbbdd43ba3aee86fc1ff711b54fac25412",
+                    "digest": "7ea1b1de6900a29fb3aa01653f9307d87a7bb5bc4d3915b62b014839b3270ed3",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1252,7 +1252,7 @@
             "stderr": "",
             "stderrBytes": 0,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"f927508f560389358af404a60e8e2cff0acdbe232af768e2db6df3fd19cd4419\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"79a987401ca447fbd1106b579adbe861a898528702de1bfa26053d73b30d59ab\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"9e407ac2a85aa2052d11b0f3822c97706dcb959357274dbf708d8e7d18facc8b\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"534061452b63d215b78c86ec4958caaa3837612a9cfe7288a5b43b8db48a2ed2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
             "stdoutBytes": 662,
             "stdoutTruncated": false,
             "subjects": [
@@ -1344,7 +1344,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+            "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
             "logicVersion": 29,
             "postcondition": {
               "satisfied": true,
@@ -1464,7 +1464,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+            "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
             "logicVersion": 29,
             "postcondition": {
               "satisfied": true,
@@ -1575,7 +1575,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "dccd9f66ccb11b8d48d90be735e7781b6b9aa44eb528a1c7dd51569cdf1f4384",
+            "logicDigest": "805aee1c008ad5ad69f87fe89948970bae04c903ff0fb81dc4b97fdbf92d8d0f",
             "logicVersion": 7,
             "postcondition": {
               "satisfied": true,
@@ -1684,7 +1684,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+            "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
             "logicVersion": 24,
             "postcondition": {
               "satisfied": true,
@@ -1770,8 +1770,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
-                  "logicVersion": 65,
+                  "logicDigest": "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
+                  "logicVersion": 66,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1781,13 +1781,13 @@
                     "command_id": "freeze-acceptance",
                     "entries": [
                       {
-                        "blake3": "931c1b47bc2fd60838bd6e46c69f1baa80116bbb2cf663638c0c208fa99b7e0d",
+                        "blake3": "8fa9d19bd1183a4917b99a3405d42baa282c6e43f4a1279f2299182ffc9d10f2",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.json"
                       },
                       {
-                        "blake3": "ea121c1ad6e99262898840c996c6389bf444aac7e1f47d7d58ba5ccbae17c667",
+                        "blake3": "04631c78f0063cc8f905739f1122baa369ff430203a659f244b502174939a677",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.lock"
@@ -1833,8 +1833,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
-                      "logicVersion": 65,
+                      "logicDigest": "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
+                      "logicVersion": 66,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1844,13 +1844,13 @@
                         "command_id": "freeze-acceptance",
                         "entries": [
                           {
-                            "blake3": "931c1b47bc2fd60838bd6e46c69f1baa80116bbb2cf663638c0c208fa99b7e0d",
+                            "blake3": "8fa9d19bd1183a4917b99a3405d42baa282c6e43f4a1279f2299182ffc9d10f2",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.json"
                           },
                           {
-                            "blake3": "ea121c1ad6e99262898840c996c6389bf444aac7e1f47d7d58ba5ccbae17c667",
+                            "blake3": "04631c78f0063cc8f905739f1122baa369ff430203a659f244b502174939a677",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.lock"
@@ -1872,7 +1872,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\nacceptance judge batch completed checks=2\n",
                       "stderrBytes": 579,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"931c1b47bc2fd60838bd6e46c69f1baa80116bbb2cf663638c0c208fa99b7e0d\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"ea121c1ad6e99262898840c996c6389bf444aac7e1f47d7d58ba5ccbae17c667\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"ee17378086a473b9c489f314a6d0c420f7ffe25b1a9fc30a16055d508040a0cc\",\"exists\":true},\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8fa9d19bd1183a4917b99a3405d42baa282c6e43f4a1279f2299182ffc9d10f2\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"04631c78f0063cc8f905739f1122baa369ff430203a659f244b502174939a677\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"4222e46580883a1c450168503a726d53dc7c3eadf28e80f3d3d0571e35c39c3a\",\"exists\":true},\"schema_version\":1}",
                       "stdoutBytes": 799,
                       "stdoutTruncated": false,
                       "timedOut": false
@@ -1894,7 +1894,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\nacceptance judge batch completed checks=2\n",
                   "stderrBytes": 579,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"931c1b47bc2fd60838bd6e46c69f1baa80116bbb2cf663638c0c208fa99b7e0d\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"ea121c1ad6e99262898840c996c6389bf444aac7e1f47d7d58ba5ccbae17c667\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"ee17378086a473b9c489f314a6d0c420f7ffe25b1a9fc30a16055d508040a0cc\",\"exists\":true},\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8fa9d19bd1183a4917b99a3405d42baa282c6e43f4a1279f2299182ffc9d10f2\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"04631c78f0063cc8f905739f1122baa369ff430203a659f244b502174939a677\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"4222e46580883a1c450168503a726d53dc7c3eadf28e80f3d3d0571e35c39c3a\",\"exists\":true},\"schema_version\":1}",
                   "stdoutBytes": 799,
                   "stdoutTruncated": false,
                   "summary": "host command '<host-call-id>' completed with exit Some(0)",
@@ -1916,7 +1916,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                  "logicDigest": "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                   "logicVersion": 5,
                   "postcondition": {
                     "satisfied": true,
@@ -1927,7 +1927,7 @@
                     "command_id": "freeze-skeleton",
                     "entries": [
                       {
-                        "blake3": "aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422",
+                        "blake3": "b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe",
                         "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                         "prior_blake3": "<receipt-digest-of-overwritten-content>",
                         "relative_path": "acceptance-pin.json"
@@ -1938,12 +1938,12 @@
                         "relative_path": "gate-envelope.json"
                       },
                       {
-                        "blake3": "f927508f560389358af404a60e8e2cff0acdbe232af768e2db6df3fd19cd4419",
+                        "blake3": "9e407ac2a85aa2052d11b0f3822c97706dcb959357274dbf708d8e7d18facc8b",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                         "relative_path": "task-skeleton.json"
                       },
                       {
-                        "blake3": "79a987401ca447fbd1106b579adbe861a898528702de1bfa26053d73b30d59ab",
+                        "blake3": "534061452b63d215b78c86ec4958caaa3837612a9cfe7288a5b43b8db48a2ed2",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                         "relative_path": "task-skeleton.lock"
                       }
@@ -1977,7 +1977,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+                      "logicDigest": "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
                       "logicVersion": 5,
                       "postcondition": {
                         "satisfied": true,
@@ -1988,7 +1988,7 @@
                         "command_id": "freeze-skeleton",
                         "entries": [
                           {
-                            "blake3": "aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422",
+                            "blake3": "b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe",
                             "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                             "prior_blake3": "<receipt-digest-of-overwritten-content>",
                             "relative_path": "acceptance-pin.json"
@@ -1999,12 +1999,12 @@
                             "relative_path": "gate-envelope.json"
                           },
                           {
-                            "blake3": "f927508f560389358af404a60e8e2cff0acdbe232af768e2db6df3fd19cd4419",
+                            "blake3": "9e407ac2a85aa2052d11b0f3822c97706dcb959357274dbf708d8e7d18facc8b",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                             "relative_path": "task-skeleton.json"
                           },
                           {
-                            "blake3": "79a987401ca447fbd1106b579adbe861a898528702de1bfa26053d73b30d59ab",
+                            "blake3": "534061452b63d215b78c86ec4958caaa3837612a9cfe7288a5b43b8db48a2ed2",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                             "relative_path": "task-skeleton.lock"
                           }
@@ -2014,7 +2014,7 @@
                       "stderr": "",
                       "stderrBytes": 0,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"f927508f560389358af404a60e8e2cff0acdbe232af768e2db6df3fd19cd4419\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"79a987401ca447fbd1106b579adbe861a898528702de1bfa26053d73b30d59ab\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"9e407ac2a85aa2052d11b0f3822c97706dcb959357274dbf708d8e7d18facc8b\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"534061452b63d215b78c86ec4958caaa3837612a9cfe7288a5b43b8db48a2ed2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                       "stdoutBytes": 662,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2046,7 +2046,7 @@
                   "stderr": "",
                   "stderrBytes": 0,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"aa064ce545471142e6212462cc9cfa5d26478ce6f6fd435b6dabda3c3115a422\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"f927508f560389358af404a60e8e2cff0acdbe232af768e2db6df3fd19cd4419\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"79a987401ca447fbd1106b579adbe861a898528702de1bfa26053d73b30d59ab\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"b808935a36e0bfd8c8141ec9fcdf1331ce7fa7d58783359746f1a383ee2169fe\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"9e407ac2a85aa2052d11b0f3822c97706dcb959357274dbf708d8e7d18facc8b\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"534061452b63d215b78c86ec4958caaa3837612a9cfe7288a5b43b8db48a2ed2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                   "stdoutBytes": 662,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2078,7 +2078,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+                  "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
                   "logicVersion": 29,
                   "postcondition": {
                     "satisfied": true,
@@ -2128,7 +2128,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+                      "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
                       "logicVersion": 29,
                       "postcondition": {
                         "satisfied": true,
@@ -2210,7 +2210,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+                  "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
                   "logicVersion": 29,
                   "postcondition": {
                     "satisfied": true,
@@ -2260,7 +2260,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+                      "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
                       "logicVersion": 29,
                       "postcondition": {
                         "satisfied": true,
@@ -2342,7 +2342,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+                  "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
                   "logicVersion": 24,
                   "postcondition": {
                     "satisfied": true,
@@ -2387,7 +2387,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "4b43e29e365bbd612361b164ed0e90012d60b67d9274ae92d19eff7fe98b1a2b",
+                      "logicDigest": "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
                       "logicVersion": 24,
                       "postcondition": {
                         "satisfied": true,
@@ -2472,7 +2472,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "dccd9f66ccb11b8d48d90be735e7781b6b9aa44eb528a1c7dd51569cdf1f4384",
+                  "logicDigest": "805aee1c008ad5ad69f87fe89948970bae04c903ff0fb81dc4b97fdbf92d8d0f",
                   "logicVersion": 7,
                   "postcondition": {
                     "satisfied": true,
@@ -2517,7 +2517,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "dccd9f66ccb11b8d48d90be735e7781b6b9aa44eb528a1c7dd51569cdf1f4384",
+                      "logicDigest": "805aee1c008ad5ad69f87fe89948970bae04c903ff0fb81dc4b97fdbf92d8d0f",
                       "logicVersion": 7,
                       "postcondition": {
                         "satisfied": true,
@@ -2693,7 +2693,7 @@
     ]
   ],
   "skeleton": {
-    "acceptance_digest": "a03e4a8dcd87991e0f8a7941ae09fc5a9b494600aab094ede8f7965312437475",
+    "acceptance_digest": "5a8112dfc4c565c046f5eee4ddfa6e1533aa1f7b2c1ed1c94b4ccb6d2766552d",
     "schema_version": 1,
     "tasks": [
       {
