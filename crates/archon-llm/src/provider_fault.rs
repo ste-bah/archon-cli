@@ -323,6 +323,16 @@ pub(crate) fn error_event(error: LlmError) -> crate::streaming::StreamEvent {
     }
 }
 
+/// Preserve the opening read-idle signal before converting the native cause.
+/// The provider boundary decides whether the caller defers outage recovery.
+pub(crate) fn api_open_transport(error: reqwest::Error) -> crate::anthropic::ApiError {
+    if error.is_timeout() {
+        crate::anthropic::ApiError::IdleTimeout
+    } else {
+        api_transport(error)
+    }
+}
+
 pub(crate) fn api_transport(error: reqwest::Error) -> crate::anthropic::ApiError {
     into_api(from_transport(error))
 }

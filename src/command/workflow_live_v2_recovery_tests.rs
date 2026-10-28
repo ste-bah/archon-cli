@@ -232,20 +232,7 @@ pub(super) fn harness_with_inactivity(
         )),
     );
     install_subagent_executor(Arc::new(executor));
-    let fallback = Arc::new(archon_pipeline::llm_adapter::ProviderLlmAdapter::new(
-        provider.clone(),
-    ));
-    crate::command::pipeline_workflow_llm::PipelineWorkflowLlmClient::arc(Arc::new(
-        archon_pipeline::subagent_adapter::SubagentPipelineClient::with_provider(
-            fallback,
-            archon_tools::tool::ToolContext {
-                working_dir: root.into(),
-                ..Default::default()
-            },
-            provider,
-        )
-        .with_inactivity_timeout(Some(inactivity)),
-    ))
+    crate::command::pipeline_workflow_llm::recovery_client_for_test(provider, root, inactivity)
 }
 pub(super) fn request() -> WorkflowAgentCall {
     WorkflowAgentCall {

@@ -166,7 +166,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 63: #526 a judge refutation counts only when its quoted rule is in the output or check text the judge saw; #528 the per-entry reuse key uses each entry's own named-file content.
         // 64: #533 a listing probe stopped before any output is a transient host fault, never an author finding; a silent scratch overrun says the host could not tell.
         // 65: #515 a re-author reply whose first entry is followed by a misplaced closing brace is refused, naming the continued field.
-        sources_digest: "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+        // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
+        sources_digest: "59e997bd6b0d712b76e6c6c6a5770f91c938a1fce7faef302de008e8bf27c805",
         build_bound: false,
     },
     CapabilityLogic {
@@ -202,7 +203,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         // #533 re-pin only: skeleton freeze verdicts do not run subcommand listing probes.
         // #514/#515/#527 re-pin only: skeleton freeze verdicts do not read the acceptance re-author reply parser.
-        sources_digest: "3b2d03e8d91b10b29cd970250486a72360a5754e678e5a09907d29e46032f23a",
+        // #364 re-pin only: typed provider faults and outage backoff do not change skeleton freeze verdicts.
+        sources_digest: "59e997bd6b0d712b76e6c6c6a5770f91c938a1fce7faef302de008e8bf27c805",
         build_bound: false,
     },
     CapabilityLogic {

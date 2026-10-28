@@ -176,7 +176,7 @@ impl AnthropicClient {
                 .body(body.clone())
                 .send()
                 .await
-                .map_err(crate::provider_fault::api_transport)?;
+                .map_err(crate::provider_fault::api_open_transport)?;
 
             let status = response.status();
             crate::provider_fault::note_response(
