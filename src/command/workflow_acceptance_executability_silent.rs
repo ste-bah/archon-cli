@@ -241,14 +241,8 @@ pub(super) fn settle(
     why: &str,
     at: &Context,
 ) -> Option<String> {
-    settle_as(
-        probe,
-        commit,
-        contract,
-        result,
-        (why, UnprovenCause::Host),
-        at,
-    )
+    let why = (why, UnprovenCause::Host);
+    settle_as(probe, commit, contract, result, why, at)
 }
 
 /// [`settle`], recording an unproven check with the cause of `why`.
@@ -267,6 +261,7 @@ pub(super) fn settle_as(
     let evidence = program_output(&result.stderr, &redactor, EVIDENCE_BYTES);
     let signature = setup_path_signature(contract, id, result, why, at);
     let retried = match cause {
+        UnprovenCause::TransientHost => "the host retries its inconclusive listing probe",
         UnprovenCause::SiteLacks => {
             "its site lacks what the host has, which is the host's to repair and never its author's; it is probed again once the site provides it"
         }
@@ -391,6 +386,10 @@ fn struck(
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
     let (finding, unproven) = texts();
+    if cause == UnprovenCause::TransientHost {
+        probe.unproven_as(id, unproven, cause);
+        return None;
+    }
     let unsaved = format!("{unproven}; its strike could not be saved, so it stays the host's");
     // Read, decide and write under the run's ownership fence, so a strike is
     // never settled by a stale owner, and written whole then renamed.

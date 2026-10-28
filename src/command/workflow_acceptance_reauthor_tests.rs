@@ -8,6 +8,9 @@ use crate::command::workflow_task_set::republish::test_fixture::frozen_set_prove
 #[path = "workflow_acceptance_reauthor_tests_parsing.rs"]
 mod parsing_tests;
 
+#[path = "workflow_acceptance_reauthor_brace_tests.rs"]
+mod brace_tests;
+
 #[path = "workflow_acceptance_reauthor_fence_tests.rs"]
 mod fence_tests;
 

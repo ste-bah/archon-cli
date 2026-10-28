@@ -1,12 +1,21 @@
 use super::*;
 
 async fn resume_prompt_for_report(report_id: &str, report: serde_json::Value) -> String {
+    resume_prompt_for_report_events(report_id, report, "").await
+}
+
+async fn resume_prompt_for_report_events(
+    report_id: &str,
+    report: serde_json::Value,
+    events: &str,
+) -> String {
     let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven(&[(
         "AC-X-001",
         "test -f build-manifest",
         true,
     )]);
     let run = tempfile::tempdir().unwrap();
+    std::fs::write(run.path().join("events.jsonl"), events).unwrap();
     let report_dir = run.path().join("decomposition/reverify/reports");
     std::fs::create_dir_all(&report_dir).unwrap();
     std::fs::write(
@@ -209,4 +218,108 @@ async fn resume_plan_attributes_findings_and_quotes_the_stored_verdict() {
             assert!(!prompt.contains("as needing remediation"), "{prompt}");
         }
     }
+}
+
+#[tokio::test]
+async fn remediation_stored_report_uses_its_recording_event_date() {
+    let report: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/remediation_report.json")).unwrap();
+    let digest =
+        archon_workflow::task_set_contract::content_digest(&serde_json::to_vec(&report).unwrap());
+    let events = format!(
+        "{}\n{}\n",
+        serde_json::json!({
+            "seq": 2, "run_id": "RUN-X-001", "ts": "2026-10-16T09:20:15Z",
+            "kind": "decomposition_reverified",
+            "detail": {"report_id": "REPORT-X-001", "report_digest": digest}
+        }),
+        serde_json::json!({
+            "seq": 3, "run_id": "RUN-X-001", "ts": "2026-10-17T09:20:15Z",
+            "kind": "decomposition_reverified",
+            "detail": {"report_id": "REPORT-X-001", "report_digest": "different"}
+        })
+    );
+    let prompt = resume_prompt_for_report_events("REPORT-X-001", report, &events).await;
+    assert!(prompt.contains("Report REPORT-X-001 (recorded 2026-10-16T09:20:15Z) said about check AC-X-001: \"stored finding\"; \"another stored finding\"."), "{prompt}");
+    assert!(
+        prompt.contains("The report gave check AC-X-001 the verdict \"needs_remediation\"."),
+        "{prompt}"
+    );
+    assert!(prompt.contains("may be out of date"), "{prompt}");
+}
+
+fn recording_events(report: &serde_json::Value, sequences: &[u64]) -> String {
+    let digest =
+        archon_workflow::task_set_contract::content_digest(&serde_json::to_vec(report).unwrap());
+    sequences
+        .iter()
+        .map(|seq| {
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "seq": seq, "run_id": "RUN-X-001", "ts": format!("2026-10-{seq:02}T09:20:15Z"),
+                    "kind": "decomposition_reverified",
+                    "detail": {"report_id": "REPORT-X-001", "report_digest": digest}
+                })
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn remediation_recording_time_unknown_without_matching_event() {
+    let report = serde_json::from_str(include_str!("fixtures/remediation_report.json")).unwrap();
+    let prompt = resume_prompt_for_report_events("REPORT-X-001", report, "").await;
+    assert!(prompt.contains("Report REPORT-X-001 (recording time unknown) said about check AC-X-001: \"stored finding\""), "{prompt}");
+}
+
+#[tokio::test]
+async fn remediation_recording_time_binds_one_event_by_sequence() {
+    let mut report: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/remediation_report.json")).unwrap();
+    report["report_event_seq"] = serde_json::json!(2);
+    let events = recording_events(&report, &[2, 3]);
+    let prompt = resume_prompt_for_report_events("REPORT-X-001", report, &events).await;
+    assert!(
+        prompt.contains("Report REPORT-X-001 (recorded 2026-10-02T09:20:15Z) said"),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("recorded 2026-10-03"), "{prompt}");
+}
+
+#[tokio::test]
+async fn remediation_recording_time_unknown_with_many_unbound_events() {
+    let report = serde_json::from_str(include_str!("fixtures/remediation_report.json")).unwrap();
+    let events = recording_events(&report, &[2, 3]);
+    let prompt = resume_prompt_for_report_events("REPORT-X-001", report, &events).await;
+    assert!(
+        prompt.contains("Report REPORT-X-001 (recording time unknown) said"),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn remediation_recording_time_unknown_when_sequence_does_not_match() {
+    let mut report: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/remediation_report.json")).unwrap();
+    report["report_event_seq"] = serde_json::json!(3);
+    let events = recording_events(&report, &[2]);
+    let prompt = resume_prompt_for_report_events("REPORT-X-001", report, &events).await;
+    assert!(
+        prompt.contains("Report REPORT-X-001 (recording time unknown) said"),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn remediation_recording_time_unknown_with_duplicate_sequence() {
+    let mut report: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/remediation_report.json")).unwrap();
+    report["report_event_seq"] = serde_json::json!(2);
+    let events = recording_events(&report, &[2, 2]);
+    let prompt = resume_prompt_for_report_events("REPORT-X-001", report, &events).await;
+    assert!(
+        prompt.contains("Report REPORT-X-001 (recording time unknown) said"),
+        "{prompt}"
+    );
 }
