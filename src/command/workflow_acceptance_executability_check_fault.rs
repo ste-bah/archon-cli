@@ -27,6 +27,7 @@ pub(super) enum Fault {
     },
     Ambiguous(String),
     Host,
+    Availability(crate::command::workflow_host_fault::Class),
 }
 
 /// Whose the operational error of `result` is, by the typed cause the
@@ -38,6 +39,14 @@ pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
     else {
         return Fault::Host;
     };
+    if let Some(archon_workflow::acceptance_scratch::faults::FaultCause::SiteSetupIo {
+        raw_os_error,
+    }) = result.fault
+    {
+        return Fault::Availability(crate::command::workflow_host_fault::io_class(
+            &std::io::Error::from_raw_os_error(raw_os_error),
+        ));
+    }
     match classify(result.fault.as_ref(), error) {
         CheckFault::Check { trigger, remedy } => Fault::Check {
             trigger,
@@ -45,6 +54,15 @@ pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
             error: error.to_string(),
         },
         CheckFault::Ambiguous => Fault::Ambiguous(error.to_string()),
+        CheckFault::Host
+            if matches!(
+                error,
+                archon_workflow::acceptance_scratch::CHECK_TIMED_OUT
+                    | archon_workflow::acceptance_scratch::CHECK_DEFERRED
+            ) =>
+        {
+            Fault::Availability(crate::command::workflow_host_fault::Class::Transient)
+        }
         CheckFault::Host => Fault::Host,
     }
 }
@@ -107,6 +125,10 @@ pub(super) fn settle(
                     )
                 },
             )
+        }
+        (Fault::Availability(class), _) => {
+            probe.unproven_as(id, unproven, UnprovenCause::from_class(class));
+            None
         }
         (Fault::Ambiguous(_) | Fault::Host, _) => {
             probe.unproven(id, unproven);

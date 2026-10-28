@@ -95,7 +95,15 @@ pub(crate) fn bind_request(
     )?;
     let pin = read_acceptance_pin(&context)?;
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
-        .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
+        .map_err(|error| {
+            crate::command::workflow_host_fault::workflow(
+                error.into(),
+                format!(
+                    "reading the frozen skeleton under {}",
+                    context.task_root.display()
+                ),
+            )
+        })?;
     // The task file opens where the body gate's packaging strip says it does,
     // so a yaml block in chat before it is never read as its frontmatter. The
     // anchor is the one frozen subject's task file in the answer; two or more

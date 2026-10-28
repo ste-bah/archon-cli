@@ -30,6 +30,14 @@ pub(super) fn evaluate_postcondition(
         &context.project_root,
         &context.task_root,
     )?;
+    evaluate_postcondition_locked(context, command_id)
+}
+
+/// The caller holds the chain read lock through receipt and postcondition observation.
+pub(super) fn evaluate_postcondition_locked(
+    context: &HostCommandResolutionContext,
+    command_id: &str,
+) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
     let pin = read_acceptance_pin(context)?;
     // A frozen-chain verification (Issue-46) answers the same question the
     // freeze it stands in for answered: the artifact on disk is the one the
@@ -66,7 +74,7 @@ pub(super) fn evaluate_postcondition(
         ));
     }
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
-        .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
+        .map_err(WorkflowError::port)?;
     if matches!(command_id, "freeze-skeleton" | "verify-frozen-skeleton") {
         return Ok((
             skeleton

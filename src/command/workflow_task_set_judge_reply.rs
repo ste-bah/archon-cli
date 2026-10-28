@@ -215,13 +215,13 @@ pub(super) async fn complete_reply(
             )
             .await
             .map_err(|_| {
-                JudgeIncomplete::provider(format!(
-                    "a judge call stalled after {JUDGE_TIMEOUT_SECS}s with no provider progress"
+                JudgeIncomplete::host_error(crate::command::workflow_host_fault::transient(
+                    format!(
+                        "a judge call stalled after {JUDGE_TIMEOUT_SECS}s with no provider progress"
+                    ),
                 ))
             })?
-            .map_err(|error| {
-                JudgeIncomplete::provider(format!("the provider gave no reply: {error}"))
-            })?;
+            .map_err(JudgeIncomplete::provider_error)?;
         match step(&reply, continuing, &outcome) {
             Step::Done(whole) => return Ok(Ok(whole)),
             Step::Unusable { why, kind, spent } => {
@@ -236,7 +236,9 @@ pub(super) async fn complete_reply(
                 chunks = chunks.saturating_add(1);
                 continuing = true;
                 if let Some(partial) = partial
-                    && !partial.extended(&reply, chunks, outcome.content.len())
+                    && !partial
+                        .extended(&reply, chunks, outcome.content.len())
+                        .map_err(JudgeIncomplete::host_error)?
                 {
                     // The host could not save a usable reply: its fault.
                     return Err(stalled(

@@ -8,7 +8,7 @@ fn ordinary_words_do_not_expand_redacted_bytes_before_credit() {
     let text = format!("{{\"reason\":\"{}", "token ".repeat(700_000));
     assert!(text.len() < MAX_PARTIAL_REPLY_BYTES);
     assert_eq!(archon_observability::redaction::redact_text(&text), text);
-    assert!(partial.extended(&text, 1, text.len()));
+    assert!(partial.extended(&text, 1, text.len()).unwrap());
     assert_eq!(
         progress.total(),
         1,
@@ -26,10 +26,10 @@ fn shrinking_redaction_keeps_withdrawable_credit() {
     let progress = FreezeProgress::default();
     let partial = PartialReply::new(temp.path(), "batch", &progress);
     let mut text = String::from("{\"reason\":\"sk-");
-    partial.extended(&text, 1, text.len());
+    partial.extended(&text, 1, text.len()).unwrap();
     for chunks in 2..=1001 {
         text.push('a');
-        partial.extended(&text, chunks, 1);
+        partial.extended(&text, chunks, 1).unwrap();
     }
     assert_eq!(progress.total(), 1001);
     assert!(
@@ -48,7 +48,7 @@ fn an_unbounded_credit_is_rejected() {
     let progress = FreezeProgress::default();
     let partial = PartialReply::new(temp.path(), "batch", &progress);
     let text = "{\"reason\":\"abc".to_string();
-    partial.extended(&text, 1, text.len());
+    partial.extended(&text, 1, text.len()).unwrap();
     let mut saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&partial.path).unwrap()).unwrap();
     saved["credit_bytes"] = serde_json::json!(u64::MAX);

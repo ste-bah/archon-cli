@@ -122,9 +122,15 @@ pub(super) fn publication_scopes(
             Some(name.to_string_lossy().into_owned()),
         ));
     }
-    scopes.extend(
-        super::super::super::workflow_host_command_publish::receipt_scopes(pin_path, tasks_root)?,
-    );
+    for (call, envelope) in
+        super::super::super::workflow_host_command_publish::receipt_scopes(pin_path, tasks_root)?
+    {
+        scopes.push((call.clone(), envelope));
+        scopes.push((
+            call,
+            Some(crate::command::workflow_host_command_committed::RECEIPT_FILE.into()),
+        ));
+    }
     Ok(scopes)
 }
 

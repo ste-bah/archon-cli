@@ -27,6 +27,51 @@ pub(super) async fn judge_prompted_with_roots(
     partial: Option<&PartialReply<'_>>,
     roots: &super::JudgeRoots,
 ) -> Result<AcceptanceContract> {
+    judge_rounds(
+        client,
+        contract,
+        prompt,
+        model,
+        validate,
+        partial,
+        roots,
+        |_| false,
+    )
+    .await
+}
+
+/// A known refutation is ready for its author before the next provider call.
+/// An incomplete result carries exactly the decided entries; all others remain pending.
+pub(crate) async fn judge_refutations(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    prompt: impl Fn(&AcceptanceContract) -> Result<String>,
+    model: &str,
+    refutes: impl Fn(&AcceptanceContract) -> bool,
+) -> Result<AcceptanceContract> {
+    judge_rounds(
+        client,
+        contract,
+        prompt,
+        model,
+        require_judged_prose,
+        None,
+        &super::JudgeRoots::default(),
+        refutes,
+    )
+    .await
+}
+
+async fn judge_rounds(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    prompt: impl Fn(&AcceptanceContract) -> Result<String>,
+    model: &str,
+    validate: impl Fn(&AcceptanceContract) -> Result<()>,
+    partial: Option<&PartialReply<'_>>,
+    roots: &super::JudgeRoots,
+    refutes: impl Fn(&AcceptanceContract) -> bool,
+) -> Result<AcceptanceContract> {
     let task = prompt(&contract)?;
     let mut messages = vec![serde_json::json!({"role":"user","content":task})];
     let mut judged_contract = contract;
@@ -117,6 +162,19 @@ pub(super) async fn judge_prompted_with_roots(
                         );
                     }
                     return Ok(judged_contract);
+                }
+                if refutes(&answered) {
+                    let mut incomplete = JudgeIncomplete::new(
+                        JudgeIncompleteKind::AuthoredReply,
+                        "known refutations require repair; remaining checks are undecided",
+                    );
+                    incomplete.decided = judged_contract
+                        .acceptance
+                        .into_iter()
+                        .chain(judged_contract.supplementary)
+                        .filter(|entry| decided.contains(&entry.id))
+                        .collect();
+                    return Err(incomplete.into());
                 }
                 pending_contract = subset_with_ids(&judged_contract, &missing);
                 current_task = prompt(&pending_contract)?;

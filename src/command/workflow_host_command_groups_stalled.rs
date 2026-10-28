@@ -1,4 +1,4 @@
-use super::{HostCommandGroupRecord, left_groups};
+use super::{HostCommandGroupRecord, UNKNOWN_SUFFIX, left_groups, unknown_path};
 use std::path::Path;
 
 /// The kept records of stalled teardowns that still run (or whose survivors
@@ -29,4 +29,34 @@ pub(crate) fn stall_note(record: &HostCommandGroupRecord) -> String {
     } else {
         String::new()
     }
+}
+
+pub(in super::super) fn refusal_files(path: &Path) -> String {
+    let mut files = vec![path.to_path_buf()];
+    if path.extension().is_some_and(|ext| ext == "pending") {
+        let original = path.with_extension("json");
+        for record in [original.clone(), unknown_path(&original)] {
+            if record.exists() {
+                files.push(record);
+            }
+        }
+    } else {
+        let pending = if let Some(stem) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(UNKNOWN_SUFFIX))
+        {
+            path.with_file_name(format!("{stem}.pending"))
+        } else {
+            path.with_extension("pending")
+        };
+        if pending.exists() {
+            files.push(pending);
+        }
+    }
+    files
+        .iter()
+        .map(|file| file.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" and ")
 }

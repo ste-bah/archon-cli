@@ -93,7 +93,13 @@ impl<'a> PartialReply<'a> {
             .unwrap_or_default()
     }
 
-    fn store(&self, reply: &str, chunks: u64, credit_bytes: u64, completed: bool) -> bool {
+    fn store(
+        &self,
+        reply: &str,
+        chunks: u64,
+        credit_bytes: u64,
+        completed: bool,
+    ) -> anyhow::Result<bool> {
         let saved = Saved {
             schema: SCHEMA,
             key: self.key.clone(),
@@ -106,16 +112,13 @@ impl<'a> PartialReply<'a> {
         // Check the bytes actually persisted, after redaction. A rejected
         // extension leaves the previous continuation and its credit intact.
         if !saved.usable(&self.key) {
-            return false;
+            return Ok(false);
         }
-        if let Err(error) = write_private(&self.path, &saved) {
-            eprintln!(
-                "the judge's partial reply could not be saved at {} ({error}); a retry continues from less",
-                self.path.display()
-            );
-            return false;
-        }
-        true
+        write_private(&self.path, &saved).map_err(|error| {
+            anyhow::Error::new(error)
+                .context(format!("saving judge continuation {}", self.path.display()))
+        })?;
+        Ok(true)
     }
 
     /// Counts the chunks a saved, still usable reply holds, once per freeze
@@ -125,7 +128,7 @@ impl<'a> PartialReply<'a> {
         if saved.completed && !verdict_saved {
             // An orphan marker is neither progress nor a continuation. Clear
             // it before a fresh reply starts counting from its first chunk.
-            self.store("", 0, 0, false);
+            let _ = self.store("", 0, 0, false);
             return;
         }
         self.progress.reused_judged(saved.chunks);
@@ -138,20 +141,25 @@ impl<'a> PartialReply<'a> {
     }
 
     /// Saves `reply`, now built of `chunks` chunks, and reports one unit.
-    pub(super) fn extended(&self, reply: &str, chunks: u64, added_bytes: usize) -> bool {
+    pub(super) fn extended(
+        &self,
+        reply: &str,
+        chunks: u64,
+        added_bytes: usize,
+    ) -> anyhow::Result<bool> {
         let previous = self.load();
         if added_bytes == 0 || chunks != previous.chunks.saturating_add(1) {
-            return false;
+            return Ok(false);
         }
         let credit_bytes = previous
             .credit_bytes
             .unwrap_or(previous.chunks)
             .saturating_add(added_bytes as u64);
-        if !self.store(reply, chunks, credit_bytes, false) {
-            return false;
+        if !self.store(reply, chunks, credit_bytes, false)? {
+            return Ok(false);
         }
         self.progress.saved(true);
-        true
+        Ok(true)
     }
 
     /// The reply is spent (judged, unusable or discarded): the next ask
@@ -161,7 +169,7 @@ impl<'a> PartialReply<'a> {
         if saved.completed || (saved.reply.is_empty() && saved.chunks == 0) {
             return;
         }
-        if self.store("", 0, 0, false) {
+        if self.store("", 0, 0, false).unwrap_or(false) {
             self.progress.withdraw_judged(saved.chunks);
         }
     }
@@ -171,7 +179,7 @@ impl<'a> PartialReply<'a> {
     pub(crate) fn completed(&self) {
         let saved = self.load();
         if !saved.completed && !saved.reply.is_empty() {
-            self.store(
+            let _ = self.store(
                 "",
                 saved.chunks,
                 saved.credit_bytes.unwrap_or(saved.chunks),

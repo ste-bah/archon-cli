@@ -259,7 +259,7 @@ async fn fidelity_a_kept_verdict_answered_again_with_the_other_meaning_is_only_l
 /// counts them without charging the host's operational window; a provider
 /// that gives no reply at all stays the host's operational error.
 #[tokio::test]
-async fn fidelity_an_unusable_critic_reply_is_authored_and_a_provider_fault_is_operational() {
+async fn fidelity_unusable_reply_stays_authored_and_unknown_provider_diagnostic_stays_permanent() {
     let (temp, ids) = wide_corpus();
     let bad = vec![ids[7].clone()];
     let critic = FakeCritic::new(vec![
@@ -280,5 +280,5 @@ async fn fidelity_an_unusable_critic_reply_is_authored_and_a_provider_fault_is_o
         .into_envelope()
         .unwrap();
     let error = envelope.operational_error.expect("no reply at all");
-    assert_eq!(error.kind, "gate_operational", "{}", error.text);
+    assert_eq!(error.kind, "permanent_host_fault", "{}", error.text);
 }

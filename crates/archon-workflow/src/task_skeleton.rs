@@ -79,6 +79,7 @@ pub struct TaskSetFinding {
 pub struct TaskSkeletonError {
     message: String,
     pub defects: Vec<crate::defect::ValidationDefect>,
+    pub io_cause: Option<(std::io::ErrorKind, Option<i32>)>,
 }
 
 impl fmt::Display for TaskSkeletonError {
@@ -169,7 +170,7 @@ pub fn validate_skeleton_set(
 }
 
 pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonResult<TaskSkeleton> {
-    let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|source| error(format!(
+    let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|source| io_error(&source, format!(
         "task_root {} could not be canonicalized: {source}; restore it or re-run `workflow freeze-skeleton`",
         tasks_root.display()
     )))?;
@@ -409,7 +410,7 @@ fn require_blake3(algorithm: &str, file: &str) -> SkeletonResult<()> {
 
 fn read_required(path: &Path) -> SkeletonResult<Vec<u8>> {
     std::fs::read(path).map_err(|read| {
-        error(format!(
+        io_error(&read, format!(
             "required task-set artifact {} could not be read: {read}; restore it or run the named freeze command",
             path.display()
         ))
@@ -430,10 +431,17 @@ fn invalid<T>(message: impl Into<String>) -> SkeletonResult<T> {
     Err(error(message))
 }
 
+fn io_error(source: &std::io::Error, message: String) -> TaskSkeletonError {
+    let mut fault = error(message);
+    fault.io_cause = Some((source.kind(), source.raw_os_error()));
+    fault
+}
+
 fn error(message: impl Into<String>) -> TaskSkeletonError {
     TaskSkeletonError {
         message: message.into(),
         defects: Vec::new(),
+        io_cause: None,
     }
 }
 

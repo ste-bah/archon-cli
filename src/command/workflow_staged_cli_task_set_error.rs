@@ -6,14 +6,15 @@ pub(super) fn body_input_finding(error: &Error) -> Option<GateEvaluation> {
     workflow_gate::task_body_input_finding(error, GateId::WorkflowLintTaskSet, "task-set")
 }
 
-pub(super) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
-    // Unanswered fidelity batches remain resumable operational errors.
-    if let Some((report, status)) = crate::command::topology_lint::resumable_exit(error) {
-        eprintln!("{report}");
-        crate::command::workflow_host_exit_drain::exit_after_drain(status);
+pub(crate) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
+    if let Some(incomplete) = crate::command::topology_lint::LintIncomplete::caused(error) {
+        eprintln!("{}", incomplete.report());
     }
     crate::command::workflow_host_command_operational::exit_if_unsettled_publish(error);
-    let evaluation = GateEvaluation::new("", Vec::new()).with_operational_error(error.to_string());
+    let evaluation = crate::command::topology_lint::LintIncomplete::caused(error)
+        .and_then(|incomplete| incomplete.evaluation.clone())
+        .unwrap_or_else(|| GateEvaluation::new("", Vec::new()))
+        .with_host_error(error);
     if crate::command::workflow_freeze_budget::FreezeIncomplete::caused(error).is_some_and(
         crate::command::workflow_freeze_budget::FreezeIncomplete::is_authored_judge_reply,
     ) {
@@ -69,10 +70,36 @@ mod tests {
     }
 
     #[test]
-    fn provider_gate_failure_keeps_the_generic_operational_kind() {
-        let envelope = gate_error_evaluation(&Error::msg("provider gave no reply"))
+    fn typed_provider_transport_keeps_the_transient_operational_kind() {
+        let envelope = gate_error_evaluation(&Error::new(std::io::Error::from(
+            std::io::ErrorKind::ConnectionReset,
+        )))
+        .into_envelope()
+        .unwrap();
+        assert_eq!(
+            envelope.operational_error.unwrap().kind,
+            "transient_host_fault"
+        );
+    }
+    #[test]
+    fn host_command_typed_decode_fault_preserves_path_and_remedy() {
+        let error = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        ))
+        .context("reading TASK file TASK-X-001.md");
+        let error = gate_error_evaluation(&error)
             .into_envelope()
+            .unwrap()
+            .operational_error
             .unwrap();
-        assert_eq!(envelope.operational_error.unwrap().kind, "gate_operational");
+        assert!(error.text.contains("TASK-X-001.md"));
+        assert!(
+            error.text.contains("stream did not contain valid UTF-8"),
+            "{}",
+            error.text
+        );
+        assert_eq!(error.kind, "permanent_host_fault");
+        assert!(error.text.contains("restore valid bytes"), "{}", error.text);
     }
 }

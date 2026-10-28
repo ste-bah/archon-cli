@@ -112,6 +112,7 @@ enum Scripted {
     Publish(Vec<u8>),
     OperatorPauseThenTimeOut,
     Stderr(i32, String),
+    TransientStderr(String),
 }
 
 #[async_trait::async_trait]
@@ -139,7 +140,26 @@ impl HostCommandProcessAdapter for ScriptedProcess {
             Scripted::Incomplete(progress) => {
                 std::fs::write(stale, b"partial").unwrap();
                 let stderr = marker(Some(progress));
-                Ok(output(Some(EXIT_INCOMPLETE_RESUMABLE), false, &stderr))
+                let mut outcome = output(Some(EXIT_INCOMPLETE_RESUMABLE), false, &stderr);
+                outcome.stdout = serde_json::to_vec(&archon_workflow::GateOperationalError {
+                    kind: "transient_host_fault".into(),
+                    text: "the observation window elapsed".into(),
+                })
+                .unwrap();
+                outcome.stdout_bytes = outcome.stdout.len() as u64;
+                outcome.stdout_retained_bytes = outcome.stdout_bytes;
+                Ok(outcome)
+            }
+            Scripted::TransientStderr(stderr) => {
+                let mut outcome = output(Some(EXIT_INCOMPLETE_RESUMABLE), false, &stderr);
+                outcome.stdout = serde_json::to_vec(&archon_workflow::GateOperationalError {
+                    kind: "transient_host_fault".into(),
+                    text: "the host observation was interrupted".into(),
+                })
+                .unwrap();
+                outcome.stdout_bytes = outcome.stdout.len() as u64;
+                outcome.stdout_retained_bytes = outcome.stdout_bytes;
+                Ok(outcome)
             }
             Scripted::Exit(code) => Ok(output(Some(code), false, "genuine failure")),
             Scripted::Stderr(code, stderr) => Ok(output(Some(code), false, &stderr)),
@@ -238,100 +258,70 @@ fn lint() -> HostCommandRequest {
     HostCommandRequest::new("task-set-lint", None).unwrap()
 }
 
-#[tokio::test]
-async fn a_timed_out_call_is_retried_once_then_pauses_the_run() {
-    let fixture = fixture(vec![Scripted::TimedOut(None)]);
-    let error = fixture
-        .executor
-        .execute(lint(), Some(fixture.generation))
-        .await
-        .unwrap_err();
+#[tokio::test(start_paused = true)]
+async fn host_command_timeouts_without_progress_recover_to_one_committed_outcome() {
+    assert_host_recovery(vec![Scripted::TimedOut(None), Scripted::TimedOut(None)], 2).await;
+}
 
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
-    spill_tests::assert_attempt_spill_dirs(&fixture.process);
-    let WorkflowError::ControlPaused(message) = &error else {
-        panic!("an operational limit pauses, never fails: {error:?}");
-    };
-    assert!(message.contains("'task-set-lint'"), "{message}");
-    assert!(message.contains("timed_out"), "{message}");
-    assert!(
-        message.contains(&format!(
-            "archon workflow resume --live --yes {}",
-            fixture.run_id
-        )),
-        "{message}"
+#[tokio::test(start_paused = true)]
+async fn host_command_growing_then_unchanged_progress_recovers_without_pause() {
+    assert_host_recovery(
+        vec![
+            Scripted::TimedOut(Some(1)),
+            Scripted::TimedOut(Some(2)),
+            Scripted::TimedOut(Some(3)),
+            Scripted::TimedOut(Some(4)),
+            Scripted::TimedOut(Some(4)),
+        ],
+        5,
+    )
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn host_command_unchanged_progress_recovers_without_operator_action() {
+    assert_host_recovery(
+        vec![Scripted::TimedOut(Some(4)), Scripted::TimedOut(Some(4))],
+        2,
+    )
+    .await;
+}
+
+async fn assert_host_recovery(mut outcomes: Vec<Scripted>, failures: usize) {
+    outcomes.push(Scripted::Publish(CANDIDATE.as_bytes().to_vec()));
+    let fixture = fixture(outcomes);
+    let task_file = fixture.context.task_root.join("TASK-X-010.md");
+    seed_frozen_chain(&fixture.context, &task_file);
+    let result = fixture
+        .executor
+        .execute(
+            HostCommandRequest::new("land-task-body", Some(CANDIDATE.into())).unwrap(),
+            Some(fixture.generation),
+        )
+        .await
+        .unwrap();
+    assert!(result.reusable(), "{result:?}");
+    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), failures + 1);
+    assert_eq!(std::fs::read(&task_file).unwrap(), CANDIDATE.as_bytes());
+    let state = fixture.store.load_state(&fixture.run_id).unwrap();
+    assert_eq!(state.status, RunStatus::Running);
+    assert_eq!(state.generation, fixture.generation);
+    assert_eq!(state.stages["host-call"].status, StageStatus::Running);
+    assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
+    let spills = fixture.process.spill_dirs.lock().unwrap();
+    assert_eq!(
+        spills
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        failures + 1
     );
-    let run = fixture.store.load_state(&fixture.run_id).unwrap();
-    assert_eq!(run.status, RunStatus::Paused);
-    assert_eq!(run.generation, fixture.generation + 1);
-    assert_eq!(run.stages["host-call"].status, StageStatus::Paused);
-
-    let events = events(&fixture);
-    let retries = events_named(&events, "host_command_operational_retry");
-    assert_eq!(retries.len(), 1, "{events:?}");
-    assert_eq!(retries[0]["kind"], "stage_stalled");
-    assert_eq!(retries[0]["detail"]["attempt"], 1);
-    assert_eq!(retries[0]["detail"]["reason"], "timed_out");
-    assert!(retries[0]["detail"]["elapsed_secs"].is_u64());
-    assert!(retries[0]["detail"]["progress"].is_null());
-    let pauses = events_named(&events, "host_command_operational_pause");
-    assert_eq!(pauses.len(), 1, "{events:?}");
-    let pause = &pauses[0]["detail"];
-    assert_eq!(pauses[0]["kind"], "paused");
-    assert_eq!(pause["cause"], "no_progress_evidence");
-    assert_eq!(pause["command_id"], "task-set-lint");
-    assert_eq!(pause["attempts"].as_array().unwrap().len(), 2);
-    assert!(pause["limit_secs"].as_u64().unwrap() > 0);
-    assert_eq!(pause["generation"], fixture.generation + 1);
-}
-
-#[tokio::test]
-async fn growing_progress_keeps_retrying_until_an_attempt_adds_nothing() {
-    let fixture = fixture(vec![
-        Scripted::TimedOut(Some(1)),
-        Scripted::TimedOut(Some(2)),
-        Scripted::TimedOut(Some(3)),
-        Scripted::TimedOut(Some(4)),
-        Scripted::TimedOut(Some(4)),
-    ]);
-    let error = fixture
-        .executor
-        .execute(lint(), Some(fixture.generation))
-        .await
-        .unwrap_err();
-
-    assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 5);
-    let events = events(&fixture);
-    let progress: Vec<_> = events_named(&events, "host_command_operational_retry")
-        .iter()
-        .map(|event| event["detail"]["progress"].as_u64().unwrap())
-        .collect();
-    assert_eq!(progress, vec![1, 2, 3, 4]);
-    let pauses = events_named(&events, "host_command_operational_pause");
-    assert_eq!(pauses[0]["detail"]["cause"], "no_progress");
-}
-
-#[tokio::test]
-async fn progress_that_stops_growing_pauses_without_a_further_retry() {
-    let fixture = fixture(vec![Scripted::TimedOut(Some(4))]);
-    let error = fixture
-        .executor
-        .execute(lint(), Some(fixture.generation))
-        .await
-        .unwrap_err();
-
-    assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
-    let events = events(&fixture);
-    let pauses = events_named(&events, "host_command_operational_pause");
-    assert_eq!(pauses[0]["detail"]["cause"], "no_progress");
 }
 
 const CANDIDATE: &str = "# Candidate\n\n```yaml\ntask_id: TASK-X-010\ntitle: Candidate\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Focused Tests\n- `test -f TASK-X-010.md`\n";
 
-#[tokio::test]
-async fn an_incomplete_resumable_call_with_growing_progress_continues_to_publication() {
+#[tokio::test(start_paused = true)]
+async fn host_command_incomplete_resumable_retries_with_backoff_to_publication() {
     let candidate = CANDIDATE.as_bytes().to_vec();
     let fixture = fixture(vec![
         Scripted::Incomplete(2),
@@ -343,36 +333,33 @@ async fn an_incomplete_resumable_call_with_growing_progress_continues_to_publica
     seed_frozen_chain(&fixture.context, &task_file);
     let request = HostCommandRequest::new("land-task-body", Some(CANDIDATE.into())).unwrap();
 
+    let started = tokio::time::Instant::now();
     let result = fixture
         .executor
         .execute(request, Some(fixture.generation))
         .await
         .unwrap();
 
+    assert!(started.elapsed() >= std::time::Duration::from_millis(1500));
     assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 3);
     assert!(result.reusable(), "{result:?}");
     assert_eq!(std::fs::read(&task_file).unwrap(), candidate);
     let run = fixture.store.load_state(&fixture.run_id).unwrap();
     assert_eq!(run.status, RunStatus::Running);
     assert_eq!(run.generation, fixture.generation);
-    let events = events(&fixture);
-    let retries = events_named(&events, "host_command_operational_retry");
-    let reasons: Vec<_> = retries
-        .iter()
-        .map(|event| event["detail"]["reason"].as_str().unwrap())
-        .collect();
-    assert_eq!(reasons, vec!["incomplete_resumable"; 2]);
-    assert!(events_named(&events, "host_command_operational_pause").is_empty());
+    assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
 }
 
 #[tokio::test]
-async fn genuine_failures_still_fail_once_without_retry_or_pause() {
+async fn host_command_permanent_exit_and_stage_refusal_remain_single_attempt() {
     let fixture = fixture(vec![Scripted::Exit(1)]);
-    let result = fixture
-        .executor
-        .execute(lint(), Some(fixture.generation))
-        .await
-        .unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        fixture.executor.execute(lint(), Some(fixture.generation)),
+    )
+    .await
+    .expect("permanent exit must finish")
+    .unwrap();
     assert_eq!(result.exit_code, Some(1));
     assert!(!result.reusable() && !result.timed_out);
     assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 1);
@@ -380,12 +367,18 @@ async fn genuine_failures_still_fail_once_without_retry_or_pause() {
     let fixture_b = self::fixture(vec![Scripted::Error(
         "host command 'task-set-lint' failed: permission denied",
     )]);
-    let error = fixture_b
-        .executor
-        .execute(lint(), Some(fixture_b.generation))
-        .await
-        .unwrap_err();
-    assert!(matches!(error, WorkflowError::StageFailed(_)), "{error}");
+    let result_b = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        fixture_b
+            .executor
+            .execute(lint(), Some(fixture_b.generation)),
+    )
+    .await
+    .expect("permanent refusal must finish")
+    .unwrap_err();
+    let error = result_b;
+    assert!(matches!(error, WorkflowError::StageFailed(_)), "{error:?}");
+    assert!(error.to_string().contains("permission denied"), "{error:?}");
     assert_eq!(fixture_b.process.calls.load(Ordering::SeqCst), 1);
 
     for fixture in [&fixture, &fixture_b] {
@@ -413,20 +406,13 @@ async fn an_operator_pause_between_attempts_wins_over_the_retry() {
     assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
 }
 
-#[tokio::test]
-async fn a_first_zero_progress_marker_gets_the_same_single_retry_as_no_marker() {
-    let fixture = fixture(vec![Scripted::TimedOut(Some(0))]);
-    let error = fixture
-        .executor
-        .execute(lint(), Some(fixture.generation))
-        .await
-        .unwrap_err();
-
-    assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
-    let events = events(&fixture);
-    let pauses = events_named(&events, "host_command_operational_pause");
-    assert_eq!(pauses[0]["detail"]["cause"], "no_progress");
+#[tokio::test(start_paused = true)]
+async fn host_command_zero_progress_timeouts_recover_without_operator_action() {
+    assert_host_recovery(
+        vec![Scripted::TimedOut(Some(0)), Scripted::TimedOut(Some(0))],
+        2,
+    )
+    .await;
 }
 
 #[cfg(unix)]

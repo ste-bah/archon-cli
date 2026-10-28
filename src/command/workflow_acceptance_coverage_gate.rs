@@ -150,7 +150,7 @@ pub(super) async fn pre_implementation_findings_with_limits(
     // What the host could not prove is the host's (operational), never the
     // author's: it is not published in any gate mode, and no author is
     // asked to change it.
-    let unproven = probe.take_unproven();
+    let unproven = probe.take_unproven_causes();
     // Issue 263: under a staged freeze it is also no reason to fail the run.
     // The freeze ends incomplete and resumable, with every verdict saved, so
     // the executor retries it while progress grows and otherwise pauses.
@@ -160,18 +160,26 @@ pub(super) async fn pre_implementation_findings_with_limits(
     // blocks publication and is probed again by the freeze that follows the
     // repair. A judge refutation is likewise an authored finding, though it
     // is assembled by `finish_acceptance` after this probe returns.
-    let host_unproven_reason = (!unproven.is_empty())
-        .then(|| super::executability::HostUnproven(unproven.clone()).to_string());
+    let host_unproven_reason = (!unproven.is_empty()).then(|| {
+        super::executability::HostUnproven(
+            unproven
+                .iter()
+                .map(|(id, (why, _))| (id.clone(), why.clone()))
+                .collect(),
+        )
+        .to_string()
+    });
     if resume.persist {
         if let Some(reason) = &host_unproven_reason {
             eprintln!("{reason}; the freeze will probe these checks again on retry");
         }
     }
-    let unproven = unproven.into_iter().map(|(id, why)| {
+    let unproven = unproven.into_iter().map(|(id, (why, cause))| {
         let text = format!(
             "check '{id}': operational: the host could not prove it after repairing its own environment ({why}); it is not published until the host can"
         );
-        finding(id, text, archon_workflow::RemediationScope::Operational)
+        let identity = archon_workflow::defect::DeterministicDefect::new(cause.code(), &id, "check");
+        finding(id, text, archon_workflow::RemediationScope::Operational).with_defect(identity)
     });
     let findings = (defects.into_iter())
         .map(|(id, text)| {
@@ -199,7 +207,7 @@ pub(crate) struct PreImplementation {
 }
 
 #[cfg(test)]
-pub(super) async fn pre_implementation_findings(
+pub(crate) async fn pre_implementation_findings(
     project_root: &Path,
     tasks_root: &Path,
     prd_path: &Path,

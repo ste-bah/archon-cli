@@ -104,7 +104,7 @@ fn a_reader_settles_a_left_journal_under_the_exclusive_lock_then_reads_shared() 
             seen.push(held_mode_here(&lock));
             std::fs::remove_file(&journal).map_err(|error| error.to_string())
         },
-        |error| error,
+        |error| error.to_string(),
         |exhausted| exhausted,
     )
     .unwrap();
@@ -120,7 +120,7 @@ fn a_reader_whose_settlement_fails_reports_it_and_retries_on_the_next_read() {
     let failed = PublishLockFile::acquire_shared_settled(
         &pin,
         || Err("cleanup failed".to_string()),
-        |error| error,
+        |error| error.to_string(),
         |exhausted| exhausted,
     );
     assert_eq!(failed.err().as_deref(), Some("cleanup failed"));
@@ -132,7 +132,7 @@ fn a_reader_whose_settlement_fails_reports_it_and_retries_on_the_next_read() {
             calls += 1;
             std::fs::remove_file(&journal).map_err(|error| error.to_string())
         },
-        |error| error,
+        |error| error.to_string(),
         |exhausted| exhausted,
     );
     assert!(read.is_ok());
@@ -191,7 +191,7 @@ fn a_reader_whose_last_settlement_succeeds_reads_on() {
             }
             Ok(())
         },
-        |error| error,
+        |error| error.to_string(),
         |exhausted| exhausted,
     )
     .expect("the read after the last settlement goes on");
@@ -221,7 +221,7 @@ fn of_two_readers_that_find_one_journal_only_one_settles_it() {
                         std::thread::sleep(Duration::from_millis(100));
                         std::fs::remove_file(&journal).map_err(|error| error.to_string())
                     },
-                    |error| error,
+                    |error| error.to_string(),
                     |exhausted| exhausted,
                 );
                 read.map(|read| read.mode())
@@ -238,5 +238,32 @@ fn of_two_readers_that_find_one_journal_only_one_settles_it() {
         settled.load(std::sync::atomic::Ordering::SeqCst),
         1,
         "the second reader settled a journal the first had settled"
+    );
+}
+
+thread_local! { static FAIL_OPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+pub(super) fn opening_fault() -> std::io::Result<()> {
+    if FAIL_OPEN.replace(false) {
+        return Err(std::io::Error::from_raw_os_error(5));
+    }
+    Ok(())
+}
+
+#[test]
+fn host_command_publish_read_lock_retains_native_acquisition_cause() {
+    use std::error::Error;
+    let (_temp, pin) = pin();
+    FAIL_OPEN.set(true);
+    let error = PublishLockFile::hold_shared_settled(&pin, pin.parent().unwrap())
+        .err()
+        .expect("injected acquisition failure");
+    assert!(error.unsettled().is_none(), "no journal was touched");
+    let native = error
+        .source()
+        .and_then(|cause| cause.downcast_ref::<std::io::Error>());
+    assert_eq!(
+        native.and_then(std::io::Error::raw_os_error),
+        Some(5),
+        "native lock cause must survive: {error}"
     );
 }

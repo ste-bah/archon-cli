@@ -33,7 +33,7 @@ pub(super) fn report_operational_failure(
             "staged command failed operationally",
             Vec::new(),
         )
-        .with_operational_error(format!("{error:#}")),
+        .with_host_error(&error),
         Vec::new(),
     )
 }

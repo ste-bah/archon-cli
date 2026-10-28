@@ -31,7 +31,7 @@ impl HostCommandProcessAdapter for ModeProcess {
         request: crate::command::workflow_host_command_catalog::ResolvedHostCommand,
         _control: HostCommandControl,
     ) -> archon_workflow::WorkflowResult<SupervisedProcessOutput> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+        let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
         let output = |exit_code, timed_out| SupervisedProcessOutput {
             exit_code,
             timed_out,
@@ -47,7 +47,7 @@ impl HostCommandProcessAdapter for ModeProcess {
             stderr_path: None,
         };
         match self.mode.load(Ordering::SeqCst) {
-            TIME_OUT => Ok(output(None, true)),
+            TIME_OUT if attempt < 2 => Ok(output(None, true)),
             // What the supervisor returned before Issue #255.
             LEGACY_TIMEOUT_ERROR => Err(WorkflowError::StageFailed(format!(
                 "host command '{}' timed out after {}s",
@@ -146,62 +146,55 @@ fn resume(fixture: &Fixture) {
 }
 
 #[tokio::test]
-async fn a_host_command_timeout_pauses_the_fixed_run_and_resume_re_runs_the_call() {
+async fn host_command_timeouts_recover_within_one_record_and_resume_reexecutes_only_the_permanent_outcome()
+ {
     let fixture = fixture(TIME_OUT);
-
-    let error = run_script(&fixture).await.expect_err("the run stops");
-
-    assert!(
-        matches!(error, WorkflowError::ControlPaused(_)),
-        "a timeout pauses, it does not fail: {error:?}"
+    run_script(&fixture).await.unwrap();
+    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 3);
+    let first = record(&fixture);
+    assert_eq!(first.attempt, 1);
+    assert_eq!(first.result.data["exitCode"], 1);
+    assert_eq!(
+        first.result.data["gateEnvelope"]["operational_error"]["kind"],
+        "permanent_host_fault"
     );
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
-    let run = fixture.store.load_state(&fixture.run_id).unwrap();
-    assert_eq!(run.status, RunStatus::Paused);
-    assert_eq!(run.stages[&fixture.call_id].status, StageStatus::Paused);
-    let interrupted = record(&fixture);
-    assert_eq!(interrupted.result.data["interrupted"], "paused");
-    assert!(!is_reusable_status(interrupted.status));
-    let error_text = interrupted.result.data["error"].as_str().unwrap();
-    assert!(error_text.contains("operational limit"), "{error_text}");
+    let state = fixture.store.load_state(&fixture.run_id).unwrap();
+    assert_eq!(state.status, RunStatus::Running);
+    assert_ne!(state.stages[&fixture.call_id].status, StageStatus::Paused);
     let events = std::fs::read_to_string(fixture.store.events_path(&fixture.run_id)).unwrap();
-    assert!(
-        events.contains("host_command_operational_retry"),
+    assert_eq!(
+        events.matches("host_command_operational_retry").count(),
+        2,
         "{events}"
     );
-    assert!(
-        events.contains("host_command_operational_pause"),
-        "{events}"
-    );
-    assert!(!events.contains("\"call_id\":\"workflow.js\""), "{events}");
+    assert!(!events.contains("host_command_operational_pause"));
+    assert!(!events.contains("\"call_id\":\"workflow.js\""));
     let log = std::fs::read_to_string(&fixture.log_path).unwrap();
-    assert!(
-        log.contains("transition=host_command_operational_pause"),
-        "{log}"
-    );
-
+    assert!(!log.contains("transition=host_command_operational_pause"));
+    archon_workflow::LifecycleController::new(fixture.store.clone())
+        .apply(&fixture.run_id, archon_workflow::LifecycleAction::Pause)
+        .unwrap();
     resume(&fixture);
     fixture.process.mode.store(GENUINE_EXIT_1, Ordering::SeqCst);
-    let _ = run_script(&fixture).await;
-
-    assert_eq!(
-        fixture.process.calls.load(Ordering::SeqCst),
-        3,
-        "the interrupted call runs again on resume, it is not reused"
-    );
-    let rerun = record(&fixture);
-    assert_eq!(rerun.attempt, interrupted.attempt + 1);
-    assert_ne!(rerun.result.data["interrupted"], "paused");
-    assert_eq!(rerun.result.data["exitCode"], 1);
+    run_script(&fixture).await.unwrap();
+    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 4);
+    assert_eq!(record(&fixture).attempt, first.attempt + 1);
 }
 
 #[tokio::test]
-async fn a_failed_fixed_run_paused_by_the_operator_re_runs_its_failed_host_call() {
+async fn historical_failed_host_calls_recover_transient_faults_after_operator_resume() {
     // A run failed by the pre-#255 timeout error: the call was recorded `failed`,
     // and the finalizer marked the run and the call's stage failed.
     let fixture = fixture(LEGACY_TIMEOUT_ERROR);
     let _ = run_script(&fixture).await;
-    let failed = record(&fixture);
+    let mut failed = record(&fixture);
+    // Seed the historical failure shape produced before availability healing.
+    failed.status = WorkflowV2Status::Failed;
+    failed.result.status = WorkflowV2Status::Failed;
+    failed.result.summary = "host command timed out after its observation window".into();
+    WorkflowV2ResultStore::new(fixture.store.run_dir(&fixture.run_id).join("v2"))
+        .save_call_record(&failed)
+        .unwrap();
     assert_eq!(failed.status, WorkflowV2Status::Failed);
     assert!(
         failed.result.summary.contains("timed out after"),
@@ -228,10 +221,18 @@ async fn a_failed_fixed_run_paused_by_the_operator_re_runs_its_failed_host_call(
     // decides re-execution, and a failed record is never reused.
     assert_eq!(resumed.stages[&fixture.call_id].status, StageStatus::Failed);
 
-    fixture.process.mode.store(GENUINE_EXIT_1, Ordering::SeqCst);
-    let _ = run_script(&fixture).await;
-
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
+    fixture.process.mode.store(TIME_OUT, Ordering::SeqCst);
+    run_script(&fixture).await.unwrap();
+    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 3);
+    let events = std::fs::read_to_string(fixture.store.events_path(&fixture.run_id)).unwrap();
+    assert!(
+        events.contains("host_command_operational_retry"),
+        "{events}"
+    );
+    assert!(
+        !events.contains("host_command_operational_pause"),
+        "{events}"
+    );
     let rerun = record(&fixture);
     assert_eq!(rerun.attempt, failed.attempt + 1);
     assert_eq!(rerun.result.data["exitCode"], 1);

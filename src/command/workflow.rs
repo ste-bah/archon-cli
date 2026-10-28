@@ -57,7 +57,7 @@ pub(crate) use workflow_freeze_cli::{
     skeleton_document,
 };
 #[path = "workflow_staged_cli.rs"]
-mod workflow_staged_cli;
+pub(crate) mod workflow_staged_cli;
 #[cfg(test)]
 pub(crate) use workflow_cli_lint::lint_from_slash_args;
 pub(crate) use workflow_staged_cli::candidate::landed_task_file;

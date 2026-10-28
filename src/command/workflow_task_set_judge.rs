@@ -59,6 +59,7 @@ pub(crate) fn named_files_for_reauthor_cached(
 #[path = "workflow_task_set_judge_rounds.rs"]
 mod rounds;
 use rounds::judge_prompted_with_roots;
+pub(crate) use rounds::judge_refutations;
 
 #[cfg(test)]
 #[path = "workflow_task_set_judge_prompt_builder_tests.rs"]
@@ -451,6 +452,7 @@ async fn judge_batch(
 /// apply its decisions to them: a truncated reply is continued (and saved in
 /// `partial` when given), a reply with no usable verdict is re-asked, and a
 /// judge that cannot complete is [`JudgeIncomplete`].
+#[cfg(test)]
 pub(crate) async fn judge_prompted(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,

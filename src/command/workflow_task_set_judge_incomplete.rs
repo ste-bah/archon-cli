@@ -42,6 +42,7 @@ pub(crate) enum JudgeIncompleteKind {
 #[derive(Debug)]
 pub(crate) struct JudgeIncomplete {
     pub(crate) kind: JudgeIncompleteKind,
+    pub(crate) fault_class: crate::command::workflow_host_fault::Class,
     /// What happened, for display only: never classified.
     pub(crate) message: String,
     /// The entries the judge did decide in this call before it could not
@@ -58,9 +59,27 @@ impl JudgeIncomplete {
     pub(crate) fn new(kind: JudgeIncompleteKind, message: impl Into<String>) -> Self {
         Self {
             kind,
+            fault_class: crate::command::workflow_host_fault::Class::Permanent,
             message: message.into(),
             decided: Vec::new(),
         }
+    }
+
+    pub(crate) fn provider_error(error: archon_workflow::WorkflowError) -> Self {
+        let error = anyhow::Error::new(error);
+        let mut incomplete = Self::provider(format!(
+            "the provider gave no reply: {}",
+            crate::command::workflow_host_fault::diagnostic(&error)
+        ));
+        incomplete.fault_class = crate::command::workflow_host_fault::classify(&error);
+        incomplete
+    }
+
+    pub(crate) fn host_error(error: anyhow::Error) -> Self {
+        let mut incomplete =
+            Self::provider(crate::command::workflow_host_fault::diagnostic(&error));
+        incomplete.fault_class = crate::command::workflow_host_fault::classify(&error);
+        incomplete
     }
 
     /// The incomplete judge `error` carries, if any.

@@ -371,9 +371,12 @@ pub async fn observe_commands_hooked(
         Ok::<_, WorkflowError>(())
     }
     .await;
-    if let Err(e) = execution {
+    if let Err(e) = &execution {
         result.operational_errors.push(e.to_string());
     }
+    // Before any check ran, a failed setup is safe to retry only after both
+    // cleanup and the live-root audit confirm the observation left no residue.
+    let setup_error = execution.err().filter(|_| result.checks.is_empty());
     let cleanup = match roots.as_mut() {
         Some(roots) => roots.cleanup(),
         None => Ok(()), // prepare performs its own cleanup before returning an error.
@@ -460,5 +463,14 @@ pub async fn observe_commands_hooked(
     let path = evidence.join("observation.json");
     std::fs::write(&path, serde_json::to_vec_pretty(&result)?)
         .map_err(|e| WorkflowError::io(&path, e))?;
+    if result.teardown_verified && result.live_roots_unchanged {
+        if let Some(error) = setup_error {
+            return Err(error);
+        }
+    }
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "acceptance_scratch_setup_fault_tests.rs"]
+pub(super) mod setup_fault_tests;

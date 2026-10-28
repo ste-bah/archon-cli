@@ -141,7 +141,7 @@ pub(super) async fn silent_failure_off_thread(
         .await
         .unwrap_or_else(|error| {
             let why = format!("deciding its verdict failed: {error}");
-            Some((why, UnprovenCause::Host))
+            Some((why, UnprovenCause::PermanentHost))
         })
 }
 
@@ -228,28 +228,11 @@ fn check_text<'a>(contract: &'a AcceptanceContract, id: &str) -> &'a str {
         .map_or("", |(_, text)| text)
 }
 
-/// Settle check `id`, which failed on `commit` without a verdict (`why`):
-/// unproven the first time (the strike is saved, which a staged freeze
-/// counts as progress, so it is retried); the author's finding when an
-/// earlier attempt already saw it fail so.
 #[cfg(test)]
-pub(super) fn settle(
-    probe: &HostProbe,
-    commit: &str,
-    contract: &AcceptanceContract,
-    result: &CheckResult,
-    why: &str,
-    at: &Context,
-) -> Option<String> {
-    settle_as(
-        probe,
-        commit,
-        contract,
-        result,
-        (why, UnprovenCause::Host),
-        at,
-    )
-}
+#[path = "workflow_acceptance_executability_silent_test_helpers.rs"]
+mod test_helpers;
+#[cfg(test)]
+pub(super) use test_helpers::settle;
 
 /// [`settle`], recording an unproven check with the cause of `why`.
 pub(super) fn settle_as(
@@ -270,7 +253,7 @@ pub(super) fn settle_as(
         UnprovenCause::SiteLacks => {
             "its site lacks what the host has, which is the host's to repair and never its author's; it is probed again once the site provides it"
         }
-        UnprovenCause::Host | UnprovenCause::ProgramAbsent => {
+        UnprovenCause::Host | UnprovenCause::PermanentHost | UnprovenCause::ProgramAbsent => {
             "it is probed again on retry, and goes to its author if it fails so again"
         }
     };
@@ -351,7 +334,11 @@ enum Credit {
 pub(super) fn ran(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
     let path = stall_strike(probe, commit, contract, id);
     if let Err(error) = archon_workflow::stage_write::remove_file(&path) {
-        probe.unproven(id, format!("stall strike could not be cleared: {error}"));
+        probe.unproven_error(
+            id,
+            error.into(),
+            format!("stall strike {} could not be cleared", path.display()),
+        );
     }
 }
 
@@ -449,7 +436,7 @@ fn struck(
     match settled {
         Ok(finding) => finding,
         Err(error) => {
-            probe.unproven(id, format!("{unsaved}: {error}"));
+            probe.unproven_error(id, error.into(), unsaved);
             None
         }
     }
@@ -488,7 +475,11 @@ pub(super) fn clear(probe: &HostProbe, commit: &str, contract: &AcceptanceContra
         Ok(())
     });
     if let Err(error) = cleared {
-        probe.unproven(id, format!("baseline strike could not be cleared: {error}"));
+        probe.unproven_error(
+            id,
+            error.into(),
+            "baseline strike could not be cleared".into(),
+        );
     }
 }
 

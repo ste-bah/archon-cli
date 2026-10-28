@@ -82,6 +82,7 @@ pub(crate) struct ReauthorGate<'a> {
 pub(crate) struct ReauthorProgress {
     pub(crate) contract: AcceptanceContract,
     pub(crate) unproven: BTreeMap<String, String>,
+    pub(crate) host_faults: BTreeMap<String, crate::command::workflow_host_fault::Class>,
     /// Checks still waiting on another authored reply or judge attempt.
     pub(crate) authored_pending: BTreeMap<String, String>,
     pub(crate) attempts: usize,
@@ -189,6 +190,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     let mut pending = ids.clone();
     let mut reused = BTreeMap::new();
     let mut unproven_checks = BTreeMap::new();
+    let mut host_faults = BTreeMap::new();
     let mut judge_retry_candidates = passability_pending::JudgeRetryCandidates::default();
     let refused = author::refused_forms(scope, gate.probe);
     let keyed_judge = client.resolve_model_alias(judge_model); // the model that judges
@@ -299,6 +301,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                     &mut judge_retry_candidates,
                     &mut feedback,
                     (&mut pending, &mut reused, &mut unproven_checks),
+                    &mut host_faults,
                 )?),
             };
             if let Some(judged) = judged {
@@ -340,6 +343,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                     entry(contract, &id).expect("named id").clone();
                 pending.remove(&id);
                 reused.remove(&id);
+                host_faults.insert(id.clone(), cause.class());
                 unproven_checks.insert(id, reason);
             }
             // Issue 275: a replacement that failed on the baseline must also
@@ -381,6 +385,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                                 } else {
                                     pending.remove(&id);
                                     reused.remove(&id);
+                                    host_faults.insert(id.clone(), held.fault_class);
                                     unproven_checks.insert(id, held.finding.clone());
                                 }
                             }
@@ -445,6 +450,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     Ok(ReauthorProgress {
         contract: working,
         unproven: unproven_checks,
+        host_faults,
         authored_pending,
         attempts: attempt,
     })

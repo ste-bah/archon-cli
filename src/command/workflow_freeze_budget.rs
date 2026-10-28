@@ -171,6 +171,7 @@ pub(crate) struct FreezeIncomplete {
     cause: IncompleteCause,
     progress: String,
     authored_judge_reply: bool,
+    fault_class: crate::command::workflow_host_fault::Class,
 }
 
 #[derive(Debug)]
@@ -211,6 +212,7 @@ impl FreezeIncomplete {
             },
             progress: progress.line(),
             authored_judge_reply: false,
+            fault_class: crate::command::workflow_host_fault::Class::Transient,
         }
     }
 
@@ -221,6 +223,7 @@ impl FreezeIncomplete {
             cause: IncompleteCause::Stalled(reason.into()),
             progress: progress.line(),
             authored_judge_reply: false,
+            fault_class: crate::command::workflow_host_fault::Class::Permanent,
         }
     }
 
@@ -232,6 +235,7 @@ impl FreezeIncomplete {
             cause: IncompleteCause::Unsaved(reason.into()),
             progress: FreezeProgress::default().line(),
             authored_judge_reply: false,
+            fault_class: crate::command::workflow_host_fault::Class::Permanent,
         }
     }
 
@@ -244,6 +248,7 @@ impl FreezeIncomplete {
         judge_error: impl Into<String>,
     ) -> Self {
         let mut incomplete = Self::new(budget, progress, deferred);
+        incomplete.fault_class = crate::command::workflow_host_fault::Class::Permanent;
         if let IncompleteCause::Budget {
             lacking,
             judge_error: cause,
@@ -258,6 +263,17 @@ impl FreezeIncomplete {
 
     /// Mark a retryable judge reply whose incompleteness was authored by the
     /// model. Provider, host and persistence failures remain operational.
+    pub(crate) fn with_fault_class(
+        mut self,
+        class: crate::command::workflow_host_fault::Class,
+    ) -> Self {
+        self.fault_class = class;
+        self
+    }
+    pub(crate) fn fault_class(&self) -> crate::command::workflow_host_fault::Class {
+        self.fault_class
+    }
+
     pub(crate) fn authored_judge_reply(mut self) -> Self {
         self.authored_judge_reply = true;
         self

@@ -216,7 +216,8 @@ fn resumable(
                 crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
                     incomplete.to_string(),
                     &resume.progress,
-                );
+                )
+                .with_fault_class(incomplete.fault_class);
             if incomplete.is_authored_reply() {
                 freeze_incomplete.authored_judge_reply().into()
             } else {
@@ -281,8 +282,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         &original,
     )?;
 
-    let repository_root =
-        live_root::freeze_repository(project_root, tasks_root, None).map_err(anyhow::Error::msg)?;
+    let repository_root = live_root::freeze_repository_typed(project_root, tasks_root, None)?;
     let judge_roots = judge::JudgeRoots {
         project: Some(project_root.to_path_buf()),
         repository: Some(repository_root.clone()),
@@ -361,6 +361,21 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
             crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
                 reason,
                 &resume.progress,
+            )
+            .with_fault_class(
+                if prepared.findings.iter().all(|finding| {
+                    matches!(
+                        finding
+                            .deterministic_defect
+                            .as_ref()
+                            .map(|defect| defect.code.as_str()),
+                        Some("host_transient" | "host_site_lacks")
+                    )
+                }) {
+                    crate::command::workflow_host_fault::Class::Transient
+                } else {
+                    crate::command::workflow_host_fault::Class::Permanent
+                },
             )
             .into(),
         );

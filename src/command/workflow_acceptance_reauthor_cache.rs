@@ -394,6 +394,11 @@ pub(crate) fn remove(state_dir: &Path) -> Result<()> {
 }
 
 pub(crate) fn archive(state_dir: &Path, publish_digest: &str) -> Result<()> {
+    #[cfg(test)]
+    crate::command::workflow_host_fault_test_hooks::fire(
+        crate::command::workflow_host_fault_test_hooks::Point::Archive,
+        state_dir,
+    )?;
     let records = state_dir.join(RECORDS);
     if !records.exists() {
         return Ok(());

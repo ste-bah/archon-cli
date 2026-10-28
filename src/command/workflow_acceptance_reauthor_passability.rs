@@ -44,6 +44,7 @@ pub(super) fn hold_judge_failure(
     retry: &mut JudgeRetryCandidates,
     feedback: &mut BTreeMap<String, Vec<String>>,
     (pending, reused, unproven): Pending<'_>,
+    host_faults: &mut BTreeMap<String, crate::command::workflow_host_fault::Class>,
 ) -> anyhow::Result<AcceptanceContract> {
     let Some(incomplete) = JudgeIncomplete::caused(&error) else {
         return Err(error);
@@ -92,6 +93,7 @@ pub(super) fn hold_judge_failure(
         } else {
             pending.remove(&entry.id);
             reused.remove(&entry.id);
+            host_faults.insert(entry.id.clone(), incomplete.fault_class);
             unproven.insert(entry.id.clone(), finding.clone());
         }
     }
@@ -104,6 +106,7 @@ pub(super) struct Held {
     pub(super) ids: BTreeSet<String>,
     pub(super) authored: bool,
     pub(super) finding: String,
+    pub(super) fault_class: crate::command::workflow_host_fault::Class,
 }
 
 /// What a passability judge that could not complete (`error`) holds of the
@@ -134,6 +137,7 @@ pub(super) fn passability_failure(error: &anyhow::Error, ids: &BTreeSet<String>)
         },
         authored,
         finding,
+        fault_class: incomplete.fault_class(),
     })
 }
 

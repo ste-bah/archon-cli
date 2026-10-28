@@ -1,6 +1,5 @@
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
-
 // The free task-id helpers, the remediation replay and the completed-task
 // reuse lookup live beside this file to hold the 500-line ceiling.
 #[path = "workflow_live_v2_script_host_completed_reuse.rs"]
@@ -80,7 +79,9 @@ impl WorkflowScriptHost {
                     "HostCommand is available only to a trusted fixed workflow run".to_string(),
                 )
             })?;
-            let identity = executor.call_identity(request)?;
+            let identity = self
+                .observe_host_metadata(&request.command_id, || executor.call_identity(request))
+                .await?;
             let occurrence = self.host_occurrences.next(&identity);
             crate::command::workflow_host_command_occurrence::stamp_occurrence(
                 &mut execution.call,

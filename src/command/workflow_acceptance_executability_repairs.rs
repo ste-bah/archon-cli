@@ -23,7 +23,7 @@
 
 use archon_workflow::acceptance_scratch::CHECK_TIMED_OUT;
 
-use super::hermetic::{CheckEvidence, Unrun};
+use super::hermetic::CheckEvidence;
 use super::sites::run_at;
 use super::*;
 
@@ -32,6 +32,7 @@ pub(super) struct TreeRun {
     pub(super) results: BTreeMap<String, CheckEvidence>,
     /// Why the last attempt could not run at all.
     why: String,
+    pub(super) fault_class: crate::command::workflow_host_fault::Class,
     /// Every environment repair made, oldest first.
     repairs: Vec<String>,
 }
@@ -44,6 +45,7 @@ impl TreeRun {
                 .map(|result| (result.acceptance_id.clone(), result.clone()))
                 .collect(),
             why: why.to_string(),
+            fault_class: crate::command::workflow_host_fault::Class::Permanent,
             repairs: Vec::new(),
         }
     }
@@ -73,6 +75,37 @@ impl TreeRun {
             "{error}; it still gave no verdict after the host repaired its environment: {}",
             self.repairs.join("; then ")
         ))
+    }
+
+    pub(super) fn site_failed(
+        &mut self,
+        pending: &[FrozenCommandRef],
+        reason: super::hermetic::Unrun,
+    ) {
+        // The fallback is authoritative for checks without an individual result.
+        let permanent_missing = !self.why.is_empty()
+            && self.fault_class == crate::command::workflow_host_fault::Class::Permanent
+            && pending
+                .iter()
+                .any(|reference| !self.results.contains_key(&reference.acceptance_id));
+        // A newer site failure replaces pending host observations.
+        // Completed verdicts and authored findings remain authoritative.
+        // Only typed transient results are replaced; unknown and permanent findings stay.
+        for reference in pending {
+            let result = self.results.get(&reference.acceptance_id);
+            if matches!(
+                check_fault::of_result(result.map(|item| &item.result)),
+                check_fault::Fault::Availability(
+                    crate::command::workflow_host_fault::Class::Transient
+                )
+            ) {
+                self.results.remove(&reference.acceptance_id);
+            }
+        }
+        if !permanent_missing || reason.1 == crate::command::workflow_host_fault::Class::Permanent {
+            self.why = reason.0;
+            self.fault_class = reason.1;
+        }
     }
 }
 
@@ -196,8 +229,11 @@ pub(super) async fn tree_results_with_save_predicates(
                 // A pending check the run returned nothing for gave no
                 // verdict either.
                 run.why = "the run returned no result for it".to_string();
+                run.fault_class = crate::command::workflow_host_fault::Class::Permanent;
             }
-            Err(Unrun(reason)) => run.why = reason,
+            Err(reason) => {
+                run.site_failed(&pending, reason);
+            }
         }
     }
     run

@@ -37,6 +37,13 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn landing_receipt_matches_disk(&self, _record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         Ok(false)
     }
+    async fn observe_landing_receipt(
+        &self,
+        record: &WorkflowV2CallRecord,
+        _expected_generation: Option<u64>,
+    ) -> WorkflowResult<bool> {
+        self.landing_receipt_matches_disk(record)
+    }
     /// Judge the current receipt's bytes under this build without publishing.
     async fn rejudge_landing(
         &self,
@@ -87,6 +94,15 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     /// its outcome; `None` for an executor that names none.
     fn logic_build(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
         Ok(None)
+    }
+
+    async fn execute_for_call(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+        _call_id: &str,
+    ) -> WorkflowResult<HostCommandResult> {
+        self.execute(request, expected_generation).await
     }
 
     async fn execute(

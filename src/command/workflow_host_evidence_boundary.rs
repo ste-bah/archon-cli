@@ -18,6 +18,7 @@ pub(crate) struct SealedProcessOutput {
     pub(crate) prepared: Option<PreparedPublicationV1>,
     pub(crate) truncated: (bool, bool),
     pub(crate) kind: Option<OperationalKind>,
+    pub(crate) fault: Option<archon_workflow::GateOperationalError>,
     pub(crate) progress: Option<u64>,
     pub(crate) unsettled_publish: Option<String>,
 }
@@ -39,6 +40,16 @@ impl HostSecrets {
         }
         // Control facts are interpreted before scrubbing. Credentials can
         // collide with protocol markers without turning a stall into success.
+        let fault = (output.exit_code != Some(0))
+            .then(|| {
+                serde_json::from_slice::<archon_workflow::GateOperationalError>(&output.stdout).ok()
+            })
+            .flatten()
+            .filter(|fault| crate::command::workflow_host_fault::is_kind(&fault.kind))
+            .map(|mut fault| {
+                fault.text = self.text(&fault.text);
+                fault
+            });
         let kind = classify(&output);
         let progress = reported_progress(&output.stderr)
             .filter(|value| !self.holds_serialized_secret(value.to_string().as_bytes()));
@@ -96,14 +107,16 @@ impl HostSecrets {
             prepared,
             truncated,
             kind,
+            fault,
             progress,
             unsettled_publish,
         })
     }
 
     /// Seals the call's staging. On a failure the whole tree is removed;
-    /// a removal failure or an I/O failure pauses the run naming the path
-    /// (#297), and only an integrity refusal (a dishonest manifest) fails.
+    /// unsafe removal or permanent I/O keeps the safety pause naming the path.
+    /// A transient error returns only after safe removal, allowing recovery;
+    /// an integrity refusal keeps its error.
     pub(crate) fn seal_staged_evidence(
         &self,
         anchor: &StagingAnchor,
@@ -111,6 +124,15 @@ impl HostSecrets {
         pause: &StagingPause,
     ) -> WorkflowResult<()> {
         let seal: WorkflowResult<()> = (|| {
+            #[cfg(test)]
+            crate::command::workflow_host_fault_test_hooks::fire(
+                crate::command::workflow_host_fault_test_hooks::Point::Seal,
+                anchor.root().parent().unwrap().parent().unwrap(),
+            )
+            .map_err(|source| WorkflowError::Io {
+                path: anchor.root().into(),
+                source,
+            })?;
             seal_staged_envelope(anchor, self, prepared.as_deref_mut())?;
             if self.remove_unsafe_artifacts(anchor)? {
                 refuse_staged_evidence(anchor, prepared.as_deref_mut())?;
@@ -137,13 +159,29 @@ impl HostSecrets {
                 ),
                 true,
             )),
-            Ok(()) if matches!(error, WorkflowError::Io { .. }) => Err(pause.pause(
-                anchor.root(),
-                "staging could not be sealed (it was removed)",
-                &evidence,
-                false,
-            )),
-            Ok(()) => Err(error),
+            Ok(()) if matches!(&error, WorkflowError::Io { source, .. } if crate::command::workflow_host_fault::io_class(source) == crate::command::workflow_host_fault::Class::Permanent) => {
+                Err(pause.pause(
+                    anchor.root(),
+                    "staging could not be sealed (it was removed)",
+                    &evidence,
+                    false,
+                ))
+            }
+            Ok(()) => {
+                let error = anyhow::Error::new(error);
+                if crate::command::workflow_host_fault::classify(&error)
+                    == crate::command::workflow_host_fault::Class::Permanent
+                {
+                    return Err(WorkflowError::port(
+                        crate::command::workflow_host_fault::EvidenceRefused(
+                            self.text(&crate::command::workflow_host_fault::diagnostic(&error)),
+                        ),
+                    ));
+                }
+                Err(error
+                    .downcast::<WorkflowError>()
+                    .expect("workflow sealing error"))
+            }
         }
     }
 
@@ -173,6 +211,13 @@ impl HostSecrets {
             WorkflowError::ControlCancelled(text) => {
                 WorkflowError::ControlCancelled(self.text(&text))
             }
+            WorkflowError::Port(source) => {
+                let error = anyhow::Error::new(WorkflowError::Port(source));
+                WorkflowError::port(crate::command::workflow_host_fault::Fault {
+                    class: crate::command::workflow_host_fault::classify(&error),
+                    text: self.text(&format!("{error:#}")),
+                })
+            }
             WorkflowError::HostOperational(text) => {
                 WorkflowError::HostOperational(self.text(&text))
             }
@@ -191,7 +236,13 @@ impl HostSecrets {
             WorkflowError::StateCorrupt(text) => WorkflowError::StateCorrupt(self.text(&text)),
             WorkflowError::Io { path, source } => WorkflowError::Io {
                 path: self.text(&path.to_string_lossy()).into(),
-                source: std::io::Error::new(source.kind(), self.text(&source.to_string())),
+                source: std::io::Error::new(
+                    source.kind(),
+                    crate::command::workflow_host_fault::Fault {
+                        class: crate::command::workflow_host_fault::io_class(&source),
+                        text: self.text(&source.to_string()),
+                    },
+                ),
             },
             error => WorkflowError::StageFailed(self.text(&error.to_string())),
         }

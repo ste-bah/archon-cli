@@ -25,9 +25,7 @@ use super::workflow_host_command_decision::{
 use super::workflow_host_command_postcondition::{
     evaluate_postcondition, fixed_subject_is_terminal,
 };
-use super::workflow_host_command_publish::{
-    LiveMutationSentinels, audit_prepared_publication, publish_audited,
-};
+use super::workflow_host_command_publish::{LiveMutationSentinels, audit_prepared_publication};
 use super::workflow_host_command_supervisor::{
     HostCommandControl, SupervisedProcessOutput, supervise_process_group,
 };
@@ -96,6 +94,15 @@ pub(crate) struct FixedHostCommandExecutor {
 }
 
 impl FixedHostCommandExecutor {
+    #[cfg(test)]
+    pub(crate) fn context_for_test(&self) -> &HostCommandResolutionContext {
+        &self.context
+    }
+    #[cfg(test)]
+    pub(crate) fn replace_process_for_test(&mut self, process: Arc<dyn HostCommandProcessAdapter>) {
+        self.process = process;
+    }
+
     pub(crate) fn new(
         catalog: CommandCapabilityCatalog,
         context: HostCommandResolutionContext,
@@ -242,6 +249,18 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         self.landing_receipt_matches_disk_live(record)
     }
 
+    async fn observe_landing_receipt(
+        &self,
+        record: &WorkflowV2CallRecord,
+        expected_generation: Option<u64>,
+    ) -> WorkflowResult<bool> {
+        self.observe_landing(expected_generation, || {
+            self.landing_receipt_matches_disk_live(record)
+                .map_err(anyhow::Error::new)
+        })
+        .await
+    }
+
     async fn rejudge_landing(
         &self,
         record: &WorkflowV2CallRecord,
@@ -289,6 +308,20 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         Ok(Some(self.build.clone()))
     }
 
+    async fn execute_for_call(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+        call_id: &str,
+    ) -> WorkflowResult<HostCommandResult> {
+        let store = archon_workflow::WorkflowV2ResultStore::new(self.run_root.join("v2"));
+        let claim = store
+            .load_call_record(call_id)?
+            .and_then(crate::command::workflow_host_command_committed::Claim::of);
+        self.execute_inner_claimed(request, expected_generation, None, false, claim)
+            .await
+    }
+
     async fn execute(
         &self,
         request: HostCommandRequest,
@@ -298,7 +331,15 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             .await
     }
 }
+#[path = "workflow_host_command_exec_heal.rs"]
+mod heal;
 #[path = "workflow_host_command_exec_identity.rs"]
 pub(crate) mod identity;
 #[path = "workflow_host_command_exec_inner.rs"]
 mod inner;
+
+#[path = "workflow_host_command_exec_fence.rs"]
+mod fence;
+
+#[path = "workflow_host_command_exec_observe.rs"]
+mod observe;

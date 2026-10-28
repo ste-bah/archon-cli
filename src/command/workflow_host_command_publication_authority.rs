@@ -9,7 +9,13 @@ const RECEIPT_BINDING: &str = "publish-task-set.json";
 /// destination to this task root. Journal data cannot grant this authority.
 /// The binding contains only a root digest; it cannot authorize arbitrary paths.
 pub(crate) fn authorize_receipt(pin: &Path, tasks: &Path, target: &Path) -> Result<()> {
-    if target.file_name() != Some(std::ffi::OsStr::new("gate-envelope.json")) {
+    if ![
+        "gate-envelope.json",
+        crate::command::workflow_host_command_committed::RECEIPT_FILE,
+    ]
+    .iter()
+    .any(|name| target.file_name() == Some(std::ffi::OsStr::new(name)))
+    {
         return Ok(());
     }
     let Some(project) = project_for_pin(pin) else {

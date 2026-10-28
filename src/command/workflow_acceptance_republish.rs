@@ -26,7 +26,7 @@ pub(crate) struct ReauthorRequest<'a> {
 
 #[path = "workflow_acceptance_republish_result.rs"]
 mod result;
-pub(crate) use result::ReauthorResult;
+pub(crate) use result::{CommittedRepair, ReauthorResult};
 #[path = "workflow_acceptance_republish_verify.rs"]
 pub(super) mod verify;
 use verify::verify;
@@ -143,23 +143,43 @@ pub(crate) async fn reauthor_and_republish(
             skeleton_digest: verified.pin.skeleton_digest,
             diagnostics,
             unproven: progress.unproven,
+            host_faults: progress.host_faults,
             authored_pending: progress.authored_pending,
             published: false,
         });
     }
-    let mut result = publish_chain(
+    let published = publish_chain(
         &request,
         verified,
         progress.contract,
         diagnostics,
         None,
         &publish_ids,
-    )?;
+    );
+    let (mut result, settlement) = match published {
+        Ok(result) => (result, None),
+        Err(error) => match error.downcast_ref::<CommittedRepair>() {
+            Some(committed) => (committed.result.clone(), Some(error)),
+            None => return Err(error),
+        },
+    };
     result.unproven = progress.unproven;
+    result.host_faults = progress.host_faults;
     result.authored_pending = progress.authored_pending;
+    if let Some(error) = settlement {
+        return Err(error.context(CommittedRepair { result }));
+    }
     if result.unproven.is_empty() {
         reauthor::cache::archive(&state_dir, &result.acceptance_digest)
-            .with_context(|| "archiving consumed acceptance re-author candidates")?;
+            .with_context(|| {
+                format!(
+                    "archiving consumed acceptance re-author candidates under {}",
+                    state_dir.display()
+                )
+            })
+            .with_context(|| CommittedRepair {
+                result: result.clone(),
+            })?;
     }
     Ok(result)
 }
@@ -393,18 +413,33 @@ fn publish_chain_owned(
             Err(rollback) => error.context(rollback.to_string()),
         });
     }
-    for warning in transaction.commit()? {
-        diagnostics.push(format!("warning: {warning}"));
-    }
-    Ok(ReauthorResult {
+    let committed = transaction.commit();
+    let mut result = ReauthorResult {
         acceptance_digest: pin.acceptance_digest,
         freeze_event_id: pin.freeze_event_id,
         skeleton_digest: pin.skeleton_digest,
         diagnostics,
         unproven: BTreeMap::new(),
+        host_faults: BTreeMap::new(),
         authored_pending: BTreeMap::new(),
         published: true,
-    })
+    };
+    match committed {
+        Ok(warnings) => result.diagnostics.extend(
+            warnings
+                .into_iter()
+                .map(|warning| format!("warning: {warning}")),
+        ),
+        Err(error)
+            if error
+                .downcast_ref::<crate::command::workflow_host_command_committed::CommitRecorded>()
+                .is_some() =>
+        {
+            return Err(error.context(CommittedRepair { result }));
+        }
+        Err(error) => return Err(error),
+    }
+    Ok(result)
 }
 
 #[path = "workflow_acceptance_republish_launch.rs"]

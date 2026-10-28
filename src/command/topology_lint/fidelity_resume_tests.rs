@@ -478,3 +478,6 @@ mod legacy_migration_tests;
 
 #[path = "fidelity_resume_context_tests.rs"]
 mod context_tests;
+
+#[path = "fidelity_resume_heal_tests.rs"]
+mod heal_tests;

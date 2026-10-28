@@ -211,11 +211,10 @@ pub(super) async fn prove(
         };
         let result = run.results.get(id);
         if result.is_none() {
-            probe.unproven(
+            probe.unproven_as(
                 id,
-                format!(
-                    "it passed on the pre-implementation tree at {short}, but the run produced no result, so no input states or exit status were recorded"
-                ),
+                format!("it passed on the pre-implementation tree at {short}, but the run produced no result, so no input states or exit status were recorded: {}", run.unrun(id).unwrap_or_default()),
+                UnprovenCause::from_class(run.fault_class),
             );
             continue;
         }

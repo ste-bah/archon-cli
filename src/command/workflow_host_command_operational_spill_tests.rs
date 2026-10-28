@@ -1,37 +1,47 @@
-use super::{Scripted, ScriptedProcess, WorkflowError, WorkflowHostCommandExecutor, fixture, lint};
+use super::{Scripted, ScriptedProcess, WorkflowHostCommandExecutor, fixture, lint};
 
-#[tokio::test]
-async fn resumed_execution_of_the_same_call_uses_a_new_spill_tree() {
+#[tokio::test(start_paused = true)]
+async fn transient_retries_and_resumed_invocations_use_distinct_numbered_spill_trees() {
     let fixture = fixture(vec![
         Scripted::TimedOut(None),
         Scripted::TimedOut(None),
         Scripted::Exit(1),
     ]);
-    let first = fixture
+    fixture
         .executor
         .execute(lint(), Some(fixture.generation))
-        .await;
-    assert!(matches!(first, Err(WorkflowError::ControlPaused(_))));
+        .await
+        .unwrap();
+    archon_workflow::LifecycleController::new(fixture.store.clone())
+        .apply(&fixture.run_id, archon_workflow::LifecycleAction::Pause)
+        .unwrap();
     let resumed = archon_workflow::LifecycleController::new(fixture.store.clone())
         .apply(&fixture.run_id, archon_workflow::LifecycleAction::Resume)
         .unwrap();
-    let result = fixture
+    fixture
         .executor
         .execute(lint(), Some(resumed.generation))
-        .await;
-    assert!(result.is_ok(), "{result:?}");
-
-    let spill_dirs = fixture.process.spill_dirs.lock().unwrap();
-    assert_eq!(spill_dirs.len(), 3);
-    assert_ne!(spill_dirs[0], spill_dirs[2]);
-    for index in [0, 2] {
+        .await
+        .unwrap();
+    let spills = fixture.process.spill_dirs.lock().unwrap();
+    assert_eq!(spills.len(), 4);
+    assert_eq!(
+        spills
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        4
+    );
+    for (index, number) in [1, 2, 3, 1].into_iter().enumerate() {
         assert!(
-            spill_dirs[index]
+            spills[index]
                 .file_name()
                 .unwrap()
                 .to_str()
                 .unwrap()
-                .starts_with("attempt-1-")
+                .starts_with(&format!("attempt-{number}-")),
+            "{:?}",
+            spills[index]
         );
     }
 }
@@ -57,4 +67,15 @@ pub(super) fn assert_attempt_spill_dirs(process: &ScriptedProcess) {
             .starts_with("attempt-2-")
     );
     assert_eq!(spill_dirs[0].parent(), spill_dirs[1].parent());
+}
+
+#[tokio::test(start_paused = true)]
+async fn host_command_two_attempts_keep_separate_numbered_spills_before_completion() {
+    let fixture = fixture(vec![Scripted::TimedOut(None), Scripted::Exit(1)]);
+    fixture
+        .executor
+        .execute(lint(), Some(fixture.generation))
+        .await
+        .unwrap();
+    assert_attempt_spill_dirs(&fixture.process);
 }

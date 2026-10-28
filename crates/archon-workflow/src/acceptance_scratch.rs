@@ -3,7 +3,6 @@ use crate::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
-
 #[path = "acceptance_scratch_cache.rs"]
 mod cache;
 #[path = "acceptance_scratch_control.rs"]
@@ -288,6 +287,8 @@ impl ScratchRoots {
             siblings: siblings::Copied::default(),
         };
         let setup = (|| {
+            #[cfg(test)]
+            observe::setup_fault_tests::fire(&roots.root)?;
             roots.registered = true;
             // Reclaim a fixed slot still registered by a stale holder.
             let reclaim: &[&str] = if roots.lease.is_some() { &["-f"] } else { &[] };

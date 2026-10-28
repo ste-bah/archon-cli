@@ -100,8 +100,10 @@ pub(crate) fn evaluate_task_file_candidate(
             Err(error) => {
                 evaluation = Some(
                     crate::command::workflow_gate::GateEvaluation::new(report.clone(), Vec::new())
+                        .with_host_error(&error)
                         .with_operational_error(format!(
-                            "repository claim check failed: {error:#}"
+                            "repository claim check failed: {}",
+                            crate::command::workflow_host_fault::diagnostic(&error)
                         )),
                 );
             }

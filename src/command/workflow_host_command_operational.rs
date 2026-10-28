@@ -37,14 +37,13 @@
 //!
 //! # Policy
 //!
-//! An operational ending is retried in place, the same call with the same
-//! input, for as long as the reported progress grows: total time is not
-//! capped, only an attempt that adds no persisted progress stops it. Growth
-//! needs a baseline: until one attempt has reported progress and a later one
-//! reports more, the call is treated as having no marker, which allows
-//! exactly one retry. The call staging directory is cleared before every
-//! attempt. When the policy stops, the run is PAUSED, never failed: the call
-//! is recorded as interrupted, so a resume runs it again instead of reusing
+//! Typed transient faults retry inside the unpublished call with backoff;
+//! permanent and unknown host faults return once with their diagnostic.
+//! Progress markers remain evidence. Confirmed teardown, staging integrity
+//! and unsettled-publication fences precede availability classification.
+//! The former progress policy helpers remain available only to historical tests.
+
+//! An interrupted settlement is fenced before retry. Nothing retries
 //! it. An unsettled publish is not retried: the child already retried the
 //! settlement, and the cause is the host's environment, so the run pauses
 //! at once with the child's evidence, exactly as an in-process read does.
@@ -177,6 +176,7 @@ pub(crate) struct OperationalAttempt {
 mod evidence;
 pub(crate) use evidence::stderr_tail;
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NextStep {
     Retry,
@@ -184,6 +184,7 @@ pub(crate) enum NextStep {
 }
 
 /// What to do after the last attempt of `history` ended operationally.
+#[cfg(test)]
 pub(crate) fn next_step(history: &[OperationalAttempt]) -> NextStep {
     let Some((last, earlier)) = history.split_last() else {
         return NextStep::Retry;
@@ -242,17 +243,8 @@ pub(crate) fn record_retry(store: &WorkflowStore, run_root: &Path, report: &Oper
         "elapsed_secs": last.elapsed_secs,
         "limit_secs": report.limit_secs,
         "progress": last.progress,
+        "attempts": report.attempts,
     });
-    tracing::warn!(
-        call_id = report.call_id,
-        command_id = report.command_id,
-        attempt = last.attempt,
-        reason = last.reason,
-        elapsed_secs = last.elapsed_secs,
-        limit_secs = report.limit_secs,
-        progress = ?last.progress,
-        "host command ended on an operational limit; retrying the same call"
-    );
     match emit(
         store,
         report.run_id,

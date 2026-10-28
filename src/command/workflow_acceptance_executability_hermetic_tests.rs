@@ -473,3 +473,6 @@ mod sibling_tests;
 
 #[path = "workflow_acceptance_executability_sibling_identity_tests.rs"]
 mod sibling_identity_tests;
+
+#[path = "workflow_acceptance_executability_hermetic_heal_tests.rs"]
+mod heal_tests;

@@ -462,3 +462,6 @@ async fn a_publisher_failure_after_contract_rename_rolls_back_and_releases_the_c
         fixture.tasks.to_string_lossy().replace('\\', "/")
     );
 }
+
+#[path = "workflow_decompose_launch_heal_tests.rs"]
+mod heal_tests;

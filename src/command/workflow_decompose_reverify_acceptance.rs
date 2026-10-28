@@ -74,6 +74,7 @@ pub(super) struct ReverifyChecks {
     pub(super) task_subjects: Vec<String>,
     pub(super) accepted: bool,
     pub(super) operational_failure: bool,
+    pub(super) transient_only: bool,
 }
 
 struct CheckProgress {
@@ -244,7 +245,11 @@ fn reverify_incomplete_advice(error: anyhow::Error) -> anyhow::Error {
         "Retry the freeze with the same candidate (resume the run): it continues from the saved results",
         "run `archon workflow reverify <run>` again; saved observations and verdicts are reused",
     );
-    anyhow!(message)
+    crate::command::workflow_host_fault::Fault {
+        class: crate::command::workflow_host_fault::classify(&error),
+        text: message,
+    }
+    .into()
 }
 
 pub(super) async fn reverify_checks(
@@ -262,11 +267,23 @@ pub(super) async fn reverify_checks(
     let contract_path = task_root.join(ACCEPTANCE_CONTRACT_FILE);
     let judged_contract_bytes = std::fs::read(&contract_path)
         .with_context(|| format!("reading {}", contract_path.display()))?;
-    let raw: AcceptanceContract = serde_json::from_slice(&judged_contract_bytes)?;
+    let raw: AcceptanceContract =
+        serde_json::from_slice(&judged_contract_bytes).with_context(|| {
+            format!(
+                "parsing frozen contract {}; restore valid JSON from its authenticated freeze",
+                contract_path.display()
+            )
+        })?;
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project_root, task_root);
     let pin: AcceptancePin = serde_json::from_slice(
         &std::fs::read(&pin_path).with_context(|| format!("reading {}", pin_path.display()))?,
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "parsing acceptance pin {}; restore valid JSON from its authenticated freeze",
+            pin_path.display()
+        )
+    })?;
     let contract = validate_acceptance_bundle(task_root, Some(&pin), &expected)
         .map_err(|error| anyhow!(error))?;
     if contract != raw {
@@ -284,7 +301,13 @@ pub(super) async fn reverify_checks(
     let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(
         &std::fs::read(task_root.join(TASK_SKELETON_FILE))
             .with_context(|| format!("reading {}", task_root.join(TASK_SKELETON_FILE).display()))?,
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "parsing frozen skeleton {}; restore valid JSON from its authenticated freeze",
+            task_root.join(TASK_SKELETON_FILE).display()
+        )
+    })?;
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
     eprintln!("{}", resume.progress.line());
     for (index, (id, accepted, _)) in check_plan.iter().enumerate() {
@@ -307,6 +330,9 @@ pub(super) async fn reverify_checks(
             .await
             .map_err(|error| anyhow!("could not prepare frozen acceptance checks: {error}"))?
     };
+    use crate::command::workflow_task_set::executability::ExecutabilityProbe;
+    let causes = probe.take_unproven_causes();
+    let transient_only = super::heal::transient_observations(&accepted_ids, &evidence, &causes);
     let regression_guards = probe.take_regression_guards();
     let mut by_id = evidence
         .into_iter()
@@ -377,7 +403,7 @@ pub(super) async fn reverify_checks(
             setup_failure: false,
             real_failure: false,
             sibling_paths: siblings,
-            findings: Vec::new(),
+            findings: item.operational_error.clone().into_iter().collect(),
             not_run_reason: None,
             regression_guard: regression_guards.get(id).cloned(),
             remediation_route: None,
@@ -414,14 +440,7 @@ pub(super) async fn reverify_checks(
             build_cache,
         )
         .map_err(|error| anyhow!(error))?;
-        let client = crate::command::workflow::reverify_acceptance_client(
-            config,
-            env_vars,
-            project_root,
-            "workflow-reverify-acceptance",
-            &scope,
-        )
-        .await?;
+        let client = judge_client::build(config, env_vars, project_root, &scope).await?;
         let runs = crate::command::workflow_task_set::executability::BaselineRuns {
             reuse: probe.take_reuse_audit(),
             commit: commit.ok_or_else(|| anyhow!("check-copy has no commit to judge"))?,
@@ -468,5 +487,9 @@ pub(super) async fn reverify_checks(
         task_subjects,
         accepted,
         operational_failure,
+        transient_only,
     })
 }
+
+#[path = "workflow_decompose_reverify_judge_client.rs"]
+pub(super) mod judge_client;

@@ -99,3 +99,35 @@ async fn an_exhausted_loop_of_refusals_is_the_judges_own() {
     );
     assert!(incomplete.is_authored_reply(), "{error:#}");
 }
+
+#[tokio::test]
+async fn host_command_judge_obstructed_continuation_cache_is_permanent_with_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let obstructed = temp.path().join("continuations");
+    std::fs::write(&obstructed, b"obstruction").unwrap();
+    let progress = crate::command::workflow_freeze_budget::FreezeProgress::default();
+    let partial = super::super::PartialReply::new(&obstructed, "batch", &progress);
+    let client = Scripted::new(vec![Ok((HEAD, Some("max_tokens")))]);
+    let error = super::super::judge_prompted(
+        &client,
+        contract(),
+        |_| Ok("checks".into()),
+        "reviewer",
+        |_| Ok(()),
+        Some(&partial),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        incomplete(&error).fault_class,
+        crate::command::workflow_host_fault::Class::Permanent
+    );
+    assert!(
+        error
+            .to_string()
+            .contains(&obstructed.display().to_string()),
+        "{error:#}"
+    );
+    assert!(error.to_string().contains("remedy:"), "{error:#}");
+    assert_eq!(client.calls().len(), 1);
+}

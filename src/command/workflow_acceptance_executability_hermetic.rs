@@ -28,8 +28,7 @@ const COPY_PREFIX: &str = "archon-probe-";
 pub(super) const WARM_TARGETS: &str = "archon-probe-targets";
 
 /// Why a hermetic run gave no verdict.
-#[derive(Debug)]
-pub(super) struct Unrun(pub(super) String);
+pub(super) use crate::command::workflow_host_probe_fault::Unrun;
 
 impl HostProbe {
     /// Make the probe's own hermetic copies under `parent`.
@@ -87,11 +86,14 @@ fn git(args: &[&std::ffi::OsStr]) -> Result<(), Unrun> {
         .args(["-c", "core.hooksPath=/dev/null"])
         .args(args)
         .output()
-        .map_err(|error| Unrun(format!("git: {error}")))?;
+        .map_err(|error| {
+            let text = format!("git: {error}");
+            Unrun::error(error.into(), text)
+        })?;
     if output.status.success() {
         return Ok(());
     }
-    Err(Unrun(format!(
+    Err(Unrun::unknown(format!(
         "git {}: {}",
         args.iter()
             .map(|arg| arg.to_string_lossy())
@@ -142,16 +144,18 @@ pub(super) fn data_digest_scoped(
     excludes: &[PathBuf],
 ) -> Result<String, Unrun> {
     let project = archon_shell::paths::canonicalize(project).map_err(|error| {
-        Unrun(format!(
+        let text = format!(
             "could not canonicalize project root {}: {error}",
             project.display()
-        ))
+        );
+        Unrun::error(error.into(), text)
     })?;
     let repository = archon_shell::paths::canonicalize(repository).map_err(|error| {
-        Unrun(format!(
+        let text = format!(
             "could not canonicalize repository root {}: {error}",
             repository.display()
-        ))
+        );
+        Unrun::error(error.into(), text)
     })?;
     let task_root_relative = task_root_relative(&project, task_root)?;
     let nested = nested_repository(&project, &repository);
@@ -197,13 +201,14 @@ fn task_root_relative(project: &Path, task_root: Option<&Path>) -> Result<Option
                 project.join(root)
             };
             let canonical = archon_shell::paths::canonicalize(&rooted).map_err(|error| {
-                Unrun(format!(
+                let text = format!(
                     "could not canonicalize task root {}: {error}",
                     root.display()
-                ))
+                );
+                Unrun::error(error.into(), text)
             })?;
             task_root_relative_paths(project, &canonical).map_err(|_| {
-                Unrun(format!(
+                Unrun::unknown(format!(
                     "task root {} is outside project {}",
                     canonical.display(),
                     project.display()
@@ -232,16 +237,20 @@ impl HermeticCopy {
         commit: &str,
     ) -> Result<Self, Unrun> {
         let canonical = |path: &Path| {
-            archon_shell::paths::canonicalize(path)
-                .map_err(|error| Unrun(format!("{}: {error}", path.display())))
+            archon_shell::paths::canonicalize(path).map_err(|error| {
+                let text = format!("{}: {error}", path.display());
+                Unrun::error(error.into(), text)
+            })
         };
         let (source, live_project) = (canonical(repository)?, canonical(project)?);
-        std::fs::create_dir_all(parent)
-            .map_err(|error| Unrun(format!("{}: {error}", parent.display())))?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            let text = format!("{}: {error}", parent.display());
+            Unrun::error(error.into(), text)
+        })?;
         let root = canonical(parent)?.join(format!("{COPY_PREFIX}{}", uuid::Uuid::new_v4()));
         for live in [&source, &live_project] {
             if root.starts_with(live) {
-                return Err(Unrun(format!(
+                return Err(Unrun::unknown(format!(
                     "the probe copy parent {} lies inside the live root {}",
                     parent.display(),
                     live.display()
@@ -295,7 +304,7 @@ impl HermeticCopy {
                     &mut remaining,
                 )?;
                 if data_digest(&live_project, &source, task_root.as_deref())? != before {
-                    return Err(Unrun(
+                    return Err(Unrun::transient(
                         "the project data changed while it was copied, so the copy is no evidence of any one tree".into(),
                     ));
                 }
@@ -308,76 +317,9 @@ impl HermeticCopy {
 /// Copy `root/relative` into `dest/relative`: regular files and
 /// directories only (a symlink is never followed), skipping [`excluded`]
 /// paths and the nested `repository`.
-fn copy_data(
-    root: &Path,
-    relative: &Path,
-    dest: &Path,
-    repository: &Path,
-    task_root: Option<&Path>,
-    remaining: &mut u64,
-) -> Result<(), Unrun> {
-    let root = archon_shell::paths::canonicalize(root).map_err(|error| {
-        Unrun(format!(
-            "could not canonicalize project root {}: {error}",
-            root.display()
-        ))
-    })?;
-    let task_root = task_root_relative(&root, task_root)?;
-    let repository = archon_shell::paths::canonicalize(repository)
-        .map_err(|error| Unrun(format!("{}: {error}", repository.display())))?;
-    copy_data_relative(
-        &root,
-        relative,
-        dest,
-        nested_repository(&root, &repository).as_deref(),
-        task_root.as_deref(),
-        remaining,
-    )
-}
-
-fn copy_data_relative(
-    root: &Path,
-    relative: &Path,
-    dest: &Path,
-    nested: Option<&Path>,
-    task_root: Option<&Path>,
-    remaining: &mut u64,
-) -> Result<(), Unrun> {
-    let io = |path: &Path, error: std::io::Error| Unrun(format!("{}: {error}", path.display()));
-    let source = root.join(relative);
-    if !relative.as_os_str().is_empty() && excluded(relative, task_root) {
-        return Ok(());
-    }
-    if nested_repository_skipped(relative, nested) {
-        return Ok(());
-    }
-    let meta = source.symlink_metadata().map_err(|e| io(&source, e))?;
-    let target = dest.join(relative);
-    if meta.is_dir() {
-        std::fs::create_dir_all(&target).map_err(|e| io(&target, e))?;
-        for item in std::fs::read_dir(&source).map_err(|e| io(&source, e))? {
-            let item = item.map_err(|e| io(&source, e))?;
-            copy_data_relative(
-                root,
-                &relative.join(item.file_name()),
-                dest,
-                nested,
-                task_root,
-                remaining,
-            )?;
-        }
-    } else if meta.is_file() {
-        if meta.len() > *remaining {
-            return Err(Unrun(format!(
-                "the project data exceeds the {} GiB a probe copies without a scratch policy; configure [workflow.acceptance_execution] with the project_inputs the checks read",
-                PROJECT_COPY_BYTES >> 30
-            )));
-        }
-        *remaining -= meta.len();
-        std::fs::copy(&source, &target).map_err(|e| io(&source, e))?;
-    }
-    Ok(())
-}
+#[path = "workflow_acceptance_executability_copy_data.rs"]
+mod copy_data_impl;
+use copy_data_impl::copy_data;
 
 /// Run `refs` of `contract` in one hermetic copy of `repository` at
 /// `commit` (see the module docs).
@@ -411,7 +353,10 @@ pub(super) async fn run_in_copy(
         HermeticCopy::at(&parent, &repo, &project, task_root.as_deref(), &at)
     })
     .await
-    .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
+    .map_err(|error| {
+        let text = format!("the copy task failed: {error}");
+        Unrun::error(error.into(), text)
+    })??;
     let mut layout = copy.layout();
     siblings::install_copy_layout(
         &mut layout,
@@ -450,16 +395,28 @@ pub(super) async fn run_in_copy(
             }
             None => false,
         };
-        match archon_workflow::acceptance_scratch::run_check_direct_with_plan(
-            &site,
-            contract,
-            digest,
-            reference,
-            hooks.mutation_plans.get(&reference.acceptance_id),
-            cancel.clone(),
-        )
-        .await
-        {
+        let execution = async {
+            #[cfg(test)]
+            crate::command::workflow_host_fault_test_hooks::fire(
+                crate::command::workflow_host_fault_test_hooks::Point::Direct,
+                repository,
+            )
+            .map_err(|source| archon_workflow::WorkflowError::Io {
+                path: repository.to_owned(),
+                source,
+            })?;
+            archon_workflow::acceptance_scratch::run_check_direct_with_plan(
+                &site,
+                contract,
+                digest,
+                reference,
+                hooks.mutation_plans.get(&reference.acceptance_id),
+                cancel.clone(),
+            )
+            .await
+        }
+        .await;
+        match execution {
             Ok(mut result) => {
                 let stopped = cut && result.operational_error.as_deref() == Some(CHECK_TIMED_OUT);
                 if stopped {
@@ -475,7 +432,12 @@ pub(super) async fn run_in_copy(
                 }
             }
             Err(error) => {
-                failure = Some(error.to_string());
+                let context = format!(
+                    "running check {} in the disposable site {}",
+                    reference.acceptance_id,
+                    site.project.display()
+                );
+                failure = Some(Unrun::error(error.into(), context));
                 break;
             }
         }
@@ -487,7 +449,7 @@ pub(super) async fn run_in_copy(
         Err(error) => probe.note(format!("a probe copy's removal failed: {error}")),
     }
     match failure {
-        Some(error) => Err(Unrun(error)),
+        Some(error) => Err(error),
         None => Ok(CopyRun { results, layout }),
     }
 }

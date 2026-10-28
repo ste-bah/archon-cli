@@ -1,5 +1,5 @@
-//! The run's answer when a call's staging cannot be prepared, sealed or
-//! removed (#297 round 7). An I/O failure there is operational: the run is
+//! Safe setup failures retain their typed availability cause for recovery.
+//! Unsafe residue or unconfirmed teardown leaves the run
 //! paused, never failed, and the pause names the staging path. When the call
 //! no longer owns the run (an operator paused or cancelled it, or a resume
 //! superseded it) that decision stands, but staging that may still hold child
@@ -50,27 +50,74 @@ impl StagingPause {
     }
 
     /// The call's staging, created empty under its anchor, after its residue
-    /// record. Stale staging that cannot be cleared, or a record that cannot
-    /// be written, pauses the run naming it.
+    /// record. Stale staging that cannot be cleared,
+    /// pauses the run naming it. Safe residue-record I/O retains its typed
+    /// availability cause so the host can retry it before any child runs.
     pub(crate) fn prepare(
         &self,
         run_root: &Path,
     ) -> WorkflowResult<super::workflow_host_command_publish::CommandStaging> {
         use super::workflow_host_command_publish::{prepare_staging, staging_root};
-        self.residue
-            .record(&self.call_id, &self.command_id, self.generation)
-            .map_err(|error| {
-                self.pause(
-                    self.residue.path(),
-                    "the staging residue record could not be written",
-                    &error.to_string(),
-                    false,
-                )
-            })?;
+        (|| {
+            #[cfg(test)]
+            crate::command::workflow_host_fault_test_hooks::fire(
+                crate::command::workflow_host_fault_test_hooks::Point::Prepare,
+                run_root,
+            )?;
+            self.residue
+                .record(&self.call_id, &self.command_id, self.generation)
+        })()
+        .map_err(|source| WorkflowError::Io {
+            path: self.residue.path().to_path_buf(),
+            source,
+        })?;
+        // The killed attempt's partial staging must not reach the
+        // audit, which requires the staged set to match the manifest.
+        // Cleared through the anchor: a link the killed attempt left
+        // is removed, never followed, and the run pauses when it cannot be.
         prepare_staging(run_root, &self.call_id).map_err(|error| {
+            if !crate::command::workflow_host_retry::transient(&error)
+                && std::fs::symlink_metadata(staging_root(run_root, &self.call_id)).is_ok()
+            {
+                return self.pause(
+                    &staging_root(run_root, &self.call_id),
+                    "existing staging could not be safely cleared",
+                    &format!("{error:#}"),
+                    true,
+                );
+            }
+            if crate::command::workflow_host_retry::transient(&error) {
+                // No child has run. Confirm removal through a fresh anchor before retrying.
+                if super::workflow_host_staging_anchor::StagingAnchor::clear(
+                    run_root,
+                    staging_root(run_root, &self.call_id)
+                        .file_name()
+                        .expect("staging identity")
+                        .to_str()
+                        .expect("staging identity"),
+                )
+                .is_ok()
+                {
+                    return crate::command::workflow_host_fault::workflow(
+                        error,
+                        format!(
+                            "preparing staging {}",
+                            staging_root(run_root, &self.call_id).display()
+                        ),
+                    );
+                }
+            } else {
+                return crate::command::workflow_host_fault::workflow(
+                    error,
+                    format!(
+                        "preparing staging {}",
+                        staging_root(run_root, &self.call_id).display()
+                    ),
+                );
+            }
             self.pause(
                 &staging_root(run_root, &self.call_id),
-                "staging could not be prepared",
+                "staging could not be safely prepared",
                 &format!("{error:#}"),
                 true,
             )

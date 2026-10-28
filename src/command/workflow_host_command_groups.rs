@@ -6,6 +6,7 @@
 //! group whose parent died. A resume must not start new commands while such
 //! a group still runs, because both would write the same task root.
 
+use anyhow::Context;
 use std::path::{Path, PathBuf};
 
 use archon_workflow::{WorkflowError, WorkflowResult};
@@ -283,10 +284,12 @@ fn left_groups_impl(
             return Ok((Vec::new(), Vec::new()));
         }
         Err(error) => {
-            return Err(anyhow::anyhow!(
-                "cannot list host command record directory {}: {error}",
-                dir.display()
-            ));
+            return Err(error).with_context(|| {
+                format!(
+                    "cannot list host command record directory {}",
+                    dir.display()
+                )
+            });
         }
     };
     let (mut running, mut ended) = (Vec::new(), Vec::new());
@@ -309,10 +312,9 @@ fn left_groups_impl(
             // guard): there is nothing left to judge.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "cannot read host command record {}: {error}",
-                    path.display()
-                ));
+                return Err(error).with_context(|| {
+                    format!("cannot read host command record {}", path.display())
+                });
             }
         };
         let marker_record = if lone_marker {
@@ -386,35 +388,7 @@ fn left_groups_impl(
     Ok((running, ended))
 }
 
-pub(super) fn refusal_files(path: &Path) -> String {
-    let mut files = vec![path.to_path_buf()];
-    if path.extension().is_some_and(|ext| ext == "pending") {
-        let original = path.with_extension("json");
-        for record in [original.clone(), unknown_path(&original)] {
-            if record.exists() {
-                files.push(record);
-            }
-        }
-    } else {
-        let pending = if let Some(stem) = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_suffix(UNKNOWN_SUFFIX))
-        {
-            path.with_file_name(format!("{stem}.pending"))
-        } else {
-            path.with_extension("pending")
-        };
-        if pending.exists() {
-            files.push(pending);
-        }
-    }
-    files
-        .iter()
-        .map(|file| file.display().to_string())
-        .collect::<Vec<_>>()
-        .join(" and ")
-}
+pub(super) use stalled::refusal_files;
 
 fn remove_healed(path: &Path) -> anyhow::Result<()> {
     match std::fs::remove_file(path) {
@@ -498,3 +472,7 @@ thread_local! {
 
 #[path = "workflow_host_command_groups_remedy.rs"]
 mod remedy;
+
+#[path = "workflow_host_command_groups_recover.rs"]
+mod recover;
+pub(crate) use recover::settle_before_resume;

@@ -13,6 +13,9 @@ use crate::command::workflow_task_set::republish::test_fixture::{FrozenSet, froz
 #[path = "workflow_acceptance_executability_probe_tests_repair.rs"]
 mod repair_tests;
 
+#[path = "workflow_acceptance_executability_scratch_rebuild_tests.rs"]
+pub(crate) mod scratch_rebuild_tests;
+
 pub(crate) struct Trees {
     pub(crate) set: FrozenSet,
     /// Holds the repository, apart from the project.

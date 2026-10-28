@@ -3,6 +3,31 @@
 use super::*;
 
 impl WorkflowScriptHost {
+    /// Read-only admission and replay observations precede any child or call record.
+    pub(super) async fn observe_host_metadata<T>(
+        &self,
+        capability: &str,
+        mut read: impl FnMut() -> archon_workflow::WorkflowResult<T>,
+    ) -> archon_workflow::WorkflowResult<T> {
+        let generation = self.owned_generation()?;
+        crate::command::workflow_host_retry::retry(
+            capability,
+            (
+                &self.runner.workflow_store,
+                &self.runner.run_id,
+                generation,
+                None,
+            ),
+            || std::future::ready(read().map_err(anyhow::Error::new)),
+        )
+        .await
+        .map_err(|error| {
+            error.downcast::<WorkflowError>().unwrap_or_else(|error| {
+                crate::command::workflow_host_fault::workflow(error, capability.into())
+            })
+        })
+    }
+
     /// `data` with what the host command `call` ran under: its limits
     /// (Issue 358), so a resume replays an outcome a limit cut short only
     /// under the same limits, and the logic version, source digest and build
@@ -29,7 +54,7 @@ impl WorkflowScriptHost {
         let (outcome, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
             Some(&run_root),
             &label,
-            executor.execute(request, expected_generation),
+            executor.execute_for_call(request, expected_generation, &execution.call.id),
         )
         .await;
         let outcome = outcome?;

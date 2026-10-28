@@ -1,22 +1,20 @@
 use super::*;
 
 impl FixedHostCommandExecutor {
-    pub(super) async fn execute_inner(
+    pub(super) async fn execute_once(
         &self,
         mut request: HostCommandRequest,
         expected_generation: Option<u64>,
         existing_receipt: Option<archon_workflow::PublicationReceiptV1>,
         judge_only: bool,
+        claim: Option<&crate::command::workflow_host_command_committed::Claim>,
+        attempt: u32,
     ) -> WorkflowResult<HostCommandResult> {
         let expected_generation = expected_generation.ok_or_else(|| {
             WorkflowError::StateCorrupt(
                 "fixed HostCommand execution has no dispatch generation".into(),
             )
         })?;
-        crate::command::workflow_host_command_integrity::require_launch_prd_unchanged(
-            &self.context,
-            &request.command_id,
-        )?;
         // A body the host cannot bind to a frozen subject is the author's
         // artifact being wrong, not the host failing: it belongs in the findings
         // channel that gives the author its next attempt, exactly like a
@@ -42,6 +40,14 @@ impl FixedHostCommandExecutor {
             Err(error) => return Err(error),
         };
         let call_id = self.content_identity(&request, &context)?;
+        if existing_receipt.is_none() && !judge_only {
+            if let Some(outcome) = self
+                .recover_committed(&request, &context, &call_id, expected_generation, claim)
+                .await?
+            {
+                return Ok(outcome);
+            }
+        }
         // A receipt-backed body has already been stamped at landing. Its stdin
         // is the live body whose exact bytes were checked against that receipt;
         // stamping again could change those bytes before private staging.
@@ -154,11 +160,16 @@ impl FixedHostCommandExecutor {
         let destinations = self.destinations(&context, &command, &call_id)?;
         let sentinels =
             LiveMutationSentinels::capture(&destinations.values().cloned().collect::<Vec<_>>())
-                .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+                .map_err(|error| {
+                    crate::command::workflow_host_fault::workflow(
+                        error,
+                        "preparing host publication".into(),
+                    )
+                })?;
         let result = async {
             // Issue #255: an operational ending is retried or pauses the run.
             let sealed = self
-                .execute_with_operational_retry(
+                .execute_supervised_attempt(
                     &command,
                     &call_id,
                     expected_generation,
@@ -166,19 +177,22 @@ impl FixedHostCommandExecutor {
                     &staging.anchor,
                     &pause,
                     &teardown,
+                attempt,
                 )
                 .await?;
             let truncated = sealed.truncated;
             let prepared = sealed.prepared;
+            let fault = sealed.fault;
             let observed = sealed.output;
             if existing_receipt.is_some() {
                 sentinels
                     .verify()
-                    .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+                    .map_err(|error| crate::command::workflow_host_fault::workflow(error, "preparing host publication".into()))?;
             }
             let stdout = utf8(observed.stdout, "stdout")?;
             let stderr = utf8(observed.stderr, "stderr")?;
             if observed.exit_code != Some(0) {
+                let gate_envelope = self.failed_envelope(fault, &staging.anchor, &staged_envelope, &secrets)?;
                 return Ok(HostCommandResult {
                     exit_code: observed.exit_code,
                     stdout,
@@ -189,7 +203,7 @@ impl FixedHostCommandExecutor {
                     interrupted: false,
                     stdout_truncated: truncated.0,
                     stderr_truncated: truncated.1,
-                    gate_envelope: None,
+                    gate_envelope,
                     publication_receipt: None,
                     subjects: Vec::new(),
                     postcondition: None,
@@ -320,18 +334,15 @@ impl FixedHostCommandExecutor {
                     WorkflowError::ArtifactInvalid(format!("host command staging refused: {error}"))
                 })?;
                 let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
-                    .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-                let receipt = match publish_audited(audited, &destinations, &pin, &context.task_root) {
+                    .map_err(|error| crate::command::workflow_host_fault::workflow(error, "preparing host publication".into()))?;
+                let receipt = match crate::command::workflow_host_command_publish::publish_audited_for_call(audited, &destinations, &pin, &context.task_root, claim) {
                     Ok(receipt) => receipt,
                     Err(error)
                         if error
                             .downcast_ref::<super::super::workflow_task_set::StaleAcceptanceContract>()
                             .is_some() => return Ok(None),
-                    Err(error) => return Err(WorkflowError::StageFailed(error.to_string())),
+                    Err(error) => return Err(crate::command::workflow_host_fault::workflow(error, "preparing host publication".into())),
                 };
-                if let Some(envelope) = destinations.get(ENVELOPE_FILE) {
-                    owner_only(envelope)?;
-                }
                 // Parent-only recording follows every publication refusal.
                 // Never fatal here. The publication is already committed to the
                 // live tree; failing the call now would lose the receipt the script
@@ -346,11 +357,9 @@ impl FixedHostCommandExecutor {
                 ) {
                     tracing::warn!(%error, "recording published gate findings failed");
                 }
-                let (subjects, postcondition) =
-                    evaluate_postcondition(&context, &command.command_id)?;
-                Ok(Some((receipt, subjects, postcondition)))
+                Ok(Some(receipt))
             })?;
-            let Some((receipt, subjects, postcondition)) = committed else {
+            let Some(receipt) = committed else {
                 // Read whole under the chain's read lock: the loop rebuilds
                 // its candidate from exactly the contract now published
                 // (`null` when none is).
@@ -385,7 +394,7 @@ impl FixedHostCommandExecutor {
             finish::remove_published(&staging, &receipt, &pause, &secrets);
             let (stdout, stdout_bytes) =
                 append_host_note(stdout, &stamped_fields, observed.stdout_bytes);
-            Ok(HostCommandResult {
+            let outcome = HostCommandResult {
                 exit_code: observed.exit_code,
                 stdout,
                 stderr,
@@ -397,10 +406,11 @@ impl FixedHostCommandExecutor {
                 stderr_truncated: truncated.1,
                 gate_envelope: Some(envelope),
                 publication_receipt: Some(receipt),
-                subjects,
-                postcondition: Some(postcondition),
+                subjects: Vec::new(),
+                postcondition: None,
                 observed_only: false,
-            })
+            };
+            self.observe_committed(&context, &command, outcome, expected_generation, &secrets).await
         }
         .await;
         #[cfg(test)]
@@ -415,35 +425,11 @@ impl FixedHostCommandExecutor {
 
 /// Compare filesystem identities rather than path spellings. On Windows the
 /// same directory can be named through an 8.3 alias or a verbatim path.
-fn resolved_path_is_within_root(
-    root: &std::path::Path,
-    path: &std::path::Path,
-) -> std::io::Result<bool> {
-    fn resolve(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
-        if path.exists() {
-            return archon_shell::paths::canonicalize(path);
-        }
-        let parent = path.parent().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
-        })?;
-        let name = path.file_name().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
-        })?;
-        Ok(archon_shell::paths::canonicalize(parent)?.join(name))
-    }
-
-    resolved_path_is_within_root_using(root, path, resolve)
-}
-
-fn resolved_path_is_within_root_using(
-    root: &std::path::Path,
-    path: &std::path::Path,
-    resolve: impl Fn(&std::path::Path) -> std::io::Result<std::path::PathBuf>,
-) -> std::io::Result<bool> {
-    let canonical_root = resolve(root)?;
-    let canonical_path = resolve(path)?;
-    Ok(canonical_path.starts_with(canonical_root))
-}
+#[path = "workflow_host_command_exec_paths.rs"]
+mod paths;
+use paths::resolved_path_is_within_root;
+#[cfg(test)]
+use paths::resolved_path_is_within_root_using;
 
 #[cfg(test)]
 mod prepared_write_path_tests {

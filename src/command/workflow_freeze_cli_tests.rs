@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn both_json_staged_paths_report_operational_failure_through_the_envelope() {
+fn staged_client_construction_and_both_freezes_report_operational_faults() {
     let whole = include_str!("workflow_freeze_cli.rs");
     let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
     for command in ["freeze-acceptance", "freeze-skeleton"] {
@@ -19,8 +19,8 @@ fn both_json_staged_paths_report_operational_failure_through_the_envelope() {
     }
     assert_eq!(
         source.matches("return report_operational_failure(").count(),
-        2,
-        "both staged paths report operationally rather than exiting non-zero"
+        3,
+        "client construction and both staged paths report operationally rather than exiting non-zero"
     );
 }
 

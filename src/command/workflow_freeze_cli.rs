@@ -137,38 +137,48 @@ async fn stage_acceptance(
     env_vars: &ArchonEnvVars,
     staged: StagedArgs<'_>,
 ) -> Result<()> {
-    if config.workflow.gate_mode == archon_core::config::GateMode::Off {
-        return Err(anyhow!(
-            "gate_mode=off must return before staged acceptance preparation"
-        ));
+    let result = async {
+        if config.workflow.gate_mode == archon_core::config::GateMode::Off {
+            return Err(anyhow!(
+                "gate_mode=off must return before staged acceptance preparation"
+            ));
+        }
+        let resume = staged_freeze_resume(&mut std::io::stderr());
+        let candidate = read_bounded_stdin(
+            archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
+            staged.staging_root,
+        )?;
+        crate::command::workflow_freeze_candidate::record_candidate_extraction(
+            &candidate,
+            &mut std::io::stderr().lock(),
+        )?;
+        let tasks_root = absolute(cwd, tasks);
+        let prd_path = absolute(cwd, prd);
+        let factory =
+            crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
+                config, env_vars,
+            )
+            .without_project_tools();
+        let client = match factory
+            .build_client(WorkflowLlmClientRequest {
+                cwd: cwd.to_path_buf(),
+                origin: "workflow-decompose-freeze-acceptance".into(),
+                session_id: staged.call_id.to_string(),
+                read_roots: Vec::new(),
+            })
+            .await
+            .context("building the staged acceptance judge client")
+        {
+            Ok(client) => client,
+            Err(error) => {
+                return report_operational_failure(cwd, staged, "freeze-acceptance", &error);
+            }
+        };
+        let paths = (tasks_root.as_path(), prd_path.as_path());
+        stage_acceptance_candidate(cwd, paths, config, client, &resume, staged, &candidate).await
     }
-    let resume = staged_freeze_resume(&mut std::io::stderr());
-    let candidate = read_bounded_stdin(
-        archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
-        staged.staging_root,
-    )?;
-    crate::command::workflow_freeze_candidate::record_candidate_extraction(
-        &candidate,
-        &mut std::io::stderr().lock(),
-    )?;
-    let tasks_root = absolute(cwd, tasks);
-    let prd_path = absolute(cwd, prd);
-    let factory =
-        crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
-            config, env_vars,
-        )
-        .without_project_tools();
-    let client = factory
-        .build_client(WorkflowLlmClientRequest {
-            cwd: cwd.to_path_buf(),
-            origin: "workflow-decompose-freeze-acceptance".into(),
-            session_id: staged.call_id.to_string(),
-            read_roots: Vec::new(),
-        })
-        .await
-        .context("building the staged acceptance judge client")?;
-    let paths = (tasks_root.as_path(), prd_path.as_path());
-    stage_acceptance_candidate(cwd, paths, config, client, &resume, staged, &candidate).await
+    .await;
+    result.map_err(crate::command::workflow_host_fault::child_failure)
 }
 
 /// The staged acceptance freeze of `candidate` (read from stdin) under
@@ -275,66 +285,74 @@ fn stage_skeleton(
     config: &ArchonConfig,
     staged: StagedArgs<'_>,
 ) -> Result<()> {
-    if config.workflow.gate_mode == archon_core::config::GateMode::Off {
-        return Err(anyhow!(
-            "gate_mode=off must return before staged skeleton preparation"
-        ));
-    }
-    let candidate = read_bounded_stdin(
-        archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
-        staged.staging_root,
-    )?;
-    crate::command::workflow_freeze_candidate::record_candidate_extraction(
-        &candidate,
-        &mut std::io::stderr().lock(),
-    )?;
-    let tasks_root = absolute(cwd, tasks);
-    let prd_path = absolute(cwd, prd);
-    let gate = (
-        "freeze-skeleton",
-        crate::command::workflow_gate::GateId::FreezeSkeleton,
-        "skeleton",
-    );
-    if let Some(refused) =
-        defects::refuse_element_shapes(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
-    {
-        return refused;
-    }
-    if let Some((code, reason)) =
-        candidate_refusal::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
-    {
-        return refuse_candidate_artifact(
-            cwd,
-            staged,
+    let result = (|| {
+        if config.workflow.gate_mode == archon_core::config::GateMode::Off {
+            return Err(anyhow!(
+                "gate_mode=off must return before staged skeleton preparation"
+            ));
+        }
+        let candidate = read_bounded_stdin(
+            archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
+            staged.staging_root,
+        )?;
+        crate::command::workflow_freeze_candidate::record_candidate_extraction(
+            &candidate,
+            &mut std::io::stderr().lock(),
+        )?;
+        let tasks_root = absolute(cwd, tasks);
+        let prd_path = absolute(cwd, prd);
+        let gate = (
             "freeze-skeleton",
             crate::command::workflow_gate::GateId::FreezeSkeleton,
             "skeleton",
-            code,
-            &reason,
         );
-    }
-    let prepared = match crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate(
-        cwd,
-        &tasks_root,
-        &prd_path,
-        config.workflow.gate_mode,
-        candidate_document(&candidate).into_owned(),
-    ) {
-        Ok(prepared) => prepared,
-        Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
-            return defects::refuse_candidate_error(
+        if let Some(refused) =
+            defects::refuse_element_shapes(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
+        {
+            return refused;
+        }
+        if let Some((code, reason)) =
+            candidate_refusal::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
+        {
+            return refuse_candidate_artifact(
                 cwd,
                 staged,
                 "freeze-skeleton",
                 crate::command::workflow_gate::GateId::FreezeSkeleton,
                 "skeleton",
-                &error,
+                code,
+                &reason,
             );
         }
-        Err(error) => return report_operational_failure(cwd, staged, "freeze-skeleton", &error),
-    };
-    let (evaluation, outputs) = prepared.into_staged_parts();
-    write_staged_manifest(cwd, staged, "freeze-skeleton", evaluation, outputs)
+        let prepared =
+            match crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate(
+                cwd,
+                &tasks_root,
+                &prd_path,
+                config.workflow.gate_mode,
+                candidate_document(&candidate).into_owned(),
+            ) {
+                Ok(prepared) => prepared,
+                Err(error)
+                    if crate::command::workflow_task_set::CandidateRejected::caused(&error) =>
+                {
+                    return defects::refuse_candidate_error(
+                        cwd,
+                        staged,
+                        "freeze-skeleton",
+                        crate::command::workflow_gate::GateId::FreezeSkeleton,
+                        "skeleton",
+                        &error,
+                    );
+                }
+                Err(error) => {
+                    return report_operational_failure(cwd, staged, "freeze-skeleton", &error);
+                }
+            };
+        let (evaluation, outputs) = prepared.into_staged_parts();
+        write_staged_manifest(cwd, staged, "freeze-skeleton", evaluation, outputs)
+    })();
+    result.map_err(crate::command::workflow_host_fault::child_failure)
 }
 
 /// The staged freeze's budget and progress (Issue 255): the host's wall
@@ -361,6 +379,14 @@ fn staged_freeze_resume(
 fn exit_incomplete_resumable(
     incomplete: &crate::command::workflow_freeze_budget::FreezeIncomplete,
 ) -> ! {
+    println!(
+        "{}",
+        serde_json::to_string(&archon_workflow::GateOperationalError {
+            kind: incomplete.fault_class().kind().into(),
+            text: incomplete.report(),
+        })
+        .expect("fault serialization")
+    );
     eprintln!("{}", incomplete.report());
     crate::command::workflow_host_exit_drain::exit_after_drain(
         crate::command::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE,

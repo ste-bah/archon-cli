@@ -68,12 +68,7 @@ impl ChainLock {
     /// Take the lock now or fail: an operator command reports the holder.
     pub(crate) fn acquire(pin_path: &Path, tasks_root: &Path) -> Result<Self> {
         let (file, path) = Self::open(pin_path)?;
-        file.try_lock().map_err(|error| {
-            anyhow!(
-                "another freeze or repair of this task set holds {} ({error}); wait for it to finish",
-                path.display()
-            )
-        })?;
+        lock::try_chain_lock(&file, &path)?;
         let lock = Self { file };
         recover_interrupted_publish(pin_path, tasks_root)?;
         Ok(lock)

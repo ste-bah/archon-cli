@@ -250,12 +250,7 @@ pub(crate) fn snapshot_locked(
     if super::workflow_skeleton_pending::is_pending(task_root, &pin)? {
         return Ok(snapshot);
     }
-    let skeleton = validate_full_chain(task_root, &pin).map_err(|error| {
-        anyhow!(
-            "frozen task skeleton under {} does not verify: {error}",
-            task_root.display()
-        )
-    })?;
+    let skeleton = validate_full_chain(task_root, &pin).with_context(|| format!("frozen task skeleton under {} does not verify; restore its authenticated skeleton, lock and pin", task_root.display()))?;
     snapshot.skeleton = true;
     for file_name in [TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE] {
         let path = task_root.join(file_name);
@@ -325,8 +320,9 @@ fn read_pin(project_root: &Path, task_root: &Path) -> Result<AcceptancePin> {
             path.display()
         )
     })?;
-    serde_json::from_slice(&bytes)
-        .with_context(|| format!("parsing acceptance pin {}", path.display()))
+    serde_json::from_slice(&bytes).map_err(|error| archon_workflow::WorkflowError::ArtifactInvalid(format!(
+        "parsing acceptance pin {}: {error}; restore valid JSON from its authenticated freeze metadata", path.display(),
+    )).into())
 }
 
 /// Exactly the `freeze-acceptance` postcondition: bundle, lock, pin, the PRD's
@@ -341,14 +337,8 @@ fn verify_acceptance(
         std::fs::read(prd_path).with_context(|| format!("reading PRD {}", prd_path.display()))?;
     let text = std::str::from_utf8(&prd).context("PRD is not UTF-8")?;
     let contract: AcceptanceContract =
-        validate_acceptance_bundle(task_root, Some(pin), &acceptance_ids(text)).map_err(
-            |error| {
-                anyhow!(
-                    "frozen acceptance contract under {} does not verify: {error}",
-                    task_root.display()
-                )
-            },
-        )?;
+        validate_acceptance_bundle(task_root, Some(pin), &acceptance_ids(text))
+            .with_context(|| format!("frozen acceptance contract under {} does not verify; restore its authenticated contract, lock and pin", task_root.display()))?;
     let actual = content_digest(&prd);
     if contract.prd.digest != actual {
         return Err(anyhow!(
@@ -418,59 +408,62 @@ pub(crate) fn stage_verify(
     call_id: Option<&str>,
     read_only: bool,
 ) -> Result<archon_workflow::PreparedPublicationV1> {
-    let stage = FrozenStage::parse(stage)?;
-    let gate_envelope = gate_envelope.ok_or_else(|| {
-        anyhow!("trusted staged verify-frozen-chain requires --gate-envelope <PATH>")
-    })?;
-    let call_id = call_id
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("trusted staged verify-frozen-chain requires --call-id <ID>"))?;
-    let absolute = |path: &Path| {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            cwd.join(path)
-        }
-    };
-    let evaluation = match verify_frozen_stage_with_recovery(
-        cwd,
-        &absolute(prd),
-        &absolute(tasks),
-        stage,
-        !read_only,
-    ) {
-        Ok(snapshot) => super::workflow_gate::GateEvaluation::new(
-            format!(
-                "{} verified: acceptance={}, skeleton={}, {} frozen subject(s), {} body file(s) present",
-                stage.command_id(),
-                snapshot.acceptance,
-                snapshot.skeleton,
-                snapshot.subjects.len(),
-                snapshot.bodies.len()
-            ),
-            Vec::new(),
-        ),
-        Err(error) => {
-            // Issue 338: a set no read can settle pauses the run instead.
-            super::workflow_host_command_operational::exit_if_unsettled_publish(&error);
-            super::workflow_gate::GateEvaluation::new(
-                format!("{} failed", stage.command_id()),
+    let result = (|| {
+        let stage = FrozenStage::parse(stage)?;
+        let gate_envelope = gate_envelope.ok_or_else(|| {
+            anyhow!("trusted staged verify-frozen-chain requires --gate-envelope <PATH>")
+        })?;
+        let call_id = call_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("trusted staged verify-frozen-chain requires --call-id <ID>"))?;
+        let absolute = |path: &Path| {
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                cwd.join(path)
+            }
+        };
+        let evaluation = match verify_frozen_stage_with_recovery(
+            cwd,
+            &absolute(prd),
+            &absolute(tasks),
+            stage,
+            !read_only,
+        ) {
+            Ok(snapshot) => super::workflow_gate::GateEvaluation::new(
+                format!(
+                    "{} verified: acceptance={}, skeleton={}, {} frozen subject(s), {} body file(s) present",
+                    stage.command_id(),
+                    snapshot.acceptance,
+                    snapshot.skeleton,
+                    snapshot.subjects.len(),
+                    snapshot.bodies.len()
+                ),
                 Vec::new(),
-            )
-            .with_operational_error(format!("{error:#}"))
-        }
-    };
-    let staging_root = gate_envelope
-        .parent()
-        .ok_or_else(|| anyhow!("staged verify-frozen-chain envelope has no parent"))?;
-    super::workflow_gate_envelope::stage_gate_evaluation(
-        staging_root,
-        gate_envelope,
-        call_id,
-        stage.command_id(),
-        evaluation,
-        Vec::new(),
-    )
+            ),
+            Err(error) => {
+                // Issue 338: a set no read can settle pauses the run instead.
+                super::workflow_host_command_operational::exit_if_unsettled_publish(&error);
+                super::workflow_gate::GateEvaluation::new(
+                    format!("{} failed", stage.command_id()),
+                    Vec::new(),
+                )
+                .with_host_error(&error)
+            }
+        };
+        let staging_root = gate_envelope
+            .parent()
+            .ok_or_else(|| anyhow!("staged verify-frozen-chain envelope has no parent"))?;
+        super::workflow_gate_envelope::stage_gate_evaluation(
+            staging_root,
+            gate_envelope,
+            call_id,
+            stage.command_id(),
+            evaluation,
+            Vec::new(),
+        )
+    })();
+    result.map_err(crate::command::workflow_host_fault::child_failure)
 }
 
 #[cfg(test)]

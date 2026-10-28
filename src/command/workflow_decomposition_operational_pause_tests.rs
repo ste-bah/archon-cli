@@ -28,6 +28,7 @@ const EXIT_1: usize = 1;
 struct ModeProcess {
     mode: AtomicUsize,
     calls: AtomicUsize,
+    started: tokio::sync::Notify,
 }
 
 #[async_trait::async_trait]
@@ -38,6 +39,7 @@ impl HostCommandProcessAdapter for ModeProcess {
         _control: HostCommandControl,
     ) -> archon_workflow::WorkflowResult<SupervisedProcessOutput> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.started.notify_one();
         let timed_out = self.mode.load(Ordering::SeqCst) == TIME_OUT;
         Ok(SupervisedProcessOutput {
             exit_code: (!timed_out).then_some(1),
@@ -90,7 +92,7 @@ async fn execute_under_lease(
 }
 
 #[tokio::test]
-async fn an_operational_pause_releases_the_executor_lease_for_a_paused_resume() {
+async fn an_operator_pause_releases_executor_lease_without_synthetic_stage_transitions() {
     let project = fixture_project();
     let root = project
         .path()
@@ -129,6 +131,7 @@ async fn an_operational_pause_releases_the_executor_lease_for_a_paused_resume() 
     let process = Arc::new(ModeProcess {
         mode: AtomicUsize::new(TIME_OUT),
         calls: AtomicUsize::new(0),
+        started: Default::default(),
     });
     let executor = FixedHostCommandExecutor::with_process(
         fixed_decomposition_catalog("rev-1").unwrap(),
@@ -137,21 +140,34 @@ async fn an_operational_pause_releases_the_executor_lease_for_a_paused_resume() 
         process.clone(),
     );
 
-    // No progress: one retry, then the executor pauses the run.
-    let error = execute_under_lease(&store, &run_id, &executor)
-        .await
-        .unwrap_err();
+    let work = execute_under_lease(&store, &run_id, &executor);
+    tokio::pin!(work);
+    tokio::select! {
+        result = &mut work => panic!("availability recovery escaped before control: {result:?}"),
+        _ = process.started.notified() => {},
+    }
+    archon_workflow::LifecycleController::new(store.clone())
+        .apply(&run_id, archon_workflow::LifecycleAction::Pause)
+        .unwrap();
+    let error = work.await.unwrap_err();
     assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    assert_eq!(process.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(process.calls.load(Ordering::SeqCst), 1);
     let run = store.load_state(&run_id).unwrap();
     assert_eq!(run.status, RunStatus::Paused);
-    assert_eq!(run.stages["host-call"].status, StageStatus::Paused);
-    let pauses: Vec<_> = events(&store, &run_id)
-        .into_iter()
-        .filter(|event| event["detail"]["event"] == "host_command_operational_pause")
-        .collect();
-    assert_eq!(pauses.len(), 1);
-    assert_eq!(pauses[0]["detail"]["cause"], "no_progress_evidence");
+    assert_eq!(run.stages["host-call"].status, StageStatus::Running);
+    let recorded = events(&store, &run_id);
+    assert!(
+        recorded
+            .iter()
+            .all(|event| event["detail"]["event"] != "host_command_operational_pause")
+    );
+    assert_eq!(
+        recorded
+            .iter()
+            .filter(|event| event["detail"]["event"] == "host_command_operational_retry")
+            .count(),
+        1
+    );
     let lock = store.run_dir(&run_id).join("decomposition/executor.lock");
     let record: serde_json::Value = read_json(&lock);
     assert_eq!(record["role"], "executor");
@@ -193,7 +209,7 @@ async fn an_operational_pause_releases_the_executor_lease_for_a_paused_resume() 
         .await
         .unwrap();
     assert_eq!(result.exit_code, Some(1));
-    assert_eq!(process.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(process.calls.load(Ordering::SeqCst), 2);
     assert_eq!(
         store.load_state(&run_id).unwrap().status,
         RunStatus::Running

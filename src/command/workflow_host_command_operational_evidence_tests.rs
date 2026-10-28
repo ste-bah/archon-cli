@@ -17,17 +17,19 @@ fn fixture_with_secret(outcomes: Vec<Scripted>, secret: &str) -> Fixture {
 
 async fn recorded_stderr(stderr: String) -> String {
     let fixture = fixture(vec![
-        Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, "first attempt".into()),
-        Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, stderr),
+        Scripted::TransientStderr("first attempt".into()),
+        Scripted::TransientStderr(stderr),
+        Scripted::Exit(1),
     ]);
     let _ = fixture
         .executor
         .execute(lint(), Some(fixture.generation))
         .await
-        .unwrap_err();
+        .unwrap();
+    assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
     let events = events(&fixture);
-    let pauses = events_named(&events, "host_command_operational_pause");
-    pauses[0]["detail"]["attempts"]
+    let pauses = events_named(&events, "host_command_operational_retry");
+    pauses.last().unwrap()["detail"]["attempts"]
         .as_array()
         .unwrap()
         .last()
@@ -38,14 +40,14 @@ async fn recorded_stderr(stderr: String) -> String {
 }
 
 #[tokio::test]
-async fn a_pause_records_the_last_exit_and_redacted_stderr_tail() {
+async fn a_retry_records_the_last_exit_and_redacted_stderr_tail() {
     let fixture = fixture_with_secret(
         vec![
-            Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, "first attempt detail".into()),
-            Scripted::Stderr(
-                EXIT_INCOMPLETE_RESUMABLE,
+            Scripted::TransientStderr("first attempt detail".into()),
+            Scripted::TransientStderr(
                 "earlier diagnostic\nsecret-value-for-test\nlast diagnostic".into(),
             ),
+            Scripted::Exit(1),
         ],
         "secret-value-for-test",
     );
@@ -53,11 +55,12 @@ async fn a_pause_records_the_last_exit_and_redacted_stderr_tail() {
         .executor
         .execute(lint(), Some(fixture.generation))
         .await
-        .unwrap_err();
+        .unwrap();
 
+    assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
     let events = events(&fixture);
-    let pauses = events_named(&events, "host_command_operational_pause");
-    let attempt = pauses[0]["detail"]["attempts"]
+    let pauses = events_named(&events, "host_command_operational_retry");
+    let attempt = pauses.last().unwrap()["detail"]["attempts"]
         .as_array()
         .unwrap()
         .last()
@@ -70,28 +73,28 @@ async fn a_pause_records_the_last_exit_and_redacted_stderr_tail() {
 }
 
 #[tokio::test]
-async fn a_pause_redacts_an_api_key_shape_from_the_stored_record() {
+async fn a_retry_redacts_an_api_key_shape_from_the_stored_record() {
     let value = "sk-ant-abcdefghijklmnopqrstuvwxyz0123456789";
     let stored = recorded_stderr(format!("provider rejected {value}")).await;
     assert!(!stored.contains(value), "{stored}");
 }
 
 #[tokio::test]
-async fn a_pause_redacts_a_bearer_token_from_the_stored_record() {
+async fn a_retry_redacts_a_bearer_token_from_the_stored_record() {
     let value = "ya29.a0Af_abcDEF-123";
     let stored = recorded_stderr(format!("Authorization: Bearer {value}")).await;
     assert!(!stored.contains(value), "{stored}");
 }
 
 #[tokio::test]
-async fn a_pause_redacts_a_key_value_credential_from_the_stored_record() {
+async fn a_retry_redacts_a_key_value_credential_from_the_stored_record() {
     let value = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
     let stored = recorded_stderr(format!("GITHUB_TOKEN={value}")).await;
     assert!(!stored.contains(value), "{stored}");
 }
 
 #[tokio::test]
-async fn a_pause_redacts_url_userinfo_credential_from_the_stored_record() {
+async fn a_retry_redacts_url_userinfo_credential_from_the_stored_record() {
     let value = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
     let stored = recorded_stderr(format!(
         "failed to reach https://user:{value}@example.test/api"
@@ -101,7 +104,7 @@ async fn a_pause_redacts_url_userinfo_credential_from_the_stored_record() {
 }
 
 #[tokio::test]
-async fn a_pause_bounds_redacted_multibyte_stderr_to_a_valid_utf8_tail() {
+async fn a_retry_bounds_redacted_multibyte_stderr_to_a_valid_utf8_tail() {
     let stderr = format!("{}TAIL-END", "界".repeat(1800));
     let stored = recorded_stderr(stderr.clone()).await;
     assert!(stored.len() <= 4096, "stored {} bytes", stored.len());
@@ -114,28 +117,33 @@ async fn a_pause_bounds_redacted_multibyte_stderr_to_a_valid_utf8_tail() {
 }
 
 #[tokio::test]
-async fn a_missing_child_exit_status_is_stored_as_null() {
-    let fixture = fixture(vec![Scripted::TimedOut(None)]);
+async fn a_retry_keeps_a_missing_child_exit_status_as_null() {
+    let fixture = fixture(vec![Scripted::TimedOut(None), Scripted::Exit(1)]);
     let _ = fixture
         .executor
         .execute(lint(), Some(fixture.generation))
         .await
-        .unwrap_err();
+        .unwrap();
+    assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
     let events = events(&fixture);
-    let pauses = events_named(&events, "host_command_operational_pause");
-    let attempt = pauses[0]["detail"]["attempts"].as_array().unwrap()[0].clone();
+    let pauses = events_named(&events, "host_command_operational_retry");
+    let attempt = pauses.last().unwrap()["detail"]["attempts"]
+        .as_array()
+        .unwrap()[0]
+        .clone();
     assert!(attempt["exit_code"].is_null(), "{attempt}");
 }
 
 #[tokio::test]
-async fn evidence_377_configured_secret_is_redacted_in_the_stored_attempt() {
+async fn host_command_retries_keep_configured_secrets_redacted_in_persisted_evidence() {
     let secret = "configured-secret-evidence";
     let stderr = format!("provider failed with {secret}; final diagnostic");
     let before = format!("exit_code={EXIT_INCOMPLETE_RESUMABLE}, stderr={stderr:?}");
     let fixture = fixture_with_secret(
         vec![
-            Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, "first attempt".into()),
-            Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, stderr),
+            Scripted::TransientStderr("first attempt".into()),
+            Scripted::TransientStderr(stderr),
+            Scripted::Exit(1),
         ],
         secret,
     );
@@ -143,11 +151,13 @@ async fn evidence_377_configured_secret_is_redacted_in_the_stored_attempt() {
         .executor
         .execute(lint(), Some(fixture.generation))
         .await
-        .unwrap_err();
+        .unwrap();
 
     // Re-open the persisted event file; this is the source of truth.
     let stored_events = events(&fixture);
-    let pause = events_named(&stored_events, "host_command_operational_pause")[0];
+    let pause = *events_named(&stored_events, "host_command_operational_retry")
+        .last()
+        .unwrap();
     let stored_attempt = pause["detail"]["attempts"]
         .as_array()
         .unwrap()
@@ -166,22 +176,25 @@ async fn evidence_377_configured_secret_is_redacted_in_the_stored_attempt() {
 }
 
 #[tokio::test]
-async fn evidence_377_credential_shape_is_redacted_in_the_stored_attempt() {
+async fn host_command_retries_keep_credential_shapes_redacted_in_persisted_evidence() {
     let token = "sk-ant-abcdefghijklmnopqrstuvwxyz0123456789";
     let stderr = format!("provider rejected {token}");
     let before = format!("exit_code={EXIT_INCOMPLETE_RESUMABLE}, stderr={stderr:?}");
     let fixture = fixture(vec![
-        Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, "first attempt".into()),
-        Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, stderr),
+        Scripted::TransientStderr("first attempt".into()),
+        Scripted::TransientStderr(stderr),
+        Scripted::Exit(1),
     ]);
     let _ = fixture
         .executor
         .execute(lint(), Some(fixture.generation))
         .await
-        .unwrap_err();
+        .unwrap();
 
     let stored_events = events(&fixture);
-    let pause = events_named(&stored_events, "host_command_operational_pause")[0];
+    let pause = *events_named(&stored_events, "host_command_operational_retry")
+        .last()
+        .unwrap();
     let stored_attempt = pause["detail"]["attempts"]
         .as_array()
         .unwrap()
@@ -199,8 +212,8 @@ async fn evidence_377_credential_shape_is_redacted_in_the_stored_attempt() {
 }
 
 #[tokio::test]
-async fn evidence_377_timeout_without_child_status_is_stored_as_null() {
-    let fixture = fixture(vec![Scripted::TimedOut(None)]);
+async fn host_command_retries_keep_timeout_without_status_as_null() {
+    let fixture = fixture(vec![Scripted::TimedOut(None), Scripted::Exit(1)]);
     let before = match &fixture.process.outcomes[0] {
         Scripted::TimedOut(progress) => format!(
             "timed_out={}, exit_code={:?}, reported_progress={:?}",
@@ -212,10 +225,12 @@ async fn evidence_377_timeout_without_child_status_is_stored_as_null() {
         .executor
         .execute(lint(), Some(fixture.generation))
         .await
-        .unwrap_err();
+        .unwrap();
 
     let stored_events = events(&fixture);
-    let pause = events_named(&stored_events, "host_command_operational_pause")[0];
+    let pause = *events_named(&stored_events, "host_command_operational_retry")
+        .last()
+        .unwrap();
     let attempt = &pause["detail"]["attempts"][0];
     let after = format!(
         "exit_code={}, stderr_tail={:?}",

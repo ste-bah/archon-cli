@@ -31,18 +31,19 @@ pub(super) fn freeze_site(project: &Path, tasks_root: &Path) -> (Site, PathBuf) 
             ))
         }
         Ok(None) => Site::Hermetic,
-        Err(error) => Site::Unavailable(format!(
-            "the [workflow.acceptance_execution] policy could not be captured ({error}); nothing is run until it is repaired"
-        )),
+        Err(error) => Site::Unavailable(Unrun::error(error.into(), "the [workflow.acceptance_execution] policy could not be captured; restore its named fields".into())),
     };
     let binding = match &site {
         Site::Scratch(binding) => Some(&**binding),
         Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
     };
-    match live_root::freeze_repository(project, tasks_root, binding) {
+    match live_root::freeze_repository_typed(project, tasks_root, binding) {
         Ok(repository) => (site, repository),
         Err(why) if !matches!(site, Site::Unavailable(_)) => (
-            Site::Unavailable(format!("{why}; nothing is run until it is repaired")),
+            Site::Unavailable(Unrun::error(
+                why,
+                "the task set repository could not be read".into(),
+            )),
             project.to_path_buf(),
         ),
         Err(_) => (site, project.to_path_buf()),
@@ -102,7 +103,7 @@ pub(super) async fn run_at(
     mutation_plans: &BTreeMap<String, archon_workflow::acceptance_scratch::MutationPlan>,
 ) -> Result<SiteRun, Unrun> {
     if let Site::Unavailable(reason) = &probe.site {
-        return Err(Unrun(reason.clone()));
+        return Err(reason.clone());
     }
     let data = if probe.memo {
         data_state(probe, tree)?
@@ -194,12 +195,12 @@ pub(super) async fn run_at(
         .collect();
     #[cfg(test)]
     if !pending.is_empty() && probe.take_injected_failure() {
-        return Err(Unrun("injected host failure".into()));
+        return Err(Unrun::transient("injected host failure".into()));
     }
     // Issue 255: nothing new starts once the freeze's budget is spent.
     if !pending.is_empty() && (probe.is_incomplete() || !probe.budget().allows_observation()) {
         probe.defer(pending.iter().map(|r| r.acceptance_id.as_str()));
-        return Err(Unrun(CHECK_DEFERRED.to_string()));
+        return Err(Unrun::transient(CHECK_DEFERRED.to_string()));
     }
     let pending_keys: BTreeMap<String, String> = (refs.iter().zip(&keys).zip(&seen))
         .filter(|(_, seen)| seen.is_none())
@@ -243,8 +244,13 @@ pub(super) async fn run_at(
             hooks,
         ))
         .await
-        .map_err(|error| Unrun(format!("scratch probe task failed: {error}")))
-        .and_then(|observed| observed.map_err(|error| Unrun(format!("{error:#}"))))
+        .map_err(|error| {
+            let text = format!("scratch probe task failed: {error}");
+            Unrun::error(error.into(), text)
+        })
+        .and_then(|observed| {
+            observed.map_err(|error| Unrun::error(error, "observing the scratch site".into()))
+        })
         .map(
             |(results, sibling_revisions, check_siblings, _disposable_root)| {
                 let mut layout = layout;

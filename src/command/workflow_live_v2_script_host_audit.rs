@@ -19,7 +19,10 @@ impl WorkflowScriptHost {
             )
         })?;
         // Issue 361: a verdict other logic gave is not this build's answer.
-        Ok(executor.outcome_logic_holds(record)? && executor.record_is_reusable(record)?)
+        self.observe_host_metadata(&record.call.id, || {
+            Ok(executor.outcome_logic_holds(record)? && executor.record_is_reusable(record)?)
+        })
+        .await
     }
 
     fn audit_cache_paths(record: &WorkflowV2CallRecord) -> Vec<String> {

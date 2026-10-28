@@ -35,6 +35,7 @@ mod fidelity;
 mod fidelity_candidate_fallback;
 mod fidelity_critic;
 mod fidelity_resume;
+pub(crate) use fidelity_resume::LintIncomplete;
 mod fidelity_store;
 mod fidelity_waivers;
 mod focused_test_files;
@@ -64,7 +65,6 @@ pub(crate) use fidelity::{
     audit_task_file_candidate, evaluate_lint_with_fidelity, evaluate_lint_with_fidelity_resumable,
 };
 pub(crate) use fidelity_critic::tag_unusable_critic_reply;
-pub(crate) use fidelity_resume::resumable_exit;
 pub(crate) use fidelity_waivers::{record_waivers, recorded_waivers, waivers_from_flags};
 use graph_load::load_graph;
 pub(crate) use owner_coverage::skeleton_defects as skeleton_owner_defects;
@@ -286,10 +286,13 @@ pub(crate) fn evaluate_lint(
 ) -> Result<crate::command::workflow_gate::GateEvaluation> {
     let _read = chain_read(cwd, source)?;
     preflight::operational_input(cwd, source)?;
+    let mut fault_classes = Vec::new();
     let graph_error = if matches!(source, LintSource::Tasks(_)) {
         load_graph(cwd, source).err().map(|error| {
+            let text = crate::command::workflow_host_fault::diagnostic(&error);
+            fault_classes.push(crate::command::workflow_host_fault::classify(&error));
             format!(
-                "task graph could not be lowered: {error}; correct the named depends_on/blocks declaration or task status, then re-run `workflow lint --tasks <DIR>`"
+                "task graph could not be lowered: {text}; correct the named depends_on/blocks declaration or task status, then re-run `workflow lint --tasks <DIR>`"
             )
         })
     } else {
@@ -380,13 +383,21 @@ pub(crate) fn evaluate_lint(
         match repository_claims::set_findings(cwd, root) {
             Ok(claims) => findings.extend(claims),
             Err(error) => {
-                repository_error = Some(format!("repository claim check failed: {error:#}"))
+                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
+                repository_error = Some(format!(
+                    "repository claim check failed: {}",
+                    crate::command::workflow_host_fault::diagnostic(&error)
+                ))
             }
         }
         match owner_coverage::set_findings(root) {
             Ok(owners) => findings.extend(owners),
             Err(error) => {
-                let text = format!("repository owner coverage failed: {error:#}");
+                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
+                let text = format!(
+                    "repository owner coverage failed: {}",
+                    crate::command::workflow_host_fault::diagnostic(&error)
+                );
                 repository_error = Some(match repository_error {
                     Some(existing) => format!("{existing}; {text}"),
                     None => text,
@@ -396,7 +407,11 @@ pub(crate) fn evaluate_lint(
         match focused_test_files::set_findings(root) {
             Ok(owned) => findings.extend(owned),
             Err(error) => {
-                let text = format!("focused test file ownership failed: {error:#}");
+                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
+                let text = format!(
+                    "focused test file ownership failed: {}",
+                    crate::command::workflow_host_fault::diagnostic(&error)
+                );
                 repository_error = Some(match repository_error {
                     Some(existing) => format!("{existing}; {text}"),
                     None => text,
@@ -423,7 +438,18 @@ pub(crate) fn evaluate_lint(
         (graph, repository) => graph.or(repository),
     };
     Ok(match operational {
-        Some(error) => evaluation.with_operational_error(error),
+        Some(error) => evaluation
+            .with_operational_error(error)
+            .with_operational_error_kind(
+                if fault_classes
+                    .iter()
+                    .all(|class| *class == crate::command::workflow_host_fault::Class::Transient)
+                {
+                    "transient_host_fault"
+                } else {
+                    "permanent_host_fault"
+                },
+            ),
         None => evaluation,
     })
 }

@@ -234,7 +234,7 @@ pub(crate) fn no_verdict_cause(
     result: &CheckResult,
     at: &Context,
 ) -> Option<(String, UnprovenCause)> {
-    let host = |why: String| Some((why, UnprovenCause::Host));
+    let host = |why: String| Some((why, UnprovenCause::PermanentHost));
     if result.operational_error.is_some() || super::baseline::passed(result) {
         return None;
     }
@@ -260,7 +260,16 @@ pub(crate) fn no_verdict_cause(
         };
         return Some((
             format!(
-                "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks"
+                "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks; {}",
+                if cause == UnprovenCause::SiteLacks {
+                    format!(
+                        "the host provides `{name}`; repair the scratch site's search path and program provisioning"
+                    )
+                } else {
+                    format!(
+                        "install `{name}` on the host and in the check environment, or replace the check's required program"
+                    )
+                }
             ),
             cause,
         ));
@@ -286,7 +295,7 @@ pub(crate) fn no_verdict_cause(
     let foreign =
         !locations.is_empty() && (locations.iter()).all(|location| !owned(location, &commands, at));
     (builds && foreign && !build_is_assertion(&commands)).then(|| {
-        ("the tree it ran on did not build: it stopped at a compiler error outside its own files and the deliverables, before any assertion ran".to_string(), UnprovenCause::Host)
+        ("the tree it ran on did not build: it stopped at a compiler error outside its own files and the deliverables, before any assertion ran".to_string(), UnprovenCause::PermanentHost)
     })
 }
 

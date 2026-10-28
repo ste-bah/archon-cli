@@ -91,6 +91,7 @@ pub(crate) struct UnsettledPublish {
     state: String,
     log: PathBuf,
     cause: String,
+    fault_class: crate::command::workflow_host_fault::Class,
 }
 
 impl UnsettledPublish {
@@ -111,7 +112,12 @@ impl UnsettledPublish {
             state,
             log: paths.log.clone(),
             cause: format!("{cause:#}"),
+            fault_class: crate::command::workflow_host_fault::classify(cause),
         }
+    }
+
+    pub(crate) fn fault_class(&self) -> crate::command::workflow_host_fault::Class {
+        self.fault_class
     }
 
     /// Whether `error` is, or wraps, an unsettled publish.
@@ -149,6 +155,11 @@ impl ChainRead {
     /// project was ever frozen (the pin's directory does not exist): a reader
     /// never creates the project's pin store.
     pub(crate) fn begin(pin_path: &Path, tasks_root: &Path) -> Result<Self> {
+        #[cfg(test)]
+        crate::command::workflow_host_fault_test_hooks::fire(
+            crate::command::workflow_host_fault_test_hooks::Point::ChainRead,
+            tasks_root,
+        )?;
         let paths = JournalPaths::for_pin(pin_path);
         let frozen_here = paths.lock.parent().is_some_and(Path::is_dir);
         if held_here(&paths.lock) || !tasks_root.is_dir() || !frozen_here {
@@ -188,7 +199,9 @@ impl ChainRead {
 /// evidence and the remedy (Issue 336): its cause is the host's environment,
 /// fixed by an operator, never the author's artifact nor a reason to fail.
 pub(super) fn stage_error(error: anyhow::Error) -> WorkflowError {
-    pause_if_unsettled(&error).unwrap_or_else(|| WorkflowError::StageFailed(format!("{error:#}")))
+    pause_if_unsettled(&error).unwrap_or_else(|| {
+        crate::command::workflow_host_fault::workflow(error, "reading the frozen set".into())
+    })
 }
 
 /// The run's pause when `error` is, or wraps, an [`UnsettledPublish`]
@@ -198,5 +211,27 @@ pub(crate) fn pause_if_unsettled(error: &anyhow::Error) -> Option<WorkflowError>
     UnsettledPublish::is(error).then(|| {
         tracing::warn!(error = %format!("{error:#}"), "pausing: the task set's interrupted publish could not be settled");
         WorkflowError::ControlPaused(format!("{error:#}"))
+    })
+}
+
+/// Preserve typed lock contention before it crosses an envelope.
+pub(super) fn try_chain_lock(file: &std::fs::File, path: &Path) -> Result<()> {
+    file.try_lock().map_err(|error| {
+        use crate::command::workflow_host_fault::{self as fault, Class, Fault};
+        let (class, text) = match error {
+            std::fs::TryLockError::WouldBlock => (
+                Class::Transient,
+                format!(
+                    "another freeze or repair of this task set holds {}; wait for it to finish",
+                    path.display()
+                ),
+            ),
+            std::fs::TryLockError::Error(source) => {
+                let error = anyhow::Error::new(source)
+                    .context(format!("locking frozen chain {}", path.display()));
+                (fault::classify(&error), fault::diagnostic(&error))
+            }
+        };
+        anyhow::Error::new(Fault { class, text })
     })
 }

@@ -94,6 +94,24 @@ impl GateEvaluation {
         self
     }
 
+    pub(crate) fn with_host_error(mut self, error: &anyhow::Error) -> Self {
+        let fault = crate::command::workflow_host_fault::envelope(error);
+        let existing = self.operational_error.take();
+        let kind = if existing.is_some()
+            && self.operational_error_kind.as_deref() != Some("transient_host_fault")
+        {
+            "permanent_host_fault".to_string()
+        } else {
+            fault.kind
+        };
+        self.operational_error = Some(match existing {
+            Some(text) => format!("{text}; {}", fault.text),
+            None => fault.text,
+        });
+        self.operational_error_kind = Some(kind);
+        self
+    }
+
     pub(crate) fn with_operational_error_kind(mut self, kind: impl Into<String>) -> Self {
         self.operational_error_kind = Some(kind.into());
         self
@@ -131,7 +149,7 @@ impl GateEvaluation {
                 .map(|text| archon_workflow::GateOperationalError {
                     kind: self
                         .operational_error_kind
-                        .unwrap_or_else(|| "gate_operational".to_string()),
+                        .unwrap_or_else(|| "permanent_host_fault".to_string()),
                     text,
                 });
         let policy_findings = self

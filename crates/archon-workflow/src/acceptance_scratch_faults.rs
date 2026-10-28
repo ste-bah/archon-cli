@@ -95,6 +95,8 @@ pub enum FaultCause {
     TeardownUnverified,
     /// The check left its private, verified site in a state the host could not remove.
     SiteTeardownFailed,
+    /// Native filesystem failure while preparing a replacement site.
+    SiteSetupIo { raw_os_error: i32 },
 }
 
 const STOP: &str = "wait for every process it starts and leave none running when it ends";
@@ -105,6 +107,7 @@ impl FaultCause {
     pub fn fault(&self) -> CheckFault {
         let check = |trigger, remedy| CheckFault::Check { trigger, remedy };
         match self {
+            Self::SiteSetupIo { .. } => CheckFault::Host,
             Self::IdentityChanged { parts }
                 if parts.is_empty() || !parts.iter().all(|p| CHECK_PARTS.contains(&p.as_str())) =>
             {

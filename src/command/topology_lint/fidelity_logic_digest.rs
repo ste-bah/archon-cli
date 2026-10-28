@@ -81,7 +81,10 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   does not change.
 /// - G3 review, version 2 unchanged: a first cut reply that is not JSON is
 ///   asked again; how a whole reply is obtained changes, not what it means.
-pub const SOURCES_DIGEST: &str = "ac3f9d2a278cc52bd4a4b69fa875a3a52fe1450940f5b1c9e3c33bf58d0a9cad";
+/// - Host availability recovery preserves provider fault types and diagnostics;
+///   questions, reply checks and stored verdict meaning are unchanged.
+// Typed idle recovery preserves the question, reply validation and stored verdict meaning.
+pub const SOURCES_DIGEST: &str = "edd1f833842ed2148bc7d0189d1f9ba58c8a8ac00b7ac37fdc6c50564bcf9a84";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

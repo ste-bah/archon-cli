@@ -119,7 +119,12 @@ pub(crate) async fn evaluate_lint_with_fidelity_resumable(
                 }));
             Ok(evaluation)
         }
-        Err(error) if LintIncomplete::caused(&error).is_some() => Err(error),
+        Err(mut error) if LintIncomplete::caused(&error).is_some() => {
+            if let Some(incomplete) = error.downcast_mut::<LintIncomplete>() {
+                incomplete.evaluation = Some(evaluation);
+            }
+            Err(error)
+        }
         // Issue 338: the run's pause, never the gate's operational error.
         Err(error) if crate::command::workflow_task_set::UnsettledPublish::is(&error) => Err(error),
         Err(error) => Ok(super::fidelity_critic::operational(evaluation, &error)),

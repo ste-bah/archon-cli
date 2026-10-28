@@ -154,7 +154,7 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .send_message(messages, system, tools, model)
             .await
             .map(outcome_from_response)
-            .map_err(WorkflowError::port)
+            .map_err(workflow_port)
     }
 
     async fn send_message_with_temperature(
@@ -169,7 +169,7 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .send_message_with_temperature(messages, system, tools, model, temperature)
             .await
             .map(outcome_from_response)
-            .map_err(WorkflowError::port)
+            .map_err(workflow_port)
     }
 
     async fn send_message_with_progress(
@@ -185,16 +185,7 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .send_message_with_progress(messages, system, tools, model, temperature, progress)
             .await
             .map(outcome_from_response)
-            .map_err(|error| {
-                if error
-                    .downcast_ref::<archon_llm::transport_idle::TransportIdle>()
-                    .is_some()
-                {
-                    WorkflowError::ControlPaused(error.to_string())
-                } else {
-                    WorkflowError::port(error)
-                }
-            })
+            .map_err(workflow_port)
     }
 
     async fn continue_agent(
@@ -209,7 +200,7 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .map_err(|error| {
                 match error.downcast::<archon_tools::subagent_session::ContinuationRefused>() {
                     Ok(refused) => WorkflowError::port(refused),
-                    Err(other) => WorkflowError::port(other),
+                    Err(other) => workflow_port(other),
                 }
             })
     }
@@ -220,8 +211,13 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .run_agent(request)
             .await
             .map(outcome_from_response)
-            .map_err(WorkflowError::port)
+            .map_err(workflow_port)
     }
+}
+
+/// Preserve the concrete provider/I/O cause across the workflow port.
+fn workflow_port(error: anyhow::Error) -> WorkflowError {
+    WorkflowError::port(error.reallocate_into_boxed_dyn_error_without_backtrace())
 }
 
 /// Rebuilds the pipeline's request from the port's call.
@@ -350,20 +346,28 @@ impl WorkflowLlmClientFactory for SubagentPipelineClientFactory {
         {
             std::future::pending::<()>().await;
         }
-        let client = build_subagent_pipeline_adapter_with_policy(
-            &self.config,
-            &self.env_vars,
-            &request.origin,
-            &request.cwd,
-            &request.session_id,
-            request.read_roots,
-            crate::command::pipeline_support::WorkflowClientPolicy {
-                endpoint: self.endpoint_policy,
-                project_tools: self.project_tools,
-            },
-        )
+        let client = async {
+            #[cfg(test)]
+            crate::command::workflow_host_fault_test_hooks::fire(
+                crate::command::workflow_host_fault_test_hooks::Point::ClientBuild,
+                &request.cwd,
+            )?;
+            build_subagent_pipeline_adapter_with_policy(
+                &self.config,
+                &self.env_vars,
+                &request.origin,
+                &request.cwd,
+                &request.session_id,
+                request.read_roots,
+                crate::command::pipeline_support::WorkflowClientPolicy {
+                    endpoint: self.endpoint_policy,
+                    project_tools: self.project_tools,
+                },
+            )
+            .await
+        }
         .await
-        .map_err(WorkflowError::port)?;
+        .map_err(workflow_port)?;
         Ok(PipelineWorkflowLlmClient::configured_for_route(
             client,
             &self.config,
@@ -464,3 +468,7 @@ mod native_policy_tests;
 #[cfg(test)]
 #[path = "pipeline_workflow_continuation_fixture.rs"]
 pub(crate) mod continuation_fixture;
+
+#[cfg(test)]
+#[path = "pipeline_workflow_llm_fault_tests.rs"]
+mod fault_tests;

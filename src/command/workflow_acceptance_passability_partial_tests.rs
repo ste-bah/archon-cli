@@ -9,7 +9,7 @@ use archon_workflow::llm_client_port::WorkflowAgentOutcome;
 use async_trait::async_trait;
 
 use super::*;
-use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeIncomplete, FreezeResume};
+use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeResume};
 
 /// Decides the first check of every batch it is shown that holds it, and
 /// never the second: its replies leave that one without a decision.
@@ -79,7 +79,7 @@ fn candidate(id: &str) -> Candidate {
 }
 
 #[tokio::test]
-async fn an_incomplete_batch_keeps_its_decided_verdicts_and_defers_only_the_rest() {
+async fn an_incomplete_batch_delivers_refutations_and_leaves_undecided_checks_uncached() {
     let mut contract = super::super::judge::continuation_tests::contract();
     let mut second = contract.acceptance[0].clone();
     second.id = "AC-X-002".into();
@@ -91,7 +91,7 @@ async fn an_incomplete_batch_keeps_its_decided_verdicts_and_defers_only_the_rest
     };
     let resume = FreezeResume::saving(FreezeBudget::unlimited(), true);
     let client = DecidesOnlyTheFirst::default();
-    let error = assess(
+    let refuted = assess(
         &client,
         "sonnet",
         &contract,
@@ -102,15 +102,9 @@ async fn an_incomplete_batch_keeps_its_decided_verdicts_and_defers_only_the_rest
         None,
     )
     .await
-    .err()
-    .expect("the judge never decides the second check");
-    let incomplete = FreezeIncomplete::caused(&error).expect("an incomplete freeze");
-    assert!(incomplete.is_authored_judge_reply(), "{error:#}");
-    assert_eq!(
-        incomplete.deferred(),
-        ["AC-X-002".to_string()],
-        "a check the judge decided is not pending: {error:#}"
-    );
+    .expect("a partial refutation is already actionable");
+    assert!(refuted.contains_key("AC-X-001"));
+    assert!(!refuted.contains_key("AC-X-002"));
     let saved = store
         .load("key-AC-X-001")
         .expect("the decided verdict is saved");

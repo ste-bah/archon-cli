@@ -95,7 +95,12 @@ pub(super) fn unproven(
             let (result, cause) = own.clone().unwrap_or_else(|| {
                 (
                     format!("site rebuild failed; check is host-unproven: {error}"),
-                    None,
+                    match error {
+                        WorkflowError::Io { source, .. } => source
+                            .raw_os_error()
+                            .map(|raw_os_error| faults::FaultCause::SiteSetupIo { raw_os_error }),
+                        _ => None,
+                    },
                 )
             });
             super::faulted(&reference.acceptance_id, result, cause)

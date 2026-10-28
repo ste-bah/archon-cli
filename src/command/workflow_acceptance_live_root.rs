@@ -59,6 +59,13 @@ pub(crate) fn check_path_rule(repository: &str, project: &str) -> String {
 /// unknown, and no check is run and no author told a root from a guess
 /// (Issue 366, N1).
 pub(crate) fn recorded_repository(project: &Path, tasks_root: &Path) -> Result<PathBuf, String> {
+    recorded_repository_typed(project, tasks_root).map_err(|error| format!("{error:#}"))
+}
+
+pub(crate) fn recorded_repository_typed(
+    project: &Path,
+    tasks_root: &Path,
+) -> anyhow::Result<PathBuf> {
     use archon_workflow::repository_record::{read_repository_record, repository_record_path};
     let lock = repository_record_path(tasks_root);
     // The lock and its repair lead: a binding fault's text can be cut short.
@@ -68,17 +75,31 @@ pub(crate) fn recorded_repository(project: &Path, tasks_root: &Path) -> Result<P
             lock.display()
         )
     };
-    match read_repository_record(tasks_root) {
+    let record = (|| {
+        #[cfg(test)]
+        crate::command::workflow_host_fault_test_hooks::fire(
+            crate::command::workflow_host_fault_test_hooks::Point::Repository,
+            tasks_root,
+        )
+        .map_err(|source| archon_workflow::WorkflowError::Io {
+            path: lock.clone(),
+            source,
+        })?;
+        read_repository_record(tasks_root)
+    })();
+    match record {
         Ok(None) => Ok(project.to_path_buf()),
         Ok(Some(record)) if Path::new(&record.repository_root).is_dir() => {
             Ok(PathBuf::from(record.repository_root))
         }
-        Ok(Some(record)) => Err(unknown(format!(
+        Ok(Some(record)) => Err(anyhow::anyhow!(unknown(format!(
             "{} records repository {}, which is not a directory",
             lock.display(),
             record.repository_root
+        )))),
+        Err(error) => Err(anyhow::Error::new(error).context(unknown(
+            "the persisted repository record could not be read".into(),
         ))),
-        Err(error) => Err(unknown(error.to_string())),
     }
 }
 
@@ -93,6 +114,15 @@ pub(crate) fn freeze_repository(
     binding: Option<&NativeBinding>,
 ) -> Result<PathBuf, String> {
     let recorded = recorded_repository(project, tasks_root)?;
+    Ok(binding.map_or(recorded, |binding| binding.policy.repository.clone()))
+}
+
+pub(crate) fn freeze_repository_typed(
+    project: &Path,
+    tasks_root: &Path,
+    binding: Option<&NativeBinding>,
+) -> anyhow::Result<PathBuf> {
+    let recorded = recorded_repository_typed(project, tasks_root)?;
     Ok(binding.map_or(recorded, |binding| binding.policy.repository.clone()))
 }
 
