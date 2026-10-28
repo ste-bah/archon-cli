@@ -26,34 +26,26 @@ function policy(ctx) {
     shadowScopes: new Set(), author: (w, prompt, round, state) =>
       ctx.authorAcceptanceEntries(w, prompt, round, state) };
 }
-// Reworded findings do not count as progress. Each full stall window advances
-// the authored ladder, and a later clean judge result completes the loop.
-async function rewordedFindingsAdvanceTheLadder() {
+// Round 4: a judge that rewords one defect makes every finding "new"; only a
+// a smaller count is progress, so the loop pauses after three attempts without it.
+async function novelty() {
   const ctx = context();
-  let calls = 0;
-  const prompts = [];
-  const w = { checkpoint: async (_id, options) => { ctx.repairLogs.push(options.task); },  agent: async (_id, options) => {
-      prompts.push(options.task);
+  let calls = 0, paused;
+  const w = { agent: async () => {
       if (++calls > 500) throw new Error('spin: no pause after 500 calls');
       return answer('candidate');
     },
-    hostCommand: async () => calls <= 13 ? ({ ...clean(), gateEnvelope: { policy_findings:
-      [{ text: `defect reworded ${calls}`, remediation_scope: 'candidate_artifact' }] } }) : clean(),
-    pause: async () => { throw new Error('authored finding requested a pause'); } };
-  await ctx.authorCandidate(w, { phase: 'body', prompt: () => 'author',
-    retryScopes: new Set(['candidate_artifact']), shadowScopes: new Set() });
-  assert.equal(calls, 14);
-  const transitions = ctx.repairLogs.filter(line => line.includes('repair rung'));
-  assert.deepEqual(transitions.map(line => line.match(/r\d+/)[0]), ['r2', 'r3', 'r4', 'r2']);
-  assert.deepEqual(transitions.map(line => Number(line.match(/attempts (\d+)/)[1])), [4, 7, 10, 13]);
-  assert.match(prompts[4], /Re-author a complete replacement from fresh context/);
-  assert.match(prompts[7], /Work through the findings in smaller groups/);
-  assert.match(prompts[10], /deferred while independent subjects settle/);
-  assert.match(prompts[13], /Re-author a complete replacement from fresh context/);
+    hostCommand: async () => ({ ...clean(), gateEnvelope: { policy_findings:
+      [{ text: `defect reworded ${calls}`, remediation_scope: 'candidate_artifact' }] } }),
+    pause: async (_, evidence) => { paused = evidence; throw new Error('paused'); } };
+  await assert.rejects(ctx.authorCandidate(w, { phase: 'body', prompt: () => 'author',
+    retryScopes: new Set(['candidate_artifact']), shadowScopes: new Set() }), /paused/);
+  assert.equal(calls, 4);
+  assert.equal(paused.reason, 'no_progress');
 }
 // A fresh VM has no volatile ladder state. Its host replays the durable
 // requests and outcomes verbatim before dispatching the first new call.
-async function midLadderReplayPreservesCallIdsPromptBytesAndRung() {
+async function midLadderReplayPreservesCallsThroughOneAttemptWindowPause() {
   async function execute(recorded = [], interrupt = false) {
     const ctx = context(), calls = [], replayed = [];
     const durable = JSON.parse(JSON.stringify(recorded));
@@ -69,7 +61,7 @@ async function midLadderReplayPreservesCallIdsPromptBytesAndRung() {
         calls.push(record);
         return JSON.parse(JSON.stringify(record.result));
       }
-      if (interrupt && method === 'agent' && author === 9) {
+      if (interrupt && method === 'agent' && author === 3) {
         throw new Error('workflow cancelled by run control');
       }
       const record = {request, result};
@@ -96,26 +88,26 @@ async function midLadderReplayPreservesCallIdsPromptBytesAndRung() {
   }
   const interrupted = await execute([], true);
   assert.match(interrupted.error?.message || '', /workflow cancelled by run control/);
-  assert.equal(interrupted.calls.filter(call => call.request.method === 'agent').length, 8, 'eight author/gate pairs persist mid-r3');
+  assert.equal(interrupted.calls.filter(call => call.request.method === 'agent').length, 2, 'two author/gate pairs persist before the next rung');
   const resumed = await execute(interrupted.calls);
   const uninterrupted = await execute();
-  assert.equal(resumed.error, undefined);
-  assert.equal(uninterrupted.error, undefined);
+  assert.match(resumed.error?.message || '', /requested a pause/);
+  assert.match(uninterrupted.error?.message || '', /requested a pause/);
   assert.deepEqual(resumed.replayed, interrupted.calls, 'the host returns recorded outcomes verbatim');
   assert.deepEqual(resumed.calls, uninterrupted.calls, 'every id, prompt byte and outcome matches a continuous run');
   assert.deepEqual(resumed.logs, uninterrupted.logs, 'the rung and cycle reconstruct by replay');
   const firstNew = resumed.calls[interrupted.calls.length].request;
-  assert.equal(firstNew.id, 'body-author-9');
+  assert.equal(firstNew.id, 'body-author-3');
   assert.match(firstNew.options.task, /Work through the findings in smaller groups/);
-  assert.deepEqual(resumed.logs.map(line => line.match(/r\d+/)[0]), ['r2', 'r3', 'r4', 'r2']);
+  assert.deepEqual(resumed.logs.map(line => line.match(/r\d+/)[0]), ['r2', 'r3', 'r4']);
 }
 
 async function partial(operational, replacing) {
   const ids = ['A', 'B', 'C', 'D'];
   const ctx = context(Object.fromEntries(ids.map(id => [id, id])));
-  let gates = 0, evidence;
+  let gates = 0, paused;
   const completed = [];
-  const w = { checkpoint: async (_id, options) => { ctx.repairLogs.push(options.task); },  agent: async (callId) => {
+  const w = { agent: async (callId) => {
     const [, id, ordinal] = /^acceptance-author-(\w+)-(\d+)$/.exec(callId);
     const round = Math.floor((Number(ordinal) - 1) / 3);
     if (replacing && round === 1) return answer(JSON.stringify({ id, version: 0 }));
@@ -127,24 +119,25 @@ async function partial(operational, replacing) {
   }, hostCommand: async () => replacing && ++gates === 1
     ? { ...clean(), gateEnvelope: { policy_findings: ids.map(id => ({
         text: `check '${id}': needs repair`, subject: id, remediation_scope: 'candidate_artifact' })) } }
-  : clean(), pause: async (_id, value) => { evidence = value; throw new Error(`host retry window ${completed}`); } };
+  : clean(), pause: async (_, e) => {
+    paused = e;
+    throw new Error(replacing ? `unexpected pause with retained work ${completed}: ${JSON.stringify(e)}` : 'paused');
+  } };
   if (replacing) {
     await ctx.authorCandidate(w, policy(ctx));
     assert.equal(gates, 2, 'a new malformed-reply refusal class advances once, then the repair reaches the gate');
   } else {
-    await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /host retry window/);
-    assert.equal(gates, 0, 'a host retry window cannot dispatch a gate before all entries exist');
-    assert.equal(evidence.reason, 'operational_no_progress');
-    assert.doesNotMatch(JSON.stringify(evidence), /resume/i);
-    assert.deepEqual(completed, ['A', 'B', 'C'], 'completed independent entries are retained before the host fault');
-    assert.ok(!completed.includes('D'), 'the pending entry is never represented as completed');
+    await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /paused/);
+    assert.ok(!completed.includes('D'), 'three provider failures pause despite retained author work');
+    assert.equal(paused.reason, 'operational_no_progress');
+    assert.match(paused.recovery, /host provider/);
   }
 }
 async function unchangedReplacement() {
   const ctx = context({ A: 'a', B: 'b' });
   // A kept entry always carries its host-owned criterion (Issue 357).
   const state = { entries: new Map([['A', { id: 'A', version: 0, criterion: 'a' }]]), retryIds: null };
-  const w = { checkpoint: async (_id, options) => { ctx.repairLogs.push(options.task); },  agent: async id => id.includes('-A-')
+  const w = { agent: async id => id.includes('-A-')
     ? answer('{"version":0,"id":"A"}') : answer('malformed') };
   await ctx.authorAcceptanceEntries(w, 'author', 1, state);
   assert.equal(state.replaced, 0, 'reordered JSON is not a changed replacement');
@@ -152,22 +145,22 @@ async function unchangedReplacement() {
 }
 async function mixed() {
   const ctx = context();
-  let calls = 0, evidence;
-  const w = { checkpoint: async (_id, options) => { ctx.repairLogs.push(options.task); },  agent: async () => ++calls % 3 === 0 ? { status: 'failed', summary: 'transport' }
-    : answer('malformed'), pause: async (_id, value) => { evidence = value; throw new Error('host retry window'); } };
-  await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /host retry window/);
-  assert.equal(evidence.reason, 'operational_no_progress');
-  assert.equal(calls, 9, `the mixed window records malformed replies and the host result before stopping: ${calls}`);
-  assert.ok(ctx.repairLogs.some(line => line.includes('repair rung r2')), 'the malformed reply class advances the author ladder');
+  let calls = 0, paused;
+  const w = { agent: async () => ++calls % 3 === 0 ? { status: 'failed', summary: 'transport' }
+    : answer('malformed'), pause: async (_, e) => { paused = e; throw new Error('paused'); } };
+  await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /paused/);
+  assert.equal(calls, 5, `a new malformed-reply refusal class advances before the independent windows stall: ${calls}`);
+  assert.equal(paused.author_calls, 5, JSON.stringify(paused));
+  assert.equal(paused.answered_attempts, 4);
 }
 (async () => {
   let failed = 0;
-  for (const [name, test] of [ ['reworded findings advance the ladder', rewordedFindingsAdvanceTheLadder],
-    ['mid-ladder replay preserves call ids, prompt bytes and rung', midLadderReplayPreservesCallIdsPromptBytesAndRung],
+  for (const [name, test] of [ ['finding 1 novelty', novelty],
+    ['mid-ladder replay preserves calls through the existing attempt window pause', midLadderReplayPreservesCallsThroughOneAttemptWindowPause],
     ['finding 2A replacements', () => partial(false, true)],
-    ['operational retry window retains completed entries', () => partial(true, false)],
+    ['finding 2B provider window retains author work', () => partial(true, false)],
     ['finding 2 unchanged replacement', unchangedReplacement],
-    ['mixed author refusals preserve the host retry window', mixed] ]) {
+    ['finding 3 mixed failures', mixed] ]) {
     try { await test(); console.log(`PASS ${name}`); }
     catch (error) { failed++; console.error(`FAIL ${name}: ${error.message}`); }
   }

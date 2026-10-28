@@ -29,7 +29,7 @@ impl WorkflowLlmClient for Replies {
 }
 
 #[tokio::test]
-async fn workflow_decompose_rung_transition_uses_real_script_host_checkpoint_without_console() {
+async fn workflow_decompose_rungs_use_real_host_checkpoints_then_pause_at_the_attempt_window() {
     let (_temp, store, run_id) = new_run();
     let replies = Arc::new(Replies::default());
     let (runner, _rx) = runner(
@@ -67,9 +67,15 @@ async function workflow(w) {{
 }}
 "#
     );
-    let outcome = runner.run(&script).await.unwrap();
-    assert_eq!(outcome.status, WorkflowV2Status::Accepted, "{outcome:?}");
-    assert_eq!(replies.0.load(Ordering::SeqCst), 5);
+    let error = tokio::time::timeout(std::time::Duration::from_secs(30), runner.run(&script))
+        .await
+        .expect("the attempt window must finish")
+        .expect_err("incomplete replies exhaust the existing attempt window");
+    assert!(
+        matches!(error, WorkflowError::ControlPaused(_)),
+        "{error:?}"
+    );
+    assert_eq!(replies.0.load(Ordering::SeqCst), 3);
     let records = WorkflowV2ResultStore::new(store.run_dir(&run_id).join("v2"))
         .load_call_records()
         .unwrap();
@@ -104,6 +110,6 @@ async function workflow(w) {{
         transitions[0]["detail"]["call_id"]
             .as_str()
             .unwrap()
-            .contains("-a3")
+            .contains("-a1")
     );
 }

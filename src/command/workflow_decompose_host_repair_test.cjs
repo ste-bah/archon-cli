@@ -30,7 +30,7 @@ function setup(extra = {}) {
     prompt: () => 'author', retryScopes: new Set(['candidate_artifact']) };
   return { ctx, w, calls, events, pauses, policy };
 }
-async function ownedSourceDispatchesAuthorBeforeNextGate() {
+async function ownedSourceDispatchesAuthorWithinTheAttemptWindow() {
   const s = setup(); let gates = 0;
   s.ctx.args.acceptanceCriteria['AC-X-002'] = 'independent criterion';
   s.w.agent = async (id, options) => {
@@ -43,7 +43,7 @@ async function ownedSourceDispatchesAuthorBeforeNextGate() {
   await s.ctx.authorCandidate(s.w, s.policy);
   assert.equal(s.calls.length, gates + 1, 'each owned finding dispatches only its owner before the next freeze');
   assert.equal(s.calls.filter(call=>call.id.includes('AC-X-002')).length, 1, 'an accepted sibling is never reauthored');
-  assert.equal(s.pauses.length, 0);
+  assert.equal(s.pauses.length, 2, "repeated owned findings pause at the existing attempt window");
 }
 async function inputSourceStopsWithExactRemedy() {
   const s = setup(); let gates = 0;
@@ -105,7 +105,7 @@ async function frozenOperationalWindowRetriesWithHostRemedy() {
 async function contextWriteFailuresUseOperationalWindow() {
   for (const acceptance of [true, false]) {
     const s = setup({ __archonAuthorContext: () => { throw new Error('component storage: disk full; retry write'); } });
-    s.policy.prompt = () => 'x'.repeat(270000);
+    s.policy.initialFeedback = ['repair assertion ' + 'x'.repeat(30000)];
     if (!acceptance) delete s.policy.author;
     s.w.pause = async (_id, evidence) => {
       s.pauses.push(evidence);
@@ -189,7 +189,7 @@ async function bodyContextRecoveryReplaysRecordedIdsAndPromptBytes() {
     return binding(...args);
   };
   const subject = {taskId:'TASK-X-001', fileName:'TASK-X-001.md'};
-  const feedback = ['repair assertion ' + 'x'.repeat(270000)];
+  const feedback = ['repair assertion ' + 'x'.repeat(30000)];
   recorded.w.hostCommand = async () => clean();
   await recorded.ctx.authorCandidate(recorded.w, recorded.ctx.bodyPolicy(subject, feedback));
   assert(writes > 1, 'storage recovered before the body dispatch');
@@ -214,7 +214,7 @@ async function bodyContextRecoveryReplaysRungCheckpointIds() {
     return binding(...args);
   };
   const subject = {taskId:'TASK-X-001', fileName:'TASK-X-001.md'};
-  const feedback = ['repair assertion ' + 'x'.repeat(270000)];
+  const feedback = ['repair assertion ' + 'x'.repeat(30000)];
   const capture = (kind, result) => async (id, options) => {
     const value = result();
     tape.push({kind,id,options:JSON.parse(JSON.stringify(options)),result:value});
@@ -242,8 +242,8 @@ async function acceptanceContextRecoveryReplaysEveryEntryAndRung() {
     const failAfterSibling = mode === "sibling";
     const recorded = setup(), tape = [];
     recorded.policy.prompt = recorded.ctx.acceptanceAuthorPrompt;
-    if (mode === "outer") recorded.policy.initialFeedback = ["repair assertion " + "x".repeat(270000)];
-    recorded.ctx.args.acceptanceCriteria['AC-X-001'] = 'criterion ' + 'x'.repeat(270000);
+    if (mode === "outer") recorded.policy.initialFeedback = ["repair assertion " + "x".repeat(30000)];
+    recorded.ctx.args.acceptanceCriteria['AC-X-001'] = 'criterion ' + 'x'.repeat(30000);
     if (failAfterSibling) recorded.ctx.args.acceptanceCriteria['AC-X-002'] = 'independent criterion';
     const binding = recorded.ctx.__archonAuthorContext;
     let failed = false, gates = 0;
@@ -293,7 +293,7 @@ async function acceptanceContextRecoveryReplaysEveryEntryAndRung() {
 }
 (async () => {
   let failed = 0;
-  for (const test of [ownedSourceDispatchesAuthorBeforeNextGate, inputSourceStopsWithExactRemedy,
+  for (const test of [ownedSourceDispatchesAuthorWithinTheAttemptWindow, inputSourceStopsWithExactRemedy,
     mixedRoutingPreservesTheUnownedFaultRemedy, freshContextKeepsAttributedGateFindings, malformedCallsNeverRepeatAcrossThreeCycles,
     mixedUnprovenChecksRepairAuthoredEntries, frozenOperationalWindowRetriesWithHostRemedy,
     contextWriteFailuresUseOperationalWindow, setGateBodyRepairsCarryTheOuterRung, midLadderReplayKeepsIdsPromptsAndRung,

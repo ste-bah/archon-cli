@@ -234,7 +234,7 @@ async function authorCandidate(w, policy) {
   let repairRung = Number.isInteger(policy.initialRung) ? policy.initialRung : 1;
   let repairCycle = 1;
   const progress = newProgress(feedback);
-  const authorState = { entries: new Map(), retryIds: null };
+  const authorState = { entries: new Map(), retryIds: null, retryPreparation: true };
   // Issue 360: after an upgrade, start from the latest durable candidate (workflow_decompose_v1_seed.js).
   const seeded = args.phaseSeed && !seedWouldReplaceLiveFeedback(policy)
     ? seedAuthorLoop(policy, authorState)
@@ -244,30 +244,29 @@ async function authorCandidate(w, policy) {
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
-      if (stall === "no_progress") {
-        if (policy.deferAuthoredPending) {
-          // Yield the stalled subject so independent bodies settle before the
-          // pool pauses. A resume advances its ladder with a fresh window.
-          return { pendingAuthor: true, pendingRung: repairRung === 4 ? 2 : repairRung + 1, findings: lastFindings.slice() };
-        }
-        if (repairRung === 3) await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
-        repairRung = repairRung === 4 ? 2 : repairRung + 1;
-        if (repairRung === 2) {
-          repairCycle += 1;
-          // Entry authors keep their own refusal in authorState; do not copy
-          // a sibling's finding into another entry's fresh-context prompt.
-          feedback = policy.author ? judgeFeedback.slice()
-            : [...new Set([...allFindings, ...lastFindings])];
-          history.length = 0;
-        }
-        await repairEvent(w, policy.phase, repairRung, repairCycle, call, progress.calls);
-        progress.stalled = 0;
-        progress.repair.stalled = 0;
-        continue;
+      if (stall === "no_progress" && policy.deferAuthoredPending) {
+        // Yield the stalled subject so independent bodies settle before the
+        // pool pauses. A resume advances its ladder with a fresh window.
+        return { pendingAuthor: true, pendingRung: repairRung, findings: lastFindings.slice() };
       }
       // A host fault is not an authored finding and cannot be repaired here.
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
       continue;
+    }
+    if (progress.history.length > 0 && progress.history.at(-1).kind !== "operational") {
+      // Deferred bodies spend the existing window on one complete strategy cycle.
+      // The first observation is the baseline; the next attempts visit rungs 2–4.
+      // A rung change consumes an attempt; it never opens a fresh window.
+      repairRung = repairRung === 4 ? 2 : repairRung + 1;
+      if (repairRung === 2) {
+        repairCycle += 1;
+        // Entry authors keep their own refusal in authorState; do not copy
+        // a sibling's finding into another entry's fresh-context prompt.
+        feedback = policy.author ? judgeFeedback.slice()
+          : [...new Set([...allFindings, ...lastFindings])];
+        history.length = 0;
+      }
+      await repairEvent(w, policy.phase, repairRung, repairCycle, call, progress.calls);
     }
     const carry = carried;
     carried = null;
@@ -281,11 +280,11 @@ async function authorCandidate(w, policy) {
     const groupFeedback = repairRung === 3 && feedback.length > 1
       ? (nextCall % 2 === 1 ? feedback.slice(0, midpoint) : feedback.slice(midpoint))
       : feedback;
-    const promptFeedback = [...new Set([...(policy.initialFeedback || []), ...groupFeedback])];
+    const promptFeedback = [...new Set([...(policy.initialFeedback || []), ...(policy.author ? feedback : [...allFindings, ...feedback])])];
     let authored;
     try {
       const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}`, attempt + 1, promptFeedback, history);
+      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}${repairRung === 3 ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : ""}`, attempt + 1, promptFeedback, history);
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
         // Context writes are not journaled. Reserve no ordinal until the
@@ -458,6 +457,7 @@ async function authorCandidate(w, policy) {
     attempt += 1;
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
+    if (policy.author) judgeFeedback = feedback.slice();
     lastFindings = routed.retry.slice();
     for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
     // `advanced` is not credited here on purpose: the gate measured the whole

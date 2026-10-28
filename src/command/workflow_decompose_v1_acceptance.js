@@ -153,6 +153,9 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       break;
     } catch (error) {
       if (!error || error.authorContext !== true) throw error;
+      // Standalone entry rounds report preparation inability to their caller;
+      // a complete phase retains its round so healthy-storage replay agrees.
+      if (!state.retryPreparation) return {failure:redactFailure({status:"failed",summary:`acceptance entry ${id}: ${error.message}`})};
       // Preparation is unjournaled. Keep this entry in its original round,
       // with the same settled prefix and prompt, until it can be dispatched.
       // A recovered write must not change any recorded request on replay.

@@ -175,17 +175,24 @@ async function runSetGateLoop(w, chain, bodies) {
       }
       const stall = stallReason(progress);
       if (stall === "operational_no_progress") {
-        await pauseAuthorLoop(w, "set-gates", progress, stall, [`${failed.capability}: ${failed.routed.operational}`]);
+        await pauseAuthorLoop(w, "set-gates", progress, stall, [`${failed.capability}: ${failed.routed.operational}`], { rounds: round });
         continue;
       }
       if (stall) {
-        if (repairRung === 3) await pauseAuthorLoop(w, "set-gates", progress, stall, [`${failed.capability}: ${failed.routed.operational}`]);
+        await pauseAuthorLoop(w, "set-gates", progress, stall, [`${failed.capability}: ${failed.routed.operational}`], { rounds: round });
         repairRung = repairRung === 4 ? 2 : repairRung + 1;
-        if (repairRung === 2) repairCycle += 1;
+        if (repairRung === 2) {
+          repairCycle += 1;
+        }
         await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
         progress.stalled = 0;
         progress.stalledOperational = 0;
         progress.repair.stalled = 0;
+      }
+      if (!stall && authoredReply) {
+        repairRung = repairRung === 4 ? 2 : repairRung + 1;
+        if (repairRung === 2) repairCycle += 1;
+        await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
       }
       continue;
     }
@@ -206,14 +213,21 @@ async function runSetGateLoop(w, chain, bodies) {
     }
     const stall = stallReason(progress);
     if (stall) {
-      if (repairRung === 3) await pauseAuthorLoop(w, "set-gates", progress, stall, open);
+      await pauseAuthorLoop(w, "set-gates", progress, stall, open, { rounds: round });
       repairRung = repairRung === 4 ? 2 : repairRung + 1;
-      if (repairRung === 2) repairCycle += 1;
+      if (repairRung === 2) {
+        repairCycle += 1;
+      }
       await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
       progress.stalled = 0;
       progress.stalledOperational = 0;
       progress.repair.stalled = 0;
       escalated = false;
+    }
+    if (!stall) {
+      repairRung = repairRung === 4 ? 2 : repairRung + 1;
+      if (repairRung === 2) repairCycle += 1;
+      await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
     }
     if (!escalated && progress.stalled >= SET_GATE_ESCALATE_AFTER) {
       escalated = true;

@@ -81,23 +81,19 @@ async function gateOutageReusesCandidate() {
   assert.equal(output.publicationReceipt.call_id, 'freeze');
 }
 
-async function wrongIdRefusalAdvancesTheLadderByItsFailureClass() {
-  const ctx = context(); let calls = 0; const rungs = [], history = [];
-  const original = ctx.recordRepairs;
-  ctx.recordRepairs = (progress, ...params) => {
-    const result = original(progress, ...params);
-    history.push(JSON.parse(JSON.stringify(progress.history.at(-1)))); return result;
-  };
-  await ctx.authorCandidate({
-    checkpoint: async (_id, options) => { rungs.push({text:options.task,calls,history:history.slice()}); },
-    agent: async () => ({status:'accepted',stopReason:'end_turn',content: ++calls <= 13 ? '{"id":"B"}' : '{"id":"A"}'}),
-    hostCommand: async () => ({publicationReceipt:{call_id:'published'},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}}),
-    pause: async () => {throw new Error('unexpected authored pause');}
-  }, {phase:'acceptance',prompt:()=>'',author:ctx.authorAcceptanceEntries,capability:'freeze-acceptance',retryScopes:new Set(['candidate_artifact'])});
-  assert.equal(calls,14);
-  assert.equal(rungs[0].calls,4);
-  assert.deepEqual(rungs[0].history.map(step=>[step.findings,step.progress]), [[1,true],[1,false],[1,false],[1,false]]);
-  assert(rungs[0].history.every(step=>step.entries[0].malformed_class === 'wrong-id'));
+async function wrongIdRefusalHasSpecificMeasuredProgress() {
+  const ctx = context();
+  let calls = 0; const pauses = [];
+  await assert.rejects(ctx.authorCandidate({
+    agent: async () => { calls++; return {status:'accepted',stopReason:'end_turn',content:'{"id":"B"}'}; },
+    hostCommand: async () => { throw new Error('wrong id must never reach freeze'); },
+    pause: async (_phase, evidence) => { pauses.push(evidence); throw new Error('paused'); },
+  }, {phase:'acceptance',prompt:()=>'',author:ctx.authorAcceptanceEntries,
+    capability:'freeze-acceptance',retryScopes:new Set(['candidate_artifact'])}), /paused/);
+  assert.equal(calls, 4, 'the first refusal class advances; three repeats exhaust the window');
+  const steps = Array.from(pauses[0].progress_history, step => [step.findings,step.progress]);
+  assert.deepEqual(steps, [[1,true],[1,false],[1,false],[1,false]]);
+  assert.match(pauses[0].last_findings.join(' '), /expected id A, got id "?B"?/);
 }
 
 async function wrongStopReasonIsSpecific() {
@@ -200,7 +196,7 @@ async function missingContentIsSpecific() {
 
 (async () => {
   for (const [name, test] of [['prompt rules',promptRules],['reply format last on first and repair attempts',replyFormatIsTheLastTaskSection],['gate outage candidate reuse',gateOutageReusesCandidate],
-    ['wrong id failure class advances the ladder',wrongIdRefusalAdvancesTheLadderByItsFailureClass],['specific stop reason',wrongStopReasonIsSpecific],
+    ['wrong id measured refusal',wrongIdRefusalHasSpecificMeasuredProgress],['specific stop reason',wrongStopReasonIsSpecific],
     ['measured max token feedback',maxTokenFeedbackMeasuresReplyShape],
     ['prose and empty max token feedback',maxTokenFeedbackDoesNotMislabelProseOrEmpty],
     ['generated fixture reply format',replyFormatGuidesGeneratedFixtures],

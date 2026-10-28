@@ -1,10 +1,12 @@
-//! Issue 261: no-progress windows advance authoring strategy and retain a
-//! resumable pause when the existing repair rungs are exhausted, so repeated
-//! host findings cannot keep an unattended loop running indefinitely.
+//! Issue 261: an author loop is limited by attempts that make no progress,
+//! never by a fixed total, and a loop that stops PAUSES the run with evidence
+//! instead of failing it.
 //!
 //! The whole embedded script runs under `node` against a scripted host, the
-//! way the set-gate tests drive it. The scripted host records author calls,
-//! gate outcomes and rung events.
+//! way the set-gate tests drive it. `w.pause` behaves as the live host does:
+//! an id it has not seen pauses the run (the call rejects with the host's
+//! pause text), and an id an earlier, resumed run already took answers
+//! `{ resumed: true }`.
 
 use super::repair_tests::script_source;
 
@@ -138,6 +140,29 @@ pub(super) fn pause_ids(out: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+pub(super) fn evidence(out: &serde_json::Value, index: usize) -> &serde_json::Value {
+    &out["pauses"][index]["evidence"]
+}
+
+pub(super) fn progress_flags(evidence: &serde_json::Value) -> Vec<bool> {
+    evidence["progress_history"]
+        .as_array()
+        .expect("progress history")
+        .iter()
+        .map(|entry| entry["progress"].as_bool().expect("progress flag"))
+        .collect()
+}
+
+/// Asserts the run stopped on a pause, not on a failure: the last pause the
+/// script requested is the one it ended with.
+pub(super) fn assert_paused(out: &serde_json::Value) {
+    let error = out["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("workflow paused by run control"),
+        "the loop must end on a pause, not a failure: {out}"
+    );
+}
+
 // --- progress keeps a subject going past the old fixed budget ---------------
 
 #[test]
@@ -153,63 +178,27 @@ fn a_subject_that_keeps_reducing_its_findings_is_retried_past_the_old_body_budge
 }
 
 #[test]
-fn an_authored_stall_walks_the_repair_ladder_and_cycles_without_pausing() {
-    let out = body(r#"{ findings: (n) => n <= 13 ? ["defect alpha"] : [] }"#);
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
-    let prompts = out["prompts"].as_array().unwrap();
-    assert!(
-        prompts.iter().any(|prompt| prompt
-            .as_str()
-            .unwrap()
-            .contains("Re-author a complete replacement from fresh context")),
-        "{prompts:?}"
+fn findings_that_are_all_new_at_the_same_count_pause() {
+    // A new set of the same size does not establish a new minimum.
+    let out = body(
+        r#"{ findings: (n) => n <= 11 ? ["defect " + String.fromCharCode(96 + n) + "x", "defect " + String.fromCharCode(96 + n) + "y"] : [] }"#,
     );
-    assert!(
-        prompts.iter().any(|prompt| prompt
-            .as_str()
-            .unwrap()
-            .contains("smaller groups while preserving every finding")),
-        "{prompts:?}"
-    );
-    assert!(
-        prompts.iter().any(|prompt| prompt
-            .as_str()
-            .unwrap()
-            .contains("deferred while independent subjects settle")),
-        "{prompts:?}"
-    );
-    assert!(
-        prompts.iter().any(|prompt| prompt
-            .as_str()
-            .unwrap()
-            .contains("Re-author a complete replacement from fresh context")
-            && prompt.as_str().unwrap().contains("Logical attempt: 14.")),
-        "cycle returns to fresh context with a new deterministic call: {prompts:?}"
-    );
-    let transitions: Vec<_> = out["progress_events"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|line| line.as_str().filter(|line| line.contains("repair rung")))
-        .collect();
-    assert!(
-        transitions[0].contains("r2")
-            && transitions[1].contains("r3")
-            && transitions[2].contains("r4")
-            && transitions[3].contains("r2"),
-        "{transitions:?}"
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
     );
 }
 
 #[test]
-fn findings_that_are_all_new_at_the_same_count_advance_the_ladder() {
+fn new_finding_text_at_the_same_count_pauses_at_the_existing_attempt_window() {
     // A new set of the same size does not establish a new minimum.
     let out = body(
         r#"{ findings: (n) => n <= 13 ? ["defect " + String.fromCharCode(96 + n) + "x", "defect " + String.fromCharCode(96 + n) + "y"] : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
 }
 
 #[test]
@@ -227,109 +216,145 @@ fn a_new_minimum_between_regressions_keeps_the_window_open() {
 // --- no progress pauses the run with evidence -------------------------------
 
 #[test]
-fn repeating_the_same_findings_advances_the_authoring_ladder() {
-    let out = body(r#"{ findings: (n) => n <= 13 ? ["defect alpha"] : [] }"#);
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+fn repeating_the_same_findings_pauses_the_run_with_evidence() {
+    let out = body(r#"{ findings: () => ["defect alpha"] }"#);
+    assert_paused(&out);
+    assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"], "{out}");
+    assert_eq!(
+        out["calls"], 4,
+        "one baseline attempt and three without progress: {out}"
+    );
+    let evidence = evidence(&out, 0);
+    assert_eq!(evidence["subject"], "body-TASK-X-010", "{evidence}");
+    assert_eq!(evidence["reason"], "no_progress", "{evidence}");
+    assert_eq!(evidence["author_calls"], 4, "{evidence}");
+    assert_eq!(evidence["stall_window"], 3, "{evidence}");
+    assert_eq!(progress_flags(evidence), [true, false, false, false]);
+    // A judge finding is not measured: no host defect is outstanding.
+    assert_eq!(evidence["progress_history"][3]["findings"], 0, "{evidence}");
+    assert_eq!(evidence["last_findings"][0], "defect alpha", "{evidence}");
     assert!(
-        out["progress_events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line.as_str().unwrap().contains("repair rung r4")),
-        "{out}"
+        evidence["recovery"]
+            .as_str()
+            .is_some_and(|text| text.contains("resume")),
+        "{evidence}"
     );
 }
 
 #[test]
-fn an_author_alternating_between_two_findings_advances_the_ladder() {
+fn an_author_alternating_between_two_findings_pauses() {
     let out = body(
-        r#"{ findings: (n) => n <= 13 ? [n % 2 ? "floor is not falsifiable" : "refuted by the judge"] : [] }"#,
+        r#"{ findings: (n) => [n % 2 ? "floor is not falsifiable" : "refuted by the judge"] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false],
+        "a different finding of the same count makes no progress"
+    );
 }
 
 #[test]
-fn changing_numbers_inside_identifiers_still_advance_the_ladder() {
+fn changing_numbers_inside_identifiers_does_not_lower_the_defect_count() {
     // Different names at the same count are not measured progress.
     let out = body(
-        r#"{ findings: (n) => n <= 13 ? ["check 'AC-X-00" + n + "' was refuted by the host judge at line " + (10 + n)] : [] }"#,
+        r#"{ findings: (n) => n <= 6 ? ["check 'AC-X-00" + n + "' was refuted by the host judge at line " + (10 + n)] : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 #[test]
-fn repeated_packaging_refusals_advance_the_ladder() {
+fn repeated_packaging_refusals_pause_whatever_the_parse_error_says() {
     let out = body(
-        r#"{ findings: (n) => n <= 13 ? [{ text: "candidate artifact was refused: the reply is not a JSON document (" + ["key must be a string", "expected value", "trailing comma", "eof"][n % 4] + ")", remediation_scope: "candidate_artifact" }] : [] }"#,
+        r#"{ findings: (n) => [{ text: "candidate artifact was refused: the reply is not a JSON document (" + ["key must be a string", "expected value", "trailing comma", "eof"][n % 4] + ")", remediation_scope: "candidate_artifact" }] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        evidence(&out, 0)["progress_history"][1]["kind"],
+        "packaging"
+    );
 }
 
 #[test]
-fn incomplete_provider_outcomes_advance_the_ladder_then_accept() {
+fn incomplete_provider_outcomes_pause_without_a_baseline() {
     let out = body(
-        r##"{ answer: (n) => n <= 12 ? ({ status: "accepted", stopReason: "max_tokens", content: "cut" }) : ({ status: "accepted", stopReason: "end_turn", content: "# body" }) }"##,
+        r#"{ answer: () => ({ status: "accepted", stopReason: "max_tokens", content: "cut" }) }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 3, "{out}");
+    assert_eq!(out["lands"], 0, "nothing was judged: {out}");
+    assert_eq!(
+        evidence(&out, 0)["progress_history"][0]["kind"],
+        "incomplete"
+    );
 }
 
 /// Issue 288: a stall pauses observe too (resumable); a committed artifact
 /// with open findings is never returned.
 #[test]
-fn observe_mode_reauthors_a_stalled_candidate_instead_of_returning_it() {
-    let out = run(
-        "observe",
-        r#"{ findings: (n) => n <= 13 ? ["defect alpha"] : [] }"#,
-        BODY,
-    );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+fn observe_mode_pauses_on_a_stall_instead_of_returning_the_committed_artifact() {
+    let out = run("observe", r#"{ findings: () => ["defect alpha"] }"#, BODY);
+    assert_paused(&out);
+    assert!(out.get("accepted").is_none(), "{out}");
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"], "{out}");
+    assert_eq!(evidence(&out, 0)["reason"], "no_progress", "{out}");
 }
 
 // --- resume -----------------------------------------------------------------
 
 #[test]
-fn a_replayed_rung_call_sequence_completes_without_operator_resume() {
-    let out = body(r#"{ findings: (n) => n <= 13 ? ["defect alpha"] : [] }"#);
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
-    let rung_events: Vec<_> = out["progress_events"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|event| event.as_str().filter(|event| event.contains("repair rung")))
-        .collect();
-    assert_eq!(
-        rung_events.len(),
-        4,
-        "the same call sequence reconstructs the ladder: {rung_events:?}"
+fn a_resumed_pause_continues_the_loop_and_can_accept() {
+    let out = body(
+        r#"{ resumed: ["pause-body-TASK-X-010-1"], findings: (n) => n <= 5 ? ["defect alpha"] : [] }"#,
     );
+    assert_eq!(out["accepted"], true, "{out}");
+    assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"], "{out}");
+    assert_eq!(out["calls"], 6, "{out}");
+}
+
+#[test]
+fn a_resume_grants_one_fresh_window_not_an_immediate_re_pause() {
+    let out = body(r#"{ resumed: ["pause-body-TASK-X-010-1"], findings: () => ["defect alpha"] }"#);
+    assert_paused(&out);
+    assert_eq!(
+        pause_ids(&out),
+        ["pause-body-TASK-X-010-1", "pause-body-TASK-X-010-2"],
+        "{out}"
+    );
+    assert_eq!(
+        out["calls"], 7,
+        "three new attempts after the resume: {out}"
+    );
+    let second = evidence(&out, 1);
+    assert_eq!(second["ordinal"], 2, "{second}");
+    assert_eq!(second["author_calls"], 7, "{second}");
 }
 
 // --- operational attempts follow the same rule ------------------------------
 
 #[test]
-fn consecutive_operational_failures_record_the_host_retry_window_without_resume_advice() {
+fn consecutive_operational_failures_pause_instead_of_failing() {
     let out = body(
         r#"{ answer: () => ({ status: "failed", summary: "agent transport failed: stream ended" }) }"#,
     );
-    assert_eq!(pause_ids(&out).len(), 1, "{out}");
-    assert_eq!(
-        out["pauses"][0]["evidence"]["reason"],
-        "operational_no_progress"
-    );
-    let evidence = out["pauses"][0]["evidence"].to_string();
+    assert_paused(&out);
+    assert_eq!(out["calls"], 3, "{out}");
+    let evidence = evidence(&out, 0);
+    assert_eq!(evidence["reason"], "operational_no_progress", "{evidence}");
     assert!(
-        evidence.contains("agent transport failed: stream ended"),
-        "{out}"
+        evidence["last_findings"][0]
+            .as_str()
+            .is_some_and(|text| text.contains("agent transport failed")),
+        "{evidence}"
     );
-    assert!(!evidence.contains("resume"), "{out}");
-    assert!(out["terminalStops"].as_array().unwrap().is_empty(), "{out}");
 }
 
 #[test]
@@ -342,45 +367,55 @@ fn operational_failures_between_answers_do_not_pause() {
 }
 
 #[test]
-fn operational_replay_retains_evidence_and_retries_until_recovery() {
+fn an_operational_stall_after_a_resume_gets_a_fresh_window() {
     let out = body(
-        r#"{ resumed: ["pause-body-TASK-X-010-1"], answer: (n) => n <= 5 ? {status:"failed",summary:"down"} : {status:"accepted",stopReason:"end_turn",content:"complete"} }"#,
+        r#"{ resumed: ["pause-body-TASK-X-010-1"], answer: () => ({ status: "failed", summary: "down" }) }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
+    assert_paused(&out);
+    assert_eq!(pause_ids(&out).len(), 2, "{out}");
     assert_eq!(out["calls"], 6, "{out}");
-    assert_eq!(pause_ids(&out).len(), 1, "{out}");
-    let recovery = out["pauses"][0]["evidence"]["recovery"].as_str().unwrap();
-    assert!(
-        recovery.contains("down") && recovery.contains("retries"),
-        "{out}"
-    );
-    assert!(!recovery.contains("resume"), "{out}");
 }
 
 #[test]
-fn an_acceptance_entry_that_never_parses_advances_the_ladder() {
+fn an_acceptance_entry_that_never_parses_pauses_the_run() {
+    // Every reply is prose: its new malformed-reply class is progress once,
+    // then three repeated classes without progress pause the run.
     let out = run(
         "enforce",
-        r##"{ answer: (n, id) => id.startsWith("acceptance-author-") && n <= 13 ? ({ status: "accepted", stopReason: "end_turn", content: "I could not produce an entry." }) : ({ status: "accepted", stopReason: "end_turn", content: id.startsWith("acceptance-author-") ? JSON.stringify({ id: "AC-X-001" }) : "# body" }) }"##,
+        r#"{ answer: () => ({ status: "accepted", stopReason: "end_turn", content: "I could not produce an entry." }) }"#,
         "workflow(w)",
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(pause_ids(&out), ["pause-acceptance-1"], "{out}");
+    assert_eq!(
+        evidence(&out, 0)["reason"],
+        "no_progress",
+        "the provider answered every reply: not an outage"
+    );
 }
 
 #[test]
-fn a_stalled_body_waits_for_independent_bodies_then_reenters_without_pause() {
+fn a_stalled_body_waits_until_independent_bodies_finish_then_retries_on_resume() {
     let out = run(
         "enforce",
         r##"{
+          resumed: ["pause-authored-pending-1"],
           answer: (_n, id) => ({ status: "accepted", stopReason: "end_turn", content: "# body " + id }),
-          findings: (_n, _capability, options) => options?.target?.taskId === "TASK-X-001" && calls.filter(id => id.includes("TASK-X-001")).length <= 10
+          findings: (_n, _capability, options) => options?.target?.taskId === "TASK-X-001" && calls.filter(id => id.includes("TASK-X-001")).length <= 4
             ? ["candidate artifact was refused: repeated body defect"] : []
         }"##,
         "authorBodies(w, work, bodies)",
     );
     assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_eq!(
+        out["pauses"][0]["evidence"]["reason"], "authored_pending",
+        "{out}"
+    );
+    assert_eq!(
+        out["pauses"][0]["evidence"]["pending_subjects"],
+        serde_json::json!(["TASK-X-001"])
+    );
     let events = out["events"].as_array().unwrap();
     let sibling_gate = events
         .iter()
@@ -388,15 +423,15 @@ fn a_stalled_body_waits_for_independent_bodies_then_reenters_without_pause() {
         .unwrap();
     let pending = events
         .iter()
-        .position(|event| event == "author:body-TASK-X-001-author-11")
+        .position(|event| event == "pause:pause-authored-pending-1")
         .unwrap();
     assert!(
         sibling_gate < pending,
-        "independent body must settle before the deferred subject re-enters: {events:?}"
+        "independent body must land before pending pause: {events:?}"
     );
     assert_eq!(
-        out["calls"], 12,
-        "the deferred subject retries only after its sibling settles: {out}"
+        out["calls"], 6,
+        "the resumed run retries only the stalled subject: {out}"
     );
 }
 

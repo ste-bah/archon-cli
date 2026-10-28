@@ -1,6 +1,6 @@
 // Issue 362: a clean author round leaves nothing to re-author. A freeze that
 // fails operationally (no findings) is retried with the same entries and no
-// author call; a host fault stops with its reported remedy and never asks for resume.
+// author call; a persisting outage pauses (resumable), never re-authors.
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -24,7 +24,7 @@ async function run(gates) {
   const authored = [], stdins = [], pauses = [], prompts = [];
   let error;
   try {
-    await ctx.authorCandidate({ checkpoint: async () => {},
+    await ctx.authorCandidate({
       agent: async (_, options) => {
         if (authored.length > 30) throw new Error('bounded test exhausted');
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
@@ -35,7 +35,8 @@ async function run(gates) {
       },
       hostCommand: async (_, {stdin}) => {
         stdins.push(stdin);
-        return stdins.length > gates.length ? clean() : gates[stdins.length - 1]();
+        if (stdins.length > gates.length) throw new Error('unexpected freeze');
+        return gates[stdins.length - 1]();
       },
       pause: async (_, evidence) => { pauses.push(evidence); },
     }, {phase:'acceptance', prompt:() => 'author', author:ctx.authorAcceptanceEntries,
@@ -44,7 +45,7 @@ async function run(gates) {
   return {authored, stdins, pauses, prompts, error};
 }
 
-async function hostOutageRetriesTheFirstCandidate() {
+async function outageAfterFirstPass() {
   const out = await run([outage, clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C'], 'the healthy first pass is not re-authored');
@@ -53,7 +54,7 @@ async function hostOutageRetriesTheFirstCandidate() {
   assert.equal(out.pauses.length, 0);
 }
 
-async function hostOutageRetriesOnlyTheRepairedCandidate() {
+async function outageAfterPartialRepair() {
   const out = await run([() => refute('B'), outage, clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C', 'B'], 'only the refuted entry was re-authored, once');
@@ -61,7 +62,7 @@ async function hostOutageRetriesOnlyTheRepairedCandidate() {
   assert.equal(out.stdins[2], out.stdins[1], 'the repaired candidate is frozen again unchanged');
 }
 
-async function twoHostOutagesPreserveTheAuthoredWindow() {
+async function twoOutagesInARow() {
   const out = await run([outage, outage, clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C']);
@@ -74,13 +75,12 @@ async function twoHostOutagesPreserveTheAuthoredWindow() {
 // retries the freeze, still without an author call. The first outage credits
 // the round that added the missing entries; two further consecutive outages
 // fill the independent operational window.
-async function hostOutageWindowRecordsRetryEvidenceThenRecovers() {
+async function persistingOutagePausesThenResumes() {
   const out = await run([outage, outage, outage, outage, clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C']);
   assert.equal(out.stdins.length, 5);
-  assert.match(out.pauses[0].recovery, /retries/);
-  assert.doesNotMatch(JSON.stringify(out.pauses), /resume/i);
+  assert.deepEqual(Array.from(out.pauses[0].progress_history, step => step.progress), [true, false, false]);
   assert.equal(out.pauses.length, 1);
   assert.equal(out.pauses[0].reason, 'operational_no_progress');
 }
@@ -127,12 +127,12 @@ async function staleContractReauthorsOnlyUnsuppliedFlaggedEntries() {
 
 // A contract that keeps changing under the freeze counts in the ordinary
 // no-progress window: the loop pauses with evidence, never retries forever.
-async function persistingStaleContractReentersTheAuthorLoop() {
+async function persistingStaleContractPausesOnNoProgress() {
   const out = await run([stale(published), stale(published), stale(published), stale(published), clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C']);
-  assert.equal(out.pauses.length, 0);
-  assert.deepEqual(out.authored, ['A', 'B', 'C']);
+  assert.equal(out.pauses.length, 1);
+  assert.equal(out.pauses[0].reason, 'no_progress');
 }
 
 // B5: the stale contract changed elsewhere (B), not the entry this round
@@ -173,7 +173,7 @@ const unproven = {text:"check 'A': operational: the host could not prove it", su
 const unprovenBeside = id => () => ({postcondition:{satisfied:false}, gateEnvelope:{policy_findings:[
   unproven, {text:`check '${id}': its own run gave no verdict; the check must change`, subject:id,
     remediation_scope:'candidate_artifact'}]}});
-async function mixedHostEvidenceRepairsOnlyTheAuthoredEntry() {
+async function anUnprovenCheckBesideAnAuthoredFindingStopsNothing() {
   const out = await run([unprovenBeside('B'), clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C', 'B'], 'only the authored finding is re-authored');
@@ -185,17 +185,17 @@ async function anUnprovenCheckAloneStopsThePhase() {
 }
 
 const tests = [
-  ['mixed host evidence repairs only the authored entry', mixedHostEvidenceRepairsOnlyTheAuthoredEntry],
+  ['an unproven check beside an authored finding stops nothing', anUnprovenCheckBesideAnAuthoredFindingStopsNothing],
   ['an unproven check alone stops the phase', anUnprovenCheckAloneStopsThePhase],
   ['a stale freeze keeps the round\'s unpublished repair', staleContractKeepsTheRoundsUnpublishedRepair],
   ['a published change since the draft base wins and shows the draft', stalePublishedChangeWinsAndShowsTheDraft],
   ['a stale freeze rebuilds from the current contract', staleContractRebuildsFromTheCurrentContract],
   ['a stale freeze re-authors only flagged entries it does not supply', staleContractReauthorsOnlyUnsuppliedFlaggedEntries],
-  ['a persisting stale contract re-enters the author loop', persistingStaleContractReentersTheAuthorLoop],
-  ['outage right after the first pass', hostOutageRetriesTheFirstCandidate],
-  ['outage after a partial repair', hostOutageRetriesOnlyTheRepairedCandidate],
-  ['two outages in a row', twoHostOutagesPreserveTheAuthoredWindow],
-  ['a host outage window records retry evidence then recovers', hostOutageWindowRecordsRetryEvidenceThenRecovers],
+  ['a persisting stale contract pauses on no progress', persistingStaleContractPausesOnNoProgress],
+  ['outage right after the first pass', outageAfterFirstPass],
+  ['outage after a partial repair', outageAfterPartialRepair],
+  ['two outages in a row', twoOutagesInARow],
+  ['a persisting outage pauses, then resumes without re-authoring', persistingOutagePausesThenResumes],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {

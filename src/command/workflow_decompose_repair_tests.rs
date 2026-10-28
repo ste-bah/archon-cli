@@ -90,8 +90,9 @@ fn run_js(driver: &str) -> String {
         "isDeterministic",
         "stageOf",
         "attemptMeasure",
-        // Issue 529: a new lowest failing-subject count is progress.
+        // Issue 529: a strictly shrinking failing-subject set is progress.
         "failingSubjectKey",
+        "isStrictSubset",
         "isBetter",
         "newProgress",
         // Issue 357: the per-entry shape-repair frontier.
@@ -175,6 +176,8 @@ async function __archonHost(method, payload) {
     let path = dir.path().join("phase.mjs");
     std::fs::write(&path, script).expect("write driver");
     let out = std::process::Command::new("node")
+        .arg("-e")
+        .arg("const r = require('node:child_process').spawnSync(process.execPath, [process.argv[1]], {timeout:30000,stdio:'inherit'}); if (r.error) console.error(r.error); process.exitCode = r.status ?? 1;")
         .arg(&path)
         .output()
         .expect("node must be available");
@@ -328,15 +331,15 @@ fn a_prd_input_finding_stops_the_phase_in_observe_mode() {
 /// used to fall back), and never fails the run. Issue 261: one baseline
 /// attempt and the stall window, not a fixed budget.
 #[test]
-fn observe_reauthors_a_stalled_committed_artifact_until_it_clears() {
+fn observe_pauses_instead_of_returning_the_committed_artifact_when_the_loop_stalls() {
     let out = run_js(&driver(
         r#"[{ "text": "floor is not falsifiable", "remediation_scope": "candidate_artifact" }]"#,
         2,
         true,
     ));
     assert_eq!(
-        out, r#"{"authorCalls":14,"committed":true}"#,
-        "observe must keep repairing until the finding clears: {out}"
+        out, r#"{"authorCalls":4,"error":"paused","terminalStops":[]}"#,
+        "observe must repair until the loop stalls and then pause: {out}"
     );
 }
 
@@ -345,7 +348,7 @@ fn observe_reauthors_a_stalled_committed_artifact_until_it_clears() {
 /// committed artifact). Every publication replaces the live tree, so an
 /// earlier round with fewer findings would describe a tree that is gone.
 #[test]
-fn a_stalled_observe_loop_reauthors_until_findings_clear() {
+fn a_stalled_observe_loop_pauses_with_the_latest_findings() {
     let driver = r#"
 globalThis.args = { gateMode: "observe" };
 let call = 0;
@@ -353,7 +356,7 @@ let paused = null;
 const finding = (n) => Array.from({ length: n }, (_, i) => ({
   text: "defect " + i, remediation_scope: "candidate_artifact",
 }));
-const w = { checkpoint: async () => {},
+const w = {
   agent: async () => {
     call += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{}" };
@@ -363,7 +366,7 @@ const w = { checkpoint: async () => {},
   hostCommand: async () => ({
     publicationReceipt: { id: "commit-" + call },
     postcondition: { satisfied: true },
-    gateEnvelope: { policy_findings: call <= 13 ? finding(call === 2 ? 1 : 2) : [] },
+    gateEnvelope: { policy_findings: finding(call === 2 ? 1 : 2) },
   }),
 };
 const policy = {
@@ -380,8 +383,10 @@ authorCandidate(w, policy).then(
 "#;
     assert_eq!(
         run_js(driver),
-        r#"{"kept":"commit-14"}"#,
-        "the stalled phase must repair until the live tree has no finding"
+        // Issue 529: the shrink to one failing finding at call 2 is progress,
+        // so the window closes after calls 3-5.
+        r#"{"error":"paused","calls":5,"last":["defect 0","defect 1"]}"#,
+        "the stalled phase must pause with the findings of the live tree"
     );
 }
 
@@ -422,7 +427,7 @@ fn repair_feedback_carries_what_earlier_attempts_already_tried() {
 globalThis.args = { gateMode: "observe" };
 let prompts = [];
 let call = 0;
-const w = { checkpoint: async () => {},
+const w = {
   agent: async (_id, opts) => {
     prompts.push(opts.task);
     call += 1;

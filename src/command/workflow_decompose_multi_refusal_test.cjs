@@ -25,14 +25,14 @@ async function run(seq, cap) {
   const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])), authorMaxParallelism:cap, gateMode:'enforce'},
     __archonValidateAcceptanceEntry: (id, serialized) => {
       const entry = JSON.parse(serialized);
-      const n = entry.version === 1 || entry.version > 13 ? 0 : seq[id](entry.version - 1);
+      const n = entry.version === 1 ? 0 : seq[id](entry.version - 1);
       return JSON.stringify(fields.slice(0, n).map(field => shape(id, field)));
     }};
   vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   let calls = 0, gates = 0, error;
   const versions = new Map(), pauses = [], prompts = [];
   try {
-    await ctx.authorCandidate({ checkpoint: async () => {},
+    await ctx.authorCandidate({
       agent: async (_, options) => {
         if (++calls > 60) throw new Error('bounded test exhausted');
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
@@ -64,12 +64,15 @@ function ownRefusalsOnly(out, ids) {
 }
 
 // Probe scenario 1: A stays at 1 defect while B shrinks 3 -> 2 -> 1 -> 0.
-// A then receives the remaining repair strategies until it clears.
+// Every round B improves is progress; only A's stall afterwards pauses.
 async function stuckBesideShrinking() {
   const out = await run({A:() => 1, B:n => Math.max(4 - n, 0)}, 2);
-  assert.equal(out.error, undefined, 'A continues through the ladder');
-  assert.equal(out.pauses.length, 0);
-  assert.ok(out.calls > 13);
+  assert.equal(out.error, 'paused', 'A stuck alone still pauses');
+  assert.equal(out.calls, 13, 'judged round, 4 rounds of A+B while B shrinks, then 3 stalled rounds of A');
+  assert.deepEqual(out.flags, [true, true, true, true, true, false, false, false]);
+  assert.deepEqual(Array.from(out.history[1].entries, e => [e.subject, e.findings]), [['A', 1], ['B', 3]], 'both refusals are measured');
+  assert.deepEqual(Array.from(out.history[4].entries, e => [e.subject, e.progress]), [['A', false], ['B', true]], 'B passing beats its best');
+  assert.ok(out.pauses[0].last_findings.some(text => text.includes("'A' was refused")));
   ownRefusalsOnly(out, ['A', 'B']);
 }
 
@@ -78,8 +81,11 @@ async function stuckBesideShrinking() {
 // recorded as worse and credits nothing. The rounds after it are B alone at 4.
 async function regressionBesideFix() {
   const out = await run({A:n => n >= 2 ? 0 : 1, B:n => n >= 2 ? 4 : 1}, 2);
-  assert.equal(out.error, undefined);
-  assert.equal(out.pauses.length, 0);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 9, 'judged round, A+B twice, then 3 stalled rounds of B');
+  assert.deepEqual(out.flags, [true, true, true, false, false, false]);
+  assert.deepEqual(Array.from(out.history[2].entries, e => [e.subject, e.findings, e.progress, e.worse]),
+    [['B', 4, false, true], ['A', 0, true, false]], 'only A passing makes the round progress');
   ownRefusalsOnly(out, ['A', 'B']);
 }
 
@@ -87,35 +93,44 @@ async function regressionBesideFix() {
 // round where B goes 1 -> 4 is no progress.
 async function regressionBesideStuck() {
   const out = await run({A:() => 1, B:n => n >= 2 ? 4 : 1}, 2);
-  assert.equal(out.error, undefined);
-  assert.equal(out.pauses.length, 0);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 10);
+  assert.deepEqual(out.flags, [true, true, false, false, false]);
+  assert.deepEqual(Array.from(out.history[2].entries, e => [e.subject, e.progress, e.worse]),
+    [['A', false, false], ['B', false, true]]);
 }
 
 // Three entries in one window: A 2 -> 1 -> 0, B 1 -> 0, C 1 -> 2 -> 2. C getting
 // worse cancels nothing: the rounds where A or B beat their bests are
-// progress; C alone then receives a fresh repair strategy.
+// progress; C alone, behind its best, then stalls and pauses.
 async function threeEntries() {
   const out = await run({A:n => Math.max(3 - n, 0), B:n => n >= 2 ? 0 : 1, C:n => n >= 2 ? 2 : 1}, 3);
-  assert.equal(out.error, undefined);
-  assert.equal(out.pauses.length, 0);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 14, 'judged round, A+B+C twice, A+C, then 3 rounds of C alone');
+  assert.deepEqual(out.flags, [true, true, true, true, false, false, false]);
+  assert.deepEqual(Array.from(out.history[2].entries, e => [e.subject, e.progress, e.worse]),
+    [['A', true, false], ['C', false, true], ['B', true, false]]);
   ownRefusalsOnly(out, ['A', 'B', 'C']);
 }
 
 // Bound: two entries trading defects forever (A 1,2,1,2... and B 2,1,2,1...)
 // make progress only while a best still improves. Once both bests are 1 no
-// round beats a best, so the loop advances repair strategies.
-async function oscillatingPairAdvancesTheLadder() {
+// round beats a best, so the loop pauses after the no-progress window.
+async function oscillatingPairIsBounded() {
   const out = await run({A:n => n % 2 ? 1 : 2, B:n => n % 2 ? 2 : 1}, 2);
-  assert.equal(out.error, undefined, 'an oscillating pair advances strategy until clean');
-  assert.equal(out.pauses.length, 0);
+  assert.equal(out.error, 'paused', 'an oscillating pair cannot loop forever');
+  assert.deepEqual(out.flags, [true, true, true, false, false, false]);
+  assert.equal(out.calls, 12);
+  assert.deepEqual(Array.from(out.history[2].entries, e => [e.subject, e.findings, e.progress, e.worse]),
+    [['A', 2, false, true], ['B', 1, true, false]]);
 }
 
 const tests = [
-  ['stuck entry beside a shrinking one: ladder continues', stuckBesideShrinking],
+  ['stuck entry beside a shrinking one: progress while B shrinks', stuckBesideShrinking],
   ['regression beside a fix: progress only because A beat its best', regressionBesideFix],
   ['regression beside a stuck entry is not progress', regressionBesideStuck],
   ['three entries: a worse entry cancels no progress', threeEntries],
-  ['an oscillating pair advances the ladder', oscillatingPairAdvancesTheLadder],
+  ['an oscillating pair is bounded', oscillatingPairIsBounded],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {

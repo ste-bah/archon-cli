@@ -1,7 +1,8 @@
 // Issue 357 round 7: an entry that beats its own best is progress in every
 // kind of failed round (a sibling refused, unparseable or never answered);
 // each entry's note stays in its own slot and the shared repair list stays
-// the gate's findings; stalled authored windows advance the ladder.
+// the gate's findings; observe pauses on a window that holds an outage, and
+// (Issue 288) on every other stalled window too.
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -31,13 +32,7 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
   const decided = new Map();
   const at = (id, version, task) => typeof script[id] === 'function' ? script[id](version, task)
     : !script[id] ? 'ok' : script[id][Math.min(version, script[id].length) - 1];
-  const logs = [], rungs = [], rounds = [];
   const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])), prdRequirementTexts:{'REQ-1':'must hold REQ-1'}, authorMaxParallelism:cap, gateMode:mode},
-    console:{log: line => {
-      logs.push(String(line));
-      rungs.push({line:String(line), calls, gate, trace:JSON.parse(JSON.stringify(ctx.progressTrace))});
-    }},
-    __archonHost: async (_, raw) => { throw new Error(JSON.parse(raw).reason); },
     JSON: Object.assign(Object.create(JSON), {parse(text, ...args) {
       if (text === 'opaque parser fixture') throw new SyntaxError('new provider parser wording');
       return JSON.parse(text, ...args);
@@ -47,36 +42,16 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
       return JSON.stringify(typeof value === 'number' ? fields.slice(0, value).map(field => shape(id, field)) : []);
     }};
   vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
-  vm.runInContext(`
-    globalThis.progressTrace = [];
-    for (const name of ['recordRepairs', 'recordAnswered', 'recordOperational', 'recordAttempt']) {
-      const original = globalThis[name];
-      globalThis[name] = (progress, ...args) => {
-        const result = original(progress, ...args);
-        progressTrace.push(JSON.parse(JSON.stringify({entry:progress.history.at(-1),
-          stalled:progress.stalled, floor:progress.repair.stalled})));
-        return result;
-      };
-    }
-  `, ctx);
-  const originalRoundReport = ctx.authorRoundReport;
-  let previousAdded = 0;
-  ctx.authorRoundReport = (policy, state) => {
-    const report = originalRoundReport(policy, state);
-    rounds.push(JSON.parse(JSON.stringify({...report, added:(state.added || 0) - previousAdded})));
-    previousAdded = state.added || 0;
-    return report;
-  };
   let calls = 0, gate = 0, error, result;
   const versions = new Map(), pauses = [], prompts = [];
   try {
-    result = await ctx.authorCandidate({ checkpoint: async (_id, options) => { const line = options.task; logs.push(line); rungs.push({line, calls, gate, trace:JSON.parse(JSON.stringify(ctx.progressTrace))}); },
+    result = await ctx.authorCandidate({
       agent: async (_, options) => {
         if (++calls > 60) throw new Error('bounded test exhausted');
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
         const version = (versions.get(id) || 0) + 1; versions.set(id, version);
         prompts.push({id, version, task:options.task});
-        const value = version >= 13 ? 'ok' : at(id, version, options.task);
+        const value = at(id, version, options.task);
         decided.set(`${id}@${version}`, value);
         if (value === 'down') return {status:'failed', summary:'transport'};
         if (value === 'bad') return {status:'accepted', stopReason:'end_turn', content:'not json'};
@@ -87,110 +62,108 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
         return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:value === 'wrong' ? 'OTHER' : id, version, criterion:''})};
       },
       hostCommand: async () => {
-        if (++gate > 9) return clean();
+        if (++gate > 40) throw new Error('gate exhausted');
         return gates[Math.min(gate, gates.length) - 1]();
       },
       pause: async (_, evidence) => { pauses.push(evidence); throw new Error('paused'); },
     }, {phase:'acceptance', prompt:() => 'author', author:ctx.authorAcceptanceEntries,
       capability:'freeze-acceptance', retryScopes:new Set(['candidate_artifact'])});
   } catch (e) { error = e.message; }
-  const trace = JSON.parse(JSON.stringify(ctx.progressTrace));
-  const history = trace.map(step => step.entry);
+  const history = pauses[0] ? Array.from(pauses[0].progress_history) : [];
   const prompt = (id, version) => (prompts.find(p => p.id === id && p.version === version) || {}).task || '';
-  return {calls, gate, error, result, pauses, prompts, prompt, history, flags:history.map(step => step.progress), logs, rungs, trace, rounds};
+  return {calls, gate, error, result, pauses, prompts, prompt, history, flags:history.map(step => step.progress)};
 }
 
-const rungEvents = out => out.logs.filter(line => line.includes('repair rung'));
-const assertAuthoredLadderContinued = out => {
-  assert.equal(out.error, undefined, out.error);
-  assert.ok(rungEvents(out).some(line => line.includes('r2')), `recorded calls advanced to r2: ${JSON.stringify(rungEvents(out))}`);
-  assert.deepEqual(out.pauses, []);
-};
-
-function assertFirstRung(out, calls, flags) {
-  assertAuthoredLadderContinued(out);
-  assert.equal(out.rungs[0].calls, calls, 'the original progress window determines the first strategy change');
-  assert.deepEqual(out.rungs[0].trace.map(step => step.entry.progress), flags);
-  assert.equal(out.rungs[0].trace.at(-1).stalled, 3);
-}
 const credited = step => Array.from(step.entries || [], e => [e.subject, e.progress]);
 
 // The judge refutes A and B; both repairs are refused at one defect; then A
 // passes while B fails in the given way, and B then stays at one defect.
-async function passBesideAdvancesAfterSiblingCredit(kind) {
+async function passBeside(kind) {
   const out = await run({A:['ok', 1, 'ok'], B:['ok', 1, kind, 1]}, [refute(['A', 'B']), clean]);
-  assertFirstRung(out, 9, [true, true, true, false, false, false]);
-  assert.ok(credited(out.history[2]).some(([id, progress]) => id === 'A' && progress), 'A passing is credited beside every sibling failure kind');
-  assert.equal(out.prompts.filter(prompt => prompt.id === 'A').length, 3, 'the accepted sibling stays settled');
+  assert.equal(out.error, 'paused', 'B stuck alone still pauses');
+  assert.equal(out.calls, 9, 'judged round, A+B twice, then 3 stalled rounds of B: A passing is progress');
+  assert.deepEqual(out.flags, [true, true, true, false, false, false]);
+  assert.ok(credited(out.history[2]).some(([id, p]) => id === 'A' && p), `A's pass is credited: ${JSON.stringify(out.history[2])}`);
+  return out;
 }
-const passBesideUnparseable = () => passBesideAdvancesAfterSiblingCredit('bad');
-const passBesideTransport = () => passBesideAdvancesAfterSiblingCredit('down');
-const passBesideRefusal = () => passBesideAdvancesAfterSiblingCredit(1);
+const passBesideUnparseable = () => passBeside('bad');
+const passBesideTransport = () => passBeside('down');
+const passBesideRefusal = () => passBeside(1);
 
-// Entry credit restores the episode floor; the earlier judged repeat stays spent.
-async function creditRestoresFloorBeforeLadderTransition() {
+// A credited round restores the window to the episode floor, never below it:
+// the second refutation repeats the first (floor 1), so after A's credit
+// only two more stalled rounds of B fit before the pause.
+async function creditStopsAtTheFloor() {
   const out = await run({A:['ok', 'ok', 1, 'ok'], B:['ok', 'ok', 1, 'bad', 1]}, [refute(['A', 'B']), refute(['A', 'B']), clean]);
-  assertFirstRung(out, 10, [true, false, true, true, false, false]);
-  assert.deepEqual(out.rungs[0].trace.map(step => step.stalled), [0, 1, 1, 1, 2, 3]);
-  assert.equal(out.rungs[0].trace[3].floor, 1, 'credit cannot forgive the preceding judged repeat');
+  assert.equal(out.error, 'paused');
+  assert.deepEqual(out.flags, [true, false, true, true, false, false]);
+  assert.equal(out.calls, 10, 'two judged rounds, A+B twice, then 2 stalled rounds of B');
 }
 
-async function passCreditedOnceBeforeLadderTransition() {
+// A pass is terminal: an entry is credited once. B's first malformed class
+// progresses once, and A passes beside it; neither is credited again later.
+async function passCreditedOnce() {
   const out = await run({A:['ok', 1, 'ok'], B:['ok', 1, 'bad']}, [refute(['A', 'B']), clean]);
-  assertFirstRung(out, 9, [true, true, true, false, false, false]);
+  assert.equal(out.error, 'paused');
+  assert.deepEqual(out.flags, [true, true, true, false, false, false]);
   assert.deepEqual(credited(out.history[2]), [['B', true], ['A', true]]);
   for (const step of out.history.slice(3)) {
-    assert.ok(!(step.entries || []).some(entry => entry.subject === 'A' && entry.progress), 'A earns no second pass credit');
+    assert.ok(!(step.entries || []).some(entry => entry.subject === 'A' && entry.progress), 'A is not credited again');
   }
 }
 
-async function knownMalformedAlternationAdvancesWithoutNewCredit() {
+// Malformed reply classes are entry-local progress once each; a repeated
+// class is no progress, and alternating known classes still spends the window.
+async function malformedClassesCreditOnceAndBoundAlternation() {
   const out = await run({A:['ok', 'bad', 'bad', 'wrong', 'wrong', 'bad', 'wrong', 'bad']},
     [refute(['A']), clean], {cap:1});
-  assertFirstRung(out, 7, [true, true, false, true, false, false, false]);
-  const malformed = out.rungs[0].trace.slice(1).map(step => step.entry.entries[0]);
-  assert.deepEqual(malformed.map(entry => entry.malformed_class),
-    ['parse-error:unexpected-token:location-unknown', 'parse-error:unexpected-token:location-unknown',
-      'wrong-id', 'wrong-id', 'parse-error:unexpected-token:location-unknown', 'wrong-id']);
-  assert.deepEqual(malformed.map(entry => entry.progress), [true, false, true, false, false, false]);
+  assert.equal(out.error, 'paused', 'the repeated A/B alternation exhausts the 3-attempt no-progress window');
+  assert.deepEqual(out.flags, [true, true, false, true, false, false, false]);
+  const malformed = out.history.slice(1);
+  assert.deepEqual(malformed.map(step => step.entries[0].malformed_class),
+    ['parse-error:unexpected-token:location-unknown', 'parse-error:unexpected-token:location-unknown', 'wrong-id', 'wrong-id',
+      'parse-error:unexpected-token:location-unknown', 'wrong-id']);
+  assert.deepEqual(malformed.map(step => step.entries[0].progress), [true, false, true, false, false, false]);
 }
 
-async function unknownParserClassAdvancesWithoutRepeatCredit() {
+async function unknownClassesRepeatWithoutProgress() {
   const out = await run({A:['badUnknown']}, [refute(['A']), clean], {cap:1});
-  assertFirstRung(out, 4, [true, false, false, false]);
-  assert.deepEqual(out.rungs[0].trace.map(step => step.entry.entries[0].malformed_class),
-    Array(4).fill('parse-error:other:location-unknown'));
+  assert.equal(out.error, 'paused');
+  assert.deepEqual(out.flags, [true, false, false, false]);
+  assert.deepEqual(out.history.map(step => step.entries[0].malformed_class),
+    ['parse-error:other:location-unknown', 'parse-error:other:location-unknown', 'parse-error:other:location-unknown', 'parse-error:other:location-unknown']);
+  assert.deepEqual(out.history.map(step => step.entries[0].progress), [true, false, false, false]);
 }
 
-async function unknownStopReasonAdvancesWithoutRepeatCredit() {
+async function unknownStopReasonsRepeatWithoutProgress() {
   const out = await run({A:['stopUnknown']}, [refute(['A']), clean], {cap:1});
-  assertFirstRung(out, 4, [true, false, false, false]);
-  assert.deepEqual(out.rungs[0].trace.map(step => step.entry.entries[0].malformed_class), Array(4).fill('stop-other'));
+  assert.equal(out.error, 'paused');
+  assert.deepEqual(out.flags, [true, false, false, false]);
+  assert.deepEqual(out.history.map(step => step.entries[0].malformed_class),
+    ['stop-other', 'stop-other', 'stop-other', 'stop-other']);
+  assert.deepEqual(out.history.map(step => step.entries[0].progress), [true, false, false, false]);
 }
 
-async function mixedRefusalsRetainBothCreditsBeforeLadderTransition() {
+async function mixedMalformedAndValidatorRefusalsKeepBothProgress() {
   const out = await run({A:['bad'], B:[1]}, [refute(['A', 'B']), clean], {cap:2});
-  assertFirstRung(out, 8, [true, false, false, false]);
-  assert.deepEqual(credited(out.history[0]), [['A', true], ['B', true]]);
-  assert.equal(out.history[0].entries[0].malformed_class, 'parse-error:unexpected-token:location-unknown');
-  assert.equal(out.history[0].entries[1].findings, 1);
+  assert.equal(out.error, 'paused');
+  const mixed = out.history[0];
+  assert.deepEqual(credited(mixed), [['A', true], ['B', true]]);
+  assert.equal(mixed.entries[0].malformed_class, 'parse-error:unexpected-token:location-unknown');
+  assert.equal(mixed.entries[1].findings, 1);
 }
 
-// A rewrite unmeasured by the entry validator is novelty, not progress.
-async function unmeasuredRewriteAdvancesWithoutCredit(kind) {
+// Issue 261 kept: a rewrite of a judge-refuted entry that passes the author
+// step without any measured refusal in the episode is novelty, not progress,
+// whatever the sibling's failure.
+async function unmeasuredRewriteIsNotCredited(kind) {
   const out = await run({A:['ok'], B:['ok', kind]}, [refute(['A', 'B']), clean]);
-  if (kind === 'bad') assertFirstRung(out, 7, [true, true, false, false, false]);
-  else {
-    assert.equal(out.error, 'paused');
-    assert.equal(out.pauses[0].reason, 'operational_no_progress');
-    assert.deepEqual(out.flags, [true, false, false, false]);
-    assert.deepEqual(out.trace.map(step => step.stalled), [0, 0, 0, 0]);
-    assert.equal(out.rungs.length, 0);
-    assert.equal(out.pauses.length, 1);
-  }
-  assert.ok(!out.history.slice(1).some(step => credited(step).some(([id, progress]) => id === 'A' && progress)));
-  if (kind === 'bad') assert.ok(credited(out.history[1]).some(([id, progress]) => id === 'B' && progress));
-  else assert.equal(out.history[1].entries, undefined);
+  assert.equal(out.error, 'paused');
+  const expected = kind === 'bad' ? [true, true, false, false, false] : [true, false, false, false];
+  assert.deepEqual(out.flags, expected);
+  if (kind === 'bad') assert.ok(credited(out.history[1]).some(([id, improved]) => id === 'B' && improved),
+    'a new malformed-reply class is progress once for its entry');
+  else assert.equal(out.history[1].entries, undefined, 'a rewrite beside transport failure is not measured');
 }
 
 // B's unparseable reply is B's own note: C (whose call failed in the same
@@ -231,173 +204,167 @@ async function refusalSurvivesOutage() {
   assert.equal(out.gate, 3);
 }
 
-// A clean author pass stays retained when the next gate reports a host fault.
-async function cleanPassSurvivesHostRetries() {
+// Review r357g F2 probe: A is repaired in a clean round and the freeze then
+// has two outages. A's pass is progress whatever the gate does next, so the
+// window is not spent and the third freeze completes.
+async function cleanPassBeforeOutages() {
   const out = await run({A:['ok', 'ok', 1, 'ok']}, [refute(['A']), refute(['A']), outage, outage, clean]);
-  assert.equal(out.error, undefined);
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
   assert.equal(out.gate, 5);
-  assert.ok(out.history.some(step => step.kind === 'operational' && step.progress), 'the clean pass earns credit before the retry');
-  assert.equal(out.pauses.length, 0);
 }
 // F2 control: the same pass beside a sibling's transport failure.
-async function siblingPassIsCreditedBeforeHostRetry() {
-  const out = await run({A:['ok', 'ok', 1, 'ok'], Z:['ok', 'ok', 1, 'down', 'ok']},
+async function cleanPassControl() {
+  const out = await run({A:['ok', 'ok', 1, 'ok'], Z:['ok', 'ok', 'ok', 'down', 'ok']},
     [refute(['A', 'Z']), refute(['A', 'Z']), outage, clean]);
-  assert.equal(out.error, undefined);
-  assert.ok(out.rounds.some(round => round.passed.includes('A') && round.outage));
-  assert.ok(out.history.some(step => (step.outage || step.kind === 'operational') && credited(step).some(([id, progress]) => id === 'A' && progress)));
-  assert.equal(out.pauses.length, 0);
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
 }
 // The judged path credits a clean pass too, but a judged repeat still adds
 // one to the next floor: A's pass forgives its stalled refusal (window 1 -> 0)
 // and the refutation then counts (0 -> 1), so A gets one more stalled round.
-async function cleanPassBeforeJudgedRepeatAdvancesTheLadder() {
+async function cleanPassBeforeJudgedRepeat() {
   const out = await run({A:['ok', 1, 1, 'ok', 1]}, [refute(['A'])]);
-  assertFirstRung(out, 7, [true, true, false, false, true, false, false]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 7, 'judged, 1, 1, pass+judged, then 1 x3 from floor 1');
   assert.deepEqual(credited(out.history[3]), [['A', true]]);
-  assert.equal(out.history[3].progress, false, 'the judged repeat remains no progress despite the pass');
+  assert.equal(out.history[3].progress, false, 'the judged repeat is no progress');
 }
-// A judge that refutes every candidate advances the ladder until the fixture
-// supplies a complete accepted candidate.
-async function endlessRefutationAdvancesTheLadder() {
+// Bound: a judge that refutes every candidate, with a shape repair between,
+// still pauses: each judged repeat raises the next floor.
+async function endlessRefutationPauses() {
   const out = await run({A:(v) => v % 2 ? 'ok' : 1}, [refute(['A'])]);
-  assert.equal(out.rungs[0].calls, 7, 'each judged repeat raises the next episode floor');
-  assertAuthoredLadderContinued(out);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 7);
 }
 
-// A transport failure hidden behind an authored refusal stays operational.
-async function hiddenOutageRetainsItsClassificationBeforeLadderTransition(kind) {
+// Review r357g F3: an outage in a round whose first failure is a refusal or
+// an unparseable reply is still an outage of the window, so observe pauses.
+async function hiddenOutagePauses(kind) {
   const out = await run({A:['ok', 1, kind, 1], B:['ok', 1, 'down', 1]}, [refute(['A', 'B'])], {mode:'observe'});
-  assertAuthoredLadderContinued(out);
-  assert.equal(out.history[2].outage, true, 'a sibling transport failure remains visible behind the first refusal');
-  assert.equal(out.trace[2].stalled, 0, 'the mixed operational round spends no authored attempt');
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.history[2].outage, true, JSON.stringify(out.history[2]));
 }
-// The control without a transport failure spends the authored window.
-async function noOutageAdvancesTheLadderToo() {
+// F3 control: the same window without the transport failure also pauses
+// (Issue 288: a stall never returns an artifact), but as a measured stall.
+async function noOutagePausesToo() {
   const out = await run({A:['ok', 1], B:['ok', 1]}, [refute(['A', 'B'])], {mode:'observe'});
-  assertAuthoredLadderContinued(out);
-  assertFirstRung(out, 10, [true, true, false, false, false]);
-  assert.notEqual(out.history[2].outage, true);
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.pauses.length, 1);
+  assert.equal(out.pauses[0].reason, 'no_progress', JSON.stringify(out.pauses[0]));
+  assert.notEqual(out.history[2].outage, true, JSON.stringify(out.history[2]));
 }
 
-// A non-transient gate fault stops with its reported detail.
-async function hostRetriesUseTheirOwnWindow() {
+// Observe: a window that ends on outages after a judged repeat pauses
+// (resumable); it never returns the commit the outages left unjudged.
+async function oneOperationalWindowDoesNotBorrowJudgedAttempts() {
   const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, outage, clean], {mode:'observe'});
-  assert.equal(out.error, undefined);
-  assert.equal(out.gate, 5);
+  assert.equal(out.error, undefined, `two operational rounds fit their own window: ${JSON.stringify(out.pauses)}`);
   assert.deepEqual(out.pauses, []);
 }
 // A successful gate resets operational attempts; author findings before it do not.
-async function successfulGateResetsTheHostRetryWindow() {
+async function successfulGateResetsOperationalWindow() {
   const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, refute(['A']), clean], {mode:'observe'});
-  assert.equal(out.error, undefined);
-  assert.equal(out.gate, 5);
+  assert.equal(out.error, undefined, `the refutation was judged successfully and reset the window: ${JSON.stringify(out.pauses)}`);
   assert.deepEqual(out.pauses, []);
 }
-// Judged repeats advance observe through the same authored ladder.
-async function observeJudgedRepeatsAdvanceTheLadder() {
+// Control: judged repeats alone pause observe too (Issue 288), with the
+// open refutation as evidence; the committed artifact is not returned.
+async function observeJudgedRepeatsPause() {
   const out = await run({A:['ok']}, [refute(['A'])], {mode:'observe'});
-  assertAuthoredLadderContinued(out);
-  assertFirstRung(out, 4, [true, false, false, false]);
-  assert.deepEqual(out.rungs[0].trace.map(step => step.entry.kind), Array(4).fill('judged'));
-  assert.ok(out.prompts.some(prompt => /check 'A'/.test(prompt.task)), 'the judge finding remains in the author call');
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.gate, 4, 'first refutation, then 3 judged repeats');
+  assert.deepEqual(out.history.map(step => step.kind), ['judged', 'judged', 'judged', 'judged']);
+  assert.ok(Array.from(out.pauses[0].last_findings).some(text => text.includes("check 'A' was refuted")),
+    JSON.stringify(out.pauses[0].last_findings));
 }
 
 // N1: an owed entry completed in a clean round is progress even when the
 // freeze then has an outage (the round added a previously missing entry).
-async function newEntryIsCreditedBeforeHostRetries() {
+async function newEntryBeforeOutages() {
   const out = await run({A:['ok']}, [refute(['A']), owe('REQ-1'), outage, outage, clean]);
-  assert.equal(out.error, undefined);
+  assert.equal(out.error, undefined, `must return, got ${JSON.stringify(out.history)}`);
   assert.equal(out.gate, 5);
-  assert.ok(out.rounds.some(round => round.added === 1 && round.passed.includes('SUP-REQ-1')));
-  assert.ok(out.history.some(step => step.kind === 'operational' && step.progress));
-  assert.deepEqual(out.pauses, []);
+  assert.deepEqual(out.history, [], 'no pause');
 }
 // A round that adds no entry and passes nothing is not progress at an outage.
-async function unchangedEntryEarnsNoCreditBeforeHostWindow() {
+async function noNewEntryOutageIsNotProgress() {
   const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, outage, outage, clean]);
   assert.equal(out.error, 'paused');
-  assert.deepEqual(out.history.map(step => step.kind), ['judged','judged','operational','operational','operational']);
+  assert.deepEqual(out.history.map(step => step.kind), ['judged', 'judged', 'operational', 'operational', 'operational']);
   assert.deepEqual(out.flags, [true, false, false, false, false]);
-  assert.equal(out.pauses[0].reason, 'operational_no_progress');
-  assert.doesNotMatch(JSON.stringify(out.pauses), /resume/i);
 }
-// The added entry remains present and is authored only once.
-async function supplementaryEntryEarnsCreditOnceBeforeHostWindow() {
+// The added entry is credited at the first outage only; later outages stall.
+async function newEntryCreditedOnce() {
   const out = await run({A:['ok']}, [refute(['A']), owe('REQ-1'), outage, outage, outage, outage, clean]);
-  assert.equal(out.error, 'paused');
+  assert.equal(out.error, 'paused', 'bounded: repeated outages after one credit pause');
+  assert.deepEqual(out.history.map(step => step.kind),
+    ['judged', 'judged', 'operational', 'operational', 'operational']);
   assert.deepEqual(out.flags, [true, false, true, false, false]);
-  assert.equal(out.prompts.filter(prompt => prompt.id === 'SUP-REQ-1').length, 1);
-  assert.equal(out.pauses[0].reason, 'operational_no_progress');
 }
 
-// A terminal gate fault does not create an authored progress measurement.
-async function hostWindowSpendsNoAuthoredAttempt() {
+// Gate and provider failures use their own consecutive window. They remain
+// in progress_history as operational rounds and never spend author attempts.
+async function operationalRoundsUseOwnWindow() {
   const out = await run({A:['ok']}, [outage, outage, outage]);
   assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 1);
-  assert.equal(out.gate, 3);
-  assert.deepEqual(out.history.map(step => step.kind), ['operational','operational','operational']);
-  assert.deepEqual(out.trace.map(step => step.stalled), [0,0,0]);
   assert.equal(out.pauses[0].reason, 'operational_no_progress');
-  assert.match(out.pauses[0].recovery, /freeze-acceptance.*judge down.*retries/);
-  assert.doesNotMatch(out.pauses[0].recovery, /resume/i);
+  assert.deepEqual(out.history.map(step => step.kind), ['operational', 'operational', 'operational']);
+  assert.match(out.pauses[0].recovery, /host gate/);
 }
 
-async function operationalRoundLeavesLadderWindowIntact() {
+async function operationalRoundDoesNotSpendAuthorWindow() {
   const out = await run({A:['down', 1, 1, 1, 1, 1]}, [clean]);
-  assertFirstRung(out, 5, [false, true, false, false, false]);
-  assert.deepEqual(out.rungs[0].trace.map(step => step.entry.kind), ['operational', 'refused', 'refused', 'refused', 'refused']);
-  assert.deepEqual(out.rungs[0].trace.map(step => step.stalled), [0, 0, 1, 2, 3]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.pauses[0].reason, 'no_progress', JSON.stringify(out.pauses[0]));
+  assert.deepEqual(out.history.map(step => step.kind), ['operational', 'refused', 'refused', 'refused', 'refused']);
 }
 
-async function authorProgressDoesNotResetTheHostWindow() {
+async function authorProgressDoesNotResetOperationalWindow() {
   const out = await run({A:['down', 1, 'ok', 'ok']}, [outage, outage, outage]);
   assert.equal(out.error, 'paused');
   assert.equal(out.pauses[0].reason, 'operational_no_progress');
   assert.deepEqual(out.history.map(step => step.kind), ['operational', 'refused', 'operational', 'operational']);
-  assert.deepEqual(out.flags, [false,true,true,false]);
+  assert.deepEqual(out.flags, [false, true, true, false]);
 }
 
-async function twoAuthorRefusalsAfterProviderFailureComplete() {
+async function twoAuthorRefusalsAfterProviderFailureDoNotPause() {
   const out = await run({A:['down', 1, 1, 'ok']}, [clean]);
   assert.equal(out.error, undefined, JSON.stringify(out.pauses));
   assert.deepEqual(out.pauses, []);
 }
 
 const tests = [
-  ['A passes beside an unparseable sibling before the ladder advances', passBesideUnparseable],
-  ['A passes beside a transport fault before the ladder advances', passBesideTransport],
-  ['A passes beside a refused sibling before the ladder advances', passBesideRefusal],
-  ['entry credit restores the episode floor before the ladder advances', creditRestoresFloorBeforeLadderTransition],
-  ['a pass earns credit once across ladder transitions', passCreditedOnceBeforeLadderTransition],
-  ['known malformed alternation advances the ladder without new credit', knownMalformedAlternationAdvancesWithoutNewCredit],
-  ['unknown parser classes advance the ladder without repeat credit', unknownParserClassAdvancesWithoutRepeatCredit],
-  ['unknown stop reasons advance the ladder without repeat credit', unknownStopReasonAdvancesWithoutRepeatCredit],
-  ['mixed refusals retain both progress credits before the ladder advances', mixedRefusalsRetainBothCreditsBeforeLadderTransition],
-  ['an unmeasured rewrite gets no credit before the ladder advances', () => unmeasuredRewriteAdvancesWithoutCredit('bad')],
-  ['an unmeasured rewrite gets no credit before the host retry window', () => unmeasuredRewriteAdvancesWithoutCredit('down')],
+  ['A passes while B is unparseable: progress', passBesideUnparseable],
+  ['A passes while B is down in transport: progress', passBesideTransport],
+  ['A passes while B is refused (control): progress', passBesideRefusal],
+  ['a credited round restores the window to the episode floor', creditStopsAtTheFloor],
+  ['a pass is credited once', passCreditedOnce],
+  ['malformed classes progress once and alternating repeats exhaust the window', malformedClassesCreditOnceAndBoundAlternation],
+  ['unknown parser classes repeat without progress', unknownClassesRepeatWithoutProgress],
+  ['unknown stop reasons repeat without progress', unknownStopReasonsRepeatWithoutProgress],
+  ['mixed malformed and validator refusals keep both progress kinds', mixedMalformedAndValidatorRefusalsKeepBothProgress],
+  ['an unmeasured rewrite beside an unparseable reply is not credited', () => unmeasuredRewriteIsNotCredited('bad')],
+  ['an unmeasured rewrite beside a transport failure is not credited', () => unmeasuredRewriteIsNotCredited('down')],
   ['an unparseable reply is noted for its own entry only', malformedNoteIsPerEntry],
   ['a refusal is replaced by an unparseable note', () => refusalAfterOtherFailure('bad')],
   ['a refusal survives a transport failure', () => refusalAfterOtherFailure('down')],
   ['F1 probe: a repair after an outage still reads its refusal', refusalSurvivesOutage],
-  ['F2: a clean pass remains retained when the freeze reports a host fault', cleanPassSurvivesHostRetries],
-  ['F2 control: a pass beside a sibling outage retains its credit before the host fault', siblingPassIsCreditedBeforeHostRetry],
-  ['a clean pass before a judged repeat advances the ladder', cleanPassBeforeJudgedRepeatAdvancesTheLadder],
-  ['an endless refutation advances through repairs', endlessRefutationAdvancesTheLadder],
-  ['F3: a hidden outage behind a refusal preserves the authored window', () => hiddenOutageRetainsItsClassificationBeforeLadderTransition(1)],
-  ['F3: a hidden outage behind an unparseable reply preserves the authored window', () => hiddenOutageRetainsItsClassificationBeforeLadderTransition('bad')],
-  ['F3 control: the window without an outage advances the ladder', noOutageAdvancesTheLadderToo],
-  ['host retries use their own window', hostRetriesUseTheirOwnWindow],
-  ['successful gate resets the host retry window', successfulGateResetsTheHostRetryWindow],
-  ['observe judged repeats advance the ladder', observeJudgedRepeatsAdvanceTheLadder],
-  ['N1: the added entry remains retained before host retries', newEntryIsCreditedBeforeHostRetries],
-  ['N1: no new entry means no progress before the host retry window', unchangedEntryEarnsNoCreditBeforeHostWindow],
-  ['N1: the supplementary entry is added once before the host retry window', supplementaryEntryEarnsCreditOnceBeforeHostWindow],
-  ['the host retry window spends no authored attempt', hostWindowSpendsNoAuthoredAttempt],
-  ['an operational round leaves the authored ladder window intact', operationalRoundLeavesLadderWindowIntact],
-  ['author progress does not reset the host retry window', authorProgressDoesNotResetTheHostWindow],
-  ['one provider failure and two author refusals still complete', twoAuthorRefusalsAfterProviderFailureComplete],
+  ['F2 probe: a clean pass before two freeze outages is progress', cleanPassBeforeOutages],
+  ['F2 control: the pass beside a sibling outage', cleanPassControl],
+  ['a clean pass before a judged repeat: credited, the repeat still counts', cleanPassBeforeJudgedRepeat],
+  ['an endless refutation with repairs between pauses', endlessRefutationPauses],
+  ['F3: an outage behind a refusal pauses observe', () => hiddenOutagePauses(1)],
+  ['F3: an outage behind an unparseable reply pauses observe', () => hiddenOutagePauses('bad')],
+  ['F3 control: the window without an outage pauses as a judged stall', noOutagePausesToo],
+  ['two operational rounds do not borrow judged attempts', oneOperationalWindowDoesNotBorrowJudgedAttempts],
+  ['a successful gate resets operational attempts', successfulGateResetsOperationalWindow],
+  ['observe pauses on judged repeats (control)', observeJudgedRepeatsPause],
+  ['N1 probe: a new entry in a clean round before two outages is progress', newEntryBeforeOutages],
+  ['N1 edge: a round with no new entry before an outage is not progress', noNewEntryOutageIsNotProgress],
+  ['N1 edge: a new entry before outages is credited once', newEntryCreditedOnce],
+  ['operational rounds fill their own window and identify the gate', operationalRoundsUseOwnWindow],
+  ['an operational round does not spend the author window', operationalRoundDoesNotSpendAuthorWindow],
+  ['author progress does not reset operational attempts before a successful gate', authorProgressDoesNotResetOperationalWindow],
+  ['one provider failure and two author refusals do not pause', twoAuthorRefusalsAfterProviderFailureDoNotPause],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {

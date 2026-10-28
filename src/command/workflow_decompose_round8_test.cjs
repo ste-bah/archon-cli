@@ -41,7 +41,7 @@ async function author(findings, { mode = 'enforce', outcome } = {}) {
 }
 const range = (n, f) => Array.from({ length: Math.max(n, 0) }, (_, i) => f(i));
 
-async function lowerFailingSubjectCountsProgressAcrossChangedMembership() {
+async function changedMembershipWithoutSubsetProgressPausesAtTheExistingAttemptWindow() {
   const sets = [
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     [1, 2, 3, 4, 5, 6],
@@ -60,7 +60,7 @@ async function lowerFailingSubjectCountsProgressAcrossChangedMembership() {
     return result;
   };
   let gates = 0, authors = 0;
-  await ctx.authorCandidate({
+  await assert.rejects(ctx.authorCandidate({
     agent: async () => { authors++; return { status: 'accepted', stopReason: 'end_turn', content: '{}' }; },
     hostCommand: async () => ({ publicationReceipt: { call_id: `publication-${++gates}` },
       postcondition: { satisfied: true }, gateEnvelope: { policy_findings: (sets[gates - 1] || []).map(id => ({
@@ -68,13 +68,13 @@ async function lowerFailingSubjectCountsProgressAcrossChangedMembership() {
         remediation_scope: 'candidate_artifact'
       })) } }),
     checkpoint: async (_id, options) => { events.push(options.task); },
-    pause: async () => { throw new Error('unexpected pause'); }
-  }, { phase: 'skeleton', prompt: () => 'author', retryScopes: new Set(['candidate_artifact']) });
-  assert.deepEqual(attempts.map(step => step.progress), [true, true, true, false, true]);
-  assert.deepEqual(attempts.map(step => step.stalled), [0, 0, 0, 1, 0]);
-  assert(attempts.every(step => step.reason === null), 'no authored stall window closes');
-  assert.deepEqual(events, []);
-  assert.equal(authors, 6);
+    pause: async () => { throw new Error('existing attempt window pause'); }
+  }, { phase: 'skeleton', prompt: () => 'author', retryScopes: new Set(['candidate_artifact']) }), /existing attempt window pause/);
+  assert.deepEqual(attempts.map(step => step.progress), [true, true, false, false, false]);
+  assert.deepEqual(attempts.map(step => step.stalled), [0, 0, 1, 2, 3]);
+  assert.equal(attempts.at(-1).reason, 'no_progress', 'main requires strict subset progress');
+  assert(events.every(line => line.includes('repair rung')), 'rungs may advance within a progressing window');
+  assert.equal(authors, 5);
 }
 
 async function lowerTierRefusalsNeverEarnSubjectCountCredit() {
@@ -146,21 +146,25 @@ async function shapes() {
 }
 // The total never rises past the best at the same first failing stage.
 async function sameStageTotalMustFall() {
-  const out = await author(n => n <= 13 ? [det('missing_runnable_test', 'TASK-X-001', 'shape'),
-    ...range(n % 2 ? 3 : 4, i => det('invalid_verifier', `TASK-X-${i}`, 'contracts'))] : []);
-  assert.equal(out.error, undefined);
-  assert.equal(out.calls, 14);
-  assert.deepEqual(out.events.map(text => /r(\d)/.exec(text)[1]), ["2", "3", "4", "2"]);
+  const out = await author(n => [det('missing_runnable_test', 'TASK-X-001', 'shape'),
+    ...range(n % 2 ? 3 : 4, i => det('invalid_verifier', `TASK-X-${i}`, 'contracts'))]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 4);
 }
-// A stalled observe loop reauthors until the gate returns a clean artifact.
-async function observeStallReauthorsUntilFindingsClear() {
-  const out = await author(n => n <= 13 ? range(n === 2 ? 1 : 2, i => det('invalid_verifier', `TASK-X-${i}`, 'contracts')) : [], {
+// Finding 5, under the Issue 288 rule: a stalled observe loop pauses
+// (resumable) and returns no artifact. Its evidence names the LATEST round's
+// findings, which match the live tree, not an earlier round with fewer.
+async function observeStallPausesWithLatestFindings() {
+  const out = await author(n => range(n === 2 ? 1 : 2, i => det('invalid_verifier', `TASK-X-${i}`, 'contracts')), {
     mode: 'observe',
     outcome: n => ({ subjects: n === 2 ? [{ taskId: 'TASK-X-001' }] : [{ taskId: 'TASK-X-001' }, { taskId: 'TASK-X-002' }] }),
   });
-  assert.equal(out.error, undefined, `observe must reauthor, got ${JSON.stringify(out.result)}`);
-  assert.equal(out.calls, 14);
-  assert.equal(out.pauses.length, 0);
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.result, undefined);
+  assert.equal(out.calls, 5);
+  assert.equal(out.pauses.length, 1);
+  assert.equal(out.pauses[0].reason, 'no_progress');
+  assert.deepEqual(Array.from(out.pauses[0].last_findings), ['invalid_verifier TASK-X-0', 'invalid_verifier TASK-X-1']);
 }
 // An authored-incomplete freeze judge reply retries the same candidate and
 // does not consume the gate's operational no-progress window.
@@ -169,7 +173,7 @@ async function authoredFreezeJudgeReplyRetriesWithoutOperationalStrike() {
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   let calls = 0;
-  const w = { checkpoint: async () => {},
+  const w = {
     agent: async () => ({ status: 'accepted', stopReason: 'end_turn', content: '{}' }),
     hostCommand: async () => ++calls === 1
       ? { gateEnvelope: { operational_error: { kind: 'authored_judge_reply', text: 'malformed judge reply' } } }
@@ -185,19 +189,18 @@ async function authoredFreezeJudgeReplyRetriesWithoutOperationalStrike() {
 }
 // A freeze judge whose reply is never usable pauses the loop on the ordinary
 // no-progress window instead of retrying forever.
-async function persistentAuthoredFreezeJudgeReplyReauthorsUntilJudgeRecovers() {
+async function persistentAuthoredFreezeJudgeReplyPausesOnNoProgress() {
   const ctx = { args: { gateMode: 'enforce' } };
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   let calls = 0;
   const pauses = [];
-  const prompts = [];
-  const w = { checkpoint: async () => {},
-    agent: async (_id, options) => { prompts.push(options.task); return { status: 'accepted', stopReason: 'end_turn', content: '{}' }; },
+  const w = {
+    agent: async () => ({ status: 'accepted', stopReason: 'end_turn', content: '{}' }),
     hostCommand: async () => {
       calls += 1;
-      if (calls <= 13) return { gateEnvelope: { operational_error: { kind: 'authored_judge_reply', text: 'malformed judge reply' } } };
-      return { publicationReceipt: { call_id: 'freeze' }, postcondition: { satisfied: true }, gateEnvelope: { policy_findings: [] } };
+      if (calls > 50) throw new Error('freeze judge retry did not stop');
+      return { gateEnvelope: { operational_error: { kind: 'authored_judge_reply', text: 'malformed judge reply' } } };
     },
     pause: async (_reason, evidence) => { pauses.push(evidence); throw new Error('paused'); },
   };
@@ -208,10 +211,10 @@ async function persistentAuthoredFreezeJudgeReplyReauthorsUntilJudgeRecovers() {
       retryScopes: new Set(),
     });
   } catch (caught) { error = caught; }
-  assert.equal(error, null, 'judge recovery completes without operator input');
-  assert.equal(calls, 14);
-  assert.equal(pauses.length, 0);
-  assert(prompts.some(prompt => prompt.includes('freeze judge reply unusable: malformed judge reply')));
+  assert.ok(error, 'a never-usable judge reply must stop the loop');
+  assert.ok(calls <= 50, `retries must be bounded by the no-progress window, got ${calls}`);
+  assert.equal(pauses.length, 1, `expected one pause, got ${JSON.stringify(pauses)}`);
+  assert.equal(pauses[0].reason, 'no_progress');
 }
 async function pauseKeepsCallerRecovery() {
   const ctx = {};
@@ -244,12 +247,12 @@ async function pendingBodyKeepsSkeletonReauthorNote() {
   for (const [name, test] of [['finding 2 later-stage repairs', laterStageRepairs],
     ['finding 1 ownership identities', ownership], ['finding 3 element shapes', shapes],
     ['same-stage total must fall', sameStageTotalMustFall],
-    ['lower failing subject counts progress across changed membership', lowerFailingSubjectCountsProgressAcrossChangedMembership],
+    ['changed membership pauses at the existing attempt window', changedMembershipWithoutSubsetProgressPausesAtTheExistingAttemptWindow],
     ['lower-tier refusals never earn subject count credit', lowerTierRefusalsNeverEarnSubjectCountCredit],
     ['lower-tier refusals preserve the judged subject frontier', lowerTierRefusalsPreserveTheJudgedSubjectFrontier],
-    ['observe stalls reauthor until findings clear', observeStallReauthorsUntilFindingsClear],
+    ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings],
     ['authored incomplete freeze judge retry', authoredFreezeJudgeReplyRetriesWithoutOperationalStrike],
-    ['persistent authored judge reply reauthors until judge recovers', persistentAuthoredFreezeJudgeReplyReauthorsUntilJudgeRecovers],
+    ['persistent authored judge reply pauses on no progress', persistentAuthoredFreezeJudgeReplyPausesOnNoProgress],
     ['pause keeps caller recovery', pauseKeepsCallerRecovery],
     ['pending body keeps skeleton re-author note', pendingBodyKeepsSkeletonReauthorNote]]) {
     try { await test(); console.log(`PASS ${name}`); }

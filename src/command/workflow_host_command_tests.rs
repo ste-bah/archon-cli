@@ -406,3 +406,38 @@ fn issue356_old_total_catalog_resumes_but_its_timeouts_do_not_replay() {
         );
     }
 }
+
+#[test]
+fn verify_frozen_chain_capabilities_publish_only_their_envelope_and_route_authored_findings() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let catalog = fixed_decomposition_catalog("rev-1").unwrap();
+    for (id, stage) in [
+        ("verify-frozen-acceptance", "acceptance"),
+        ("verify-frozen-skeleton", "skeleton"),
+    ] {
+        let request = HostCommandRequest::new(id, None).unwrap();
+        let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
+        assert_eq!(
+            &resolved.args[..4],
+            ["workflow", "verify-frozen-chain", "--stage", stage]
+        );
+        assert!(resolved.stdin.is_none());
+        assert!(
+            !resolved.environment.contains_key("ARCHON_OAUTH_TOKEN"),
+            "no provider environment"
+        );
+        assert_eq!(resolved.declared_write_set.len(), 1);
+        assert!(resolved.declared_write_set[0].ends_with("gate-envelope.json"));
+        assert_eq!(
+            resolved.remediation_scopes,
+            BTreeSet::from([
+                RemediationScope::CandidateArtifact,
+                RemediationScope::Skeleton,
+                RemediationScope::Operational
+            ])
+        );
+        let with_stdin = HostCommandRequest::new(id, Some("x".into())).unwrap();
+        assert!(resolve_host_command(&with_stdin, &catalog, &context, "call-1").is_err());
+    }
+}

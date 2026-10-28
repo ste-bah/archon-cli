@@ -2,35 +2,41 @@
 //! as a new finding, which attempts count, and what may stop a loop that is
 //! still converging.
 
-use super::{BODY, body, pause_ids, run};
+use super::{BODY, assert_paused, body, evidence, pause_ids, progress_flags, run};
 
 // --- finding identity -------------------------------------------------------
 
 #[test]
-fn rewording_by_case_space_or_punctuation_advances_the_ladder() {
+fn rewording_by_case_space_or_punctuation_is_the_same_finding() {
     let out = body(
-        r#"{ findings: (n) => n <= 13 ? [["Validation is absent.", "validation is absent", "VALIDATION IS ABSENT!", "validation   is absent;"][n % 4]] : [] }"#,
+        r#"{ findings: (n) => [["Validation is absent.", "validation is absent", "VALIDATION IS ABSENT!", "validation   is absent;"][n % 4]] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "a baseline and three restatements: {out}");
 }
 
 #[test]
-fn different_numbers_at_the_same_defect_count_advance_the_ladder() {
+fn different_numbers_at_the_same_defect_count_do_not_progress() {
     // Different argument numbers do not lower the number of outstanding defects.
-    let out =
-        body(r#"{ findings: (n) => n <= 13 ? ["argument " + n + " lacks validation"] : [] }"#);
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    let out = body(r#"{ findings: (n) => n <= 5 ? ["argument " + n + " lacks validation"] : [] }"#);
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 #[test]
-fn changing_the_subject_at_the_same_defect_count_advances_the_ladder() {
+fn changing_the_subject_at_the_same_defect_count_does_not_progress() {
     let out = body(
-        r#"{ findings: (n) => n <= 13 ? [{ text: "check is weak", subject: "AC-X-00" + n, remediation_scope: "body" }] : [] }"#,
+        r#"{ findings: (n) => n <= 5 ? [{ text: "check is weak", subject: "AC-X-00" + n, remediation_scope: "body" }] : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 // --- a converging loop is never stopped by a count --------------------------
@@ -48,54 +54,32 @@ fn a_best_that_keeps_improving_is_never_stopped_by_a_count() {
 }
 
 #[test]
-fn no_novelty_still_reaches_the_next_authored_rung() {
+fn novelty_cannot_extend_the_window_until_a_distant_new_best() {
     // A distant improvement cannot justify 29 attempts at the same count.
     let out = body(
-        r#"{ findings: (n) => n <= 13 ? Array.from({ length: 5 - Math.floor(n / 30) }, (_, i) => "defect " + n + "-" + i) : [] }"#,
+        r#"{ findings: (n) => n <= 95 ? Array.from({ length: 5 - Math.floor(n / 30) }, (_, i) => "defect " + n + "-" + i) : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
 }
 
 // --- one count of consecutive attempts without progress ---------------------
 
 #[test]
-fn alternating_transport_and_incomplete_replies_fill_only_the_host_window() {
+fn transport_failures_and_incomplete_replies_use_separate_windows() {
     let out = body(
         r#"{ answer: (n) => n % 2 ? { status: "failed", summary: "transport" } : { status: "accepted", stopReason: "max_tokens", content: "cut" } }"#,
     );
+    assert_paused(&out);
     assert_eq!(out["calls"], 5, "{out}");
-    assert_eq!(pause_ids(&out).len(), 1, "{out}");
-    let evidence = &out["pauses"][0]["evidence"];
-    assert_eq!(evidence["reason"], "operational_no_progress", "{out}");
-    assert_eq!(evidence["answered_attempts"], 2, "{out}");
-    let kinds: Vec<_> = evidence["progress_history"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|step| step["kind"].as_str().unwrap())
-        .collect();
     assert_eq!(
-        kinds,
-        [
-            "operational",
-            "incomplete",
-            "operational",
-            "incomplete",
-            "operational"
-        ]
+        progress_flags(evidence(&out, 0)),
+        [false, false, false, false, false]
     );
-    assert!(
-        evidence["recovery"].as_str().unwrap().contains("transport"),
-        "{out}"
-    );
-    assert!(
-        !evidence["recovery"].as_str().unwrap().contains("resume"),
-        "{out}"
-    );
-    assert!(
-        out["progress_events"].as_array().unwrap().is_empty(),
-        "{out}"
+    assert_eq!(
+        evidence(&out, 0)["reason"],
+        "operational_no_progress",
+        "three transport failures close the operational window independently"
     );
 }
 
@@ -127,31 +111,37 @@ fn an_acceptance_round_that_completes_an_entry_is_progress() {
 // --- set gates follow the same rule -----------------------------------------
 
 #[test]
-fn set_gate_rounds_trading_one_defect_pause_and_resume_the_ladder() {
+fn set_gate_rounds_trading_one_defect_for_another_pause() {
     let out = run(
         "enforce",
-        r#"{ resumed: ['pause-set-gates-1'], findings: (n, capability) => {
+        r#"{ findings: (n, capability) => {
           if (capability !== "task-set-lint") return [];
           const round = globalThis.lintRound = (globalThis.lintRound || 0) + 1;
-          return round <= 12 ? [{ text: "task TASK-X-010: obligation " + String.fromCharCode(96 + round) + " is unclaimed", subject: "TASK-X-010", source_path: "/p/tasks/TASK-X-010.md", remediation_scope: "body" }] : [];
+          return round <= 6 ? [{ text: "task TASK-X-010: obligation " + String.fromCharCode(96 + round) + " is unclaimed", subject: "TASK-X-010", source_path: "/p/tasks/TASK-X-010.md", remediation_scope: "body" }] : [];
         } }"#,
         "workflow(w)",
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert_eq!(pause_ids(&out), ["pause-set-gates-1"], "{out}");
+    assert_paused(&out);
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 #[test]
-fn set_gate_rounds_that_repeat_one_defect_advance_author_rungs() {
+fn set_gate_rounds_that_repeat_one_defect_pause_after_the_stall_window() {
     let out = run(
         "enforce",
-        r#"{ findings: (n, capability) => capability === "task-set-lint" && n <= 12
+        r#"{ findings: (n, capability) => capability === "task-set-lint"
           ? [{ text: "task TASK-X-010: obligation a is unclaimed", subject: "TASK-X-010", source_path: "/p/tasks/TASK-X-010.md", remediation_scope: "body" }]
           : [] }"#,
         "workflow(w)",
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(pause_ids(&out), ["pause-set-gates-1"], "{out}");
+    let evidence = evidence(&out, 0);
+    assert_eq!(evidence["reason"], "no_progress", "{evidence}");
+    assert_eq!(progress_flags(evidence), [true, false, false, false]);
 }
 
 #[test]

@@ -14,8 +14,8 @@
 // When the records do not fit their share, a deterministic subset is shown,
 // the rest is counted, and the complete list is one more file. The current
 // findings are never cut: they are what the author repairs. A prompt whose
-// own text still passes AUTHOR_PROMPT_LIMIT is not sent: the host keeps every byte in a context file
-// and the author reads that exact file (requireDispatchable).
+// own text still passes AUTHOR_PROMPT_LIMIT is not sent: the loop pauses and
+// says why (requireDispatchable).
 
 const HISTORY_SHARE = 8192;
 const PRIOR_SHARE = 14336;
@@ -225,19 +225,25 @@ function authorPrompt(base, attempt, feedback, history) {
   return prompt;
 }
 
-// Keep an oversized mandatory prompt intact in host-written context and send
-// a compact pointer. This preserves every finding while keeping dispatchable
-// prompt bytes below the existing limit.
+// A prompt whose own text passes AUTHOR_PROMPT_LIMIT is never sent: its
+// base and current findings cannot be cut without hiding what the author
+// repairs, so the loop pauses with the measured size and the remedy, and a
+// resumed loop that still measures it pauses again.
 async function requireDispatchable(w, subject, task) {
-  if (utf8Bytes(task) <= AUTHOR_PROMPT_LIMIT) return task;
-  const file = contextFile("txt", task);
-  const compact = `The complete subject contract, author instructions, and all current and earlier findings are in ${file.path} (host-written context for this call: read it by its exact path). Return a complete replacement that satisfies every item in that file.`;
-  if (utf8Bytes(compact) <= AUTHOR_PROMPT_LIMIT) return compact;
-  return `Read the complete author context at ${file.path} and return a complete replacement satisfying every item.`;
+  for (;;) {
+    const bytes = utf8Bytes(task);
+    if (bytes <= AUTHOR_PROMPT_LIMIT) return task;
+    await pauseLoop(w, subject, {
+      reason: "author_prompt_oversized", prompt_bytes: bytes, limit_bytes: AUTHOR_PROMPT_LIMIT, context_budget_bytes: CONTEXT_BUDGET,
+      diagnosis: "the prompt's mandatory text (the phase instructions and the current findings) alone exceeds the dispatch limit; the earlier-work context is already bounded",
+      remedy: "resuming alone pauses again: reduce the current findings this call must repair (split the input that produces them), or raise AUTHOR_PROMPT_LIMIT in the fixed decomposition script (a code change), then resume"
+    });
+  }
 }
 
 // Checkpoints use the same journal and watch path as the host's log primitive.
 async function repairEvent(w, subject, rung, cycle, call, attempts) {
+  if (typeof w.checkpoint !== "function") return;
   await w.checkpoint(`repair-${subject}-r${rung}-c${cycle}-${call}-a${attempts}`, {
     task: `${subject} repair rung r${rung}, cycle ${cycle}, attempts ${attempts}`
   });
