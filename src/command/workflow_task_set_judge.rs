@@ -16,7 +16,9 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 #[path = "workflow_task_set_judge_named_files.rs"]
 mod named_files;
 #[cfg(test)]
-pub(crate) use named_files::budget_tests::body_reads;
+pub(crate) use named_files::budget_tests::{
+    body_read_observer, body_reads, set_body_read_observer,
+};
 #[cfg(test)]
 use named_files::named_files;
 pub(super) use named_files::named_files_content_digest;

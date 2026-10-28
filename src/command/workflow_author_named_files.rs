@@ -76,8 +76,22 @@ pub(super) fn install(ctx: &rquickjs::Ctx<'_>, args: Option<&Value>) -> rquickjs
             let Some(roots) = roots.as_ref() else {
                 return Ok("[]".to_owned());
             };
-            let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
-            files(&entry, roots, &notes, remaining, &mut cache).map_err(|message| {
+            // Discovery and file resolution are native work. Keep their CPU
+            // off the script thread without resetting its execution guards.
+            #[cfg(test)]
+            let body_reads = judge::body_read_observer();
+            let result = std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        #[cfg(test)]
+                        judge::set_body_read_observer(body_reads);
+                        let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
+                        files(&entry, roots, &notes, remaining, &mut cache)
+                    })
+                    .join()
+                    .unwrap_or_else(|error| std::panic::resume_unwind(error))
+            });
+            result.map_err(|message| {
                 rquickjs::Error::new_from_js_message("named files", "string", message)
             })
         }),

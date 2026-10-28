@@ -274,6 +274,8 @@ function malformedAcceptanceFailure(id, reason, malformedClass) {
 function parseErrorClass(error) {
   // Match a finite set of parser kinds. The message itself is diagnostic
   // text and must never become a progress key.
+  // Match a finite set of parser kinds. The message itself is diagnostic
+  // text and must never become a progress key.
   const message = String(error && error.message || error || "").toLowerCase();
   let kind = "other";
   if (/unterminated string/.test(message)) kind = "unterminated-string";
@@ -281,6 +283,9 @@ function parseErrorClass(error) {
   else if (/expected property name|property name enclosed/.test(message)) kind = "property-name";
   else if (/expected .*after property|expected colon/.test(message)) kind = "property-separator";
   else if (/unexpected token|unexpected character|invalid \\escape/.test(message)) kind = "unexpected-token";
+  // Retain numeric source coordinates so repair tracking can compare how far
+  // the reply parses. Do not let provider-controlled diagnostic text enter
+  // progress state.
   // Retain numeric source coordinates so repair tracking can compare how far
   // the reply parses. Do not let provider-controlled diagnostic text enter
   // progress state.
@@ -395,6 +400,10 @@ function hasEscapedLineBreak(value) {
 // whole reply. JSON.parse engines report positions in different forms; retain
 // their message and derive a nearby excerpt when a location is available.
 // The joined excerpt is redacted before adding its fault marker.
+// Keep malformed-reply refusals useful to the author without echoing the
+// whole reply. JSON.parse engines report positions in different forms; retain
+// their message and derive a nearby excerpt when a location is available.
+// The joined excerpt is redacted before adding its fault marker.
 function acceptanceParseRefusal(id, source, error) {
   const message = redactSecretShapedText(String(error && error.message || error || "invalid JSON")
     .replace(/[\r\n\t]+/g, " ")).slice(0, 240);
@@ -431,6 +440,10 @@ function acceptanceParseRefusal(id, source, error) {
     : "";
   let excerpt = "";
   if (offset !== null) {
+    // An invalid escape can split a credential field name before the shared
+    // redactor sees it. Treat that malformed spelling as the joined field so
+    // its value is still removed in the diagnostic. Redact the source first
+    // so a credential cut by either window edge cannot leave a partial value.
     // An invalid escape can split a credential field name before the shared
     // redactor sees it. Treat that malformed spelling as the joined field so
     // its value is still removed in the diagnostic. Redact the source first

@@ -171,3 +171,16 @@ async fn read_guard_fixed_author_prefetch_redacts_and_spends_the_existing_prompt
     assert!(task.contains("Return exactly one complete reply with one entry and one check."));
     assert!(task.len() <= 262_144);
 }
+
+#[tokio::test]
+async fn named_files_native_prefetch_leaves_the_dispatch_budget_for_the_script() {
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set(&[(
+        "AC-X-001",
+        "criterion",
+        false,
+    )]);
+    let notes = vec!["src/input.data"; 1024];
+    let task = fixed_author_task(&set, &notes).await;
+    assert!(task.contains("Author ONLY entry AC-X-001:"));
+    assert!(task.contains("Files already identified"));
+}
