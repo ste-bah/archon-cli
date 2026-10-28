@@ -3,6 +3,8 @@ use archon_workflow::task_set_contract::{AcceptanceCheck, TrustedCwd};
 
 #[path = "workflow_acceptance_site_command_tests.rs"]
 mod command_tests;
+#[path = "workflow_acceptance_site_operand_tests.rs"]
+mod operand_tests;
 
 fn decisions(
     set: &super::super::super::republish::test_fixture::FrozenSet,

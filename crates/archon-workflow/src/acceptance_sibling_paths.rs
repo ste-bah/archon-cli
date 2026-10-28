@@ -421,7 +421,7 @@ pub fn is_path_character(character: char) -> bool {
         || matches!(character, '.' | '_' | '/' | '-' | '+' | '@')
 }
 
-fn names_entry_below_parent(path: &std::path::Path) -> bool {
+pub(crate) fn names_entry_below_parent(path: &std::path::Path) -> bool {
     use std::path::Component;
     let mut depth = 0usize;
     let mut escaped = false;

@@ -167,7 +167,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 64: #533 a listing probe stopped before any output is a transient host fault, never an author finding; a silent scratch overrun says the host could not tell.
         // 65: #515 a re-author reply whose first entry is followed by a misplaced closing brace is refused, naming the continued field.
         // 66: #213 #466 #478 #498 #501 the acceptance site refuses only a closed list of operands that leave it (redirections, path-reading programs, cd/pushd targets, program-text file-open literals); a data heredoc for a text tool is not refused.
-        sources_digest: "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
+        sources_digest: "e07ea1eb1215abffc8dfc9ff67ad0bd1408231b88041d26e0d9443570af5d16e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -204,7 +204,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #533 re-pin only: skeleton freeze verdicts do not run subcommand listing probes.
         // #514/#515/#527 re-pin only: skeleton freeze verdicts do not read the acceptance re-author reply parser.
         // #213/#466/#478/#498/#501 re-pin only: skeleton freeze verdicts do not run the acceptance site path policy; freeze-acceptance 66 counts the change.
-        sources_digest: "a779f7f406444113d5c9463c998bb420d6dad18bf9f8a4454e568970c93fd70e",
+        sources_digest: "e07ea1eb1215abffc8dfc9ff67ad0bd1408231b88041d26e0d9443570af5d16e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -272,7 +272,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         // #514/#515/#527 re-pin only: the acceptance re-author reply parser does not decide this capability's verdicts.
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide this capability's verdicts.
-        sources_digest: "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
+        sources_digest: "2b70dce67fb5b0c379c65f999cfe3a0b7b13f6c75111c355166d1d9805d6c08f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -326,7 +326,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         // #514/#515/#527 re-pin only: the acceptance re-author reply parser does not decide topology lint verdicts.
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide topology lint verdicts.
-        sources_digest: "bfd6dd411eb638876303275e6e9aaa633aff9fc4c8725bca11283f5ed3b40a25",
+        sources_digest: "2b70dce67fb5b0c379c65f999cfe3a0b7b13f6c75111c355166d1d9805d6c08f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -346,7 +346,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 25 re-pin only: the shared Scratch path helper moved; trace verdicts do not read mutation proofs.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide requirement trace verdicts.
-        sources_digest: "805aee1c008ad5ad69f87fe89948970bae04c903ff0fb81dc4b97fdbf92d8d0f",
+        sources_digest: "fe75e0abcafb07eff2dccbb45d9ce1302ae390cf71f14186c6b1b81a6a999d44",
         build_bound: true,
     },
     CapabilityLogic {
@@ -398,7 +398,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         // 19: #533 a listing probe stopped before any output is a transient host fault, never an author finding.
         // #213/#466/#478/#498/#501 re-pin only: frozen acceptance verification reads stored policy findings; it does not run the acceptance site path policy.
-        sources_digest: "73dbdb69f64e746269783991f81ec924481b92c0d3a4fc5d24e16e6cbd310384",
+        sources_digest: "b8bdf08954ba531650e2428a512dae8398eef7be94f673c83bdf87c94873ee30",
         build_bound: true,
     },
     CapabilityLogic {
@@ -433,7 +433,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         // #533 re-pin only: skeleton reverify verdicts do not run subcommand listing probes.
         // #213/#466/#478/#498/#501 re-pin only: frozen skeleton verification reads stored policy findings; it does not run the acceptance site path policy.
-        sources_digest: "73dbdb69f64e746269783991f81ec924481b92c0d3a4fc5d24e16e6cbd310384",
+        sources_digest: "b8bdf08954ba531650e2428a512dae8398eef7be94f673c83bdf87c94873ee30",
         build_bound: true,
     },
 ];

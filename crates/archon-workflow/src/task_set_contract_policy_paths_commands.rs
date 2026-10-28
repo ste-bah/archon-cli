@@ -118,15 +118,12 @@ fn program_paths(command: &str, root: &Path, mut directory: Option<PathBuf>) -> 
 }
 
 fn scan_segment(segment: &[String], operators: &[bool], base: &Path) -> Vec<PathBuf> {
-    let paths = argv::path_operands(segment, operators);
-    let text = paths
-        .iter()
-        .map(|word| quote(word))
-        .collect::<Vec<_>>()
-        .join(" ");
-    crate::acceptance_sibling_paths::scan_from(&text, base)
+    // Selected operands are whole filesystem paths, not assignment words.
+    // In particular, an equals sign is an ordinary filename character here.
+    argv::path_operands(segment, operators)
         .into_iter()
-        .map(|named| named.path)
+        .map(|word| base.join(word))
+        .filter(|path| crate::acceptance_sibling_paths::names_entry_below_parent(path))
         .collect()
 }
 
