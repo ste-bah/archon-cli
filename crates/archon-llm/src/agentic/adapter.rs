@@ -135,12 +135,18 @@ impl AgenticTurnState {
                 sink.emit(AgenticTurnEvent::ReasoningEncrypted { blob })
                     .await?;
             }
-            StreamEvent::Error { message, .. } => {
+            StreamEvent::Error {
+                error_type,
+                message,
+            } => {
                 sink.emit(AgenticTurnEvent::ProviderError {
                     message: message.clone(),
                 })
                 .await?;
-                return Err(LlmError::Http(message));
+                return Err(crate::provider_fault::from_stream_error(
+                    &error_type,
+                    &message,
+                ));
             }
             StreamEvent::MessageStop => {
                 sink.emit(AgenticTurnEvent::TurnCompleted {

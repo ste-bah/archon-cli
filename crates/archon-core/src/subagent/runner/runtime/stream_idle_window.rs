@@ -47,21 +47,21 @@ const STEP_FLOOR: Duration = Duration::from_millis(150);
 
 /// The window ended before the awaited work did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct IdleExpired {
+pub(crate) struct IdleExpired {
     /// The wall and boot clocks ended it: the machine slept through it.
-    pub(super) slept: bool,
+    pub(crate) slept: bool,
 }
 
 #[cfg(test)]
 thread_local! {
     /// Test seam: how far this thread's wall clock has jumped forward, as a
     /// wake from a long sleep or a clock step jumps it.
-    pub(super) static WALL_JUMP: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    pub(crate) static WALL_JUMP: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
     /// Test seam: how far this thread's boot clock has jumped forward, as a
     /// sleep (and never a clock step) jumps it.
-    pub(super) static BOOT_JUMP: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    pub(crate) static BOOT_JUMP: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
     /// Test seam: this thread reads no boot clock.
-    pub(super) static NO_BOOT_CLOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static NO_BOOT_CLOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn wall_now() -> SystemTime {
@@ -123,7 +123,7 @@ fn boot_now() -> Option<Duration> {
 /// clock, or on the wall clock confirmed as a sleep (see the module doc).
 /// `work` must be cancel safe: it is polled across re-checks and dropped when
 /// the window ends.
-pub(super) async fn within<F: Future>(limit: Duration, work: F) -> Result<F::Output, IdleExpired> {
+pub(crate) async fn within<F: Future>(limit: Duration, work: F) -> Result<F::Output, IdleExpired> {
     let started = tokio::time::Instant::now();
     let wall_started = wall_now();
     let boot_started = boot_now();

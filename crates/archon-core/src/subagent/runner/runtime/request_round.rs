@@ -46,7 +46,7 @@ pub(super) async fn prepare_request_round(
     pressure: &mut PressureState,
     reasoning_encrypted: Option<String>,
     turn: u32,
-) -> PreparedRequest {
+) -> anyhow::Result<PreparedRequest> {
     let telemetry = build_compaction_telemetry(runner);
     maybe_compact_for_context_window(
         runner,
@@ -55,7 +55,7 @@ pub(super) async fn prepare_request_round(
         last_known_context_tokens,
         &telemetry,
     )
-    .await;
+    .await?;
 
     // Compaction is the intended mechanism; this is the guarantee. It runs
     // whether or not compaction fired, succeeded, or was even attempted,
@@ -111,14 +111,14 @@ pub(super) async fn prepare_request_round(
         &mut request_body_bytes,
         &telemetry,
     )
-    .await;
+    .await?;
 
-    PreparedRequest {
+    Ok(PreparedRequest {
         template,
         request_body_bytes,
         large_retry_body_bytes,
         telemetry,
-    }
+    })
 }
 
 /// Preflight size line for the subagent request.
@@ -186,7 +186,7 @@ async fn maybe_compact_for_context_window(
     auto_compact: &mut crate::agent::AutoCompactState,
     last_known_context_tokens: &mut u64,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
-) {
+) -> anyhow::Result<()> {
     let effective_window = runner
         .agent_config
         .effective_context_window(telemetry.runtime_context_budget);
@@ -200,7 +200,7 @@ async fn maybe_compact_for_context_window(
         auto_compact,
         threshold,
     ) else {
-        return;
+        return Ok(());
     };
 
     tracing::info!(
@@ -225,7 +225,8 @@ async fn maybe_compact_for_context_window(
         action,
         "proactive subagent compaction failed; continuing turn",
     )
-    .await;
+    .await?;
+    Ok(())
 }
 
 async fn build_llm_request(
@@ -369,7 +370,7 @@ async fn maybe_compact_for_request_pressure(
     (pressure, envelope_bytes): (&mut PressureState, usize),
     request_body_bytes: &mut usize,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
-) {
+) -> anyhow::Result<()> {
     let trigger_tokens = current_trigger_tokens(messages, *last_known_context_tokens);
     let token_pressure = runner
         .agent_config
@@ -382,7 +383,7 @@ async fn maybe_compact_for_request_pressure(
         .rate_limit_pressure_body_bytes
         .is_some_and(|threshold| *request_body_bytes as u64 >= threshold);
     if !(token_pressure || body_pressure) {
-        return;
+        return Ok(());
     }
     // Arithmetic before inference. `[prune]` may reclaim enough on its own,
     // and unlike the summariser it has no context window of its own to blow.
@@ -398,14 +399,14 @@ async fn maybe_compact_for_request_pressure(
         |history| super::request_round_pressure::prune_history_mechanically(runner, history),
     ) == super::request_round_pressure::PruneVerdict::Cleared
     {
-        return;
+        return Ok(());
     }
     if !super::request_round_pressure::proactive_rearmed(
         pressure.proactive_retry_watermark,
         trigger_tokens,
     ) || !auto_compact.should_attempt()
     {
-        return;
+        return Ok(());
     }
     let reason = pressure_reason(token_pressure, body_pressure);
     tracing::info!(
@@ -433,7 +434,7 @@ async fn maybe_compact_for_request_pressure(
         crate::agent::CompactAction::Full,
         "subagent request-pressure compaction failed; continuing turn",
     )
-    .await;
+    .await?;
     // Success re-arms unconditionally: the compacted history is the new
     // baseline and the pressure threshold alone decides when to act again.
     // Failure holds the guard at the size that failed, so the next attempt
@@ -451,6 +452,7 @@ async fn maybe_compact_for_request_pressure(
         envelope_bytes,
         messages.estimated_tokens(),
     );
+    Ok(())
 }
 
 fn pressure_reason(token_pressure: bool, body_pressure: bool) -> &'static str {

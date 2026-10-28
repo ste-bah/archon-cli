@@ -13,6 +13,9 @@ use crate::types::Secret;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
+    #[error(transparent)]
+    Provider(#[from] crate::provider::LlmError),
+
     #[error("credential file I/O error: {0}")]
     IoError(#[from] std::io::Error),
 

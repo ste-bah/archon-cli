@@ -326,9 +326,10 @@ fn unanswered_backoff(failures: usize) -> Duration {
 
 /// Is this failure to open a stream one a resend may cure?
 fn retryable_open_error(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<LlmError>()
-        .is_some_and(|error| archon_llm::classify_retry(error) == archon_llm::RetryDecision::Retry)
+    error.downcast_ref::<LlmError>().is_some_and(|error| {
+        !(archon_tools::provider_recovery::enabled() && error.is_permanent())
+            && archon_llm::classify_retry(error) == archon_llm::RetryDecision::Retry
+    })
 }
 
 #[cfg(test)]

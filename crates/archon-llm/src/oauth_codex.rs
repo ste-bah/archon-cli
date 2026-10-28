@@ -122,7 +122,7 @@ impl CodexOAuthClient {
             .form(&params)
             .send()
             .await
-            .map_err(|e| AuthError::ParseError(format!("token refresh HTTP error: {e}")))?;
+            .map_err(|e| crate::auth_fault::transport_error("token refresh HTTP error", e))?;
         parse_token_response(response, TokenFailureKind::Refresh).await
     }
 }
@@ -169,10 +169,31 @@ async fn parse_token_response(
     failure_kind: TokenFailureKind,
 ) -> Result<CodexCredentials, AuthError> {
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| AuthError::ParseError(format!("failed to read token response: {e}")))?;
+    if matches!(failure_kind, TokenFailureKind::Refresh)
+        && matches!(status.as_u16(), 408 | 429 | 500..=599)
+    {
+        return Err(AuthError::Provider(
+            crate::transport_http::response_error(response, |status, message| {
+                crate::provider::LlmError::Server {
+                    status,
+                    message,
+                    pipeline_retry_after_secs: None,
+                }
+            })
+            .await,
+        ));
+    }
+    let body = response.text().await.map_err(|e| {
+        if status.is_success() {
+            crate::auth_fault::transport_error("failed to read token response", e)
+        } else {
+            AuthError::Provider(crate::provider::LlmError::Server {
+                status: status.as_u16(),
+                message: format!("failed to read token response: {e}"),
+                pipeline_retry_after_secs: None,
+            })
+        }
+    })?;
 
     if !status.is_success() {
         let status = status.as_u16();

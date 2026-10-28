@@ -424,6 +424,10 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
     {
         return err;
     }
+    let error = crate::provider_fault::from_status(status, &Default::default(), body.clone());
+    if matches!(error, LlmError::Rejected { .. }) {
+        return error;
+    }
     match status {
         400 => LlmError::Server {
             status,
@@ -440,10 +444,6 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
             status: Some(status),
             retry_after_secs: None,
         },
-        _ => LlmError::Server {
-            status,
-            message: body,
-            pipeline_retry_after_secs: None,
-        },
+        _ => error,
     }
 }

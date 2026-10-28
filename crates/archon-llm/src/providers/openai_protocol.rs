@@ -41,6 +41,13 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
     {
         return err;
     }
+    if let Some(error) = crate::provider_fault::structured_rejection(status, &body) {
+        return error;
+    }
+    let error = crate::provider_fault::from_status(status, &Default::default(), body.clone());
+    if matches!(error, LlmError::Rejected { .. }) {
+        return error;
+    }
     match status {
         401 => LlmError::Auth(body),
         429 => LlmError::RateLimited {
@@ -52,10 +59,6 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
             status: Some(status),
             retry_after_secs: None,
         },
-        _ => LlmError::Server {
-            status,
-            message: body,
-            pipeline_retry_after_secs: None,
-        },
+        _ => error,
     }
 }

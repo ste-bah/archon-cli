@@ -14,6 +14,7 @@ mod evidence_recovery;
 mod memory;
 pub(crate) use memory::{EffectiveRunContext, ToolCancellation};
 mod runtime;
+pub(crate) use runtime::stream_idle_window;
 #[cfg(test)]
 mod tests;
 

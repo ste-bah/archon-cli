@@ -81,6 +81,7 @@ impl AgentSubagentExecutor {
         }
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id)
             && session.continuing
+            && !session.history.is_recovering()
             && session
                 .history
                 .messages()

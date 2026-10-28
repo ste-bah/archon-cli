@@ -116,14 +116,20 @@ pub async fn get_access_token(
         .form(&params)
         .send()
         .await
-        .map_err(|e| LlmError::Http(format!("GCP token request failed: {e}")))?;
+        .map_err(crate::provider_fault::from_transport)?;
 
     let status = resp.status().as_u16();
     if status >= 400 {
-        let body = resp.text().await.unwrap_or_else(|_| "unknown".to_string());
-        return Err(LlmError::Auth(format!(
-            "GCP token endpoint returned {status}: {body}"
-        )));
+        return Err(crate::transport_http::response_error(resp, |status, body| {
+            let error =
+                crate::provider_fault::from_status(status, &Default::default(), body.clone());
+            if error.is_operational() || matches!(error, LlmError::Rejected { .. }) {
+                error
+            } else {
+                LlmError::Auth(format!("GCP token endpoint returned {status}: {body}"))
+            }
+        })
+        .await);
     }
 
     #[derive(Deserialize)]
@@ -135,7 +141,7 @@ pub async fn get_access_token(
     let token_resp: TokenResponse = resp
         .json()
         .await
-        .map_err(|e| LlmError::Serialize(format!("failed to parse GCP token response: {e}")))?;
+        .map_err(crate::provider_fault::from_transport)?;
 
     let expires_secs = token_resp.expires_in.unwrap_or(3600);
     let expires_at =
@@ -271,3 +277,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "gcp_recovery_tests.rs"]
+mod recovery_http_tests;

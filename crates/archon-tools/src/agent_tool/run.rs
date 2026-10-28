@@ -33,11 +33,13 @@ impl ExecutionResult {
                     status,
                     retry_after_secs,
                     overloaded,
+                    source,
                 }) => SubagentOutcome::FailedWithProvider {
                     message: message.clone(),
                     status: *status,
                     retry_after_secs: *retry_after_secs,
                     overloaded: *overloaded,
+                    source: source.clone(),
                 },
                 Err(error) => SubagentOutcome::Failed(error.to_string()),
             }
@@ -255,6 +257,7 @@ async fn run_subagent_owned(
     // registry result (and registered a new manager generation).
     if let Some(session) = crate::subagent_session::current_for(&subagent_id)
         && session.continuing
+        && !session.history.is_recovering()
         && !has_completed_assistant_history(&session.history.messages())
     {
         session

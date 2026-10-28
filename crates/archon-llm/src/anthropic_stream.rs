@@ -40,8 +40,13 @@ where
                 let idle = (&error as &dyn std::any::Any)
                     .downcast_ref::<reqwest::Error>()
                     .is_some_and(reqwest::Error::is_timeout);
-                send_stream_error(&tx, if idle { "transport_idle" } else { "network" }, error)
-                    .await;
+                if idle {
+                    send_stream_error(&tx, "transport_idle", error).await;
+                } else {
+                    let _ = tx
+                        .send(crate::provider_fault::native_transport_event(error))
+                        .await;
+                }
                 return;
             }
         }

@@ -405,7 +405,15 @@ pub(crate) fn build_llm_provider_selection(
                 api_key_env: None,
                 retry: None,
             };
-            let http = Arc::new(reqwest::Client::new());
+            // A host can sleep long enough for a pooled keep-alive socket to
+            // become unusable while the process and its provider remain live.
+            // Do not retain idle sockets across calls: a retry then opens a
+            // new connection instead of repeatedly selecting a dead pool entry.
+            let http = Arc::new(
+                archon_llm::transport_http::client_builder()
+                    .build()
+                    .expect("default HTTP client configuration is valid"),
+            );
             match ActiveProvider::new(&flat, http) {
                 Ok(active) => selected(active, None),
                 Err(ProviderError::MissingCredential { var }) => {

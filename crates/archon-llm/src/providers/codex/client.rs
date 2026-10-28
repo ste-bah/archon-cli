@@ -227,217 +227,15 @@ pub struct CodexProvider {
     spoof: SpoofConfig,
     base_url: String,
     oauth_client: Arc<CodexOAuthClient>,
-    tls_preflight_cache: OnceCell<Result<(), String>>,
+    tls_preflight_cache: OnceCell<()>,
     refresh_lock: Mutex<()>,
     preflight_url: String,
     retry_base_delay: Duration,
     aliases: CodexAliasMap,
 }
 
-impl CodexProvider {
-    pub fn new(
-        credentials_path: PathBuf,
-        spoof: SpoofConfig,
-        http: reqwest::Client,
-    ) -> Result<Self, LlmError> {
-        Self::new_inner(
-            credentials_path,
-            spoof,
-            http,
-            DEFAULT_BASE_URL.into(),
-            DEFAULT_PREFLIGHT_URL.into(),
-            Duration::from_millis(BASE_DELAY_MS),
-        )
-    }
-
-    pub fn new_with_base_url(
-        credentials_path: PathBuf,
-        spoof: SpoofConfig,
-        http: reqwest::Client,
-        base_url: String,
-    ) -> Result<Self, LlmError> {
-        Self::new_inner(
-            credentials_path,
-            spoof,
-            http,
-            base_url.clone(),
-            format!("{base_url}/"),
-            Duration::from_millis(10),
-        )
-    }
-
-    fn new_inner(
-        credentials_path: PathBuf,
-        spoof: SpoofConfig,
-        http: reqwest::Client,
-        base_url: String,
-        preflight_url: String,
-        retry_base_delay: Duration,
-    ) -> Result<Self, LlmError> {
-        validate_spoof_headers(&spoof)?;
-        let oauth_client = Arc::new(CodexOAuthClient::new(http.clone()));
-        Ok(Self {
-            http,
-            credentials_path,
-            spoof,
-            base_url,
-            oauth_client,
-            tls_preflight_cache: OnceCell::new(),
-            refresh_lock: Mutex::new(()),
-            preflight_url,
-            retry_base_delay,
-            aliases: CodexAliasMap::default(),
-        })
-    }
-
-    /// Builder: attach an alias map sourced from operator config.
-    pub fn with_alias_map(mut self, aliases: CodexAliasMap) -> Self {
-        self.aliases = aliases;
-        self
-    }
-
-    pub fn resolve_url(&self) -> String {
-        format!("{}/codex/responses", self.base_url.trim_end_matches('/'))
-    }
-
-    pub fn build_request_body(&self, req: &LlmRequest) -> Result<ResponsesRequest, LlmError> {
-        let input = messages_to_responses_input(req)?;
-        let instructions = join_system_prompt(&req.system);
-        let tools = if req.tools.is_empty() {
-            None
-        } else {
-            Some(tools_to_responses_tools(&req.tools)?)
-        };
-        let reasoning = build_reasoning_config(&req.model, req.effort.as_deref());
-        let cache_key = prompt_cache_key(&req.model, instructions.as_deref(), tools.as_deref());
-
-        Ok(ResponsesRequest {
-            model: req.model.clone(),
-            store: false,
-            stream: true,
-            instructions,
-            input,
-            tools,
-            tool_choice: Some("auto".into()),
-            parallel_tool_calls: Some(true),
-            temperature: None,
-            reasoning,
-            service_tier: None,
-            text: Some(TextConfig {
-                verbosity: Some("low".into()),
-            }),
-            include: Some(vec!["reasoning.encrypted_content".into()]),
-            prompt_cache_key: Some(cache_key),
-        })
-    }
-
-    async fn ensure_preflight(&self) -> Result<(), LlmError> {
-        let result = self
-            .tls_preflight_cache
-            .get_or_init(|| async {
-                run_codex_tls_preflight_url(&self.http, &self.preflight_url)
-                    .await
-                    .map_err(|e| e.to_string())
-            })
-            .await;
-        result
-            .as_ref()
-            .map(|_| ())
-            .map_err(|e| LlmError::Http(e.clone()))
-    }
-
-    async fn send_with_retry(
-        &self,
-        body: &ResponsesRequest,
-    ) -> Result<reqwest::Response, LlmError> {
-        let mut refreshed_after_401 = false;
-
-        for attempt in 0..=MAX_RETRIES {
-            let creds = ensure_codex_token_valid(&self.credentials_path, &self.oauth_client)
-                .await
-                .map_err(auth_to_llm_error)?;
-            let session_id = Uuid::new_v4().to_string();
-            let headers = build_codex_headers(&creds, &self.spoof, &session_id)?;
-            // Only ever serialised when the level is enabled — the body is
-            // large and this is the hot path. Without it there is no way to see
-            // what actually went out, which is what made a silent prompt-cache
-            // miss on this provider impossible to diagnose from the outside:
-            // the counters read zero whether the cache missed or the service
-            // simply did not report a hit.
-            if tracing::enabled!(tracing::Level::DEBUG)
-                && let Ok(rendered) = serde_json::to_string(body)
-            {
-                tracing::debug!(
-                    provider = "openai-codex",
-                    "Codex request body: {}",
-                    crate::debug_body::debug_body(&rendered)
-                );
-            }
-            let response = self
-                .http
-                .post(self.resolve_url())
-                .headers(headers)
-                .json(body)
-                .send()
-                .await;
-
-            let response = match response {
-                Ok(response) => response,
-                Err(e) if attempt < MAX_RETRIES => {
-                    self.sleep_before_retry(attempt).await;
-                    if e.is_request() {
-                        continue;
-                    }
-                    continue;
-                }
-                Err(e) => return Err(LlmError::Http(e.to_string())),
-            };
-
-            let status = response.status().as_u16();
-            if status < 400 {
-                return Ok(response);
-            }
-
-            let body_text = response.text().await.unwrap_or_else(|e| e.to_string());
-            if status == 401 && !refreshed_after_401 {
-                refreshed_after_401 = true;
-                self.refresh_token_once().await?;
-                continue;
-            }
-            if status == 401 {
-                return Err(map_codex_error(status, body_text, true));
-            }
-            if is_quota_exceeded(&body_text) {
-                return Err(LlmError::QuotaExceeded(body_text));
-            }
-            if is_retryable(status, &body_text) && attempt < MAX_RETRIES {
-                self.sleep_before_retry(attempt).await;
-                continue;
-            }
-            return Err(map_codex_error(status, body_text, false));
-        }
-
-        Err(LlmError::Aborted)
-    }
-
-    async fn refresh_token_once(&self) -> Result<(), LlmError> {
-        let _guard = self.refresh_lock.lock().await;
-        let (creds, _) =
-            read_codex_credentials_locked(&self.credentials_path).map_err(auth_to_llm_error)?;
-        let refreshed = self
-            .oauth_client
-            .refresh(creds.refresh_token.expose())
-            .await
-            .map_err(auth_to_llm_error)?;
-        write_codex_credentials_atomic(&self.credentials_path, &refreshed)
-            .map_err(auth_to_llm_error)
-    }
-
-    async fn sleep_before_retry(&self, attempt: u32) {
-        let delay = self.retry_base_delay * 2u32.saturating_pow(attempt);
-        tokio::time::sleep(delay).await;
-    }
-}
+#[path = "client_request.rs"]
+mod request_impl;
 
 #[async_trait]
 impl LlmProvider for CodexProvider {
@@ -620,12 +418,7 @@ impl LlmProvider for CodexProvider {
                         }
                     }
                     Err(e) => {
-                        let _ = tx
-                            .send(StreamEvent::Error {
-                                error_type: "http_error".into(),
-                                message: e.to_string(),
-                            })
-                            .await;
+                        let _ = tx.send(crate::provider_fault::error_event(e)).await;
                         return;
                     }
                 }
@@ -654,141 +447,16 @@ impl LlmProvider for CodexProvider {
     }
 }
 
-fn serialized_len<T: Serialize>(value: &T) -> usize {
-    serde_json::to_vec(value)
-        .map(|bytes| bytes.len())
-        .unwrap_or(usize::MAX)
-}
+#[path = "client_protocol.rs"]
+mod protocol;
+use protocol::{
+    approx_tokens_from_bytes, auth_to_llm_error, is_quota_exceeded, is_retryable, map_codex_error,
+    serialized_len,
+};
+pub use protocol::{
+    build_codex_headers, build_reasoning_config, clamp_reasoning_effort, validate_spoof_headers,
+};
 
-fn approx_tokens_from_bytes(bytes: usize) -> u64 {
-    bytes.div_ceil(4) as u64
-}
-
-pub fn build_reasoning_config(model: &str, effort: Option<&str>) -> Option<ReasoningConfig> {
-    effort.map(|effort| ReasoningConfig {
-        effort: Some(clamp_reasoning_effort(model, effort)),
-        summary: Some("auto".into()),
-    })
-}
-
-pub fn clamp_reasoning_effort(model_id: &str, effort: &str) -> String {
-    let id = model_id.rsplit('/').next().unwrap_or(model_id);
-    if (id.starts_with("gpt-5.2")
-        || id.starts_with("gpt-5.3")
-        || id.starts_with("gpt-5.4")
-        || id.starts_with("gpt-5.5"))
-        && effort == "minimal"
-    {
-        return "low".into();
-    }
-    if id == "gpt-5.1" && effort == "xhigh" {
-        return "high".into();
-    }
-    if id == "gpt-5.3-codex-mini" {
-        if effort == "high" || effort == "xhigh" {
-            return "high".into();
-        }
-        return "medium".into();
-    }
-    effort.into()
-}
-
-pub fn build_codex_headers(
-    creds: &CodexCredentials,
-    spoof: &SpoofConfig,
-    session_id: &str,
-) -> Result<HeaderMap, LlmError> {
-    let mut headers = HeaderMap::new();
-    insert_header(
-        &mut headers,
-        "Authorization",
-        &format!("Bearer {}", creds.access_token.expose()),
-    )?;
-    insert_header(&mut headers, "chatgpt-account-id", &creds.account_id)?;
-    insert_header(&mut headers, "originator", &spoof.originator)?;
-    insert_header(&mut headers, "User-Agent", &spoof.user_agent)?;
-    insert_header(&mut headers, "OpenAI-Beta", &spoof.openai_beta)?;
-    insert_header(&mut headers, "accept", "text/event-stream")?;
-    insert_header(&mut headers, "content-type", "application/json")?;
-    insert_header(&mut headers, "session_id", session_id)?;
-    insert_header(&mut headers, "x-client-request-id", session_id)?;
-
-    for (key, value) in &spoof.extra_headers {
-        insert_header(&mut headers, key, value)?;
-    }
-    Ok(headers)
-}
-
-pub fn validate_spoof_headers(spoof: &SpoofConfig) -> Result<(), LlmError> {
-    for key in spoof.extra_headers.keys() {
-        let lower = key.to_lowercase();
-        if RESERVED_HEADERS.contains(&lower.as_str()) {
-            return Err(LlmError::Auth(format!(
-                "spoof.extra_headers contains reserved header: {key}"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn insert_header(headers: &mut HeaderMap, key: &str, value: &str) -> Result<(), LlmError> {
-    let name = HeaderName::from_bytes(key.as_bytes())
-        .map_err(|e| LlmError::Serialize(format!("invalid header name `{key}`: {e}")))?;
-    let value = HeaderValue::from_str(value)
-        .map_err(|e| LlmError::Serialize(format!("invalid header value for `{key}`: {e}")))?;
-    headers.insert(name, value);
-    Ok(())
-}
-
-fn is_retryable(status: u16, body: &str) -> bool {
-    matches!(status, 429 | 500 | 502 | 503 | 504)
-        || contains_any(
-            body,
-            &[
-                "rate limit",
-                "rate-limit",
-                "ratelimit",
-                "overloaded",
-                "service unavailable",
-                "upstream connect",
-                "connection refused",
-            ],
-        )
-}
-
-fn is_quota_exceeded(body: &str) -> bool {
-    body.to_lowercase().contains("usage limit")
-}
-
-fn contains_any(body: &str, needles: &[&str]) -> bool {
-    let body = body.to_lowercase();
-    needles.iter().any(|needle| body.contains(needle))
-}
-
-fn map_codex_error(status: u16, body: String, refreshed: bool) -> LlmError {
-    if status == 401 && body.to_lowercase().contains("originator mismatch") {
-        return LlmError::Auth(
-            "Codex spoof manifest outdated, run `archon update-codex-compat`".into(),
-        );
-    }
-    match status {
-        401 if refreshed => LlmError::Auth("Codex token rejected after refresh".into()),
-        401 | 403 => LlmError::Auth(body),
-        429 if is_quota_exceeded(&body) => LlmError::QuotaExceeded(body),
-        429 => LlmError::RateLimited {
-            retry_after_secs: 1,
-            from_provider: false,
-            pipeline_retry_after_secs: None,
-        },
-        500..=599 => LlmError::Server {
-            status,
-            message: body,
-            pipeline_retry_after_secs: None,
-        },
-        _ => LlmError::Http(format!("status {status}: {body}")),
-    }
-}
-
-fn auth_to_llm_error(err: AuthError) -> LlmError {
-    LlmError::Auth(err.to_string())
-}
+#[cfg(test)]
+#[path = "recovery_tests.rs"]
+mod recovery_tests;

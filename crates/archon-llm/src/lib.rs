@@ -54,6 +54,7 @@ mod transport_evidence_redaction;
 pub fn redact_transport_evidence(text: &str) -> String {
     transport_evidence_redaction::scrub(text, &[], false, false)
 }
+pub mod transport_http;
 pub mod transport_idle;
 pub mod types;
 pub mod usage;
@@ -66,6 +67,9 @@ mod anthropic_oauth_refresh_tests;
 mod anthropic_tests;
 #[cfg(test)]
 mod identity_spoof_contract_tests;
+
+#[cfg(test)]
+mod connection_tests;
 
 // TASK-AGS-706: re-export LlmConfig at crate root for call sites that
 // don't want to reach into `config::`.
@@ -89,3 +93,10 @@ pub use active::ActiveProvider;
 
 // TASK-TUI-702: re-export TokenUsage at crate root for SessionStats struct.
 pub use types::TokenUsage;
+
+pub mod provider_fault;
+
+mod auth_fault;
+
+#[cfg(test)]
+mod provider_fault_http_tests;

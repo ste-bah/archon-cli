@@ -31,7 +31,9 @@ impl OpenAiProvider {
         Self {
             api_key: resolved_key,
             base_url: resolved_url,
-            http: reqwest::Client::new(),
+            http: crate::transport_http::client_builder()
+                .build()
+                .expect("default HTTP client configuration is valid"),
         }
     }
 
@@ -179,6 +181,7 @@ impl OpenAiProvider {
 
     /// Build and send the streaming request, return the mpsc receiver.
     async fn do_stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        crate::provider_fault::begin_request();
         let body = self.request_body(&request);
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self
@@ -188,15 +191,15 @@ impl OpenAiProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+            .map_err(crate::provider_fault::from_transport)?;
 
         let status = resp.status().as_u16();
+        crate::provider_fault::note_response(
+            status,
+            crate::transport_http::response_retry_after(&resp),
+        );
         if status >= 400 {
-            let msg = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| String::from("unknown"));
-            return Err(map_http_error(status, msg));
+            return Err(crate::transport_http::response_error(resp, map_http_error).await);
         }
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
@@ -210,12 +213,7 @@ impl OpenAiProvider {
                 let chunk_bytes = match chunk_result {
                     Ok(b) => b,
                     Err(e) => {
-                        let _ = tx
-                            .send(StreamEvent::Error {
-                                error_type: "http_error".to_string(),
-                                message: e.to_string(),
-                            })
-                            .await;
+                        let _ = tx.send(crate::provider_fault::transport_event(e)).await;
                         return;
                     }
                 };
@@ -394,6 +392,15 @@ impl LlmProvider for OpenAiProvider {
                 } => {
                     stop_reason = sr;
                 }
+                StreamEvent::Error {
+                    error_type,
+                    message,
+                } => {
+                    return Err(crate::provider_fault::from_stream_error(
+                        &error_type,
+                        &message,
+                    ));
+                }
                 _ => {}
             }
         }
@@ -454,5 +461,38 @@ impl OpenAiProvider {
             body["temperature"] = temperature.clone();
         }
         body
+    }
+}
+
+#[cfg(test)]
+mod connection_recovery_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn calls_after_sleep_use_fresh_connections() {
+        let client = OpenAiProvider::new("AC-X-001".into(), None, String::new());
+        crate::connection_tests::assert_fresh_connections(client.http).await;
+    }
+}
+
+#[cfg(test)]
+mod header_recovery_tests {
+    #[tokio::test]
+    async fn response_header_retains_typed_retry_after() {
+        let response = crate::connection_tests::error_response(503, "90").await;
+        let error = crate::transport_http::response_error(response, super::map_http_error).await;
+        assert!(
+            matches!(
+                error,
+                crate::provider::LlmError::Overloaded {
+                    retry_after_secs: Some(90),
+                    ..
+                } | crate::provider::LlmError::Server {
+                    pipeline_retry_after_secs: Some(90),
+                    ..
+                }
+            ),
+            "header lost: {error:?}"
+        );
     }
 }

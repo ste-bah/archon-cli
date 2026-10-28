@@ -17,7 +17,7 @@ use crate::types::Usage;
 // Error type
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum LlmError {
     #[error("HTTP error: {0}")]
@@ -82,6 +82,9 @@ pub enum LlmError {
         provider: Option<String>,
         model: Option<String>,
     },
+
+    #[error("HTTP error: {0}")]
+    Transport(String),
 }
 
 // Request-pressure and context-window classification of an error.

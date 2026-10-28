@@ -32,7 +32,7 @@
 //! diagnosis ([`DispatchCut::NeverAdmitted`]): a missing admission report is
 //! named, never silently timed from dispatch.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -124,6 +124,7 @@ pub struct DispatchClock {
     last: Mutex<Option<String>>,
     /// Tool calls a guard refused in the call's sessions (Issue 382).
     refused: AtomicU64,
+    provider_accounted: AtomicBool,
 }
 
 impl DispatchClock {
@@ -141,6 +142,7 @@ impl DispatchClock {
             state,
             last: Mutex::new(None),
             refused: AtomicU64::new(0),
+            provider_accounted: AtomicBool::new(false),
         })
     }
 
@@ -183,6 +185,25 @@ impl DispatchClock {
                 state.spent = Duration::ZERO;
                 state.running_since = (state.waits == 0).then(Instant::now);
             }
+        });
+    }
+
+    /// The executor accounts provider phases on this clock, preserving partial work.
+    pub fn mark_provider_accounted(&self) {
+        self.provider_accounted.store(true, Ordering::Relaxed);
+    }
+
+    pub fn provider_accounted(&self) -> bool {
+        self.provider_accounted.load(Ordering::Relaxed)
+    }
+
+    /// Remove only outage time, retaining no-progress time from before it.
+    pub fn refund(&self, elapsed: Duration) {
+        self.state.send_modify(|state| {
+            let now = Instant::now();
+            state.stop(now);
+            state.spent = state.spent.saturating_sub(elapsed);
+            state.resume(now);
         });
     }
 
@@ -292,6 +313,7 @@ impl Drop for ClockPause {
 pub struct SessionClocks {
     pub agent_id: String,
     pub clocks: Vec<Arc<DispatchClock>>,
+    pub provider_recovery: bool,
 }
 
 tokio::task_local! {
@@ -308,6 +330,7 @@ pub async fn scope_session<T>(
     let session = SessionClocks {
         agent_id: agent_id.into(),
         clocks,
+        provider_recovery: crate::provider_recovery::enabled(),
     };
     SESSION.scope(session, work).await
 }
@@ -320,6 +343,11 @@ pub fn current_for(agent_id: &str) -> Option<SessionClocks> {
         .filter(|session| session.agent_id == agent_id)
 }
 
+/// The installed clocks on this executor task, including its outer call.
+pub fn current_session() -> Option<SessionClocks> {
+    SESSION.try_with(Clone::clone).ok()
+}
+
 /// Task locals do not cross spawn. Capture on the caller with
 /// [`current_for`] and restore around the spawned executor's work.
 pub async fn inherit<T>(
@@ -327,7 +355,13 @@ pub async fn inherit<T>(
     work: impl std::future::Future<Output = T>,
 ) -> T {
     match session {
-        Some(session) => SESSION.scope(session, work).await,
+        Some(session) => {
+            crate::provider_recovery::inherit(
+                session.provider_recovery,
+                SESSION.scope(session, work),
+            )
+            .await
+        }
         None => work.await,
     }
 }

@@ -417,7 +417,13 @@ pub(crate) fn llm_response_for_subagent_outcome(
             status,
             retry_after_secs,
             overloaded,
+            source,
         } => {
+            if let Some(source) = source {
+                return Err(
+                    anyhow::Error::new(source).context(format!("subagent failed: {message}"))
+                );
+            }
             let Some(error) = provider_failure::to_llm_error(
                 status,
                 retry_after_secs,

@@ -79,6 +79,7 @@ async fn compaction_reinjects_host_landed_records_and_read_orientation() {
             "fixture compaction failed"
         )
         .await
+        .unwrap()
     );
     let last = messages.as_slice().last().unwrap()["content"]
         .as_str()

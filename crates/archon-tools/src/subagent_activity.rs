@@ -79,6 +79,22 @@ impl ActivityClock {
         ToolRoundGuard(Arc::clone(self))
     }
 
+    /// Hold inactivity while the outcome of a provider open is unknown.
+    pub fn pause_for_provider(self: &Arc<Self>) -> ActivityPause {
+        self.tool_rounds.fetch_add(1, Ordering::SeqCst);
+        ActivityPause {
+            clock: Arc::clone(self),
+            started: Instant::now(),
+            exclude: false,
+        }
+    }
+
+    pub fn exclude_silence(&self, elapsed: Duration) {
+        if let Ok(mut last) = self.last.lock() {
+            *last = last.map(|last| last + elapsed);
+        }
+    }
+
     /// When the current silence began, or `None` while a tool round runs or
     /// before the session has started.
     pub fn silent_since(&self) -> Option<Instant> {
@@ -97,6 +113,29 @@ impl Drop for ToolRoundGuard {
     fn drop(&mut self) {
         self.0.touch();
         self.0.tool_rounds.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A speculative hold: only operational failures exclude elapsed time.
+#[derive(Debug)]
+pub struct ActivityPause {
+    clock: Arc<ActivityClock>,
+    started: Instant,
+    exclude: bool,
+}
+impl ActivityPause {
+    pub fn exclude_elapsed(&mut self, exclude: bool) {
+        self.exclude = exclude;
+    }
+}
+impl Drop for ActivityPause {
+    fn drop(&mut self) {
+        if self.exclude
+            && let Ok(mut last) = self.clock.last.lock()
+        {
+            *last = last.map(|last| last + self.started.elapsed());
+        }
+        self.clock.tool_rounds.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
