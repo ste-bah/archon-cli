@@ -134,6 +134,12 @@ async function authorBodies(w, work, bodies) {
   const failure = settled.find((result) => result && result.status === "rejected");
   if (failure) throw failure.reason;
   if (pending.length > 0) {
+    await pauseLoop(w, "authored-pending", {
+      reason: "authored_pending",
+      pending_subjects: pending.map(([subject]) => subject.taskId),
+      last_findings: pending.flatMap(([, findings]) => findings).slice(0, PAUSE_EVIDENCE_FINDINGS),
+      recovery: "The run is paused with authored subjects pending. Resume to retry these subjects; completed independent bodies remain published."
+    });
     await authorBodies(w, pending.map(([subject, findings, priorFeedback, rung]) => [
       subject, [...priorFeedback, ...findings], rung
     ]), bodies);
@@ -173,6 +179,7 @@ async function runSetGateLoop(w, chain, bodies) {
         continue;
       }
       if (stall) {
+        if (repairRung === 3) await pauseAuthorLoop(w, "set-gates", progress, stall, [`${failed.capability}: ${failed.routed.operational}`]);
         repairRung = repairRung === 4 ? 2 : repairRung + 1;
         if (repairRung === 2) repairCycle += 1;
         await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
@@ -199,6 +206,7 @@ async function runSetGateLoop(w, chain, bodies) {
     }
     const stall = stallReason(progress);
     if (stall) {
+      if (repairRung === 3) await pauseAuthorLoop(w, "set-gates", progress, stall, open);
       repairRung = repairRung === 4 ? 2 : repairRung + 1;
       if (repairRung === 2) repairCycle += 1;
       await repairEvent(w, "set-gates", repairRung, repairCycle, round, progress.calls);
@@ -259,7 +267,8 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
   const next = SKELETON_TASKS.get(outcome);
   const grouped = new Map(groupFindingsBySubject(bodyFindings, chain.subjects));
   const onDisk = frozenChain().bodies;
-  const reached = (subject) => !prior || !next
+  const dependencies = changedDependencySubjects(prior, next);
+  const reached = (subject) => dependencies.has(subject.taskId) || !prior || !next
     || !(bodies.has(subject.fileName) || onDisk.has(subject.fileName))
     || grouped.has(subject.fileName) || !prior.has(subject.taskId)
     || prior.get(subject.taskId) !== next.get(subject.taskId);
@@ -390,72 +399,4 @@ function bodyEvidence(subjects, bodies) {
     if (bodies.has(subject.fileName)) evidence.push(bodies.get(subject.fileName));
   }
   return evidence;
-}
-
-// The launcher's reading of the task root: which frozen stages exist and
-// verify, and which frozen bodies are already on disk. Absent means nothing
-// is frozen. A skeleton without an acceptance contract, or bodies without a
-// skeleton, is a chain the host would never have reported. `tasks` is the
-// frozen skeleton's entries as published, one per subject, or null when the
-// launch argument does not carry them.
-function frozenChain() {
-  const raw = args.frozenChain;
-  const none = { acceptance: false, skeleton: false, subjects: [], bodies: new Set(), tasks: null };
-  if (raw === undefined || raw === null) return none;
-  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("fixed decomposition frozenChain argument is malformed");
-  const acceptance = raw.acceptance === true;
-  const skeleton = raw.skeleton === true;
-  const subjects = Array.isArray(raw.subjects) ? raw.subjects : [];
-  const bodies = new Set(Array.isArray(raw.bodies) ? raw.bodies : []);
-  if (skeleton && !acceptance) throw new Error("frozenChain reports a skeleton without an acceptance contract");
-  if (!skeleton && (subjects.length > 0 || bodies.size > 0)) throw new Error("frozenChain reports subjects or bodies without a frozen skeleton");
-  for (const subject of subjects) requireSubject(subject);
-  for (const fileName of bodies) {
-    if (!subjects.some((subject) => subject.fileName === fileName)) throw new Error(`frozenChain body ${fileName} names no frozen subject`);
-  }
-  const tasks = raw.tasks === undefined ? null : frozenTaskEntries(raw.tasks);
-  if (raw.tasks !== undefined && (!skeleton || !tasks || tasks.size !== subjects.length
-    || subjects.some((subject) => !tasks.has(subject.taskId)))) {
-    throw new Error("frozenChain tasks are not one frozen entry per frozen subject");
-  }
-  return { acceptance, skeleton, subjects, bodies, tasks };
-}
-
-// A committed outcome for a stage the launcher found frozen: the host
-// re-verifies the artifact in place and reports its subjects as the freeze
-// would have. Any finding here is fatal; there is no candidate to repair.
-// A verification that could not run is retried, and pauses the run when its
-// window closes, like any other attempt without progress.
-async function verifyFrozenStage(w, capability) {
-  const progress = newProgress([]);
-  for (let attempt = 1; ; attempt += 1) {
-    const outcome = await w.hostCommand(capability, { stdin: null });
-    const routed = routeFindings(outcome, new Set(), new Set());
-    if (!routed.operational) {
-      if (routed.all.length > 0) {
-        await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
-      }
-      requireCommitted(outcome, capability);
-      const tasks = capability === "verify-frozen-skeleton" ? frozenChain().tasks : null;
-      if (tasks) SKELETON_TASKS.set(outcome, tasks);
-      return outcome;
-    }
-    progress.calls = attempt;
-    recordOperational(progress, attempt, routed.operational, false, NO_ROUND, capability);
-    const stall = stallReason(progress);
-    if (stall) await pauseAuthorLoop(w, capability, progress, stall, [`${capability}: ${routed.operational}`]);
-  }
-}
-
-// The subjects the host read at verification are the ones the launcher read,
-// or the skeleton was re-frozen underneath the run. A rehearsal answers with
-// a stand-in subject and is not held to this.
-function requireFrozenSubjects(frozen, skeleton) {
-  if (!frozen.skeleton || skeleton.dryRun === true) return;
-  const key = (subject) => `${subject.taskId}\u0000${subject.fileName}`;
-  const launched = frozen.subjects.map(key).sort();
-  const verified = skeleton.subjects.map(key).sort();
-  if (launched.length !== verified.length || launched.some((entry, index) => entry !== verified[index])) {
-    throw new Error("frozen skeleton subjects differ from the launch-bound frozenChain; the task root changed underneath the run");
-  }
 }

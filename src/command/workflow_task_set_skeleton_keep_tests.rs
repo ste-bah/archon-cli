@@ -63,3 +63,69 @@ fn a_candidate_that_drops_a_frozen_task_is_refused_before_publication() {
         kept.err()
     );
 }
+
+#[test]
+fn frozen_subjects_survive_an_acceptance_rebind_before_skeleton_repair() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, _) = seed_frozen_acceptance(&temp);
+    let prd = temp.path().join("prds/PRD-X.md");
+    std::fs::write(tasks.join(TASK_SKELETON_FILE), skeleton("TASK-X-010")).unwrap();
+    freeze_skeleton(temp.path(), &tasks, &prd).unwrap();
+    let pin_path = acceptance_pin_path(temp.path(), &tasks);
+    let mut pin: AcceptancePin =
+        serde_json::from_slice(&std::fs::read(&pin_path).unwrap()).unwrap();
+    pin.skeleton_digest = None;
+    pin.skeleton_gate = None;
+    std::fs::write(pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
+    let error = prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &prd,
+        archon_core::config::GateMode::Observe,
+        skeleton("TASK-X-020").into_bytes(),
+    )
+    .expect_err("the prior lock still owns its frozen subjects during repair");
+    assert!(CandidateRejected::caused(&error), "{error:#}");
+    assert!(
+        format!("{error:#}").contains("drops frozen task TASK-X-010"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn skeleton_freeze_rejects_a_forged_lock_and_matching_cache() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, _) = seed_frozen_acceptance(&temp);
+    let prd = temp.path().join("prds/PRD-X.md");
+    std::fs::write(tasks.join(TASK_SKELETON_FILE), skeleton("TASK-X-010")).unwrap();
+    freeze_skeleton(temp.path(), &tasks, &prd).unwrap();
+    let lock_path = tasks.join(archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE);
+    let mut lock: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+    let forged = skeleton("TASK-X-020").into_bytes();
+    let digest = archon_workflow::task_set_contract::content_digest(&forged);
+    lock["digest"] = digest.clone().into();
+    std::fs::write(lock_path, serde_json::to_vec(&lock).unwrap()).unwrap();
+    let cache = temp
+        .path()
+        .join(".archon/freeze-cache/skeletons")
+        .join(digest);
+    std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    std::fs::write(cache, forged.clone()).unwrap();
+    let error = prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &prd,
+        archon_core::config::GateMode::Observe,
+        forged,
+    )
+    .expect_err("a supplied lock cannot replace the host pin's ownership");
+    assert!(
+        !CandidateRejected::caused(&error),
+        "forged authority is a chain fault: {error:#}"
+    );
+    assert!(format!("{error:#}").contains("pin"), "{error:#}");
+}
+
+#[path = "workflow_task_set_retention_tests.rs"]
+mod retention;

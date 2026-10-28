@@ -124,6 +124,7 @@ pub(super) fn script_source() -> String {
             "workflow_decompose_v1.js",
             "workflow_decompose_v1_acceptance.js",
             "workflow_decompose_v1_set_gate.js",
+            "workflow_decompose_v1_frozen.js",
             "workflow_decompose_v1_progress.js",
             "workflow_decompose_v1_context.js",
         ]

@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use archon_workflow::WorkflowStore;
 
 use super::freeze_override::{self, OverrideDecision, freeze_override_decision};
-use super::{FrozenChainSnapshot, snapshot_locked, with_chain_read};
+use super::{FrozenChainSnapshot, snapshot_admission_locked, with_chain_read};
 
 const RESUME_CHAIN_DIR: &str = "decomposition/resume-frozen-chain";
 const RESUME_CHAIN_SCHEMA: u32 = 1;
@@ -115,10 +115,16 @@ fn decide_locked(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
+    if !read_only {
+        super::skeleton_cache::restore_missing(project_root, task_root)?;
+    }
     let snapshot = match recorded {
         Some(snapshot) => snapshot,
         None => {
-            let snapshot = snapshot_locked(project_root, prd_path, task_root)?;
+            let snapshot = snapshot_admission_locked(project_root, prd_path, task_root)?;
+            if !read_only && snapshot.skeleton {
+                super::skeleton_cache::backfill(project_root, task_root)?;
+            }
             if !read_only {
                 use crate::command::workflow_task_set::{create_dir_all_durably, sync_parent};
                 let directory = store.run_dir(run_id).join(RESUME_CHAIN_DIR);
@@ -206,11 +212,16 @@ fn decide_locked(
     if !effective.skeleton {
         effective.subjects.clear();
     }
-    // The verified skeleton's entries come from the published skeleton on
-    // every resume, never from the record: a record an older build wrote
-    // carries none, and the record itself is never rewritten.
+    // Generation-bound entries are the comparison inputs replay started with,
+    // even after a repaired publication changes the live skeleton's digest.
+    // A record an older build wrote carries none: only that legacy case reads
+    // the matching published skeleton, and the record itself is never rewritten.
     effective.tasks = if effective.skeleton {
-        published_tasks(task_root, &effective)?
+        if effective.tasks.is_empty() {
+            published_tasks(task_root, &effective)?
+        } else {
+            effective.tasks.clone()
+        }
     } else {
         Vec::new()
     };

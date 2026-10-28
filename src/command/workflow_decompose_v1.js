@@ -95,21 +95,7 @@ async function workflow(w) {
   if (args.phaseSeed) applySeedOrdinals(); // Issue 360: after an upgrade, start from the phase seed.
   const frozen = frozenChain();
 
-  // A stage the launcher found frozen and verified is not re-authored: the
-  // host verifies it in place and that committed outcome is its evidence.
-  const acceptance = frozen.acceptance ? await verifyFrozenStage(w, "verify-frozen-acceptance") : await authorCandidate(w, {
-    phase: "acceptance",
-    author: authorAcceptanceEntries,
-    capability: "freeze-acceptance",
-    retryScopes: new Set(["candidate_artifact"]),
-    prompt: acceptanceAuthorPrompt
-  });
-
-  const skeleton = frozen.skeleton ? await verifyFrozenStage(w, "verify-frozen-skeleton") : await authorCandidate(w, skeletonPolicy([]));
-  if (!Array.isArray(skeleton.subjects) || skeleton.subjects.length === 0) {
-    throw new Error("frozen skeleton returned zero host-read task subjects");
-  }
-  requireFrozenSubjects(frozen, skeleton);
+  const { acceptance, skeleton, changedChecks } = await prepareAuthorStages(w, frozen);
 
   // Keyed by frozen file name so a body the set gate sends back replaces its
   // earlier evidence entry instead of appending a second one. A body already
@@ -120,7 +106,7 @@ async function workflow(w) {
   const forceBodySubjects = new Set(Array.isArray(args.forceBodySubjects) ? args.forceBodySubjects : []);
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
-    if (frozen.bodies.has(subject.fileName) && !forceBodySubjects.has(subject.taskId)) continue;
+    if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) continue;
     unauthored.push([subject, []]);
   }
   await authorBodies(w, unauthored, bodies);
@@ -259,10 +245,12 @@ async function authorCandidate(w, policy) {
     const stall = stallReason(progress);
     if (stall) {
       if (stall === "no_progress") {
-        if (repairRung === 3 && policy.deferAuthoredPending) {
-          await repairEvent(w, policy.phase, 4, repairCycle, call, progress.calls);
-          return { pendingAuthor: true, pendingRung: 4, findings: lastFindings.slice() };
+        if (policy.deferAuthoredPending) {
+          // Yield the stalled subject so independent bodies settle before the
+          // pool pauses. A resume advances its ladder with a fresh window.
+          return { pendingAuthor: true, pendingRung: repairRung === 4 ? 2 : repairRung + 1, findings: lastFindings.slice() };
         }
+        if (repairRung === 3) await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
         repairRung = repairRung === 4 ? 2 : repairRung + 1;
         if (repairRung === 2) {
           repairCycle += 1;

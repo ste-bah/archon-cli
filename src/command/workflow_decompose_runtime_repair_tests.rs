@@ -47,6 +47,7 @@ async fn workflow_decompose_rung_transition_uses_real_script_host_checkpoint_wit
                 "workflow_decompose_reply_blocks.js",
                 "workflow_decompose_v1_acceptance.js",
                 "workflow_decompose_v1_set_gate.js",
+                "workflow_decompose_v1_frozen.js",
                 "workflow_decompose_v1_progress.js",
                 "workflow_decompose_v1_seed.js",
                 "workflow_decompose_v1_context.js",

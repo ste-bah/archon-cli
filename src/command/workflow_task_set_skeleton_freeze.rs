@@ -98,7 +98,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         &marker_value,
         true,
     ));
-    defects.extend(dropped_frozen_tasks(tasks_root, &pin, &skeleton));
+    defects.extend(dropped_frozen_tasks(project_root, tasks_root, &skeleton)?);
     let mut findings = findings::skeleton_findings(
         tasks_root,
         &canonical_prd,
@@ -166,32 +166,48 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
 /// it may add implements and tasks, never remove one. A candidate that drops
 /// one is refused before anything is published, as a defect its author
 /// repairs -- for every caller of the freeze, not only the decomposition
-/// script. With no published skeleton (the pin names none, or the file on
-/// disk is not the one it names, as when the candidate is that file) there
-/// is nothing to keep.
+/// script. Previously, a missing pin digest or replaced live file meant there
+/// was nothing to keep. The prior lock now authenticates ownership through an
+/// acceptance rebind, using matching live or cached bytes; without a published
+/// lock there is still nothing to keep.
 fn dropped_frozen_tasks(
+    project_root: &Path,
     tasks_root: &Path,
-    pin: &AcceptancePin,
     candidate: &TaskSkeleton,
-) -> Vec<archon_workflow::defect::ValidationDefect> {
-    let Some(published) = pin.skeleton_digest.as_deref() else {
-        return Vec::new();
-    };
-    let Ok(bytes) = std::fs::read(tasks_root.join(TASK_SKELETON_FILE)) else {
-        return Vec::new();
-    };
-    if content_digest(&bytes) != published {
-        return Vec::new();
+) -> Result<Vec<archon_workflow::defect::ValidationDefect>> {
+    let lock_path = tasks_root.join(archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE);
+    if !lock_path.try_exists()? {
+        return Ok(Vec::new());
     }
-    let Ok(frozen) = serde_json::from_slice::<TaskSkeleton>(&bytes) else {
-        return Vec::new();
-    };
-    (frozen.tasks.iter())
-        .filter(|kept| {
-            !(candidate.tasks.iter())
-                .any(|task| task.task_id == kept.task_id && task.file_name == kept.file_name)
+    let lock: TaskSkeletonLock = serde_json::from_slice(&std::fs::read(&lock_path)?)
+        .with_context(|| format!("parsing frozen skeleton lock {}", lock_path.display()))?;
+    let bytes =
+        crate::command::workflow_decompose_frozen_chain::skeleton_cache::authenticated_bytes(
+            project_root,
+            tasks_root,
+            &lock,
+        )?;
+    let frozen: TaskSkeleton = serde_json::from_slice(&bytes)?;
+    // The prior lock retains ownership while a new acceptance freeze leaves
+    // the skeleton pin pending; an absent pin digest cannot erase subjects.
+    let shape =
+        archon_workflow::task_skeleton::skeleton_defects(&frozen, &frozen.acceptance_digest);
+    let mut seen = std::collections::BTreeSet::new();
+    // Authenticated authored defects still need a repair path: retain valid
+    // subjects, but allow correction of an invalid id or filename. A duplicate
+    // id retains its first valid owner rather than making a valid set impossible.
+    Ok(frozen.tasks.iter().enumerate()
+        .filter(|(index, kept)| {
+            seen.insert(kept.task_id.clone()) && !shape.iter().any(|defect|
+                defect.identity.code == "invalid_task_id" && defect.identity.subject == format!("tasks/{index}"))
         })
-        .map(|dropped| archon_workflow::defect::ValidationDefect {
+        .filter(|(_, kept)| {
+            !(candidate.tasks.iter())
+                .any(|task| task.task_id == kept.task_id && (task.file_name == kept.file_name
+                    || shape.iter().any(|defect| defect.identity.subject == kept.task_id
+                        && matches!(defect.identity.code.as_str(), "invalid_filename" | "duplicate_filename"))))
+        })
+        .map(|(_, dropped)| archon_workflow::defect::ValidationDefect {
             identity: archon_workflow::defect::DeterministicDefect::new(
                 "missing_frozen_task",
                 &dropped.task_id,
@@ -202,7 +218,7 @@ fn dropped_frozen_tasks(
                 dropped.task_id, dropped.file_name
             ),
         })
-        .collect()
+        .collect())
 }
 
 pub(crate) fn publish_skeleton_freeze(

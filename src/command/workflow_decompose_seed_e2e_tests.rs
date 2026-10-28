@@ -13,8 +13,14 @@ use crate::command::workflow_decompose_seed::{
 use archon_workflow::WorkflowResult;
 
 /// The same script before a prompt change: every author input differs.
+/// Its historical author loop paused at the first stalled progress window;
+/// changing prompts alone would inherit the current repair ladder instead.
 fn earlier_script() -> String {
     let earlier = FIXED_SCRIPT_SOURCE
+        .replace(
+            "if (stall === \"no_progress\") {",
+            "if (stall === \"no_progress\" && !policy.deferAuthoredPending) await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);\n      if (stall === \"no_progress\") {",
+        )
         .replace(
             "Author exactly one acceptance entry identified below",
             "Author one acceptance entry named below",

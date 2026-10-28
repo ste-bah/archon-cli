@@ -8,15 +8,18 @@ use super::FIXED_SCRIPT_SOURCE;
 /// The embedded script, or the same files under `ARCHON_TEST_SCRIPT_ROOT` (the
 /// override the Node suites honour), so a script can be tested before it is
 /// embedded and an old script replayed to show a test fails before its fix.
-fn script_source() -> std::borrow::Cow<'static, str> {
+pub(super) fn script_source() -> std::borrow::Cow<'static, str> {
     let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") else {
         return FIXED_SCRIPT_SOURCE.into();
     };
     [
         "workflow_decompose_v1.js",
+        "workflow_decompose_reply_blocks.js",
         "workflow_decompose_v1_acceptance.js",
         "workflow_decompose_v1_set_gate.js",
+        "workflow_decompose_v1_frozen.js",
         "workflow_decompose_v1_progress.js",
+        "workflow_decompose_v1_seed.js",
         "workflow_decompose_v1_context.js",
     ]
     .iter()
@@ -62,6 +65,9 @@ mod refusal_progress;
 mod set_gate;
 #[path = "workflow_decompose_set_gate_skeleton_tests.rs"]
 pub(crate) mod set_gate_skeleton;
+
+#[path = "workflow_decompose_frozen_routing_tests.rs"]
+pub(crate) mod frozen_routing;
 
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
@@ -138,6 +144,13 @@ fn run_js(driver: &str) -> String {
         "repairEvent",
         "authorCandidate",
         "verifyFrozenStage",
+        "frozenFindingOwner",
+        "repairFrozenStage",
+        "acceptanceStagePolicy",
+        "FROZEN_REPAIRS",
+        "prepareAuthorStages",
+        "frozenBodyReusable",
+        "changedDependencySubjects",
         "acceptanceRepairIds",
     ] {
         script.push_str(&decl(name));
@@ -450,6 +463,22 @@ fn host_repair_regressions_drive_the_embedded_script() {
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/src/command/workflow_decompose_host_repair_test.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn set_gate_author_loops_pause_without_progress() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_loop_pause_test.cjs"
         ))
         .output()
         .unwrap();

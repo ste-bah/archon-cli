@@ -13,6 +13,8 @@
 //! A lock that exists but does not verify is an error at launch, never a
 //! silent `false`: the operator asked to build on this root, and a root whose
 //! frozen record contradicts its contents is not one to build on quietly.
+//! Authenticated authored defects retain admission metadata so verification
+//! can return them to their owner; provenance contradictions remain errors.
 
 use std::path::Path;
 
@@ -40,11 +42,20 @@ pub(crate) fn prepare_launch_snapshot(
     repository_root: &Path,
     catalog: &archon_workflow::CommandCapabilityCatalog,
 ) -> Result<LaunchSnapshot> {
-    let read = frozen_chain_snapshot_read_only(project_root, prd_path, task_root);
-    let deferred = read
-        .as_ref()
-        .err()
-        .is_some_and(|error| format!("{error:#}").contains("publish recovery is pending"));
+    let read =
+        frozen_chain_snapshot_read_only(project_root, prd_path, task_root).or_else(|error| {
+            if verification::is_authored(&error) {
+                with_chain_read(project_root, task_root, false, || {
+                    snapshot_admission_locked(project_root, prd_path, task_root)
+                })
+            } else {
+                Err(error)
+            }
+        });
+    let deferred = read.as_ref().err().is_some_and(|error| {
+        verification::missing_skeleton(error)
+            || format!("{error:#}").contains("publish recovery is pending")
+    });
     let frozen_chain = match read {
         Ok(snapshot) => snapshot,
         Err(_) if deferred => FrozenChainSnapshot::default(),
@@ -72,7 +83,14 @@ pub(crate) fn recover_deferred_launch_snapshot(
     repository_root: &Path,
     catalog: &archon_workflow::CommandCapabilityCatalog,
 ) -> Result<(FrozenChainSnapshot, LaunchAcceptance)> {
-    let snapshot = frozen_chain_snapshot(project_root, prd_path, task_root)?;
+    let snapshot = with_chain_read(project_root, task_root, true, || {
+        skeleton_cache::restore_missing(project_root, task_root)?;
+        let snapshot = snapshot_admission_locked(project_root, prd_path, task_root)?;
+        if snapshot.skeleton {
+            skeleton_cache::backfill(project_root, task_root)?;
+        }
+        Ok(snapshot)
+    })?;
     let decision = launch_acceptance_decision(
         snapshot.acceptance,
         store,
@@ -96,7 +114,13 @@ pub(crate) use resume_chain::resume_chain_argument;
 pub(crate) use resume_chain::resume_chain_decision;
 #[path = "workflow_decompose_frozen_chain_stage.rs"]
 mod stage;
-pub(crate) use stage::FrozenStage;
+#[cfg(test)]
+pub(crate) use stage::stage_verify;
+pub(crate) use stage::{FrozenStage, handle_staged_verify};
+#[path = "workflow_decompose_frozen_chain_cache.rs"]
+pub(crate) mod skeleton_cache;
+#[path = "workflow_decompose_frozen_chain_verification.rs"]
+mod verification;
 
 /// The frozen chain the launcher found and verified under a task root. Read
 /// strictly on resume: a new field follows the rule of
@@ -155,12 +179,12 @@ pub(crate) fn frozen_chain_snapshot_read_only(
     prd_path: &Path,
     task_root: &Path,
 ) -> Result<FrozenChainSnapshot> {
-    if task_root.is_dir() {
+    if verification::is_directory(task_root)? {
         let pin_path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
         let lock_path = archon_workflow::task_set_publish_lock::lock_path(&pin_path);
-        if !lock_path.exists() {
+        if !lock_path.try_exists()? {
             let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
-            if journal.exists() {
+            if journal.try_exists()? {
                 return Err(anyhow!(
                     "frozen task chain publish recovery is pending at {}",
                     journal.display()
@@ -179,7 +203,14 @@ fn frozen_chain_snapshot_with_recovery(
     recover: bool,
 ) -> Result<FrozenChainSnapshot> {
     with_chain_read(project_root, task_root, recover, || {
-        snapshot_locked(project_root, prd_path, task_root)
+        if recover {
+            skeleton_cache::restore_missing(project_root, task_root)?;
+        }
+        let snapshot = snapshot_locked(project_root, prd_path, task_root)?;
+        if recover && snapshot.skeleton {
+            skeleton_cache::backfill(project_root, task_root)?;
+        }
+        Ok(snapshot)
     })
 }
 
@@ -190,7 +221,7 @@ pub(crate) fn with_chain_read<T>(
     recover: bool,
     read: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    if !task_root.is_dir() {
+    if !verification::is_directory(task_root)? {
         return read();
     }
     let pin_path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
@@ -202,7 +233,7 @@ pub(crate) fn with_chain_read<T>(
         archon_workflow::task_set_publish_lock::PublishLockFile::hold_shared_existing(&pin_path)
             .map_err(|error| anyhow!(error))?;
     let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
-    if journal.exists() {
+    if journal.try_exists()? {
         return Err(anyhow!(
             "dry-run cannot inspect frozen task chain while publish recovery is pending at {}; run a live resume to settle it",
             journal.display()
@@ -216,16 +247,33 @@ pub(crate) fn snapshot_locked(
     prd_path: &Path,
     task_root: &Path,
 ) -> Result<FrozenChainSnapshot> {
+    snapshot_inner(project_root, prd_path, task_root, false)
+}
+
+fn snapshot_admission_locked(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+) -> Result<FrozenChainSnapshot> {
+    snapshot_inner(project_root, prd_path, task_root, true)
+}
+
+fn snapshot_inner(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+    admission: bool,
+) -> Result<FrozenChainSnapshot> {
     let mut snapshot = FrozenChainSnapshot::default();
-    if !task_root.is_dir() {
+    if !verification::is_directory(task_root)? {
         return Ok(snapshot);
     }
     #[cfg(test)]
     super::workflow_task_set::reader_test_step("decomposition-read");
     let acceptance_lock = task_root.join(ACCEPTANCE_LOCK_FILE);
     let skeleton_lock = task_root.join(TASK_SKELETON_LOCK_FILE);
-    if !acceptance_lock.exists() {
-        if skeleton_lock.exists() {
+    if !acceptance_lock.try_exists()? {
+        if skeleton_lock.try_exists()? {
             return Err(anyhow!(
                 "{} exists under {} without {}; the frozen chain is inconsistent — restore the acceptance freeze or clear the task root",
                 TASK_SKELETON_LOCK_FILE,
@@ -236,9 +284,13 @@ pub(crate) fn snapshot_locked(
         return Ok(snapshot);
     }
     let pin = read_pin(project_root, task_root)?;
-    verify_acceptance(project_root, prd_path, task_root, &pin)?;
+    if let Err(error) = verify_acceptance(project_root, prd_path, task_root, &pin)
+        && !(admission && verification::is_authored(&error))
+    {
+        return Err(error);
+    }
     snapshot.acceptance = true;
-    if !skeleton_lock.exists() {
+    if !skeleton_lock.try_exists()? {
         // Originating acceptance-only behavior: without the skeleton lock,
         // the skeleton is not a frozen successor, even if its draft bytes or
         // pin fields remain. Preflight tells operators to remove successor
@@ -250,16 +302,25 @@ pub(crate) fn snapshot_locked(
     if super::workflow_skeleton_pending::is_pending(task_root, &pin)? {
         return Ok(snapshot);
     }
-    let skeleton = validate_full_chain(task_root, &pin).map_err(|error| {
-        anyhow!(
-            "frozen task skeleton under {} does not verify: {error}",
-            task_root.display()
-        )
-    })?;
+    for name in [TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE] {
+        verification::read(&task_root.join(name), true)?;
+    }
+    let skeleton = match validate_full_chain(task_root, &pin) {
+        Ok(skeleton) => skeleton,
+        Err(error) if admission && !error.defects.is_empty() => verification::admission_skeleton(
+            &verification::read(&task_root.join(TASK_SKELETON_FILE), true)?,
+        )?,
+        Err(error) => {
+            return Err(anyhow::Error::new(error).context(format!(
+                "frozen task skeleton under {} does not verify",
+                task_root.display()
+            )));
+        }
+    };
     snapshot.skeleton = true;
     for file_name in [TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE] {
         let path = task_root.join(file_name);
-        let bytes = std::fs::read(&path)
+        let bytes = verification::read(&path, true)
             .with_context(|| format!("reading frozen task-chain artifact {}", path.display()))?;
         snapshot
             .preserved_digests
@@ -267,9 +328,24 @@ pub(crate) fn snapshot_locked(
     }
     for task in &skeleton.tasks {
         let path = task_root.join(&task.file_name);
-        if std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file()) {
+        // Invalid authored paths may be retained as comparison inputs, but
+        // admission never reads a body outside the owning artifact's directory.
+        let direct = Path::new(&task.file_name).components().count() == 1;
+        let present = match if direct {
+            std::fs::symlink_metadata(&path)
+        } else {
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        } {
+            Ok(meta) => meta.is_file(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("reading frozen body metadata {}", path.display()));
+            }
+        };
+        if present {
             snapshot.bodies.push(task.file_name.clone());
-            let bytes = std::fs::read(&path)
+            let bytes = verification::read(&path, false)
                 .with_context(|| format!("reading frozen task body {}", path.display()))?;
             snapshot
                 .body_digests
@@ -290,6 +366,8 @@ pub(crate) fn snapshot_locked(
 /// Verify one frozen stage the way the launcher did, for the
 /// `verify-frozen-chain` host command. A stage that is not frozen is an
 /// error: the script only asks about a stage the launcher reported frozen.
+/// Acceptance is read independently of its successor so a repairable successor
+/// defect does not prevent verification of its unchanged predecessor.
 fn verify_frozen_stage_with_recovery(
     project_root: &Path,
     prd_path: &Path,
@@ -297,6 +375,21 @@ fn verify_frozen_stage_with_recovery(
     stage: FrozenStage,
     recover: bool,
 ) -> Result<FrozenChainSnapshot> {
+    if stage == FrozenStage::Acceptance {
+        return with_chain_read(project_root, task_root, recover, || {
+            let pin = read_pin(project_root, task_root)?;
+            if let Err(error) = verify_acceptance(project_root, prd_path, task_root, &pin) {
+                if verification::is_authored(&error) && pin.skeleton_digest.is_some() {
+                    skeleton_cache::backfill(project_root, task_root)?;
+                }
+                return Err(error);
+            }
+            Ok(FrozenChainSnapshot {
+                acceptance: true,
+                ..Default::default()
+            })
+        });
+    }
     let snapshot = frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, recover)?;
     let frozen = match stage {
         FrozenStage::Acceptance => snapshot.acceptance,
@@ -317,7 +410,7 @@ fn verify_frozen_stage_with_recovery(
 
 fn read_pin(project_root: &Path, task_root: &Path) -> Result<AcceptancePin> {
     let path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
-    let bytes = std::fs::read(&path).with_context(|| {
+    let bytes = verification::read(&path, true).with_context(|| {
         format!(
             "{} exists under {} but its host pin {} cannot be read; the freeze that wrote the lock left no pin to verify it against",
             ACCEPTANCE_LOCK_FILE,
@@ -337,22 +430,30 @@ fn verify_acceptance(
     task_root: &Path,
     pin: &AcceptancePin,
 ) -> Result<()> {
-    let prd =
-        std::fs::read(prd_path).with_context(|| format!("reading PRD {}", prd_path.display()))?;
-    let text = std::str::from_utf8(&prd).context("PRD is not UTF-8")?;
+    for name in [ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE] {
+        verification::read(&task_root.join(name), true)?;
+    }
+    let prd = verification::read(prd_path, false)
+        .with_context(|| format!("reading PRD {}", prd_path.display()))?;
+    let text = std::str::from_utf8(&prd).with_context(|| {
+        format!(
+            "frozen input {} is not UTF-8; restore that input from the accepted publication",
+            prd_path.display()
+        )
+    })?;
     let contract: AcceptanceContract =
         validate_acceptance_bundle(task_root, Some(pin), &acceptance_ids(text)).map_err(
             |error| {
-                anyhow!(
-                    "frozen acceptance contract under {} does not verify: {error}",
+                anyhow::Error::new(error).context(format!(
+                    "frozen acceptance contract under {} does not verify",
                     task_root.display()
-                )
+                ))
             },
         )?;
     let actual = content_digest(&prd);
     if contract.prd.digest != actual {
         return Err(anyhow!(
-            "{} under {} was frozen against PRD digest {} but {} now digests to {}; the frozen chain belongs to a different PRD",
+            "{} under {} was frozen against PRD digest {} but {} now digests to {}; the frozen chain belongs to a different PRD; restore the named input to its frozen digest before retrying verification",
             ACCEPTANCE_CONTRACT_FILE,
             task_root.display(),
             contract.prd.digest,
@@ -365,112 +466,23 @@ fn verify_acceptance(
     // acceptance author and left the refusal to launch time.
     let refuted = super::workflow_task_set::non_accepted_ids(&contract);
     if !refuted.is_empty() {
-        return Err(anyhow!(
-            "frozen acceptance contract under {} carries check(s) the judge did not accept ({}), which can never run; repair them before decomposing on it: {}",
-            task_root.display(),
-            refuted.iter().cloned().collect::<Vec<_>>().join(", "),
-            super::workflow_task_set::republish::reauthor_command(
-                project_root,
-                task_root,
-                &contract,
-                &refuted
-            )
-        ));
-    }
-    Ok(())
-}
-
-/// The `workflow verify-frozen-chain` trusted child behind the
-/// `verify-frozen-acceptance` / `verify-frozen-skeleton` capabilities. It
-/// publishes nothing: its gate envelope is the whole staged output, and the
-/// parent's postcondition (the freeze command's own) reads the chain again.
-/// A stage that does not verify is reported through the envelope as an
-/// operational error, never by exiting non-zero, so the script stops with the
-/// reason instead of "no committed publication receipt".
-pub(crate) fn handle_staged_verify(
-    cwd: &Path,
-    stage: &str,
-    tasks: &Path,
-    prd: &Path,
-    gate_envelope: Option<&Path>,
-    call_id: Option<&str>,
-    read_only: bool,
-    config: &archon_core::config::ArchonConfig,
-) -> Result<()> {
-    if config.workflow.gate_mode == archon_core::config::GateMode::Off {
-        return Err(anyhow!(
-            "gate_mode=off must return before staged frozen-chain verification"
-        ));
-    }
-    let manifest = stage_verify(cwd, stage, tasks, prd, gate_envelope, call_id, read_only)?;
-    println!("{}", serde_json::to_string(&manifest)?);
-    Ok(())
-}
-
-/// The staged child's work, minus the print: the envelope under the staging
-/// root and the prepared manifest naming it.
-pub(crate) fn stage_verify(
-    cwd: &Path,
-    stage: &str,
-    tasks: &Path,
-    prd: &Path,
-    gate_envelope: Option<&Path>,
-    call_id: Option<&str>,
-    read_only: bool,
-) -> Result<archon_workflow::PreparedPublicationV1> {
-    let stage = FrozenStage::parse(stage)?;
-    let gate_envelope = gate_envelope.ok_or_else(|| {
-        anyhow!("trusted staged verify-frozen-chain requires --gate-envelope <PATH>")
-    })?;
-    let call_id = call_id
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("trusted staged verify-frozen-chain requires --call-id <ID>"))?;
-    let absolute = |path: &Path| {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            cwd.join(path)
-        }
-    };
-    let evaluation = match verify_frozen_stage_with_recovery(
-        cwd,
-        &absolute(prd),
-        &absolute(tasks),
-        stage,
-        !read_only,
-    ) {
-        Ok(snapshot) => super::workflow_gate::GateEvaluation::new(
+        return Err(verification::refuted(
+            &contract,
+            task_root,
             format!(
-                "{} verified: acceptance={}, skeleton={}, {} frozen subject(s), {} body file(s) present",
-                stage.command_id(),
-                snapshot.acceptance,
-                snapshot.skeleton,
-                snapshot.subjects.len(),
-                snapshot.bodies.len()
+                "frozen acceptance contract under {} carries check(s) the judge did not accept ({}), which can never run; repair them before decomposing on it: {}",
+                task_root.display(),
+                refuted.iter().cloned().collect::<Vec<_>>().join(", "),
+                super::workflow_task_set::republish::reauthor_command(
+                    project_root,
+                    task_root,
+                    &contract,
+                    &refuted
+                )
             ),
-            Vec::new(),
-        ),
-        Err(error) => {
-            // Issue 338: a set no read can settle pauses the run instead.
-            super::workflow_host_command_operational::exit_if_unsettled_publish(&error);
-            super::workflow_gate::GateEvaluation::new(
-                format!("{} failed", stage.command_id()),
-                Vec::new(),
-            )
-            .with_operational_error(format!("{error:#}"))
-        }
-    };
-    let staging_root = gate_envelope
-        .parent()
-        .ok_or_else(|| anyhow!("staged verify-frozen-chain envelope has no parent"))?;
-    super::workflow_gate_envelope::stage_gate_evaluation(
-        staging_root,
-        gate_envelope,
-        call_id,
-        stage.command_id(),
-        evaluation,
-        Vec::new(),
-    )
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

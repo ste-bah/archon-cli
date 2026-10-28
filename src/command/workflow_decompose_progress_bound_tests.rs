@@ -44,11 +44,11 @@ fn a_subject_clearing_distinct_defects_is_not_stopped_by_the_short_window() {
 }
 
 #[test]
-fn set_gate_rounds_whose_judge_rewords_one_defect_advance_the_ladder() {
+fn set_gate_rounds_whose_judge_rewords_one_defect_pause_and_resume_the_ladder() {
     let out = run(
         "enforce",
         &format!(
-            r##"{{ answer: (n, id) => {{ {SPIN_GUARD} return {{ status: "accepted", stopReason: "end_turn", content: id.startsWith("acceptance-author-") ? JSON.stringify({{ id: "AC-X-001" }}) : "# body " + n }}; }},
+            r##"{{ resumed: ["pause-set-gates-1"], answer: (n, id) => {{ {SPIN_GUARD} return {{ status: "accepted", stopReason: "end_turn", content: id.startsWith("acceptance-author-") ? JSON.stringify({{ id: "AC-X-001" }}) : "# body " + n }}; }},
               findings: (n, capability) => {{
                 if (capability !== "task-set-lint") return [];
                 const round = globalThis.lintRound = (globalThis.lintRound || 0) + 1;
@@ -59,7 +59,7 @@ fn set_gate_rounds_whose_judge_rewords_one_defect_advance_the_ladder() {
         "workflow(w)",
     );
     assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_eq!(pause_ids(&out), ["pause-set-gates-1"], "{out}");
 }
 
 /// The judge rejects both entries with the same findings every time. Each

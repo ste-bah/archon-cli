@@ -24,6 +24,9 @@ mod snapshot;
 #[path = "support/workflow_decomposition_offline_variant_cells.rs"]
 mod variant_cells;
 
+#[path = "support/workflow_decomposition_offline_frozen_repair.rs"]
+mod frozen_repair;
+
 use std::fs;
 
 use deadline::{await_provider_boundary, progress, run, tail, wait_for_child};

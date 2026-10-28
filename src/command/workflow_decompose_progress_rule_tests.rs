@@ -127,10 +127,10 @@ fn an_acceptance_round_that_completes_an_entry_is_progress() {
 // --- set gates follow the same rule -----------------------------------------
 
 #[test]
-fn set_gate_rounds_trading_one_defect_advance_the_ladder() {
+fn set_gate_rounds_trading_one_defect_pause_and_resume_the_ladder() {
     let out = run(
         "enforce",
-        r#"{ findings: (n, capability) => {
+        r#"{ resumed: ['pause-set-gates-1'], findings: (n, capability) => {
           if (capability !== "task-set-lint") return [];
           const round = globalThis.lintRound = (globalThis.lintRound || 0) + 1;
           return round <= 12 ? [{ text: "task TASK-X-010: obligation " + String.fromCharCode(96 + round) + " is unclaimed", subject: "TASK-X-010", source_path: "/p/tasks/TASK-X-010.md", remediation_scope: "body" }] : [];
@@ -138,7 +138,7 @@ fn set_gate_rounds_trading_one_defect_advance_the_ladder() {
         "workflow(w)",
     );
     assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_eq!(pause_ids(&out), ["pause-set-gates-1"], "{out}");
 }
 
 #[test]

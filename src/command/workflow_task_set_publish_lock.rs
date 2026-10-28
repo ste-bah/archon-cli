@@ -91,6 +91,7 @@ pub(crate) struct UnsettledPublish {
     state: String,
     log: PathBuf,
     cause: String,
+    permanent: bool,
 }
 
 impl UnsettledPublish {
@@ -111,7 +112,16 @@ impl UnsettledPublish {
             state,
             log: paths.log.clone(),
             cause: format!("{cause:#}"),
+            permanent: cause
+                .downcast_ref::<super::journal::InvalidJournal>()
+                .is_some(),
         }
+    }
+
+    pub(crate) fn permanent(error: &anyhow::Error) -> bool {
+        error
+            .downcast_ref::<Self>()
+            .is_some_and(|error| error.permanent)
     }
 
     /// Whether `error` is, or wraps, an unsettled publish.
@@ -122,6 +132,9 @@ impl UnsettledPublish {
 
 impl std::fmt::Display for UnsettledPublish {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.permanent {
+            return f.write_str(&self.cause);
+        }
         write!(
             f,
             "an interrupted publish of this task set left its journal {} (state: {}) and it could not be settled: {}. Nothing was read; every read retries the settlement. A committed journal means the new set is final and only its cleanup is left; any other state rolls back to the old set. Operator remedy: fix what the cause names (a file or directory beside the pin or in the task set that cannot be written or removed), then resume the run (`archon workflow resume --live --yes <RUN_ID>`); each settlement is recorded in {}",

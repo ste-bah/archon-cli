@@ -7,7 +7,7 @@
 //! `requirements-trace` call answers, and the test reads back which calls
 //! were made, in what order, and what the final evidence held.
 
-use super::FIXED_SCRIPT_SOURCE;
+use super::script_source;
 
 const TASK_ROOT: &str = "/p/tasks";
 
@@ -16,8 +16,9 @@ const TASK_ROOT: &str = "/p/tasks";
 /// answers `args.traceRounds` the same way, clean when absent. Every host outcome is committed with a receipt whose id is
 /// the capability plus the call ordinal.
 fn driver(args_json: &str, lint_rounds: &str, tail: &str) -> String {
+    let source = script_source();
     format!(
-        r##"{FIXED_SCRIPT_SOURCE}
+        r##"{source}
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
 // Explicit Node fixture binding; host redaction parity is covered in QuickJS.
@@ -93,6 +94,8 @@ fn run(script: &str) -> serde_json::Value {
     let path = dir.path().join("set-gate.cjs");
     std::fs::write(&path, script).expect("write driver");
     let out = std::process::Command::new("node")
+        .arg("-e")
+        .arg("const r = require('node:child_process').spawnSync(process.execPath, [process.argv[1]], {timeout:30000,stdio:'inherit'}); if (r.error) console.error(r.error); process.exitCode = r.status ?? 1;")
         .arg(&path)
         .output()
         .expect("node must be available");
@@ -183,11 +186,15 @@ fn a_set_gate_body_finding_re_authors_the_task_it_names_with_the_finding_then_re
 /// without progress, and the third such round PAUSES the run with the
 /// findings as evidence. It used to fail the run.
 #[test]
-fn a_plateau_escalates_and_cycles_the_repair_ladder_until_clear() {
+fn a_plateau_escalates_then_pauses_and_resumes_the_repair_ladder_until_clear() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
-    let out = run(&driver("{ clearAfter: 12 }", &format!("[[{finding}]]"), ""));
+    let out = run(&driver(
+        "{ clearAfter: 12, resumedPauses: ['pause-set-gates-1'] }",
+        &format!("[[{finding}]]"),
+        "",
+    ));
     assert!(out.get("error").is_none(), "{out}");
-    assert!(out["pauses"].as_array().unwrap().is_empty(), "{out}");
+    assert_eq!(out["pauses"].as_array().unwrap().len(), 1, "{out}");
     assert!(count(&out, "hostCalls", "task-set-lint") >= 13, "{out}");
     assert!(
         count(&out, "hostCalls", "freeze-skeleton") >= 2,
@@ -200,20 +207,21 @@ fn a_plateau_escalates_and_cycles_the_repair_ladder_until_clear() {
 /// judge's own: it counts in the ordinary no-progress window and pauses as
 /// `no_progress`, never charging the host's operational window.
 #[test]
-fn an_authored_judge_reply_reauthors_while_host_faults_keep_the_operational_window() {
+fn an_authored_judge_reply_pauses_and_resumes_while_host_faults_keep_the_operational_window() {
     let rounds = |kind: &str| {
         format!(
             r#"[{{ "operational_error": {{ "kind": "{kind}", "text": "critic reply unusable" }} }}]"#
         )
     };
     let authored = run(&driver(
-        "{ clearAfter: 12 }",
+        "{ clearAfter: 12, resumedPauses: ['pause-set-gates-1'] }",
         &rounds("authored_judge_reply"),
         "",
     ));
     assert!(authored.get("error").is_none(), "{authored}");
-    assert!(
-        authored["pauses"].as_array().unwrap().is_empty(),
+    assert_eq!(
+        authored["pauses"].as_array().unwrap().len(),
+        1,
         "{authored}"
     );
     let host = run(&driver("{}", &rounds("gate_operational"), ""));
@@ -249,15 +257,15 @@ fn a_replayed_set_gate_rung_sequence_can_accept_without_a_pause() {
 /// Observe mode no longer accepts a stalled set gate: findings open pause
 /// the run in either mode.
 #[test]
-fn observe_mode_reauthors_a_set_with_findings_open_until_clear() {
+fn observe_mode_pauses_and_resumes_a_set_with_findings_open_until_clear() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver(
-        r#"{ gateMode: "observe", clearAfter: 12 }"#,
+        r#"{ gateMode: "observe", clearAfter: 12, resumedPauses: ['pause-set-gates-1'] }"#,
         &format!("[[{finding}]]"),
         "",
     ));
     assert!(out.get("error").is_none(), "{out}");
-    assert!(out["pauses"].as_array().unwrap().is_empty(), "{out}");
+    assert_eq!(out["pauses"].as_array().unwrap().len(), 1, "{out}");
 }
 
 #[test]

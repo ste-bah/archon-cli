@@ -1,11 +1,12 @@
-//! Issue 261: no-progress windows advance authoring strategy and never pause
-//! for operator repair.
+//! Issue 261: no-progress windows advance authoring strategy and retain a
+//! resumable pause when the existing repair rungs are exhausted, so repeated
+//! host findings cannot keep an unattended loop running indefinitely.
 //!
 //! The whole embedded script runs under `node` against a scripted host, the
 //! way the set-gate tests drive it. The scripted host records author calls,
 //! gate outcomes and rung events.
 
-use super::FIXED_SCRIPT_SOURCE;
+use super::repair_tests::script_source;
 
 /// `scenario` is a JS object literal with optional members:
 /// - `answer(n)`: the agent reply for author call `n` (1-based); defaults to a
@@ -14,12 +15,14 @@ use super::FIXED_SCRIPT_SOURCE;
 ///   for its `n`-th call; defaults to none.
 /// - `operational(n, capability)`: a gate operational error text for the
 ///   gate's `n`-th call, or null; defaults to none.
-/// - `resumed`: legacy fixture field, unused by authored repair loops.
+/// - `resumed`: pause ids already credited by the scripted host, including
+///   authored repair windows explicitly resumed by the scenario.
 ///
 /// `entry` is the expression the driver awaits; `subject` and `w` are in scope.
 pub(crate) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
+    let source = script_source();
     let driver = format!(
-        r##"{FIXED_SCRIPT_SOURCE}
+        r##"{source}
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
 // Explicit Node fixture binding; host redaction parity is covered in QuickJS.
@@ -91,6 +94,8 @@ Promise.resolve().then(() => {entry}).then(
     let path = dir.path().join("progress.cjs");
     std::fs::write(&path, driver).expect("write driver");
     let out = std::process::Command::new("node")
+        .arg("-e")
+        .arg("const r = require('node:child_process').spawnSync(process.execPath, [process.argv[1]], {timeout:30000,stdio:'inherit'}); if (r.error) console.error(r.error); process.exitCode = r.status ?? 1;")
         .arg(&path)
         .output()
         .expect("node must be available");
