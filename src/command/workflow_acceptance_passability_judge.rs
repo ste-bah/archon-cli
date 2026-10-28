@@ -5,6 +5,7 @@ use archon_workflow::WorkflowLlmClient;
 use archon_workflow::task_set_contract::{AcceptanceContract, AcceptanceCriterion};
 
 use super::{Candidate, Decision, INSTRUCTION, entries};
+use crate::command::workflow_freeze_budget::{FreezeIncomplete, FreezeResume};
 
 /// One batch over pending checks; preserve any verdicts from an incomplete reply.
 pub(super) async fn ask(
@@ -64,5 +65,22 @@ pub(super) async fn ask(
             }
             None => Err(error),
         },
+    }
+}
+
+pub(in crate::command::workflow_task_set) fn incomplete_judge_error(
+    error: anyhow::Error,
+    resume: &FreezeResume,
+    deferred: Vec<String>,
+) -> anyhow::Error {
+    let authored_reply = super::super::judge::JudgeIncomplete::caused(&error)
+        .is_some_and(super::super::judge::JudgeIncomplete::is_authored_reply);
+    let cause = archon_observability::redaction::redact_text(&format!("{error:#}"));
+    let incomplete =
+        FreezeIncomplete::awaiting_judge(&resume.budget, &resume.progress, deferred, cause);
+    if authored_reply {
+        incomplete.authored_judge_reply().into()
+    } else {
+        incomplete.into()
     }
 }

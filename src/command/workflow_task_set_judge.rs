@@ -18,9 +18,11 @@ mod named_files;
 #[cfg(test)]
 use named_files::named_files;
 pub(super) use named_files::named_files_content_digest;
+#[cfg(test)]
 pub(super) use named_files::named_files_digest;
 #[cfg(test)]
 pub(super) use named_files::named_files_digest_for_list;
+#[cfg(test)]
 pub(super) use named_files::named_files_digest_with_budget;
 use named_files::named_files_with_budget;
 

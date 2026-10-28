@@ -88,6 +88,8 @@ pub(crate) enum UnprovenCause {
     /// The host's: its site, its environment or its run. A strike makes
     /// the same failure its author's after a resume (Issue 328, #356).
     Host,
+    /// An inconclusive host probe: retried without a strike or author finding.
+    TransientHost,
     /// The check's site lacks a program (or a tool's subcommand) the host
     /// has, or the host could not tell: a defect of the site the host
     /// built, so no strike ever makes it the author's (F6).

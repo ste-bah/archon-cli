@@ -91,7 +91,7 @@ pub(crate) use consumed::{append_consumed, is_consumed};
 
 #[path = "workflow_decompose_remediation_report_seed.rs"]
 mod report_seed;
-pub(crate) use report_seed::report_author_seed;
+pub(crate) use report_seed::{read_author_report, report_author_seed};
 
 #[path = "workflow_decompose_remediation_lineage.rs"]
 mod lineage;
@@ -175,15 +175,7 @@ pub(crate) async fn reauthor_check_subjects_on_resume(
     if ids.is_empty() {
         return Ok(());
     }
-    let report_path = run_dir.join(format!(
-        "decomposition/reverify/reports/{}.json",
-        ledger.report_id
-    ));
-    let report: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&report_path)
-            .with_context(|| format!("reading {}", report_path.display()))?,
-    )
-    .with_context(|| format!("parsing {}", report_path.display()))?;
+    let report = read_author_report(run_dir, &ledger.report_id)?;
     let uncertain = if is_consumed(run_dir, &ledger.report_id)? {
         consumed_ledger_findings(task_root, run_dir, ledger)?
     } else {

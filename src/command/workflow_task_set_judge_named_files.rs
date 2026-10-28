@@ -262,6 +262,7 @@ fn repository_missing_status(
 }
 
 /// Digest the exact path/content list the judge prompt will receive.
+#[cfg(test)]
 pub(in crate::command::workflow_task_set) fn named_files_digest(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
@@ -311,6 +312,7 @@ pub(in crate::command::workflow_task_set) fn named_files_content_digest(
     named_files_digest_for_list(&files)
 }
 
+#[cfg(test)]
 pub(in crate::command::workflow_task_set) fn named_files_digest_with_budget(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
