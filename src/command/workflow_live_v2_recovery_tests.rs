@@ -80,6 +80,7 @@ impl LlmProvider for Transport {
                 Fault::Connection => LlmError::Http("connection reset".into()),
                 _ => archon_llm::anthropic::ApiError::Overloaded {
                     retry_after_secs: None,
+                    message: String::new(),
                 }
                 .into(),
             });

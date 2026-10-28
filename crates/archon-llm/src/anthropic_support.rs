@@ -56,14 +56,18 @@ pub enum ApiError {
     Rejected { error_type: String, message: String },
 
     /// `from_provider`: see [`crate::provider::LlmError::RateLimited`].
-    #[error("rate limited: retry after {retry_after_secs}s")]
+    #[error("rate limited: retry after {retry_after_secs}s{}", crate::provider_fault::diagnostic_suffix(.message))]
     RateLimited {
+        message: String,
         retry_after_secs: u64,
         from_provider: bool,
     },
 
-    #[error("server overloaded (529)")]
-    Overloaded { retry_after_secs: Option<u64> },
+    #[error("server overloaded (529){}", crate::provider_fault::diagnostic_suffix(.message))]
+    Overloaded {
+        message: String,
+        retry_after_secs: Option<u64>,
+    },
 
     #[error("server error ({status}): {message}")]
     ServerError {
@@ -387,11 +391,13 @@ pub(crate) fn classify_error(
             ApiError::RateLimited {
                 retry_after_secs: named.unwrap_or(DEFAULT_RATE_LIMIT_WAIT_SECS),
                 from_provider: named.is_some(),
+                message: body.to_string(),
             }
         }
         529 => ApiError::Overloaded {
             retry_after_secs: retry_after_header
                 .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
+            message: body.to_string(),
         },
         408 | 500..=599 => ApiError::ServerError {
             status,

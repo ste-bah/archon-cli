@@ -41,14 +41,20 @@ impl From<ApiError> for LlmError {
             ApiError::RateLimited {
                 retry_after_secs,
                 from_provider,
+                message,
             } => LlmError::RateLimited {
                 retry_after_secs,
                 from_provider,
                 pipeline_retry_after_secs: from_provider.then_some(retry_after_secs),
+                message,
             },
-            ApiError::Overloaded { retry_after_secs } => LlmError::Overloaded {
+            ApiError::Overloaded {
+                retry_after_secs,
+                message,
+            } => LlmError::Overloaded {
                 status: Some(529),
                 retry_after_secs,
+                message,
             },
             ApiError::ServerError {
                 status,

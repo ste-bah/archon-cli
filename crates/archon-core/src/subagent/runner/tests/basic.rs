@@ -318,6 +318,7 @@ impl LlmProvider for CompactionFailsProvider {
                 retry_after_secs: 30,
                 from_provider: true,
                 pipeline_retry_after_secs: None,
+                message: String::new(),
             });
         }
         let events = text_response("survived");

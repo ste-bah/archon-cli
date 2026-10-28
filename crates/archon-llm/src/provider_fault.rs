@@ -1,6 +1,15 @@
 //! Operational recovery semantics, independent of bounded interactive retries.
 use crate::provider::LlmError;
 
+/// Append a supplied diagnostic without changing message-less fault display.
+pub(crate) fn diagnostic_suffix(message: &str) -> String {
+    if message.is_empty() {
+        String::new()
+    } else {
+        format!(": {message}")
+    }
+}
+
 impl LlmError {
     /// A typed rejection wins over diagnostic text quoted by the provider.
     pub fn is_operational(&self) -> bool {
@@ -61,6 +70,7 @@ impl LlmError {
                 retry_after_secs,
                 pipeline_retry_after_secs,
                 from_provider,
+                ..
             } => pipeline_retry_after_secs.or_else(|| from_provider.then_some(*retry_after_secs)),
             Self::Overloaded {
                 retry_after_secs, ..
@@ -222,6 +232,7 @@ pub fn from_status(status: u16, headers: &reqwest::header::HeaderMap, body: Stri
             retry_after_secs: 0,
             from_provider: false,
             pipeline_retry_after_secs: hint,
+            message: body,
         },
         _ => LlmError::Server {
             status,
@@ -263,11 +274,13 @@ pub fn from_stream_error(kind: &str, message: &str) -> LlmError {
             retry_after_secs: 0,
             from_provider: false,
             pipeline_retry_after_secs: None,
+            message,
         },
         "overloaded_error" | "server_overloaded" | "server_error" | "api_error" => {
             LlmError::Overloaded {
                 status: None,
                 retry_after_secs: None,
+                message,
             }
         }
         "billing_error" | "insufficient_quota" | "billing_hard_limit_reached" => {
@@ -310,11 +323,16 @@ pub(crate) fn error_event(error: LlmError) -> crate::streaming::StreamEvent {
         LlmError::Http(_) => "protocol",
     };
     let kind = kind.to_string();
-    let message = match error {
+    let message = match &error {
         LlmError::Transport(message)
         | LlmError::Serialize(message)
         | LlmError::Http(message)
-        | LlmError::Rejected { message, .. } => message,
+        | LlmError::Rejected { message, .. } => message.clone(),
+        LlmError::RateLimited { message, .. } | LlmError::Overloaded { message, .. }
+            if !message.is_empty() =>
+        {
+            message.clone()
+        }
         error => error.to_string(),
     };
     crate::streaming::StreamEvent::Error {
@@ -364,9 +382,11 @@ fn into_api(error: LlmError) -> crate::anthropic::ApiError {
             retry_after_secs,
             from_provider,
             pipeline_retry_after_secs,
+            message,
         } => ApiError::RateLimited {
             retry_after_secs: pipeline_retry_after_secs.unwrap_or(retry_after_secs),
             from_provider: from_provider || pipeline_retry_after_secs.is_some(),
+            message,
         },
         LlmError::Rejected {
             error_type,

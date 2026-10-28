@@ -59,7 +59,8 @@ fn retry_after_header_accepts_seconds_and_http_date() {
         LlmError::RateLimited {
             retry_after_secs: 0,
             from_provider: false,
-            pipeline_retry_after_secs: Some(37)
+            pipeline_retry_after_secs: Some(37),
+            ..
         }
     ));
     let server = OpenAiCompatProvider::map_http_error(
@@ -118,7 +119,8 @@ async fn retry_after_120_stays_out_of_retryprovider_wait_and_fail_fast_policy() 
         LlmError::RateLimited {
             retry_after_secs: 0,
             from_provider: false,
-            pipeline_retry_after_secs: Some(120)
+            pipeline_retry_after_secs: Some(120),
+            ..
         }
     ));
     assert_eq!(inner.calls.load(Ordering::SeqCst), 3);

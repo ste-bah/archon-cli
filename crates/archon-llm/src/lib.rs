@@ -100,3 +100,6 @@ mod auth_fault;
 
 #[cfg(test)]
 mod provider_fault_http_tests;
+
+#[cfg(test)]
+mod provider_fault_message_tests;

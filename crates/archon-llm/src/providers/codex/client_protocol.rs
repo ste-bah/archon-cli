@@ -133,6 +133,7 @@ pub(super) fn map_codex_error(status: u16, body: String, refreshed: bool) -> Llm
             retry_after_secs: 1,
             from_provider: false,
             pipeline_retry_after_secs: None,
+            message: body,
         },
         500..=599 => LlmError::Server {
             status,

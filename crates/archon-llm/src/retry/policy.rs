@@ -199,6 +199,7 @@ mod tests {
             retry_after_secs: 30,
             from_provider: true,
             pipeline_retry_after_secs: None,
+            message: String::new(),
         };
 
         assert_eq!(classify(&err), RetryDecision::Retry);
@@ -210,6 +211,7 @@ mod tests {
             retry_after_secs: 8_004,
             from_provider: true,
             pipeline_retry_after_secs: None,
+            message: String::new(),
         };
 
         assert_eq!(classify(&err), RetryDecision::FailFast);

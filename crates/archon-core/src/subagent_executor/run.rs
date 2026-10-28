@@ -253,6 +253,7 @@ impl AgentSubagentExecutor {
                     archon_llm::provider::LlmError::Overloaded {
                         status,
                         retry_after_secs,
+                        ..
                     } => Some((*status, *retry_after_secs, true)),
                     archon_llm::provider::LlmError::Server { status, .. }
                         if matches!(status, 429 | 529) =>

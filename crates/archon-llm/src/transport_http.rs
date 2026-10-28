@@ -58,6 +58,7 @@ pub(crate) fn with_retry_after(
                 retry_after_secs,
                 from_provider,
                 pipeline_retry_after_secs,
+                ..
             } => {
                 *retry_after_secs = wait;
                 *from_provider = true;

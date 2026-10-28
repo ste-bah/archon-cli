@@ -29,8 +29,10 @@ pub enum LlmError {
     /// `from_provider` is true when the provider named the wait (a
     /// Retry-After header or body field); false when `retry_after_secs` is
     /// this client's default wait because the provider named none.
-    #[error("rate limited: retry after {retry_after_secs}s")]
+    #[error("rate limited: retry after {retry_after_secs}s{}", crate::provider_fault::diagnostic_suffix(.message))]
     RateLimited {
+        /// Original provider diagnostic, empty when no diagnostic was supplied.
+        message: String,
         retry_after_secs: u64,
         from_provider: bool,
         /// Optional provider wait hint for the pipeline's outer retry loop.
@@ -46,8 +48,10 @@ pub enum LlmError {
 
     /// Provider status and optional Retry-After metadata; this error keeps the
     /// same retry semantics and display text regardless of those fields.
-    #[error("server overloaded")]
+    #[error("server overloaded{}", crate::provider_fault::diagnostic_suffix(.message))]
     Overloaded {
+        /// Original provider diagnostic, independent of retry metadata.
+        message: String,
         status: Option<u16>,
         retry_after_secs: Option<u64>,
     },

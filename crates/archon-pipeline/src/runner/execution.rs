@@ -362,6 +362,7 @@ fn provider_retry_after(error: &anyhow::Error) -> Option<Duration> {
     if let Some(LlmError::Overloaded {
         status,
         retry_after_secs: Some(retry_after_secs),
+        ..
     }) = error.downcast_ref::<LlmError>()
     {
         if matches!(status, None | Some(429 | 529)) {

@@ -47,11 +47,13 @@ impl LlmProvider for CompleteFailureProvider {
             FailureScript::Overload(retry_after_secs) => LlmError::Overloaded {
                 status: Some(529),
                 retry_after_secs,
+                message: String::new(),
             },
             FailureScript::RateLimit(retry_after_secs) => LlmError::RateLimited {
                 retry_after_secs,
                 from_provider: true,
                 pipeline_retry_after_secs: None,
+                message: String::new(),
             },
         })
     }

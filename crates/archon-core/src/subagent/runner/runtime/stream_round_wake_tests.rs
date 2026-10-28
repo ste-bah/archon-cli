@@ -162,6 +162,7 @@ impl LlmProvider for WakeNetworkProvider {
                     retry_after_secs: secs,
                     from_provider: true,
                     pipeline_retry_after_secs: None,
+                    message: String::new(),
                 });
             }
             WakeOpen::ErrorEvent(error_type) => {

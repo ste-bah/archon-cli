@@ -108,7 +108,8 @@ fn provider_retry_metadata_crosses_the_subagent_boundary_as_typed_error() {
         error.downcast_ref::<archon_llm::provider::LlmError>(),
         Some(archon_llm::provider::LlmError::Overloaded {
             status: Some(429),
-            retry_after_secs: Some(41)
+            retry_after_secs: Some(41),
+            ..
         })
     ));
 }
@@ -129,10 +130,12 @@ fn typed_429_with_or_without_hint_and_529_are_pipeline_overloads() {
         )
         .expect_err("provider failure should remain an error");
         assert!(matches!(
-            error.downcast_ref::<archon_llm::provider::LlmError>(),
-            Some(archon_llm::provider::LlmError::Overloaded { status: actual, retry_after_secs })
-                if *actual == status && *retry_after_secs == hint
-        ));
+                    error.downcast_ref::<archon_llm::provider::LlmError>(),
+                    Some(archon_llm::provider::LlmError::Overloaded { status: actual, retry_after_secs,
+        ..
+        })
+                        if *actual == status && *retry_after_secs == hint
+                ));
     }
 }
 

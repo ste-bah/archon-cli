@@ -208,10 +208,12 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
             retry_after_secs: 60,
             from_provider: false,
             pipeline_retry_after_secs: None,
+            message: body,
         },
         500 | 503 => LlmError::Overloaded {
             status: Some(status),
             retry_after_secs: None,
+            message: body,
         },
         _ => error,
     }

@@ -5,6 +5,7 @@ fn rate_limited(header: Option<&str>, body: &str) -> (u64, bool) {
         ApiError::RateLimited {
             retry_after_secs,
             from_provider,
+            ..
         } => (retry_after_secs, from_provider),
         other => panic!("expected a rate limit, got {other:?}"),
     }
