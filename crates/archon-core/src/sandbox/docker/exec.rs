@@ -331,7 +331,10 @@ fn workspace_mount_args(
     ];
     if workspace_access == "scratch" {
         args.extend(["--tmpfs".into(), "/scratch:rw,nosuid,size=512m".into()]);
-        args.extend(["--env".into(), "ARCHON_SANDBOX_SCRATCH=/scratch".into()]);
+        args.extend([
+            "--env".into(),
+            format!("{}=/scratch", crate::env_vars::SANDBOX_SCRATCH_ENV),
+        ]);
     }
     if readonly {
         args.extend(writable_path_mount_args(working_dir, writable_paths));

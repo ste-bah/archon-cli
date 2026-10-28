@@ -45,15 +45,7 @@ pub(super) async fn reauthor_resume_plan(
         }
     }
     if let Some(pending) = &plan.pending {
-        let report_path = run_dir.join(format!(
-            "decomposition/reverify/reports/{}.json",
-            pending.report_id
-        ));
-        let report: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(&report_path)
-                .with_context(|| format!("reading {}", report_path.display()))?,
-        )
-        .with_context(|| format!("parsing {}", report_path.display()))?;
+        let report = super::read_author_report(run_dir, &pending.report_id)?;
         for id in &pending.subjects {
             if check_ids.contains(id)
                 && pending_unresolved

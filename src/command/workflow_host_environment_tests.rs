@@ -375,3 +375,6 @@ fn catalog_digest_environment_child() {
 
 #[path = "workflow_host_environment_isolation_tests.rs"]
 mod isolation_tests;
+
+#[path = "workflow_host_environment_source_tests.rs"]
+mod extra_known_env;

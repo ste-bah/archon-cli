@@ -104,6 +104,7 @@ pub(super) fn shape_diagnoses(
     if let blocks::ObjectExtraction::MisplacedBrace {
         missing_fields,
         next_field,
+        additional_entries,
     } = extraction
     {
         let missing = if missing_fields.is_empty() {
@@ -119,6 +120,12 @@ pub(super) fn shape_diagnoses(
         diagnoses.push(format!(
             "the entry closes early, before \"{next_field}\"{missing}; a closing brace is extra or misplaced"
         ));
+        for id in additional_entries {
+            diagnoses.push(format!(
+                "the reply also holds additional entry {}; return exactly one",
+                serde_json::to_string(id).expect("serializing a string"),
+            ));
+        }
     }
     if reply_blocks
         .iter()
