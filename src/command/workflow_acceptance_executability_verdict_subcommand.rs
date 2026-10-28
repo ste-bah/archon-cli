@@ -123,6 +123,9 @@ pub(super) fn host_path() -> Option<String> {
 /// other no-verdict cell is the host's (the site lacks what the host has,
 /// or the host could not tell): [`UnprovenCause::SiteLacks`], unproven on
 /// every attempt, which no strike makes its author's.
+/// A listing stopped by the no-progress rule before producing any output is instead
+/// [`UnprovenCause::TransientHost`]: no evidence about the site, and no
+/// strike or author finding, however often the host retries it.
 pub(super) fn missing(
     commands: &[Simple],
     output: &str,
@@ -185,6 +188,13 @@ pub(super) fn missing(
                     UnprovenCause::ProgramAbsent,
                 )),
                 (Listing::Unlisted(_), None) => None,
+                (Listing::HostUnproven(why), _) => Some((
+                    format!("the host could not tell whether `{name}` is built into `{tool}`: {why}; the host must retry its listing probe, which gives no evidence that the check or its site is at fault"),
+                    UnprovenCause::TransientHost,
+                )),
+                (Listing::ScratchUnproven(why), _) => site(format!(
+                    "the host could not tell whether `{name}` is built into `{tool}`: {why}; the check must not depend on `{tool} {name}`"
+                )),
                 (Listing::NoAnswer(why), _) => site(format!(
                     "{lacks}, and the host could not tell whether `{name}` is built into `{tool}`: {why}. {depends}"
                 )),
@@ -316,6 +326,16 @@ fn unresolved(
             guard(&tool, last)
         )),
         Listing::Unlisted(_) => None,
+        Listing::HostUnproven(why) => Some(format!(
+            "{} (the host could not tell whether it is built into `{tool}`: {why}; the host must retry its listing probe)",
+            which(names[0])
+        )),
+        Listing::ScratchUnproven(why) => Some(format!(
+            "{} (the host could not tell whether `{}` is built into `{tool}`: {why}; the check must not depend on `{tool} {}`)",
+            which(names[0]),
+            names[0],
+            names[0]
+        )),
         Listing::NoAnswer(why) => Some(format!(
             "{} (the host could not tell whether it is built into `{tool}`: {why}. {})",
             which(names[0]),
@@ -429,3 +449,7 @@ mod tests_333d;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_subcommand_333e_tests.rs"]
 mod tests_333e;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_listing_fault_tests.rs"]
+mod listing_fault_tests;
