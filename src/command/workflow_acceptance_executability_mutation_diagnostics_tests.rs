@@ -384,3 +384,74 @@ fn absolute_project_symlink_to_live_repository_is_outside_the_copy() {
         result.candidates
     );
 }
+
+#[test]
+fn whole_tree_spellings_are_diagnosed_and_never_movable() {
+    let parent = tempfile::tempdir().unwrap();
+    let project = parent.path().join("workspace");
+    let repository = parent.path().join("repository");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&repository).unwrap();
+    let mut failures = Vec::new();
+    for cwd in ["project_root", "repo_root"] {
+        for token in ["../.", "./", "./.", ".././", "..//", ".//", "././"] {
+            let mut criterion = entry(&format!("probe {token}"), cwd);
+            criterion.id = "AC-X-001".into();
+            let result = input_discovery(&criterion, &project, &repository);
+            if !result.eligible.is_empty()
+                || !result.candidates.iter().any(|candidate| {
+                    candidate.exclusion == Some(ExclusionReason::WholeDirectoryTree)
+                })
+            {
+                failures.push(format!("{cwd} {token}: {:?}", result.candidates));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_tree_aliases_are_diagnosed_and_never_movable() {
+    let parent = tempfile::tempdir().unwrap();
+    let project = parent.path().join("workspace");
+    let repository = parent.path().join("repository");
+    for root in [&project, &repository] {
+        std::fs::create_dir_all(root.join("child")).unwrap();
+        std::os::unix::fs::symlink(".", root.join("alias")).unwrap();
+        std::os::unix::fs::symlink("..", root.join("above")).unwrap();
+    }
+    let mut failures = Vec::new();
+    for cwd in ["project_root", "repo_root"] {
+        for token in ["alias", "alias/.", "above/."] {
+            let mut criterion = entry(&format!("probe {token}"), cwd);
+            criterion.id = "AC-X-001".into();
+            let result = input_discovery(&criterion, &project, &repository);
+            if !result.eligible.is_empty()
+                || !result.candidates.iter().any(|candidate| {
+                    candidate.exclusion == Some(ExclusionReason::WholeDirectoryTree)
+                })
+            {
+                failures.push(format!("{cwd} {token}: {:?}", result.candidates));
+            }
+        }
+        // A dot after cd names the child, which remains a check mechanic.
+        // It must not become a movable dot at the selected root.
+        let mut criterion = entry("cd child && probe .", cwd);
+        criterion.id = "AC-X-001".into();
+        let result = input_discovery(&criterion, &project, &repository);
+        if !result.eligible.is_empty()
+            || result
+                .candidates
+                .iter()
+                .any(|candidate| candidate.exclusion == Some(ExclusionReason::WholeDirectoryTree))
+            || !result.candidates.iter().any(|candidate| {
+                candidate.path == "child"
+                    && candidate.exclusion == Some(ExclusionReason::CheckMechanics)
+            })
+        {
+            failures.push(format!("{cwd} child dot: {:?}", result.candidates));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

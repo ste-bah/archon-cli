@@ -3,6 +3,10 @@
 use crate::verifier_strength::{acceptance_verifier_strength_defect, verifier_strength_defect};
 
 use super::{AcceptanceCheck, AcceptanceContract, JudgeDecision};
+use std::path::Path;
+#[path = "task_set_contract_policy_paths.rs"]
+mod paths;
+pub use paths::acceptance_site_path_defect;
 
 /// Identifiers a PRD uses when it prescribes an acceptance check's SHAPE
 /// rather than its outcome: the deliverable-contract fields that decide what a
@@ -39,6 +43,23 @@ pub struct AcceptancePolicyFinding {
 }
 
 pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<AcceptancePolicyFinding> {
+    policy_findings(contract, None)
+}
+
+/// Policy for authoring and publication against the roots of the actual site.
+pub fn acceptance_policy_findings_with_roots(
+    contract: &AcceptanceContract,
+    project: &Path,
+    repository: &Path,
+    build_cache: bool,
+) -> Vec<AcceptancePolicyFinding> {
+    policy_findings(contract, Some((project, repository, build_cache)))
+}
+
+fn policy_findings(
+    contract: &AcceptanceContract,
+    roots: Option<(&Path, &Path, bool)>,
+) -> Vec<AcceptancePolicyFinding> {
     let mut findings = Vec::new();
     for (index, criterion) in contract
         .acceptance
@@ -49,6 +70,18 @@ pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<Acceptan
         let slot = format!("checks/{index}");
         let before_check = findings.len();
         let mut check_defects = Vec::new();
+        if let Some((project, repository, build_cache)) = roots {
+            if let Some(defect) =
+                acceptance_site_path_defect(criterion, project, repository, build_cache)
+            {
+                check_defects.push(crate::defect::ValidationDefect::new(
+                    "unavailable_site_path",
+                    &slot,
+                    "check",
+                    defect,
+                ));
+            }
+        }
         match &criterion.check {
             AcceptanceCheck::Command { command, .. } => {
                 if let Some(defect) = verifier_strength_defect(Some(command), None, None) {

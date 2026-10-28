@@ -244,3 +244,5 @@ pub mod subagent_session;
 pub mod tool_trace_input;
 
 pub mod audit_landing;
+
+pub mod provider_recovery;

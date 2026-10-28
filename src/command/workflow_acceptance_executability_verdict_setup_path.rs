@@ -86,7 +86,7 @@ pub(super) fn refusal(
         for (how, path) in named {
             if !expands(path) && outside(path, depth, tree) && reported_missing(output, path) {
                 return Some(format!(
-                    "it names the path `{path}` ({how}), which lies outside the tree it ran in and is absent there, as its output says: a setup failure of its site, not a failure of its criterion"
+                    "it names the path `{path}` ({how}), which the site does not create because it lies outside the tree it ran in; its output reports the path absent: a setup failure of its site, not a failure of its criterion"
                 ));
             }
         }

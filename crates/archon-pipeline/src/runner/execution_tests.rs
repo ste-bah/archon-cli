@@ -6,6 +6,7 @@ fn overload_backoff_doubles_then_caps_without_changing_attempt_budget() {
     let error = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: None,
+        message: String::new(),
     });
     let delays: Vec<_> = (1..=8)
         .map(|attempt| pipeline_attempt_retry_delay(attempt, &error).as_secs())
@@ -20,15 +21,18 @@ fn provider_retry_after_seconds_are_honoured_for_rate_limits_and_overload() {
         retry_after_secs: 37,
         from_provider: true,
         pipeline_retry_after_secs: None,
+        message: String::new(),
     });
     let overloaded = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: Some(53),
+        message: String::new(),
     });
     let pipeline_hint_only = anyhow::Error::new(LlmError::RateLimited {
         retry_after_secs: 0,
         from_provider: false,
         pipeline_retry_after_secs: Some(120),
+        message: String::new(),
     });
     assert_eq!(
         pipeline_attempt_retry_delay(1, &rate_limited),
@@ -45,6 +49,7 @@ fn provider_retry_after_seconds_are_honoured_for_rate_limits_and_overload() {
     let huge_hint = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: Some(86_400 * 20),
+        message: String::new(),
     });
     assert_eq!(
         pipeline_attempt_retry_delay(1, &huge_hint),
@@ -106,6 +111,7 @@ fn overloaded_503_uses_ordinary_retry_delay_even_with_provider_hint() {
     let error = anyhow::Error::new(LlmError::Overloaded {
         status: Some(503),
         retry_after_secs: Some(90),
+        message: String::new(),
     });
     assert!(is_retryable_pipeline_attempt_error(&error));
     assert!(!is_pipeline_overload_error(&error));
@@ -157,6 +163,7 @@ async fn runner_sleep_uses_injectable_delay_without_waiting() {
     let error = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: None,
+        message: String::new(),
     });
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     for attempt in 1..PIPELINE_MAX_ATTEMPTS {

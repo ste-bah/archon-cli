@@ -6,7 +6,8 @@ use crate::anthropic_support::{
     enforce_cache_breakpoint_budget, extract_unknown_beta, remove_cache_directives,
     should_retry_without_knob,
 };
-use crate::auth::{AuthError, AuthProvider, OAuthCredentials};
+use crate::auth::{AuthProvider, OAuthCredentials};
+use crate::auth_fault::auth_error_to_api;
 use crate::identity::IdentityProvider;
 use crate::streaming::StreamEvent;
 
@@ -76,7 +77,7 @@ impl AnthropicClient {
         api_url: Option<String>,
         read_backstop_secs: u64,
     ) -> Self {
-        let http = reqwest::Client::builder()
+        let http = crate::transport_http::client_builder()
             .read_timeout(Duration::from_secs(read_backstop_secs.max(1)))
             .no_proxy()
             .build()
@@ -149,6 +150,7 @@ impl AnthropicClient {
         let mut refreshed_after_401 = false;
 
         for attempt in 0..=MAX_RETRIES {
+            crate::provider_fault::begin_request();
             let request_id = uuid::Uuid::new_v4().to_string();
             let mut headers = self.identity.request_headers(&request_id);
 
@@ -170,21 +172,20 @@ impl AnthropicClient {
                 body.len()
             );
             tracing::debug!("API request body: {}", crate::debug_body::debug_body(&body));
-
-            let response = req.body(body.clone()).send().await.map_err(|e| {
-                if e.is_timeout() {
-                    ApiError::IdleTimeout
-                } else {
-                    ApiError::HttpError(format!("request failed: {e}"))
-                }
-            })?;
+            let response = req
+                .body(body.clone())
+                .send()
+                .await
+                .map_err(crate::provider_fault::api_open_transport)?;
 
             let status = response.status();
-
+            crate::provider_fault::note_response(
+                status.as_u16(),
+                crate::transport_http::response_retry_after(&response),
+            );
             if status.is_success() {
                 return self.spawn_stream_reader(response, auth_header_value).await;
             }
-
             // Log full error details for debugging
             let retry_after_header = response
                 .headers()
@@ -194,12 +195,13 @@ impl AnthropicClient {
 
             let capture =
                 crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
+            let response_headers = response.headers().clone();
             let response_body = response.text().await.map_err(|error| {
-                if error.is_timeout() {
-                    ApiError::IdleTimeout
-                } else {
-                    ApiError::HttpError(format!("error response body failed: {error}"))
-                }
+                crate::provider_fault::api_body_read_error(
+                    status.as_u16(),
+                    &response_headers,
+                    error,
+                )
             })?;
             capture.body(response_body.as_bytes());
 
@@ -223,6 +225,17 @@ impl AnthropicClient {
                 retry_after_header.as_deref(),
             );
 
+            // A durable caller owns operational backoff and cancellation.
+            if crate::provider_fault::retry_is_deferred()
+                && matches!(
+                    &err,
+                    ApiError::RateLimited { .. }
+                        | ApiError::Overloaded { .. }
+                        | ApiError::ServerError { .. }
+                )
+            {
+                return Err(err);
+            }
             match &err {
                 // 429: wait for retry-after then retry
                 ApiError::RateLimited {
@@ -295,6 +308,7 @@ impl AnthropicClient {
                 {
                     refreshed_after_401 = true;
                     tracing::warn!("Anthropic OAuth token rejected, refreshing and retrying once");
+                    crate::provider_fault::begin_request();
                     self.force_refresh_oauth().await?;
                     continue;
                 }
@@ -439,10 +453,6 @@ fn oauth_header(creds: &OAuthCredentials) -> (String, String) {
     )
 }
 
-fn auth_error_to_api(err: AuthError) -> ApiError {
-    ApiError::AuthError(err.to_string())
-}
-
 #[cfg(test)]
 mod transport_backstop_tests {
     use super::AnthropicClient;
@@ -464,3 +474,23 @@ mod dead_connection_tests;
 
 #[path = "anthropic_body.rs"]
 mod body;
+
+#[cfg(test)]
+mod connection_recovery_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn calls_after_sleep_use_fresh_connections() {
+        let client = AnthropicClient::new(
+            crate::auth::AuthProvider::ApiKey(crate::types::Secret::new("AC-X-001".into())),
+            crate::identity::IdentityProvider::new(
+                crate::identity::IdentityMode::Clean,
+                "AC-X-001".into(),
+                "AC-X-001".into(),
+                String::new(),
+            ),
+            None,
+        );
+        crate::connection_tests::assert_fresh_connections(client.http).await;
+    }
+}

@@ -93,8 +93,13 @@ impl AuthorScope {
             source_roots: vec![tasks_root.display().to_string()],
             tasks,
         };
+        // An unavailable site is reported by the probe as host-unproven;
+        // constructing reading scope must not turn it into a hard failure.
+        let binding = crate::command::acceptance_scratch_policy::capture(project_root, tasks_root)
+            .ok()
+            .flatten();
         let repository_root =
-            super::super::live_root::recorded_repository(project_root, tasks_root)?;
+            super::super::live_root::freeze_repository(project_root, tasks_root, binding.as_ref())?;
         let baseline =
             super::super::executability::Baseline::for_task_set(&repository_root, tasks_root);
         Ok(Self {

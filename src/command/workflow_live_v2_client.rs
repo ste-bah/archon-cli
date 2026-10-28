@@ -11,7 +11,9 @@ use archon_workflow::{
 
 use archon_workflow::v2::project_artifact_stamping::stamp_project_artifact_paths;
 
-use archon_workflow::llm_retry::run_agent_with_transient_retry;
+use archon_workflow::llm_retry::{
+    continue_agent_with_transient_retry, run_agent_with_transient_retry,
+};
 
 use super::super::workflow_live_runner::workflow_live_stage_board::{
     StageBoardItem, stage_board_outcome,
@@ -309,40 +311,32 @@ impl LiveV2AgentClient {
                 .map(WorkflowProviderEnv::new),
         };
         let retried = structured_trace::Retried::default();
-        let provider_work =
-            async {
-                if continuing {
-                    // Never retry a validation repair by spawning a fresh pipeline run.
-                    self.llm.continue_agent(agent_request).await
-                } else {
-                    run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
-                        retried.mark();
-                        let client = self.clone();
-                        let stage_request = stage_request.clone();
-                        let agent_name = agent_name.clone();
-                        let provider_id = provider_id.clone();
-                        let resolved_model = resolved_model.clone();
-                        async move {
-                            client
-                        .emit_required_activity(
-                            &stage_request,
-                            &agent_name,
-                            &provider_id,
-                            &resolved_model,
-                            WorkflowActivityStatus::Running,
-                            &format!(
-                                "v2 call retrying after transient provider error ({attempt}/3)"
-                            ),
-                        )
-                        .await
-                        .map_err(|error| {
-                            archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
-                        })
-                        }
-                    })
-                    .await
+        let on_retry =
+            |attempt| {
+                retried.mark();
+                let client = self.clone();
+                let stage_request = stage_request.clone();
+                let agent_name = agent_name.clone();
+                let provider_id = provider_id.clone();
+                let resolved_model = resolved_model.clone();
+                async move {
+                    client.emit_required_activity(
+                    &stage_request, &agent_name, &provider_id, &resolved_model,
+                    WorkflowActivityStatus::Running,
+                    &format!("v2 call retrying after transient provider error (attempt {attempt})"),
+                ).await.map_err(|error| {
+                    archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
+                })
                 }
             };
+        let provider_work = async {
+            if continuing {
+                // Never retry a validation repair by spawning a fresh pipeline run.
+                continue_agent_with_transient_retry(&self.llm, agent_request, on_retry).await
+            } else {
+                run_agent_with_transient_retry(&self.llm, agent_request, on_retry).await
+            }
+        };
         let response = self.admit_provider(provider_work).await;
         retried.note(response.is_err());
         let response = match response {
@@ -458,3 +452,19 @@ mod wire_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_continuation_tests.rs"]
 mod continuation_tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_recovery_tests.rs"]
+mod recovery_tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_recovery_http_tests.rs"]
+mod recovery_http_tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_open_timeout_tests.rs"]
+mod open_timeout_tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_recovery_regression_tests.rs"]
+mod recovery_regression_tests;

@@ -215,5 +215,14 @@ pub fn classify_stream_error(
         Some(provider),
         None,
     )
-    .unwrap_or_else(|| archon_llm::provider::LlmError::Http(format!("{error_type}: {message}")))
+    .unwrap_or_else(|| {
+        let classified = archon_llm::retry::classify_stream_failure(error_type, &message);
+        if classified.is_permanent()
+            || !matches!(classified, archon_llm::provider::LlmError::Http(_))
+        {
+            classified
+        } else {
+            archon_llm::provider::LlmError::Http(format!("{error_type}: {message}"))
+        }
+    })
 }

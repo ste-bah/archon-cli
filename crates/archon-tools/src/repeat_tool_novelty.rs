@@ -163,7 +163,11 @@ fn strip_per_attempt_entropy(text: &str) -> String {
                     .trim_matches(|ch| matches!(ch, '[' | ']' | '(' | ')'));
                 if day_text.bytes().all(|b| b.is_ascii_digit()) && is_clock(clock_text) {
                     out.push_str("<volatile> <time>");
-                    out.push_str(&clock[clock_text.len()..]);
+                    let clock_end = clock
+                        .trim_end()
+                        .trim_end_matches(['[', ']', '(', ')'])
+                        .len();
+                    out.push_str(&clock[clock_end..]);
                     consumed_through = clock_index + 1;
                     continue;
                 }

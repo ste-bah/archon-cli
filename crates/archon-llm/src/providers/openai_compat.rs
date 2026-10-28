@@ -40,230 +40,8 @@ pub struct OpenAiCompatProvider {
     pub(crate) api_key: ApiKey,
 }
 
-impl OpenAiCompatProvider {
-    /// Construct a new provider bound to `descriptor`, reusing the supplied
-    /// HTTP client and API key.
-    pub fn new(
-        descriptor: &'static ProviderDescriptor,
-        http: Arc<reqwest::Client>,
-        api_key: ApiKey,
-    ) -> Self {
-        Self {
-            descriptor,
-            http,
-            api_key,
-        }
-    }
-
-    // -----------------------------------------------------------------
-    // URL construction
-    // -----------------------------------------------------------------
-
-    /// Join `descriptor.base_url` with `chat/completions`.
-    ///
-    /// `Url::join` replaces the final path segment unless the base ends in
-    /// `/`, so we explicitly append one before joining. That way a base of
-    /// `http://localhost:11434/v1` correctly produces
-    /// `http://localhost:11434/v1/chat/completions` instead of
-    /// `http://localhost:11434/chat/completions`.
-    fn build_chat_url(&self) -> String {
-        self.build_endpoint_url("chat/completions")
-    }
-
-    fn build_embeddings_url(&self) -> String {
-        self.build_endpoint_url("embeddings")
-    }
-
-    fn build_endpoint_url(&self, endpoint: &str) -> String {
-        let mut base = self.descriptor.base_url.clone();
-        // Ensure trailing slash on the base path so `Url::join` appends
-        // rather than replaces the final segment.
-        if !base.path().ends_with('/') {
-            let new_path = format!("{}/", base.path());
-            base.set_path(&new_path);
-        }
-        match base.join(endpoint) {
-            Ok(u) => u.to_string(),
-            // Fallback: manually concatenate. `endpoint` here is a static
-            // string so this branch is essentially unreachable, but we
-            // prefer a deterministic string over a panic.
-            Err(_) => format!("{}{}", base, endpoint),
-        }
-    }
-
-    /// TASK-AGS-705: delimiter bytes for the provider's streaming wire
-    /// format. Crate-visible so TASK-AGS-707 can drive its chunk parser
-    /// without knowing which provider it's talking to. Marked
-    /// `#[allow(dead_code)]` until TASK-AGS-707 consumes it.
-    #[allow(dead_code)]
-    pub(crate) fn delimiter_bytes(&self) -> &'static [u8] {
-        self.descriptor.quirks.delimiter_bytes()
-    }
-
-    // -----------------------------------------------------------------
-    // Auth + static headers
-    // -----------------------------------------------------------------
-
-    /// Attach auth + descriptor headers to a `RequestBuilder`. No
-    /// per-provider-id branching: the descriptor's `auth_flavor` decides
-    /// how to sign the request, and custom schemes are deferred to
-    /// TASK-AGS-705.
-    fn apply_auth(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let rb = match &self.descriptor.auth_flavor {
-            AuthFlavor::BearerApiKey => rb.bearer_auth(self.api_key.expose()),
-            AuthFlavor::None => rb,
-            // BasicAuth + Custom schemes are reserved for TASK-AGS-705.
-            // Return `rb` unchanged for now so those descriptors compile
-            // without stubbing behavior they don't need in this task.
-            AuthFlavor::BasicAuth | AuthFlavor::Custom(_) => rb,
-        };
-        let mut rb = rb;
-        for (k, v) in &self.descriptor.headers {
-            rb = rb.header(k, v);
-        }
-        rb
-    }
-
-    // -----------------------------------------------------------------
-    // Response parsing
-    // -----------------------------------------------------------------
-
-    /// Apply `quirks.ignore_response_fields` to a response body in place.
-    /// Strips the named keys from the top-level object and from each
-    /// element of `choices` if present. Used for DeepSeek's `logprobs`
-    /// bag whose shape deviates from OpenAI's canonical form and whose
-    /// contents archon never consumes. Pure data transform — no
-    /// provider-id branching.
-    fn strip_ignored_fields(body: &mut Value, quirks: &ProviderQuirks) {
-        if quirks.ignore_response_fields.is_empty() {
-            return;
-        }
-        if let Some(obj) = body.as_object_mut() {
-            for field in quirks.ignore_response_fields {
-                obj.remove(*field);
-            }
-            if let Some(Value::Array(choices)) = obj.get_mut("choices") {
-                for choice in choices.iter_mut() {
-                    if let Some(choice_obj) = choice.as_object_mut() {
-                        for field in quirks.ignore_response_fields {
-                            choice_obj.remove(*field);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------
-    // HTTP error mapping
-    // -----------------------------------------------------------------
-
-    /// Map a non-success HTTP status into an `LlmError`.
-    ///
-    fn map_http_error(
-        status: reqwest::StatusCode,
-        headers: &reqwest::header::HeaderMap,
-        body: String,
-        provider: &str,
-    ) -> LlmError {
-        let code = status.as_u16();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return LlmError::Auth(format!("{provider}: {body}"));
-        }
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let retry_after_secs = headers
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(Self::parse_retry_after);
-            return LlmError::RateLimited {
-                retry_after_secs: 0,
-                from_provider: false,
-                pipeline_retry_after_secs: retry_after_secs,
-            };
-        }
-        if status.is_server_error() {
-            return LlmError::Server {
-                status: code,
-                message: body,
-                pipeline_retry_after_secs: if code == 529 {
-                    headers
-                        .get(reqwest::header::RETRY_AFTER)
-                        .and_then(|value| value.to_str().ok())
-                        .and_then(Self::parse_retry_after)
-                } else {
-                    None
-                },
-            };
-        }
-        LlmError::Http(format!("status {}: {}", code, body))
-    }
-
-    fn parse_retry_after(value: &str) -> Option<u64> {
-        if let Ok(seconds) = value.trim().parse::<u64>() {
-            return Some(seconds);
-        }
-        let date = chrono::DateTime::parse_from_rfc2822(value.trim()).ok()?;
-        let remaining = date
-            .timestamp()
-            .saturating_sub(chrono::Utc::now().timestamp());
-        Some(remaining.max(0) as u64)
-    }
-
-    // -----------------------------------------------------------------
-    // Embeddings — inherent method, not on the trait
-    // -----------------------------------------------------------------
-
-    /// Embeddings endpoint — inherent method, not on the `LlmProvider`
-    /// trait.
-    ///
-    /// TASK-AGS-703 spec deviation: the trait does not expose `embed()`,
-    /// so this lives as an inherent method for OpenAI-compat callers that
-    /// need it. TASK-AGS-711 acceptance tests may exercise this via a
-    /// downcast helper. Minimal implementation using the same auth / URL
-    /// / error patterns as `complete()`.
-    pub async fn embed(&self, model: &str, input: Vec<String>) -> Result<Vec<Vec<f32>>, LlmError> {
-        let url = self.build_embeddings_url();
-        let body = json!({
-            "model": if model.is_empty() { self.descriptor.default_model.as_str() } else { model },
-            "input": input,
-        });
-        let rb = self.http.post(&url).json(&body);
-        let rb = self.apply_auth(rb);
-        let resp = rb.send().await.map_err(|e| LlmError::Http(e.to_string()))?;
-        let status = resp.status();
-        if !status.is_success() {
-            let headers = resp.headers().clone();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(Self::map_http_error(status, &headers, text, self.name()));
-        }
-        let json: Value = resp
-            .json()
-            .await
-            .map_err(|e| LlmError::Serialize(format!("invalid JSON body: {e}")))?;
-
-        let data = json.get("data").and_then(|d| d.as_array()).ok_or_else(|| {
-            LlmError::Serialize("missing `data` array in embeddings response".into())
-        })?;
-
-        let mut out: Vec<Vec<f32>> = Vec::with_capacity(data.len());
-        for entry in data {
-            let emb = entry
-                .get("embedding")
-                .and_then(|e| e.as_array())
-                .ok_or_else(|| LlmError::Serialize("missing `data[].embedding` array".into()))?;
-            let mut vec: Vec<f32> = Vec::with_capacity(emb.len());
-            for v in emb {
-                let f = v
-                    .as_f64()
-                    .ok_or_else(|| LlmError::Serialize("embedding entry was not a number".into()))?
-                    as f32;
-                vec.push(f);
-            }
-            out.push(vec);
-        }
-        Ok(out)
-    }
-}
+#[path = "openai_compat_request.rs"]
+mod request_impl;
 
 #[async_trait::async_trait]
 impl LlmProvider for OpenAiCompatProvider {
@@ -336,17 +114,31 @@ impl LlmProvider for OpenAiCompatProvider {
         let body = self.to_openai_wire(&request);
         let rb = self.http.post(&url).json(&body);
         let rb = self.apply_auth(rb);
-        let resp = rb.send().await.map_err(|e| LlmError::Http(e.to_string()))?;
+        crate::provider_fault::begin_request();
+        let resp = rb
+            .send()
+            .await
+            .map_err(crate::provider_fault::from_transport)?;
         let status = resp.status();
+        crate::provider_fault::note_response(
+            status.as_u16(),
+            crate::transport_http::response_retry_after(&resp),
+        );
         if !status.is_success() {
             let headers = resp.headers().clone();
-            let text = resp.text().await.unwrap_or_default();
+            crate::provider_fault::note_response(
+                status.as_u16(),
+                crate::transport_http::response_retry_after(&resp),
+            );
+            let text = resp.text().await.map_err(|error| {
+                crate::provider_fault::body_read_error(status.as_u16(), &headers, error)
+            })?;
             return Err(Self::map_http_error(status, &headers, text, self.name()));
         }
         let mut json: Value = resp
             .json()
             .await
-            .map_err(|e| LlmError::Serialize(format!("invalid JSON body: {e}")))?;
+            .map_err(crate::provider_fault::from_transport)?;
         // TASK-AGS-705: strip quirk-ignored fields (e.g. DeepSeek
         // `logprobs`) before the generic parser walks the body.
         Self::strip_ignored_fields(&mut json, &self.descriptor.quirks);
@@ -392,12 +184,26 @@ impl LlmProvider for OpenAiCompatProvider {
 
         let rb = self.http.post(&url).json(&body);
         let rb = self.apply_auth(rb);
-        let resp = rb.send().await.map_err(|e| LlmError::Http(e.to_string()))?;
+        crate::provider_fault::begin_request();
+        let resp = rb
+            .send()
+            .await
+            .map_err(crate::provider_fault::from_transport)?;
 
         let status = resp.status();
+        crate::provider_fault::note_response(
+            status.as_u16(),
+            crate::transport_http::response_retry_after(&resp),
+        );
         if !status.is_success() {
             let headers = resp.headers().clone();
-            let text = resp.text().await.unwrap_or_default();
+            crate::provider_fault::note_response(
+                status.as_u16(),
+                crate::transport_http::response_retry_after(&resp),
+            );
+            let text = resp.text().await.map_err(|error| {
+                crate::provider_fault::body_read_error(status.as_u16(), &headers, error)
+            })?;
             return Err(Self::map_http_error(status, &headers, text, self.name()));
         }
 
@@ -417,12 +223,7 @@ impl LlmProvider for OpenAiCompatProvider {
                     Err(e) => {
                         // Mid-stream network error: surface as
                         // StreamEvent::Error and close the channel.
-                        let _ = tx
-                            .send(StreamEvent::Error {
-                                error_type: "http_error".into(),
-                                message: e.to_string(),
-                            })
-                            .await;
+                        let _ = tx.send(crate::provider_fault::transport_event(e)).await;
                         return;
                     }
                 };
@@ -544,192 +345,5 @@ impl LlmProvider for OpenAiCompatProvider {
 mod wire;
 
 #[cfg(test)]
-mod retry_after_tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct Compat429Provider {
-        calls: AtomicUsize,
-        times: std::sync::Mutex<Vec<tokio::time::Instant>>,
-        status: reqwest::StatusCode,
-    }
-
-    #[async_trait::async_trait]
-    impl LlmProvider for Compat429Provider {
-        fn name(&self) -> &str {
-            "compat-429"
-        }
-        fn models(&self) -> Vec<ModelInfo> {
-            Vec::new()
-        }
-        fn supports_feature(&self, _: ProviderFeature) -> bool {
-            true
-        }
-        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            self.times.lock().unwrap().push(tokio::time::Instant::now());
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(reqwest::header::RETRY_AFTER, "120".parse().unwrap());
-            Err(OpenAiCompatProvider::map_http_error(
-                self.status,
-                &headers,
-                "rate limited".into(),
-                "compat-429",
-            ))
-        }
-        async fn stream(&self, _: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-            unreachable!()
-        }
-    }
-
-    #[test]
-    fn retry_after_header_accepts_seconds_and_http_date() {
-        assert_eq!(OpenAiCompatProvider::parse_retry_after("37"), Some(37));
-        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(70);
-        let date = chrono::DateTime::<chrono::Utc>::from(future)
-            .format("%a, %d %b %Y %H:%M:%S GMT")
-            .to_string();
-        assert!(
-            OpenAiCompatProvider::parse_retry_after(&date)
-                .is_some_and(|seconds| (68..=70).contains(&seconds))
-        );
-
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::RETRY_AFTER, "37".parse().unwrap());
-        assert!(matches!(
-            OpenAiCompatProvider::map_http_error(
-                reqwest::StatusCode::TOO_MANY_REQUESTS,
-                &headers,
-                String::new(),
-                "test"
-            ),
-            LlmError::RateLimited {
-                retry_after_secs: 0,
-                from_provider: false,
-                pipeline_retry_after_secs: Some(37)
-            }
-        ));
-        let server = OpenAiCompatProvider::map_http_error(
-            reqwest::StatusCode::from_u16(529).unwrap(),
-            &headers,
-            "temporarily overloaded".into(),
-            "test",
-        );
-        assert!(matches!(
-            server,
-            LlmError::Server {
-                status: 529,
-                pipeline_retry_after_secs: Some(37),
-                ..
-            }
-        ));
-        assert_eq!(
-            server.to_string(),
-            "server error (529): temporarily overloaded"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn retry_after_120_stays_out_of_retryprovider_wait_and_fail_fast_policy() {
-        let inner = Arc::new(Compat429Provider {
-            calls: AtomicUsize::new(0),
-            times: std::sync::Mutex::new(Vec::new()),
-            status: reqwest::StatusCode::TOO_MANY_REQUESTS,
-        });
-        let retry = crate::retry::RetryProvider::new(
-            inner.clone(),
-            crate::retry::RetryPolicy {
-                max_attempts: 3,
-                initial_backoff: std::time::Duration::from_secs(10),
-                max_backoff: std::time::Duration::from_secs(30),
-                multiplier: 2.0,
-                jitter: false,
-            },
-        );
-        let request = LlmRequest {
-            model: "test".into(),
-            max_tokens: 1,
-            system: Vec::new(),
-            messages: vec![json!({"role": "user", "content": "x"})],
-            tools: Default::default(),
-            thinking: None,
-            speed: None,
-            effort: None,
-            extra: Value::Null,
-            request_origin: None,
-            reasoning_encrypted: None,
-        };
-        let error = retry.complete(request).await.unwrap_err();
-        assert!(matches!(
-            error,
-            LlmError::RateLimited {
-                retry_after_secs: 0,
-                from_provider: false,
-                pipeline_retry_after_secs: Some(120)
-            }
-        ));
-        assert_eq!(inner.calls.load(Ordering::SeqCst), 3);
-        let times = inner.times.lock().unwrap();
-        assert_eq!(
-            times
-                .windows(2)
-                .map(|pair| pair[1] - pair[0])
-                .collect::<Vec<_>>(),
-            [std::time::Duration::ZERO, std::time::Duration::ZERO]
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn retry_after_529_stays_out_of_retryprovider_wait() {
-        let inner = Arc::new(Compat429Provider {
-            calls: AtomicUsize::new(0),
-            times: std::sync::Mutex::new(Vec::new()),
-            status: reqwest::StatusCode::from_u16(529).unwrap(),
-        });
-        let retry = crate::retry::RetryProvider::new(
-            inner.clone(),
-            crate::retry::RetryPolicy {
-                max_attempts: 3,
-                initial_backoff: std::time::Duration::from_secs(10),
-                max_backoff: std::time::Duration::from_secs(30),
-                multiplier: 2.0,
-                jitter: false,
-            },
-        );
-        let request = LlmRequest {
-            model: "test".into(),
-            max_tokens: 1,
-            system: Vec::new(),
-            messages: vec![json!({"role": "user", "content": "x"})],
-            tools: Default::default(),
-            thinking: None,
-            speed: None,
-            effort: None,
-            extra: Value::Null,
-            request_origin: None,
-            reasoning_encrypted: None,
-        };
-        let error = retry.complete(request).await.unwrap_err();
-        assert!(matches!(
-            error,
-            LlmError::Server {
-                status: 529,
-                pipeline_retry_after_secs: Some(120),
-                ..
-            }
-        ));
-        assert_eq!(error.to_string(), "server error (529): rate limited");
-        assert_eq!(inner.calls.load(Ordering::SeqCst), 3);
-        let times = inner.times.lock().unwrap();
-        assert_eq!(
-            times
-                .windows(2)
-                .map(|pair| pair[1] - pair[0])
-                .collect::<Vec<_>>(),
-            [
-                std::time::Duration::from_secs(10),
-                std::time::Duration::from_secs(20)
-            ]
-        );
-    }
-}
+#[path = "../compat_retry_tests.rs"]
+mod retry_after_tests;

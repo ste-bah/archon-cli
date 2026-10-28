@@ -256,3 +256,112 @@ async fn repeated_oauth_401_returns_error_without_refresh_loop() {
         .expect_err("second 401 should be returned");
     assert!(err.to_string().contains("still expired"));
 }
+
+#[tokio::test]
+#[serial]
+async fn refresh_outage_preserves_operational_status_and_header_on_stream() {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let server = MockServer::start().await;
+        let dir = TempDir::new().unwrap();
+        let expired = oauth(
+            "AC-X-001",
+            "AC-X-002",
+            Utc::now() - ChronoDuration::hours(1),
+        );
+        let _path = tokens::set_credentials_path_for_tests(write_credentials(&dir, &expired));
+        let _endpoint =
+            tokens::set_token_endpoint_for_tests(format!("{}/oauth/token", server.uri()));
+        Mock::given(method("POST"))
+            .and(path("/oauth/token"))
+            .respond_with(
+                ResponseTemplate::new(503)
+                    .insert_header("Retry-After", "2")
+                    .set_body_string("AC-X-001"),
+            )
+            .mount(&server)
+            .await;
+        let client = AnthropicClient::new(
+            AuthProvider::OAuthToken(expired),
+            identity(),
+            Some(server.uri()),
+        );
+        let error: crate::provider::LlmError =
+            crate::provider_fault::defer_retry(client.stream_message(MessageRequest {
+                model: "AC-X-001".into(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap_err()
+            .into();
+        assert!(
+            error.is_operational(),
+            "refresh outage became permanent: {error:?}"
+        );
+        assert_eq!(error.retry_after_hint(), Some(2));
+        server.reset().await;
+        mount_refresh(&server, "AC-X-002", "AC-X-003", "AC-X-004").await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(sse_ok())
+            .mount(&server)
+            .await;
+        crate::provider_fault::defer_retry(client.stream_message(MessageRequest {
+            model: "AC-X-001".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[serial]
+async fn refresh_body_disconnect_retains_operational_type_and_recovers() {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let server = MockServer::start().await;
+        let dir = TempDir::new().unwrap();
+        let expired = oauth(
+            "AC-X-001",
+            "AC-X-002",
+            Utc::now() - ChronoDuration::hours(1),
+        );
+        let _path = tokens::set_credentials_path_for_tests(write_credentials(&dir, &expired));
+        let body = serde_json::json!({"access_token":"AC-X-003", "refresh_token":"AC-X-004",
+            "expires_in":7200, "scope":"user:inference"})
+        .to_string();
+        let (endpoint, peer) =
+            crate::connection_tests::truncated_response_then_recovery(body).await;
+        let _endpoint = tokens::set_token_endpoint_for_tests(endpoint);
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(sse_ok())
+            .mount(&server)
+            .await;
+        let client = AnthropicClient::new(
+            AuthProvider::OAuthToken(expired),
+            identity(),
+            Some(server.uri()),
+        );
+        let call = || MessageRequest {
+            model: "AC-X-001".into(),
+            ..Default::default()
+        };
+        let error: crate::provider::LlmError =
+            crate::provider_fault::defer_retry(client.stream_message(call()))
+                .await
+                .unwrap_err()
+                .into();
+        assert!(
+            error.is_operational(),
+            "refresh body transport class lost: {error:?}"
+        );
+        crate::provider_fault::defer_retry(client.stream_message(call()))
+            .await
+            .unwrap();
+        peer.await.unwrap();
+    })
+    .await
+    .unwrap();
+}

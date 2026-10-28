@@ -318,3 +318,30 @@ fn the_stop_message_carries_the_marker_and_the_facts() {
     assert!(text.starts_with(NO_PROGRESS_STOP_MARKER));
     assert!(text.contains("8 tool rounds"), "{text}");
 }
+
+#[test]
+fn bracketed_month_clocks_keep_only_the_real_suffix() {
+    let mut mismatches = Vec::new();
+    for (clock, suffix) in [
+        ("[12:34:56]", "]"),
+        ("[12:34:56", ""),
+        ("12:34:56]", "]"),
+        ("(12:34:56)", ")"),
+        ("[[12:34:56]]", "]]"),
+    ] {
+        let actual = result_digest(&format!("Oct 27 {clock} ready"));
+        let expected = result_digest(&format!("<volatile> <time>{suffix} ready"));
+        if actual != expected {
+            mismatches.push(clock);
+        }
+    }
+    assert!(mismatches.is_empty(), "incorrect suffixes: {mismatches:?}");
+}
+
+#[test]
+fn bracketed_month_clock_with_unicode_neighbour_keeps_a_valid_boundary() {
+    assert_eq!(
+        result_digest("Oct 27 [12:34:56é] 界"),
+        result_digest("<volatile> <time>] 界")
+    );
+}

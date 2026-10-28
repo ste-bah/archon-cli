@@ -84,7 +84,7 @@ fn build_openai_compatible(provider: &str) -> Result<Arc<dyn LlmProvider>> {
         api_key_env: None,
         retry: None,
     };
-    let http = Arc::new(reqwest::Client::new());
+    let http = Arc::new(archon_llm::transport_http::client_builder().build()?);
     ActiveProvider::new(&flat, http)
         .map(|active| Arc::new(active) as Arc<dyn LlmProvider>)
         .map_err(|error| anyhow::anyhow!("{error}"))

@@ -236,3 +236,6 @@ async fn changed_check_refutation_is_retained_for_the_acceptance_author() {
         "unchanged check and covers restore the accepted judgment"
     );
 }
+
+#[path = "workflow_acceptance_site_policy_tests.rs"]
+mod site_policy_tests;

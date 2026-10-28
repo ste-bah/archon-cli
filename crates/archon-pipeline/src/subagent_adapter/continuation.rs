@@ -340,8 +340,26 @@ impl SubagentPipelineClient {
         }
 
         let mut response =
-            llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)
-                .map_err(|error| super::host_cuts::name_last_progress(error, cut, &clock))?;
+            match llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs) {
+                Err(error)
+                    if continuing
+                        && archon_tools::provider_recovery::enabled()
+                        && error
+                            .chain()
+                            .filter_map(|source| {
+                                source.downcast_ref::<archon_llm::provider::LlmError>()
+                            })
+                            .any(|error| error.is_operational()) =>
+                {
+                    lease.history.set_recovering(true);
+                    lease.complete()?;
+                    retain_scope_after_completion(cancel_on_drop);
+                    return Err(error);
+                }
+                result => result
+                    .map_err(|error| super::host_cuts::name_last_progress(error, cut, &clock))?,
+            };
+        lease.history.set_recovering(false);
         // Workflow sessions only: the coding pipeline reads `tool_uses` for its
         // own verification signals, which this does not change.
         if request.pipeline_type == PipelineType::Workflow {

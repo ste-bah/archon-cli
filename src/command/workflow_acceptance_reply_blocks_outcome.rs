@@ -11,6 +11,7 @@ pub(crate) enum ObjectExtraction {
     MisplacedBrace {
         missing_fields: Vec<String>,
         next_field: String,
+        additional_entries: Vec<String>,
     },
 }
 
@@ -58,6 +59,12 @@ pub(crate) fn extract_object_outcome_with_markers(
     let mut first_end = None;
     let mut first_bare = None;
     let mut stray_after = None;
+    let mut additional_entries = json
+        .iter()
+        .filter_map(|candidate| serde_json::from_str::<Value>(candidate).ok())
+        .filter(|value| value.get("check").is_some())
+        .filter_map(|value| value["id"].as_str().map(str::to_string))
+        .collect::<Vec<_>>();
     for (index, byte) in source.bytes().enumerate() {
         if quoted {
             if escaped {
@@ -81,6 +88,12 @@ pub(crate) fn extract_object_outcome_with_markers(
                 if first_end.is_none() {
                     first_end = Some(index);
                     first_bare = Some(source[start..=index].to_string());
+                } else if !source[..start].trim_end().ends_with(':')
+                    && let Ok(value) = serde_json::from_str::<Value>(&source[start..=index])
+                    && value.get("check").is_some()
+                    && let Some(id) = value["id"].as_str()
+                {
+                    additional_entries.push(id.to_string());
                 }
                 bare.push(source[start..=index].to_string());
             }
@@ -97,6 +110,7 @@ pub(crate) fn extract_object_outcome_with_markers(
         return ObjectExtraction::MisplacedBrace {
             missing_fields: missing_check_fields(candidate, content, markers).unwrap_or_default(),
             next_field,
+            additional_entries,
         };
     }
     let parsed: Vec<_> = candidates
@@ -150,7 +164,10 @@ pub(crate) fn extract_object_outcome_with_markers(
 }
 
 fn continued_key(tail: &str) -> Option<String> {
-    let after_comma = tail.trim_start().strip_prefix(',')?.trim_start();
+    let after_comma = tail
+        .trim_start_matches(|ch: char| ch.is_whitespace() || ch == '}')
+        .strip_prefix(',')?
+        .trim_start();
     let after_quote = after_comma.strip_prefix('"')?;
     let end = after_quote.find('"')?;
     let key = &after_quote[..end];
@@ -177,6 +194,14 @@ fn missing_check_fields(candidate: &str, content: &str, markers: &[String]) -> O
             Ok(_) => break,
             Err(error) => {
                 let error = error.to_string();
+                // Unknown top-level fields do not tell us which required
+                // fields are absent. Remove them only from this diagnostic copy.
+                if let Some((_, rest)) = error.split_once("unknown field `")
+                    && let Some((field, _)) = rest.split_once('`')
+                    && check.remove(field).is_some()
+                {
+                    continue;
+                }
                 let Some(field) = missing_field(&error) else {
                     break;
                 };

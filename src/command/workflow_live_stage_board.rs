@@ -127,8 +127,8 @@ fn raised_by(request: &StageRunRequest) -> String {
 ///   work was never refused or attempted-and-failed, and a paused run may run
 ///   this very branch again;
 /// - the branch's subagent was cancelled, which reaches here as the adapter's
-///   message inside a `StageFailed`. Read out of the message for the same
-///   reason `llm_retry::transient_live_agent_error_for_request` reads the same
+///   message inside a `StageFailed` or port error. Read out of the message for
+///   the same reason `llm_retry::transient_live_agent_error_for_request` reads the same
 ///   sentence out of the same string: cancellation is reported as a transport
 ///   failure, and this is the only place the distinction still exists.
 ///
@@ -139,8 +139,11 @@ pub(crate) fn stage_board_outcome(error: &WorkflowError) -> DelegatedOutcome {
         WorkflowError::ControlCancelled(_) | WorkflowError::ControlPaused(_) => {
             DelegatedOutcome::Stopped
         }
-        WorkflowError::StageFailed(message)
-            if message.to_ascii_lowercase().contains("subagent cancelled") =>
+        WorkflowError::StageFailed(_) | WorkflowError::Port(_)
+            if error
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("subagent cancelled") =>
         {
             DelegatedOutcome::Stopped
         }

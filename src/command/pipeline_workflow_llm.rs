@@ -376,7 +376,9 @@ impl WorkflowLlmClientFactory for SubagentPipelineClientFactory {
 #[path = "pipeline_workflow_llm_test_support.rs"]
 mod test_support;
 #[cfg(test)]
-pub(crate) use test_support::{TestClientFallback, subagent_workflow_client_for_test};
+pub(crate) use test_support::{
+    TestClientFallback, recovery_client_for_test, subagent_workflow_client_for_test,
+};
 
 #[cfg(test)]
 mod tests {

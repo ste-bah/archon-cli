@@ -82,7 +82,7 @@ pub fn inline_programs(commands: &[Vec<String>]) -> Vec<(usize, usize, String)> 
     found
 }
 
-fn heredoc_bodies(command: &str) -> Vec<String> {
+pub(crate) fn heredoc_bodies(command: &str) -> Vec<String> {
     let mut found = Vec::new();
     let lines: Vec<_> = command.lines().collect();
     let mut line = 0;
@@ -208,6 +208,11 @@ fn normalize(path: PathBuf) -> PathBuf {
 /// Existing paths are useful inputs even when mentioned as ordinary
 /// arguments; missing ordinary arguments are not setup failures.
 pub fn scan(command: &str) -> Vec<SiblingPath> {
+    scan_from(command, std::path::Path::new(""))
+}
+
+/// Parent operands read from a proven logical directory, relative to the selected root.
+pub(crate) fn scan_from(command: &str, directory: &std::path::Path) -> Vec<SiblingPath> {
     let command = strip_quote_prefixes(command);
     // R2: comments set aside, so an apostrophe in one opens no quote that
     // would hide every path after it.
@@ -253,7 +258,7 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
                 && matches!(option, "-C" | "--manifest-path" | "--path")
                 && !value.is_empty()
             {
-                if let Some(path) = sibling_word(value) {
+                if let Some(path) = sibling_word(value, directory) {
                     push(&mut found, path, true);
                 }
             }
@@ -274,7 +279,7 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
             }
         }
         for (index, word) in segment.iter().enumerate() {
-            if let Some(path) = sibling_word(word) {
+            if let Some(path) = sibling_word(word, directory) {
                 push(&mut found, path, required_indexes.contains(&index));
             }
         }
@@ -290,24 +295,14 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
             && pair[0].get(1).is_some_and(|word| word == "..")
             && pair[1].first().is_some_and(|word| word == "cd")
             && let Some(child) = pair[1].get(1)
-            && let Some(path) = sibling_word(&format!("../{child}"))
+            && let Some(path) = sibling_word(&format!("../{child}"), directory)
         {
             push(&mut found, path, true);
         }
     }
     for program in program_texts(&command) {
-        let program = strip_quote_prefixes(&program);
-        for word in crate::check_source_resolve::words(&without_comments(&program)) {
-            if let Some(path) = sibling_word(&word) {
-                push(&mut found, path, true);
-            }
-        }
-        // R2: a quoted string glued to the code before it (`run(['../x'`)
-        // is no word of its own; it is read from its opening quote.
-        for quoted in quoted_parent_paths(&program) {
-            if let Some(path) = sibling_word(quoted) {
-                push(&mut found, path, true);
-            }
+        for path in program_parent_paths(&program, directory) {
+            push(&mut found, path, true);
         }
     }
     found.sort_by(|a, b| a.path.cmp(&b.path).then(a.required.cmp(&b.required)));
@@ -322,9 +317,28 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
     merged
 }
 
+/// The existing program-text path detection, shared with rooted policy scans.
+pub(crate) fn program_parent_paths(program: &str, directory: &std::path::Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let program = strip_quote_prefixes(program);
+    for word in crate::check_source_resolve::words(&without_comments(&program)) {
+        if let Some(path) = sibling_word(&word, directory) {
+            found.push(path);
+        }
+    }
+    // R2: a quoted string glued to the code before it (`run(['../x'`)
+    // is no word of its own; it is read from its opening quote.
+    for quoted in quoted_parent_paths(&program) {
+        if let Some(path) = sibling_word(quoted, directory) {
+            found.push(path);
+        }
+    }
+    found
+}
+
 /// `text` without its comments: from a `#` that starts a word outside
 /// quotes to the end of its line, as the shell reads them.
-fn without_comments(text: &str) -> String {
+pub(crate) fn without_comments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let (mut quote, mut comment, mut previous) = (None, false, '\n');
     let mut chars = text.chars();
@@ -377,7 +391,7 @@ fn quoted_parent_paths(program: &str) -> Vec<&str> {
         .collect()
 }
 
-fn sibling_word(word: &str) -> Option<PathBuf> {
+fn sibling_word(word: &str, directory: &std::path::Path) -> Option<PathBuf> {
     let value = word.split_once('=').map_or(word, |(_, value)| value);
     let value = value.strip_prefix("$PWD/").unwrap_or(value);
     let value = value.trim_matches(|character: char| {
@@ -387,6 +401,13 @@ fn sibling_word(word: &str) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(value);
+    if !path
+        .components()
+        .any(|part| part == std::path::Component::ParentDir)
+    {
+        return None;
+    }
+    let path = directory.join(path);
     names_entry_below_parent(&path).then_some(path)
 }
 
@@ -400,7 +421,7 @@ pub fn is_path_character(character: char) -> bool {
         || matches!(character, '.' | '_' | '/' | '-' | '+' | '@')
 }
 
-fn names_entry_below_parent(path: &std::path::Path) -> bool {
+pub(crate) fn names_entry_below_parent(path: &std::path::Path) -> bool {
     use std::path::Component;
     let mut depth = 0usize;
     let mut escaped = false;

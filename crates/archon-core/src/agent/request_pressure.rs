@@ -181,6 +181,7 @@ mod tests {
             retry_after_secs: 30,
             from_provider: true,
             pipeline_retry_after_secs: None,
+            message: String::new(),
         }));
         assert!(is_rate_limited_error(&LlmError::Http(
             "HTTP 429: rate_limited".into()

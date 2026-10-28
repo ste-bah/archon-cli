@@ -42,6 +42,7 @@ struct SessionState {
     context: Option<RuntimeContext>,
     /// Set by the executor when it refuses to continue this session.
     refusal: Option<String>,
+    recovering: bool,
 }
 
 #[derive(Clone)]
@@ -53,6 +54,20 @@ pub struct RuntimeContext {
 }
 
 impl CompletedHistory {
+    pub fn set_recovering(&self, recovering: bool) {
+        self.0
+            .lock()
+            .expect("completed history poisoned")
+            .recovering = recovering;
+    }
+
+    pub fn is_recovering(&self) -> bool {
+        self.0
+            .lock()
+            .expect("completed history poisoned")
+            .recovering
+    }
+
     pub fn append(&self, message: &serde_json::Value) {
         // Poisoning is never silently converted into incomplete history.
         self.0

@@ -52,7 +52,7 @@ async fn fetch_imds_credentials() -> Result<Option<(AwsCredentials, DateTime<Utc
     }
 
     let base = imds_endpoint();
-    let http = reqwest::Client::builder()
+    let http = crate::transport_http::client_builder()
         .timeout(IMDS_TIMEOUT)
         .build()
         .map_err(|e| LlmError::Auth(format!("failed to build IMDS client: {e}")))?;

@@ -25,6 +25,9 @@
 //! tool is asked once per program (its resolved path, size and change time)
 //! and environment, whatever it answered; one that gave no answer is asked
 //! again next time.
+//!
+//! A no-progress stop before either stream supplies any bytes is a
+//! transient host fault: it proves nothing about the check or its site.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -49,6 +52,10 @@ pub(super) enum Listing {
     Unlisted(String),
     /// It gave no answer: it could not start, stalled or never stopped.
     NoAnswer(String),
+    /// Stopped before any output: the host must retry its own probe.
+    HostUnproven(String),
+    /// Silent scratch overrun: the author can drop the dependency.
+    ScratchUnproven(String),
 }
 
 type Identity = (PathBuf, u64, Option<SystemTime>);
@@ -90,7 +97,7 @@ pub(super) fn listing(program: &Path, at: &Context) -> Listing {
         .lock()
         .unwrap()
         .insert(key.0.0.clone(), listing.clone());
-    if !matches!(listing, Listing::NoAnswer(_)) {
+    if matches!(listing, Listing::Commands(_) | Listing::Unlisted(_)) {
         lock().insert(key, listing.clone());
     }
     listing
@@ -116,6 +123,12 @@ fn list(program: &Path, at: &Context) -> Result<Listing, String> {
     let listed = root.path().and_then(|root| list_in(program, root, at));
     match (listed, root.remove()) {
         (listed, Ok(())) => listed,
+        (Ok(Listing::HostUnproven(why)), Err(left)) => {
+            Ok(Listing::HostUnproven(format!("{why}; {left}")))
+        }
+        (Ok(Listing::ScratchUnproven(why)), Err(left)) => {
+            Ok(Listing::ScratchUnproven(format!("{why}; {left}")))
+        }
         (Ok(_), Err(left)) => Err(left),
         (Err(why), Err(left)) => Err(format!("{why}; {left}")),
     }
@@ -328,6 +341,11 @@ fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String>
         }
         polls += 1;
         if polls % 10 == 0 && bytes_under(root) > MOST_SCRATCH {
+            if output.iter().all(|printed| printed.bytes.is_empty()) {
+                return Ok(Listing::ScratchUnproven(format!(
+                    "`{shown} --list` wrote more than {MOST_SCRATCH} bytes to its working directory without printing and was stopped"
+                )));
+            }
             return Err(format!(
                 "`{shown} --list` wrote more than {MOST_SCRATCH} bytes to its own directories, so it was stopped"
             ));
@@ -349,10 +367,16 @@ fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String>
             if status.is_some() {
                 break;
             }
-            return Err(format!(
+            let why = format!(
                 "`{shown} --list` printed nothing new for {} ms, so it was stopped",
                 at.list_stall.as_millis()
-            ));
+            );
+            if output.iter().all(|printed| printed.bytes.is_empty()) {
+                return Ok(Listing::HostUnproven(format!(
+                    "{why}; no output was received, so the host's listing probe is inconclusive"
+                )));
+            }
+            return Err(why);
         }
     }
     let status = status.expect("the loop ends only once the tool is reaped");

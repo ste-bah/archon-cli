@@ -1,5 +1,45 @@
 use super::*;
 
+#[test]
+fn contract_policy_resolves_parent_inputs_after_directory_changes() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("checks")).unwrap();
+    std::fs::write(root.path().join("input"), "ready").unwrap();
+    for cwd in [
+        super::super::TrustedCwd::ProjectRoot,
+        super::super::TrustedCwd::RepoRoot,
+    ] {
+        for command in [
+            "cd checks && ./verify ../input",
+            "cd checks; ./verify ../input",
+            "cd checks && ./verify ../input && cd .. && ./verify ./input",
+        ] {
+            let candidate = super::super::AcceptanceCriterion {
+                id: "AC-X-001".into(),
+                criterion: "input is verified".into(),
+                check: AcceptanceCheck::Command {
+                    command: command.into(),
+                    cwd,
+                },
+                gap_permitted: false,
+                covers: Vec::new(),
+                judgment: super::super::JudgeVerdict {
+                    verdict: JudgeDecision::Accepted,
+                    counterexample: "none".into(),
+                    reason: "input is verified".into(),
+                    host_call_id: String::new(),
+                    sampling: None,
+                },
+            };
+            assert_eq!(
+                acceptance_site_path_defect(&candidate, root.path(), root.path(), false),
+                None,
+                "{cwd:?}: {command}"
+            );
+        }
+    }
+}
+
 /// The synthetic proof fixture prescribes its floor field by field; that text
 /// must read as prescribing, or the proof's byte-identical floor assertion and
 /// the repair loop would fight each other.

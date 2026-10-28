@@ -86,10 +86,16 @@ pub(super) async fn collect_stream_round(
             // the no-progress window like a resend; auth and other 4xx
             // errors still end the round at once.
             Ok(Err(error)) => {
+                if super::provider_open::operational(&error) {
+                    return Err(error);
+                }
                 let backoff = budget.open_failed(error, "first open could not open")?;
                 tokio::time::sleep(backoff).await;
             }
             Err(expired) => {
+                if archon_tools::provider_recovery::enabled() {
+                    return Err(archon_llm::provider_fault::opening_timeout().into());
+                }
                 budget.note_expiry(expired);
                 let backoff = budget
                     .failed(FailedAttempt::Unanswered(
@@ -115,6 +121,7 @@ pub(super) async fn collect_stream_round(
     loop {
         // Issue 364: idle by either clock, so a stream silent across a sleep
         // is resent soon after the wake.
+        let read_started = tokio::time::Instant::now();
         let received = within(stream_idle_timeout(runner), rx.recv()).await;
         let transport_failure = matches!(&received, Ok(Some(StreamEvent::Error { error_type, message }))
             if archon_llm::retry::stream_error_is_retryable(error_type, message));
@@ -125,6 +132,28 @@ pub(super) async fn collect_stream_round(
             || transport_failure
             || matches!(&received, Ok(None))
                 && ((!terminal_marker && finish_reason.is_none()) || empty_terminal);
+        if archon_tools::provider_recovery::enabled()
+            && let Ok(Some(StreamEvent::Error {
+                error_type,
+                message,
+            })) = &received
+        {
+            let error = crate::agent::autocompact::classify_stream_error(
+                runner.provider.name(),
+                error_type,
+                message,
+            );
+            if error.is_operational() {
+                if text_content.is_empty()
+                    && thinking_blocks.is_empty()
+                    && pending_tools.is_empty()
+                    && reasoning_encrypted.is_none()
+                {
+                    archon_tools::provider_recovery::exclude_silence(read_started.elapsed());
+                }
+                return Err(anyhow::Error::new(error));
+            }
+        }
         if interrupted {
             match &received {
                 Err(expired) => budget.note_expiry(*expired),
@@ -165,7 +194,7 @@ pub(super) async fn collect_stream_round(
                 tokio::time::sleep(backoff).await;
                 let opened = within(
                     stream_idle_timeout(runner),
-                    runner.provider.stream(request.clone()),
+                    super::provider_open::open(runner, request.clone()),
                 )
                 .await;
                 let attempt = match opened {
@@ -175,11 +204,17 @@ pub(super) async fn collect_stream_round(
                         break;
                     }
                     Ok(Err(error)) => {
+                        if archon_tools::provider_recovery::enabled() && error.is_operational() {
+                            return Err(anyhow::Error::new(error));
+                        }
                         backoff = budget
                             .open_failed(anyhow::Error::from(error), "resend could not open")?;
                         continue;
                     }
                     Err(expired) => {
+                        if archon_tools::provider_recovery::enabled() {
+                            return Err(archon_llm::provider_fault::opening_timeout().into());
+                        }
                         budget.note_expiry(expired);
                         FailedAttempt::Unanswered("stream idle timeout while reconnecting")
                     }

@@ -12,9 +12,10 @@ mod progress_stop;
 mod progress_window;
 #[cfg(test)]
 mod progress_window_tests;
+mod provider_open;
 mod request_round;
 mod request_round_pressure;
-mod stream_idle_window;
+pub(crate) mod stream_idle_window;
 mod stream_resend_budget;
 mod stream_round;
 mod tool_helpers;
@@ -27,6 +28,7 @@ mod read_range_history_recovery_tests;
 use cargo_credit::CargoCredit;
 use message_history::MessageHistory;
 use progress_window::ProgressWindow;
+use provider_open::{adjusted_deadline, optional_timeout};
 use request_round::{PressureState, prepare_request_round};
 use stream_round::collect_stream_round;
 use tool_round::replay_tool_round;
@@ -45,14 +47,7 @@ impl SubagentRunner {
         // The session has started: from here, and not while it was queued for
         // a subagent slot, silence counts against the host's inactivity bound.
         archon_tools::subagent_activity::note();
-        // AGT-024: Use initial_messages for resume, or start fresh
-        let mut messages = MessageHistory::new(self.initial_messages.clone().unwrap_or_default());
-        let user_msg = serde_json::json!({
-            "role": "user",
-            "content": initial_prompt,
-        });
-        self.record_transcript(&user_msg);
-        messages.push(user_msg);
+        let mut messages = provider_open::initial_history(self, initial_prompt);
 
         // Issue 288: the session's limit is a no-progress window, never a
         // total. It renews only on novel activity (see `progress_window`).
@@ -61,7 +56,13 @@ impl SubagentRunner {
             Some(archon_tools::host_timeout::HostTimeout::Finite(seconds)) => Some(seconds),
             None => Some(self.timeout_secs),
         };
-        let mut window = ProgressWindow::open(timeout_secs)?;
+        // Workflow hosts own a dynamic session clock that excludes classified
+        // outages. A second static deadline would cut before a fault returns.
+        let mut window = ProgressWindow::open(if archon_tools::provider_recovery::enabled() {
+            None
+        } else {
+            timeout_secs
+        })?;
         let mut cargo_credit = CargoCredit::new(timeout_secs);
         let mut progress_stop = progress_stop::ProgressStop::default();
         let progress_agent = self.tool_context.subagent_id.clone().unwrap_or_default();
@@ -126,22 +127,18 @@ impl SubagentRunner {
                 &cargo_credit,
                 &self.tool_context.session_id,
             );
-            let prepared_request = optional_timeout(
+            let prepared_request = Box::pin(provider_open::prepare(
+                self,
                 request_deadline,
-                prepare_request_round(
-                    self,
-                    &mut messages,
-                    &mut auto_compact,
-                    &mut last_known_context_tokens,
-                    &mut pressure,
-                    reasoning_encrypted.clone(),
-                    turn,
-                ),
-            )
-            .await
-            .map_err(|_| {
-                window.stall_error("while preparing an LLM request", turn.saturating_add(1))
-            })?;
+                &window,
+                &mut messages,
+                &mut auto_compact,
+                &mut last_known_context_tokens,
+                &mut pressure,
+                reasoning_encrypted.clone(),
+                turn,
+            ))
+            .await?;
             let offered_tool_names = prepared_request
                 .template
                 .tools
@@ -405,24 +402,6 @@ fn withdrawn_note(reason: Option<&str>) -> String {
             .unwrap_or_default(),
         archon_tools::workflow_read_guard::ANSWER_IN_TASK_FORMAT
     )
-}
-
-fn adjusted_deadline(
-    deadline: Option<tokio::time::Instant>,
-    credit: &CargoCredit,
-    session: &str,
-) -> Option<tokio::time::Instant> {
-    deadline.map(|deadline| deadline + credit.live(session))
-}
-
-async fn optional_timeout<T>(
-    deadline: Option<tokio::time::Instant>,
-    work: impl std::future::Future<Output = T>,
-) -> Result<T, tokio::time::error::Elapsed> {
-    match deadline {
-        Some(deadline) => tokio::time::timeout_at(deadline, work).await,
-        None => Ok(work.await),
-    }
 }
 
 async fn await_cancellable_inference<F, T>(
