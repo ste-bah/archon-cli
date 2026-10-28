@@ -5,8 +5,10 @@ fn assert_literal_operand(command: &'static str, valid: bool) {
     std::thread::spawn(move || {
         let set = frozen_set(&[("AC-X-001", "true", false)]);
         let root = set.project.path();
-        std::fs::create_dir_all(root.join("key=../missing")).unwrap();
-        std::fs::write(root.join("key=../missing/input"), "ready").unwrap();
+        if valid {
+            std::fs::create_dir_all(root.join("key=../missing")).unwrap();
+            std::fs::write(root.join("key=../missing/input"), "ready").unwrap();
+        }
         let mut failures = Vec::new();
         for cwd in [TrustedCwd::ProjectRoot, TrustedCwd::RepoRoot] {
             let actual = if valid {
@@ -113,6 +115,7 @@ fn reader_path_decisions(
 }
 
 #[test]
+#[cfg(unix)] // Windows filesystems strip trailing dots from the `key=..` component.
 fn acceptance_site_selected_reader_operand_keeps_literal_equals() {
     assert_literal_operand("cat -e './key=../missing/input'", true);
 }

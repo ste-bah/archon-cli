@@ -71,7 +71,7 @@ async fn glob_fixed_prefix_visits_only_reachable_directories() {
     };
     let expected = ["", "selected", "selected/data", "selected/data/nested"]
         .into_iter()
-        .map(|path| base.join(path))
+        .map(|path| base.join(path).canonicalize().unwrap())
         .collect::<BTreeSet<_>>();
     for pattern in [
         "selected/data/**/*.json".to_string(),
@@ -91,6 +91,12 @@ async fn glob_fixed_prefix_visits_only_reachable_directories() {
             expected.len(),
             "unreachable directories were walked"
         );
+        // Canonicalize both sets to compare directory identities across host
+        // path spellings (including Windows verbatim prefixes and separators).
+        let visited = visited
+            .into_iter()
+            .map(|path| path.canonicalize().unwrap())
+            .collect::<BTreeSet<_>>();
         assert_eq!(visited, expected);
     }
     // With no fixed directory prefix, every branch remains reachable.

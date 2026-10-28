@@ -108,7 +108,11 @@ fn owned_name_locations(sources: &[Source]) -> BTreeMap<String, BTreeSet<String>
                 at += 1;
                 continue;
             };
-            let location = format!("{}:{}", source.path.display(), source.lines[at]);
+            let location = format!(
+                "{}:{}",
+                source.path.to_string_lossy().replace('\\', "/"),
+                source.lines[at]
+            );
             let prefix_query = at >= 3
                 && is(tokens.get(at - 1), '(')
                 && matches!(word(tokens.get(at - 2)), Some("starts_with" | "find"))
