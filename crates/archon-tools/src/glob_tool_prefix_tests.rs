@@ -5,6 +5,28 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+#[test]
+fn absolute_pattern_normalization_preserves_glob_syntax() {
+    for (verbatim, plain) in [
+        (r"\\?\C:\x\*.json", r"C:\x\*.json"),
+        (r"\\?\C:\x/**/[ab]?*.json", r"C:\x/**/[ab]?*.json"),
+        (r"\\?\UNC\server\share\x\*.json", r"\\server\share\x\*.json"),
+    ] {
+        let normalized = prefix::normalize_absolute_pattern(verbatim);
+        assert_eq!(normalized, prefix::normalize_absolute_pattern(plain));
+        assert_eq!(normalized, plain);
+        assert_eq!(
+            prefix::fixed_prefix(Path::new(normalized.as_ref())),
+            prefix::fixed_prefix(Path::new(plain))
+        );
+        let matcher = glob::Pattern::new(&normalized).unwrap();
+        assert_eq!(matcher.as_str(), plain);
+    }
+    for pattern in ["/x/**/*.json", "/x/[ab]?.json", "relative/*.json"] {
+        assert_eq!(prefix::normalize_absolute_pattern(pattern), pattern);
+    }
+}
+
 #[derive(Debug, Default)]
 struct RecordingFs(Mutex<BTreeSet<PathBuf>>);
 
@@ -71,7 +93,7 @@ async fn glob_fixed_prefix_visits_only_reachable_directories() {
     };
     let expected = ["", "selected", "selected/data", "selected/data/nested"]
         .into_iter()
-        .map(|path| base.join(path))
+        .map(|path| base.join(path).canonicalize().unwrap())
         .collect::<BTreeSet<_>>();
     for pattern in [
         "selected/data/**/*.json".to_string(),
@@ -91,6 +113,12 @@ async fn glob_fixed_prefix_visits_only_reachable_directories() {
             expected.len(),
             "unreachable directories were walked"
         );
+        // Canonicalize both sets to compare directory identities across host
+        // path spellings (including Windows verbatim prefixes and separators).
+        let visited = visited
+            .into_iter()
+            .map(|path| path.canonicalize().unwrap())
+            .collect::<BTreeSet<_>>();
         assert_eq!(visited, expected);
     }
     // With no fixed directory prefix, every branch remains reachable.

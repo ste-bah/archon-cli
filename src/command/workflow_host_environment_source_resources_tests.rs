@@ -53,7 +53,11 @@ pub(super) fn production_sources(base: &Path) -> Vec<Source> {
                 if !is(source.tokens.get(at + 1), '!') {
                     continue;
                 }
-                let location = format!("{}:{}", path.display(), source.lines[at]);
+                let location = format!(
+                    "{}:{}",
+                    path.to_string_lossy().replace('\\', "/"),
+                    source.lines[at]
+                );
                 let (relative, _) = path_value(&source.tokens, at + 3, manifest)
                     .filter(|(_, end)| is(source.tokens.get(*end), ')'))
                     .unwrap_or_else(|| panic!("{location}: unresolved embedded resource"));
