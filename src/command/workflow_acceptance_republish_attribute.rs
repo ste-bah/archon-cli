@@ -32,11 +32,12 @@ pub(super) fn hold_back(
     }
     let contract_path = request.tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let findings = findings::acceptance_findings(
+        request.project_root,
         request.prd_path,
         &verified.prd_text,
         &contract_path,
         &progress.contract,
-    );
+    )?;
     // The PRD's own finding refuses the republish whatever is held back.
     if (findings.iter()).any(|finding| finding.remediation_scope == RemediationScope::PrdInput) {
         return Ok(());

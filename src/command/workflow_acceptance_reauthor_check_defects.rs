@@ -8,61 +8,13 @@ pub(super) fn check_defects(
     candidate: AcceptanceCriterion,
     scope: &AuthorScope,
 ) -> std::result::Result<AcceptanceCriterion, String> {
-    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, cwd } =
-        &candidate.check
-    {
-        // This is a lexical safety scan, not shell evaluation. It covers
-        // path-like words, interpreter operands/program text, and the common
-        // `cd .. && cd child` form; dynamic path construction remains outside
-        // what a static scan can establish.
-        let root_name = match cwd {
-            archon_workflow::task_set_contract::TrustedCwd::ProjectRoot => "project root",
-            archon_workflow::task_set_contract::TrustedCwd::RepoRoot => "repository root",
-        };
-        for named in archon_workflow::acceptance_sibling_paths::scan(command)
-            .into_iter()
-            .filter(|named| {
-                named
-                    .path
-                    .components()
-                    .any(|part| part == std::path::Component::ParentDir)
-            })
-        {
-            if let Err(refusal) = archon_workflow::acceptance_scratch::site_path_alone(
-                &scope.project_root,
-                &scope.repository_root,
-                command,
-                *cwd,
-                &named.path,
-                scope.build_cache,
-            ) {
-                let refused_path = refusal
-                    .reason
-                    .as_deref()
-                    .and_then(|reason| {
-                        reason.strip_prefix(
-                            archon_workflow::acceptance_scratch::faults::SIBLING_ROOT_REFUSED,
-                        )
-                    })
-                    .and_then(|reason| reason.strip_prefix(": "))
-                    .and_then(|reason| reason.split_once(" resolves to ").map(|(path, _)| path))
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| archon_shell::paths::stored_text(&named.path));
-                let reason = refusal.reason.unwrap_or_else(|| {
-                    format!(
-                        "alone in its site, `{}` from {root_name} resolves to `{}`, which the site does not create",
-                        archon_shell::paths::stored_text(&named.path),
-                        archon_shell::paths::stored_text(&refusal.site_target),
-                    )
-                });
-                return Err(format!(
-                    "check '{}': it names `{}` from the {root_name}; {reason} (site target `{}`).",
-                    candidate.id,
-                    refused_path,
-                    archon_shell::paths::stored_text(&refusal.site_target),
-                ));
-            }
-        }
+    if let Some(defect) = archon_workflow::task_set_contract::acceptance_site_path_defect(
+        &candidate,
+        &scope.project_root,
+        &scope.repository_root,
+        scope.build_cache,
+    ) {
+        return Err(format!("check '{}': {defect}", candidate.id));
     }
     let mut probe = working.clone();
     *super::entry_mut(&mut probe, &candidate.id).expect("named id") = candidate.clone();

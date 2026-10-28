@@ -5,6 +5,7 @@ use archon_workflow::defect::ValidationDefect;
 
 pub(super) fn prepare(
     project_root: &Path,
+    tasks_root: &Path,
     prd_path: &Path,
     prd_digest: &str,
     prd_text: &str,
@@ -75,18 +76,23 @@ pub(super) fn prepare(
 
     // Authored verdicts are placeholders. Only check defects, never those
     // placeholder judgments, decide whether the candidate reaches the judge.
-    let policy_defects = acceptance_policy_findings(&contract)
+    let policy_defects = rooted_policy_findings(&contract, project_root, tasks_root)?
         .into_iter()
         .filter(|finding| {
+            let unavailable_site_path = finding
+                .identity
+                .as_ref()
+                .is_some_and(|identity| identity.code == "unavailable_site_path");
             finding.field.ends_with(".check")
-                && !contract
-                    .acceptance
-                    .iter()
-                    .chain(&contract.supplementary)
-                    .any(|entry| {
-                        finding.field == format!("{}.check", entry.id)
-                            && criterion_prescribes_check_shape(&entry.criterion)
-                    })
+                && (unavailable_site_path
+                    || !contract
+                        .acceptance
+                        .iter()
+                        .chain(&contract.supplementary)
+                        .any(|entry| {
+                            finding.field == format!("{}.check", entry.id)
+                                && criterion_prescribes_check_shape(&entry.criterion)
+                        }))
         })
         .filter_map(|finding| {
             finding.identity.map(|identity| ValidationDefect {
@@ -100,4 +106,30 @@ pub(super) fn prepare(
         return CandidateRejected::tag(Err(CandidateDefects(defects).into()));
     }
     Ok(contract)
+}
+
+/// Use the same site roots for the first author and every publication.
+pub(super) fn rooted_policy_findings(
+    contract: &AcceptanceContract,
+    project: &Path,
+    tasks: &Path,
+) -> Result<Vec<archon_workflow::task_set_contract::AcceptancePolicyFinding>> {
+    let Ok(binding) = crate::command::acceptance_scratch_policy::capture(project, tasks) else {
+        // No site can run: the probe owns its operational refusal. Relative
+        // availability cannot be proven here, so retain portable validation.
+        return Ok(acceptance_policy_findings(contract));
+    };
+    let repository = live_root::freeze_repository(project, tasks, binding.as_ref())
+        .map_err(anyhow::Error::msg)?;
+    // Configured freeze sites select their cache after capture, just as the
+    // re-author's site scope does. The captured field is still unset here.
+    let build_cache = binding.is_some();
+    Ok(
+        archon_workflow::task_set_contract::acceptance_policy_findings_with_roots(
+            contract,
+            project,
+            &repository,
+            build_cache,
+        ),
+    )
 }

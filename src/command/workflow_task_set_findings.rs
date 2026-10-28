@@ -4,82 +4,9 @@
 use super::*;
 use archon_workflow::task_set_contract::JudgeDecision;
 
-/// Every finding the acceptance gate records for `contract` against the PRD.
-pub(super) fn acceptance_findings(
-    prd_path: &Path,
-    prd_text: &str,
-    contract_path: &Path,
-    contract: &AcceptanceContract,
-) -> Vec<GateFinding> {
-    let mut findings = malformed_obligation_ids(prd_text)
-        .into_iter()
-        .map(|id| {
-            GateFinding::new(
-                GateId::FreezeAcceptance,
-                malformed_obligation_finding(&id),
-                id,
-                Some(prd_path.to_path_buf()),
-                archon_workflow::RemediationScope::PrdInput,
-            )
-        })
-        .collect::<Vec<_>>();
-    findings.extend(duplicate_obligation_ids(prd_text).into_iter().map(|id| {
-        GateFinding::new(
-            GateId::FreezeAcceptance,
-            duplicate_obligation_finding(&id),
-            id,
-            Some(prd_path.to_path_buf()),
-            archon_workflow::RemediationScope::PrdInput,
-        )
-    }));
-    findings.extend(
-        acceptance_policy_findings(contract)
-            .into_iter()
-            .map(|finding| {
-                let subject = finding
-                    .field
-                    .split('.')
-                    .next()
-                    .unwrap_or("acceptance-contract");
-                let entry = contract
-                    .acceptance
-                    .iter()
-                    .chain(&contract.supplementary)
-                    .find(|criterion| criterion.id == subject);
-                // Repairable unless the PRD itself prescribed the check's shape
-                // (TD-015): outcome language leaves the shape to the author, so a
-                // floor that cannot fail goes back with the finding; a criterion
-                // naming the contract fields has fixed the shape, so that
-                // finding is recorded, never retried, never blocking in observe.
-                let prescribed = entry.is_some_and(|criterion| {
-                    criterion_prescribes_check_shape(&criterion.criterion)
-                });
-                // A judge verdict other than `accepted` is never an observation:
-                // such a check can never run, so it is never published, and the
-                // only way forward is the author's. It goes back to the author
-                // whatever the criterion prescribes.
-                let refuted = finding.field.ends_with(".judgment")
-                    && entry.is_some_and(|criterion| {
-                        criterion.judgment.verdict != JudgeDecision::Accepted
-                    });
-                let scope = if prescribed && !refuted {
-                    archon_workflow::RemediationScope::InheritedPredecessor
-                } else {
-                    archon_workflow::RemediationScope::CandidateArtifact
-                };
-                let mut gate_finding = GateFinding::new(
-                    GateId::FreezeAcceptance,
-                    finding.message,
-                    subject,
-                    Some(contract_path.to_path_buf()),
-                    scope,
-                );
-                gate_finding.deterministic_defect = finding.identity;
-                gate_finding
-            }),
-    );
-    findings
-}
+#[path = "workflow_task_set_acceptance_findings.rs"]
+mod acceptance;
+pub(super) use acceptance::acceptance_findings;
 
 /// Ids of every check whose judge verdict is not `accepted`.
 pub(crate) fn non_accepted_ids(contract: &AcceptanceContract) -> BTreeSet<String> {
@@ -107,7 +34,8 @@ pub(super) fn finish_acceptance(
     candidate_digest: String,
 ) -> Result<PreparedAcceptanceFreeze> {
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
-    let mut findings = acceptance_findings(prd_path, prd_text, &contract_path, contract);
+    let mut findings =
+        acceptance_findings(project_root, prd_path, prd_text, &contract_path, contract)?;
     // Issue 275: a check refuted because it cannot pass as written has its
     // own finding, carrying its pre-implementation output; the generic
     // refutation would only tell its author to make it fail.
