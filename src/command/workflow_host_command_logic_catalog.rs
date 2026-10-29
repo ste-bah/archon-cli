@@ -172,7 +172,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "9328c43ef44a83d8d17a7bf0eeebae15c439ee5590c55c990aba783a9e84e15e",
+        // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        sources_digest: "ee689aba1e57dde7d99abdc0c94ed95df7f242535ce0d6e9e9dbc59d8f09aa8d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -214,7 +215,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "9328c43ef44a83d8d17a7bf0eeebae15c439ee5590c55c990aba783a9e84e15e",
+        // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        sources_digest: "ee689aba1e57dde7d99abdc0c94ed95df7f242535ce0d6e9e9dbc59d8f09aa8d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -284,7 +286,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide this capability's verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide this capability's verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "638226c4a9310bfed9c36a774fc6e050627e6d2f8eef0fc88854d54c07223910",
+        // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        sources_digest: "e45f67a86d6f69af5e0f89f2e407cd0100eadce386ccb6efa51ba46833d56aa2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -340,7 +343,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide topology lint verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide topology lint verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "638226c4a9310bfed9c36a774fc6e050627e6d2f8eef0fc88854d54c07223910",
+        // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        sources_digest: "e45f67a86d6f69af5e0f89f2e407cd0100eadce386ccb6efa51ba46833d56aa2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -362,7 +366,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide requirement trace verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide requirement trace verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "e200aa17683b5721645a184373c3ee5ecf1e4946faa271b9b02481241912ee7a",
+        // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        sources_digest: "5f26b8656be764e519d6a231f2fef3ea9158c93bdbb0bd2ac496f172bc5c7047",
         build_bound: true,
     },
     CapabilityLogic {
@@ -417,7 +422,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 20: #497 W4 an authored finding in frozen acceptance verification reopens its owning author; transient inability retries in the progress window; an unsettled publish still pauses the run (Issue 338).
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "84c4805954f70af0cc8befc0bb0563521aefc056e46f35544956ecc667a58b51",
+        // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        sources_digest: "f6146ffce45f883dfe9fbefd7109c5e42e36b5924be82685a9d2ed87a6720452",
         build_bound: true,
     },
     CapabilityLogic {
@@ -455,7 +461,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #497 W4 an authored finding in frozen skeleton verification reopens its owning author instead of stopping the run.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "84c4805954f70af0cc8befc0bb0563521aefc056e46f35544956ecc667a58b51",
+        // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        sources_digest: "f6146ffce45f883dfe9fbefd7109c5e42e36b5924be82685a9d2ed87a6720452",
         build_bound: true,
     },
 ];

@@ -82,6 +82,12 @@ impl ScratchRoots {
             }
             self.registered = false;
         }
+        // Release the site's own root handle before removing the root. On
+        // Windows a directory this process holds open without delete
+        // sharing cannot be removed (ERROR_SHARING_VIOLATION, os error 32);
+        // a Unix descriptor never blocks removal. No check runs on a site
+        // being torn down, and a retried teardown needs no handle.
+        self.mutation_root = None;
         if let Err(error) = io::remove_owned_tree(&self.root) {
             if let WorkflowError::Io { path, source } = &error
                 && path.starts_with(&self.root)

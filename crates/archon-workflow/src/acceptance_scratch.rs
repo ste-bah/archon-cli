@@ -157,7 +157,7 @@ impl ScratchPolicy {
 
 pub struct ScratchRoots {
     root: PathBuf,
-    mutation_root: mutation_fd::SiteRoot,
+    mutation_root: Option<mutation_fd::SiteRoot>,
     /// CARGO_TARGET_DIR: `root/target`, or the held build cache's.
     target: PathBuf,
     lease: Option<cache::Lease>,
@@ -277,7 +277,7 @@ impl ScratchRoots {
             ),
             lease,
             root,
-            mutation_root,
+            mutation_root: Some(mutation_root),
             live_repository,
             registered: false,
             worktree_link: None,

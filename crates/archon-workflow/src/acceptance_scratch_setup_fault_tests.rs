@@ -27,6 +27,13 @@ fn toolchain_path() -> String {
     }
 }
 
+// A check runs only in a fully prepared scratch site. Off Unix, preparation
+// always refuses before any check is spawned ("native scratch target links
+// require a supported Unix host", `acceptance_scratch.rs`), so no check can
+// exit with a status there; the integration targets that run checks are
+// Unix-only for the same reason. The setup-fault cleanup test below runs on
+// every host.
+#[cfg(unix)]
 #[tokio::test]
 async fn acceptance_scratch_rebuild_preserves_native_io_and_completed_findings() {
     tokio::time::timeout(std::time::Duration::from_secs(20), async {

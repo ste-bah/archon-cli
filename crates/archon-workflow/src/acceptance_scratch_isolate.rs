@@ -198,7 +198,7 @@ pub(super) fn check_site<'a>(
         output_bytes: policy.output_bytes,
         timeout_secs,
         mutation_plan,
-        mutation_root: Some(roots.mutation_root().clone()),
+        mutation_root: roots.mutation_root().cloned(),
         redactor: Some(roots),
     }
 }
