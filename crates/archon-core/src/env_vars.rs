@@ -25,6 +25,7 @@ use crate::config::ArchonConfig;
 pub const HOOK_SESSION_ID_ENV: &str = "ARCHON_SESSION_ID";
 pub const HOOK_CWD_ENV: &str = "ARCHON_CWD";
 pub const HOOK_EVENT_ENV: &str = "ARCHON_HOOK_EVENT";
+pub const SANDBOX_SCRATCH_ENV: &str = "ARCHON_SANDBOX_SCRATCH";
 
 // ---------------------------------------------------------------------------
 // Known variables — single source of truth
@@ -90,6 +91,7 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_LOG",
     "ARCHON_LOG_DIR",
     "ARCHON_TOOL_CHILD",
+    SANDBOX_SCRATCH_ENV,
     HOOK_CWD_ENV,
     HOOK_EVENT_ENV,
     HOOK_SESSION_ID_ENV,

@@ -273,8 +273,9 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     assert!(!holds(&bumped, "land-task-body", &unstamped));
     // The stamp the host writes is the version the key names.
     let request = HostCommandRequest::new("freeze-skeleton", Some("c".into())).unwrap();
-    assert_eq!(bumped.logic_version(&request).unwrap(), Some(6));
-    assert_eq!(baseline.logic_version(&request).unwrap(), Some(5));
+    let skeleton = crate::command::workflow_host_command_logic::versions()["freeze-skeleton"];
+    assert_eq!(bumped.logic_version(&request).unwrap(), Some(skeleton + 1));
+    assert_eq!(baseline.logic_version(&request).unwrap(), Some(skeleton));
     // A command this build no longer declares has no logic to vouch for it.
     let mut narrowed = catalog.clone();
     narrowed.capabilities.remove("freeze-skeleton");
@@ -355,7 +356,10 @@ fn logic_361_a_bump_rekeys_that_capability_alone_and_none_names_no_key() {
             request.command_id
         );
     }
-    let bumped = build(Some(("freeze-skeleton", Some(6))));
+    // Bumps are relative to the current freeze-skeleton logic, so a later catalog bump keeps this test meaningful.
+    let skeleton_version =
+        crate::command::workflow_host_command_logic::versions()["freeze-skeleton"];
+    let bumped = build(Some(("freeze-skeleton", Some(skeleton_version + 1))));
     assert_ne!(
         bumped.call_identity(&skeleton).unwrap(),
         launched.call_identity(&skeleton).unwrap()
@@ -364,7 +368,7 @@ fn logic_361_a_bump_rekeys_that_capability_alone_and_none_names_no_key() {
         bumped.call_identity(&verify).unwrap(),
         launched.call_identity(&verify).unwrap()
     );
-    let again = build(Some(("freeze-skeleton", Some(7))));
+    let again = build(Some(("freeze-skeleton", Some(skeleton_version + 2))));
     assert_ne!(
         again.call_identity(&skeleton).unwrap(),
         bumped.call_identity(&skeleton).unwrap()

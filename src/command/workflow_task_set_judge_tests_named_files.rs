@@ -82,6 +82,10 @@ fn named_file_judge_omits_invalid_old_rules_and_states_decision_dependency() {
     ));
 }
 
+#[cfg(unix)]
+#[path = "workflow_task_set_judge_tests_dependency.rs"]
+mod dependency_tests;
+
 #[test]
 fn named_source_budget_is_shared_across_the_batch() {
     let root = tempfile::tempdir().unwrap();

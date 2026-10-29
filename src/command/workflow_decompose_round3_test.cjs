@@ -5,10 +5,14 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 function context(criteria = { A: 'a' }) {
-  const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 1 } };
+  const logs = [];
+  const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 1 },
+    console: { log: line => logs.push(String(line)) },
+    __archonHost: async (_, raw) => { throw new Error(JSON.parse(raw).reason); } };
+  ctx.repairLogs = logs;
   ctx.__archonValidateAcceptanceEntry = () => '[]';
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
@@ -39,6 +43,65 @@ async function novelty() {
   assert.equal(calls, 4);
   assert.equal(paused.reason, 'no_progress');
 }
+// A fresh VM has no volatile ladder state. Its host replays the durable
+// requests and outcomes verbatim before dispatching the first new call.
+async function midLadderReplayPreservesCallsThroughOneAttemptWindowPause() {
+  async function execute(recorded = [], interrupt = false) {
+    const ctx = context(), calls = [], replayed = [];
+    const durable = JSON.parse(JSON.stringify(recorded));
+    let cursor = 0, author = 0;
+    const dispatch = async (method, id, options, result) => {
+      const request = JSON.parse(JSON.stringify({method, id, options}));
+      if (cursor < durable.length) {
+        const record = durable[cursor++];
+        assert.deepEqual(request, record.request, 'replay preserves call ids and prompt bytes');
+        if (method === 'agent') assert.deepEqual(Buffer.from(options.task),
+          Buffer.from(record.request.options.task), 'the UTF-8 prompt bytes replay exactly');
+        replayed.push(record);
+        calls.push(record);
+        return JSON.parse(JSON.stringify(record.result));
+      }
+      if (interrupt && method === 'agent' && author === 3) {
+        throw new Error('workflow cancelled by run control');
+      }
+      const record = {request, result};
+      calls.push(record);
+      return result;
+    };
+    const w = { checkpoint: async (id, options) => { ctx.repairLogs.push(options.task); return dispatch('checkpoint', id, options, {}); },
+      agent: async (id, options) => {
+        author++;
+        return dispatch('agent', id, options, answer(`candidate-${author}`));
+      },
+      hostCommand: async (id, options) => dispatch('hostCommand', id, options,
+        author <= 13 ? {...clean(), gateEnvelope:{policy_findings:[{
+          text:`defect reworded ${author}`, subject:'TASK-X-001', remediation_scope:'candidate_artifact'
+        }]}} : clean()),
+      pause: async () => { throw new Error('authored finding requested a pause'); }
+    };
+    let error;
+    try {
+      await ctx.authorCandidate(w, {phase:'body', prompt:() => 'subject contract',
+        capability:'land-task-body', retryScopes:new Set(['candidate_artifact'])});
+    } catch (caught) { error = caught; }
+    return {calls, replayed, logs:ctx.repairLogs, error};
+  }
+  const interrupted = await execute([], true);
+  assert.match(interrupted.error?.message || '', /workflow cancelled by run control/);
+  assert.equal(interrupted.calls.filter(call => call.request.method === 'agent').length, 2, 'two author/gate pairs persist before the next rung');
+  const resumed = await execute(interrupted.calls);
+  const uninterrupted = await execute();
+  assert.match(resumed.error?.message || '', /requested a pause/);
+  assert.match(uninterrupted.error?.message || '', /requested a pause/);
+  assert.deepEqual(resumed.replayed, interrupted.calls, 'the host returns recorded outcomes verbatim');
+  assert.deepEqual(resumed.calls, uninterrupted.calls, 'every id, prompt byte and outcome matches a continuous run');
+  assert.deepEqual(resumed.logs, uninterrupted.logs, 'the rung and cycle reconstruct by replay');
+  const firstNew = resumed.calls[interrupted.calls.length].request;
+  assert.equal(firstNew.id, 'body-author-3');
+  assert.match(firstNew.options.task, /Work through the findings in smaller groups/);
+  assert.deepEqual(resumed.logs.map(line => line.match(/r\d+/)[0]), ['r2', 'r3', 'r4']);
+}
+
 async function partial(operational, replacing) {
   const ids = ['A', 'B', 'C', 'D'];
   const ctx = context(Object.fromEntries(ids.map(id => [id, id])));
@@ -93,6 +156,7 @@ async function mixed() {
 (async () => {
   let failed = 0;
   for (const [name, test] of [ ['finding 1 novelty', novelty],
+    ['mid-ladder replay preserves calls through the existing attempt window pause', midLadderReplayPreservesCallsThroughOneAttemptWindowPause],
     ['finding 2A replacements', () => partial(false, true)],
     ['finding 2B provider window retains author work', () => partial(true, false)],
     ['finding 2 unchanged replacement', unchangedReplacement],

@@ -161,5 +161,6 @@ pub fn validate_acceptance_structure(
         message: defect_message(&defects),
         defects,
         io_cause: None,
+        io_kind: None,
     })
 }

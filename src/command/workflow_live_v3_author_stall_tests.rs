@@ -9,6 +9,7 @@ use archon_workflow::{WorkflowAgentOutcome, WorkflowLlmClient};
 enum Reply {
     Script(&'static str),
     Transport,
+    RecoverAfterTransport,
     /// The live agent client fails on the host's own I/O.
     Io,
     /// The live agent client finds the host's state damaged.
@@ -35,6 +36,14 @@ impl ScriptedAuthor {
         self.tasks.lock().unwrap().push(task);
         let script = match self.reply {
             Reply::Script(script) => script,
+            Reply::RecoverAfterTransport => {
+                if self.tasks.lock().unwrap().len() <= 4 {
+                    return Err(WorkflowError::StageFailed(
+                        "agent transport failed: connection reset by peer".into(),
+                    ));
+                }
+                AUTHORED_DEMO_SCRIPT
+            }
             Reply::Io => {
                 return Err(WorkflowError::Io {
                     path: "/review/transcript".into(),
@@ -184,69 +193,70 @@ impl Fixture {
     }
 }
 
-fn is_transport_stall(result: &archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>) -> bool {
-    matches!(result, Err(WorkflowError::ControlPaused(message))
-        if message.contains("failed in transport 6 times") && message.contains("paused, not failed"))
+/// A provider outage recovers inside the workflow retry helper, with each
+/// retry carrying the same pending call payload.
+#[tokio::test]
+async fn a_transport_outage_recovers_inside_the_workflow_helper() {
+    let author = ScriptedAuthor::new(Reply::RecoverAfterTransport);
+    let call = generic_agent_call();
+    let expected_task = call.task.clone();
+    archon_workflow::llm_retry::run_agent_with_transient_retry(
+        &(author.clone() as Arc<dyn WorkflowLlmClient>),
+        call,
+        |_| async { Ok(()) },
+    )
+    .await
+    .expect("the provider recovers");
+    let tasks = author.tasks.lock().unwrap();
+    assert_eq!(tasks.len(), 5);
+    assert!(tasks.iter().all(|task| task == &expected_task));
 }
 
-/// Item 1: a transport stall in an authoring that held no rejection (the
-/// recorded one came from an earlier authoring that did not stall) names no
-/// rejection and leaves no hand-over marker, so the resume starts from the
-/// brief alone.
+/// Replaying a pending call during transport recovery preserves its payload.
 #[tokio::test]
-async fn a_transport_stall_does_not_hand_over_a_rejection_from_an_earlier_authoring() {
-    let run = Fixture::new();
-    let old = serde_json::json!({"attempt": 1, "error": "OLD FINDING", "script_path": null});
-    (run.store)
-        .write_run_json(&run.run_id, "rejected-scripts/attempt-1.json", &old)
-        .unwrap();
-    let dropped = ScriptedAuthor::new(Reply::Transport);
-    let result = run.author(dropped.clone()).await;
-    assert!(is_transport_stall(&result), "{result:?}");
-    let detail = run.last_pause();
-    assert_eq!(
-        detail["last_rejection"],
-        serde_json::Value::Null,
-        "{detail}"
-    );
-    assert!(!run.rejected().join("stall-pause.json").exists());
-
-    run.control(archon_workflow::LifecycleAction::Resume);
-    let author = ScriptedAuthor::new(Reply::Script(AUTHORED_DEMO_SCRIPT));
-    run.author(author.clone())
-        .await
-        .expect("the resume authors");
+async fn a_transport_retries_preserve_the_pending_call_payload() {
+    let author = ScriptedAuthor::new(Reply::RecoverAfterTransport);
+    let call = generic_agent_call();
+    let expected_task = call.task.clone();
+    archon_workflow::llm_retry::run_agent_with_transient_retry(
+        &(author.clone() as Arc<dyn WorkflowLlmClient>),
+        call,
+        |_| async { Ok(()) },
+    )
+    .await
+    .expect("the provider recovers");
     let tasks = author.tasks.lock().unwrap();
-    assert!(!tasks[0].contains("OLD FINDING"), "{}", tasks[0]);
+    assert_eq!(tasks.len(), 5);
+    assert!(tasks.iter().all(|task| task == &expected_task));
 }
 
-/// Item 4: six transport failures pause the run with their evidence. The
-/// authoring held the finding a defect stall handed it, so the pause names
-/// it and the next resume is handed it again.
-#[tokio::test]
-async fn a_transport_stall_pauses_with_its_evidence_and_keeps_the_finding_it_held() {
-    let run = Fixture::new();
-    run.defect_stall().await;
-    run.control(archon_workflow::LifecycleAction::Resume);
-    let dropped = ScriptedAuthor::new(Reply::Transport);
-    let result = run.author(dropped.clone()).await;
-    assert!(is_transport_stall(&result), "{result:?}");
-    assert!(dropped.tasks.lock().unwrap().len() >= 6);
-    assert_eq!(run.status(), archon_workflow::RunStatus::Paused);
-    let detail = run.last_pause();
-    assert_eq!(detail["stall"], "transport_attempts_exhausted", "{detail}");
-    assert_eq!(detail["transport_attempts"], 6);
-    assert_eq!(detail["defect_attempts"], 0);
-    assert_eq!(detail["last_rejection"], "rejected-scripts/attempt-6.json");
-    assert!(!run.rejected().join("attempt-7.json").exists());
-
-    run.control(archon_workflow::LifecycleAction::Resume);
-    let author = ScriptedAuthor::new(Reply::Script(AUTHORED_DEMO_SCRIPT));
-    run.author(author.clone())
-        .await
-        .expect("the resume authors");
-    let tasks = author.tasks.lock().unwrap();
-    assert!(tasks[0].contains("ZERO agent calls"), "{}", tasks[0]);
+fn generic_agent_call() -> archon_workflow::WorkflowAgentCall {
+    archon_workflow::WorkflowAgentCall {
+        session_id: "AC-X-001".into(),
+        task: "TASK-X-001".into(),
+        cwd: None,
+        ordinal: 1,
+        attempt: 1,
+        agent: archon_workflow::WorkflowAgentSpec {
+            key: "AC-X-001".into(),
+            display_name: "AC-X-001".into(),
+            model: String::new(),
+            phase: 1,
+            critical: true,
+            parallelizable: true,
+            quality_threshold: 0.8,
+            tool_access: archon_workflow::WorkflowAgentToolAccess::Full,
+        },
+        messages: Vec::new(),
+        system: Vec::new(),
+        tools: Vec::new(),
+        allowed_tools: Vec::new(),
+        timeout_secs: None,
+        disable_auto_background: false,
+        read_roots: Vec::new(),
+        write_roots: Vec::new(),
+        provider_env: None,
+    }
 }
 
 /// Item 2: a resume stopped before its first attempt has a result keeps the

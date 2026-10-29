@@ -23,12 +23,13 @@ impl From<ApiError> for LlmError {
     fn from(e: ApiError) -> Self {
         match e {
             ApiError::IdleTimeout => {
-                LlmError::Http(crate::transport_idle::TransportIdle.to_string())
+                crate::provider_fault::unknown(crate::transport_idle::TransportIdle.to_string())
             }
             ApiError::HttpError(msg) => {
                 classify_context_window_error(None, None, None, &msg, Some("anthropic"), None)
-                    .unwrap_or(LlmError::Http(msg))
+                    .unwrap_or_else(|| crate::provider_fault::unknown(msg))
             }
+            ApiError::Transport(msg) => LlmError::Transport(msg),
             ApiError::AuthError(msg) => LlmError::Auth(msg),
             ApiError::Rejected {
                 error_type,
@@ -40,16 +41,26 @@ impl From<ApiError> for LlmError {
             ApiError::RateLimited {
                 retry_after_secs,
                 from_provider,
+                message,
             } => LlmError::RateLimited {
                 retry_after_secs,
                 from_provider,
                 pipeline_retry_after_secs: from_provider.then_some(retry_after_secs),
+                message: crate::provider_fault::diagnostic_message(&message),
             },
-            ApiError::Overloaded { retry_after_secs } => LlmError::Overloaded {
+            ApiError::Overloaded {
+                retry_after_secs,
+                message,
+            } => LlmError::Overloaded {
                 status: Some(529),
                 retry_after_secs,
+                message: crate::provider_fault::diagnostic_message(&message),
             },
-            ApiError::ServerError { status, message } => classify_context_window_error(
+            ApiError::ServerError {
+                status,
+                message,
+                retry_after_secs,
+            } => classify_context_window_error(
                 Some(status),
                 None,
                 None,
@@ -60,7 +71,7 @@ impl From<ApiError> for LlmError {
             .unwrap_or(LlmError::Server {
                 status,
                 message,
-                pipeline_retry_after_secs: None,
+                pipeline_retry_after_secs: retry_after_secs,
             }),
             ApiError::SerializeError(msg) => LlmError::Serialize(msg),
         }
@@ -240,6 +251,9 @@ impl LlmProvider for AnthropicProvider {
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         let msg_request = self.prepare_message(request);
         match self.client.stream_message(msg_request).await {
+            Err(ApiError::IdleTimeout) if crate::provider_fault::retry_is_deferred() => {
+                Err(crate::provider_fault::opening_timeout())
+            }
             Err(ApiError::IdleTimeout) => {
                 // Header silence and body silence have the same resumable
                 // meaning at the provider boundary.

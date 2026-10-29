@@ -52,7 +52,7 @@ pub async fn forward_codex_sse<S, B>(
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(e) => {
-                let _ = tx.send(Err(LlmError::Http(e.to_string()))).await;
+                let _ = tx.send(Err(crate::provider_fault::from_transport(e))).await;
                 return;
             }
         };
@@ -74,8 +74,8 @@ pub async fn forward_codex_sse<S, B>(
             let _ = tx.send(event).await;
         }
         let _ = tx
-            .send(Err(LlmError::Http(
-                "Codex SSE stream closed mid-frame".into(),
+            .send(Err(crate::provider_fault::unknown(
+                "Codex SSE stream closed mid-frame",
             )))
             .await;
     }

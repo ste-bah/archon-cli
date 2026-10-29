@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 const defect = (task, value = 'bad') => ({
   text: `candidate artifact was refused: task '${task}' file_name '${value}' is invalid`,
@@ -16,10 +16,19 @@ async function author(findings, resumed = [], mode = 'enforce', initialFeedback 
   const ctx = { args: { gateMode: mode } };
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
+  const original = ctx.recordAttempt;
+  const history = [];
+  ctx.recordAttempt = (progress, ...params) => {
+    const result = original(progress, ...params);
+    history.push(JSON.parse(JSON.stringify(progress.history.at(-1))));
+    return result;
+  };
   let calls = 0;
-  const pauses = [];
+  const pauses = [], rungs = [], prompts = [];
   const w = {
-    agent: async () => {
+    checkpoint: async (_id, options) => { rungs.push({text:options.task, calls, history:history.slice()}); },
+    agent: async (_id, options) => {
+      prompts.push(options.task);
       if (++calls > 1000) throw new Error('rename spin exceeded 1000 calls');
       return { status: 'accepted', stopReason: 'end_turn', content: '{}' };
     },
@@ -33,7 +42,7 @@ async function author(findings, resumed = [], mode = 'enforce', initialFeedback 
   let error;
   try { await ctx.authorCandidate(w, { phase: 'skeleton', prompt: () => 'author',
     retryScopes: new Set(['candidate_artifact']), initialFeedback }); } catch (e) { error = e.message; }
-  return { calls, pauses, error };
+  return { calls, pauses, error, rungs, prompts };
 }
 const flags = out => Array.from(out.pauses.at(-1).evidence.progress_history, e => e.progress);
 async function rename() {

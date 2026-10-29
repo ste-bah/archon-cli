@@ -261,7 +261,9 @@ impl FixedHostCommandExecutor {
                 // never publish or rewrite that artifact, even when the new
                 // verdict contains findings.
                 let (subjects, postcondition) =
-                    evaluate_postcondition(&context, &command.command_id)?;
+                    super::super::workflow_host_command_postcondition::evaluate_outcome_postcondition(
+                        &context, &command.command_id, &envelope,
+                    )?;
                 let (stdout, stdout_bytes) =
                     append_host_note(stdout, &stamped_fields, observed.stdout_bytes);
                 return Ok(HostCommandResult {

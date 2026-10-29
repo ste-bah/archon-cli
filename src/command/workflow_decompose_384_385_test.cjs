@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const context = () => {
   const ctx = {args:{prdPath:'PRD.md', taskRoot:'tasks', repositoryRoot:'repo', projectRoot:'project',
@@ -144,6 +144,26 @@ async function replyFormatGuidesGeneratedFixtures() {
   assert.ok(format.includes('Generate large or repetitive fixture data with code rather than writing it literally.'));
 }
 
+async function skeletonAndBodyReplyFormatsGuideGeneratedFixtures() {
+  const ctx = context(), missing = [];
+  const sentence = 'Generate large or repetitive fixture data with code rather than writing it literally.';
+  for (const policy of [ctx.skeletonPolicy([]), ctx.bodyPolicy({ taskId: 'TASK-X-001', fileName: 'TASK-X-001.md' }, [])]) {
+    const prompts = [];
+    await ctx.authorCandidate({
+      agent: async (_id, options) => {
+        prompts.push(options.task);
+        return { status: 'accepted', stopReason: 'end_turn', content: '{}' };
+      },
+      hostCommand: async () => ({ publicationReceipt: { call_id: 'published' },
+        postcondition: { satisfied: true }, gateEnvelope: { policy_findings: [] } }),
+      pause: async () => { throw new Error('unexpected pause'); }
+    }, policy);
+    assert.equal(prompts.length, 1);
+    if (!prompts[0].includes(sentence)) missing.push(policy.phase);
+  }
+  assert.deepEqual(missing, [], 'every dispatched author prompt must carry the fixture generation sentence');
+}
+
 async function candidateLoopUsesMeasuredMaxTokenFeedback() {
   const ctx = context();
   const tasks = [];
@@ -180,6 +200,7 @@ async function missingContentIsSpecific() {
     ['measured max token feedback',maxTokenFeedbackMeasuresReplyShape],
     ['prose and empty max token feedback',maxTokenFeedbackDoesNotMislabelProseOrEmpty],
     ['generated fixture reply format',replyFormatGuidesGeneratedFixtures],
+    ['skeleton and body reply formats guide generated fixtures',skeletonAndBodyReplyFormatsGuideGeneratedFixtures],
     ['candidate loop measured feedback',candidateLoopUsesMeasuredMaxTokenFeedback],
     ['specific missing content',missingContentIsSpecific]]) {
     await test(); console.log(`PASS ${name}`);

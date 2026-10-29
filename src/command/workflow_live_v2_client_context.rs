@@ -32,6 +32,8 @@ impl LiveV2AgentClient {
 /// only, from when a session of the call takes its subagent slot (a slot wait
 /// does not run it), and renews on the novel activity its sessions report
 /// (Issue 288).
+/// Provider opens and the shared retry helper exclude classified outage time
+/// without renewing the window for a stalled or partial stream.
 pub(super) async fn author_attempt_deadline<T>(
     timeout_secs: Option<u64>,
     attempt: impl std::future::Future<Output = T>,
@@ -48,7 +50,7 @@ pub(super) async fn author_attempt_deadline<T>(
         WorkflowV2AgentError::Transport(match cut {
             archon_tools::subagent_dispatch_clock::DispatchCut::Execution(_) => format!(
                 "author attempt no-progress deadline exceeded after {seconds}s without novel \
-                 activity, including transient retries; {last}"
+                 activity; {last}"
             ),
             never => format!("author attempt deadline: the call was {never}"),
         })

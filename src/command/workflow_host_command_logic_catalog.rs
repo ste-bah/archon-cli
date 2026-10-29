@@ -124,7 +124,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // identity; #523 the host refutes external-program usage errors; #478 bare . and ..
         // are whole-tree inputs; #490 a pending skeleton is reported, not compared.
         // #524 the can-pass instruction names the evidence tree, not only the pre-implementation tree.
-        version: 63,
+        version: 66,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -164,7 +164,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 53: #496 a CLI repair that publishes no checks exits incomplete.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // 63: #526 a judge refutation counts only when its quoted rule is in the output or check text the judge saw; #528 the per-entry reuse key uses each entry's own named-file content.
-        sources_digest: "7d1566a69aa5445ace66160fdcd80fdeff4e3a3e62afdad6539590853270bf86",
+        // 64: #533 a listing probe stopped before any output is a transient host fault, never an author finding; a silent scratch overrun says the host could not tell.
+        // 65: #515 a re-author reply whose first entry is followed by a misplaced closing brace is refused, naming the continued field.
+        // 66: #213 #466 #478 #498 #501 the acceptance site refuses only a closed list of operands that leave it (redirections, path-reading programs, cd/pushd targets, program-text file-open literals); a data heredoc for a text tool is not refused.
+        // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
+        // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
+        sources_digest: "c444be2139f825d682ed78c1173cb032479e4615fe59f3756bfad474ab843dd0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -173,7 +178,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: review of #491: an attempt with open findings stays open when its logic is stale, and a recorded skeleton without its lock stays acceptance-only.
-        version: 5,
+        version: 6,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -198,7 +203,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton freeze verdicts do not read acceptance judge identity, passability or path classes.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "7d1566a69aa5445ace66160fdcd80fdeff4e3a3e62afdad6539590853270bf86",
+        // #533 re-pin only: skeleton freeze verdicts do not run subcommand listing probes.
+        // #514/#515/#527 re-pin only: skeleton freeze verdicts do not read the acceptance re-author reply parser.
+        // #213/#466/#478/#498/#501 re-pin only: skeleton freeze verdicts do not run the acceptance site path policy; freeze-acceptance 66 counts the change.
+        // #364 re-pin only: typed provider faults and outage backoff do not change skeleton freeze verdicts.
+        // 6: #497 W4 the outgoing skeleton pin is retained under the publication lock before rebind; a stale lock or cache pair after interrupted retention is refused.
+        sources_digest: "c444be2139f825d682ed78c1173cb032479e4615fe59f3756bfad474ab843dd0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -264,7 +274,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #487 re-pin only: this acceptance judge path does not decide task body verdicts.
         // #497 re-pin only: body stall handling does not change task-set lint verdicts.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "06b04ef2a771cf931b99cd38a659db17dcfb89eb13306023d7a6de61fcbebb98",
+        // #514/#515/#527 re-pin only: the acceptance re-author reply parser does not decide this capability's verdicts.
+        // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide this capability's verdicts.
+        // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide this capability's verdicts.
+        sources_digest: "bfdcba721617f95f4b24883ede94eb14bdd20ee673f91075ac52ff2b63cdc9d3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -316,7 +329,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #476
         // #487 re-pin only: this acceptance judge path does not decide topology lint verdicts.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "06b04ef2a771cf931b99cd38a659db17dcfb89eb13306023d7a6de61fcbebb98",
+        // #514/#515/#527 re-pin only: the acceptance re-author reply parser does not decide topology lint verdicts.
+        // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide topology lint verdicts.
+        // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide topology lint verdicts.
+        sources_digest: "bfdcba721617f95f4b24883ede94eb14bdd20ee673f91075ac52ff2b63cdc9d3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -335,7 +351,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pinned only (verdict rules unchanged): #434 #417 #438 #441 #424 #369 #383 #440 #420 #447 #446 #464 #466 #469
         // Batch 25 re-pin only: the shared Scratch path helper moved; trace verdicts do not read mutation proofs.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "dccd9f66ccb11b8d48d90be735e7781b6b9aa44eb528a1c7dd51569cdf1f4384",
+        // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide requirement trace verdicts.
+        // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide requirement trace verdicts.
+        sources_digest: "1d815844796ea63924225b3711ea9506ce5432f9345ab6ea9da9fb0c65a2825c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -361,7 +379,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #518 and #519 change which inputs a frozen-check mutation proof moves
         // and how it restores them.
         // 18: batch 26 #523 host refutation and #520 judge identity can change reverify verdicts.
-        version: 18,
+        version: 20,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -385,7 +403,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 re-pin only: freeze repair findings do not change frozen-chain verification.
         // CI re-pin only: refusal diagnostics render paths with forward slashes on every host; verdicts are unchanged.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "7dc1b86f935fffea49a9c152e827ac0066f49c22674517e4dfd0ac6177779508",
+        // 19: #533 a listing probe stopped before any output is a transient host fault, never an author finding.
+        // #213/#466/#478/#498/#501 re-pin only: frozen acceptance verification reads stored policy findings; it does not run the acceptance site path policy.
+        // 20: #497 W4 an authored finding in frozen acceptance verification reopens its owning author; transient inability retries in the progress window; an unsettled publish still pauses the run (Issue 338).
+        sources_digest: "dbb402c6c16f49ebf1d38eaffc5a9db9ebec7c0eb2bc24fe1da3a664ecc4d87d",
         build_bound: true,
     },
     CapabilityLogic {
@@ -394,7 +415,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: #491 a skeleton bound to the prior acceptance is pending and skipped by the frozen snapshot.
         // 6: review of #491: a recorded skeleton without its lock stays acceptance-only, and open findings keep a stale-logic stage open.
-        version: 6,
+        version: 7,
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -418,7 +439,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 25 re-pin only: skeleton verdicts do not read mutation proofs or re-author prompts.
         // Batch 26 re-pin only: skeleton reverify verdicts do not read passability or acceptance judge identity.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
-        sources_digest: "7dc1b86f935fffea49a9c152e827ac0066f49c22674517e4dfd0ac6177779508",
+        // #533 re-pin only: skeleton reverify verdicts do not run subcommand listing probes.
+        // #213/#466/#478/#498/#501 re-pin only: frozen skeleton verification reads stored policy findings; it does not run the acceptance site path policy.
+        // 7: #497 W4 an authored finding in frozen skeleton verification reopens its owning author instead of stopping the run.
+        sources_digest: "dbb402c6c16f49ebf1d38eaffc5a9db9ebec7c0eb2bc24fe1da3a664ecc4d87d",
         build_bound: true,
     },
 ];

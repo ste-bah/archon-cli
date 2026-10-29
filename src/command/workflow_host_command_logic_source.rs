@@ -37,16 +37,26 @@ impl<'a> SourceTree<'a> {
 pub(crate) enum Tok {
     Ident(String),
     Str(String),
+    Number(String),
     PathSep,
     Punct(char),
 }
 
 /// The tokens of `text`, and the offsets where a `//` comment starts.
 pub(crate) fn lex(text: &str) -> (Vec<Tok>, BTreeSet<usize>) {
+    let (tokens, comments, _) = lex_located(text);
+    (tokens, comments)
+}
+
+/// Tokens and their source lines, shared by guards that diagnose setters.
+pub(crate) fn lex_located(text: &str) -> (Vec<Tok>, BTreeSet<usize>, Vec<usize>) {
     let b = text.as_bytes();
+    let mut offsets = Vec::new();
     let (mut i, mut toks, mut comments) = (0, Vec::new(), BTreeSet::new());
     let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c >= 0x80;
     while i < b.len() {
+        let start = i;
+        let count = toks.len();
         let c = b[i];
         let next = b.get(i + 1).copied();
         if c.is_ascii_whitespace() {
@@ -98,9 +108,11 @@ pub(crate) fn lex(text: &str) -> (Vec<Tok>, BTreeSet<usize>) {
                 }
             }
         } else if c.is_ascii_digit() {
+            let start = i;
             while i < b.len() && ident(b[i]) {
                 i += 1;
             }
+            toks.push(Tok::Number(text[start..i].to_string()));
         } else if ident(c) {
             let start = i;
             while i < b.len() && ident(b[i]) {
@@ -132,8 +144,19 @@ pub(crate) fn lex(text: &str) -> (Vec<Tok>, BTreeSet<usize>) {
             toks.push(Tok::Punct(ch));
             i += ch.len_utf8();
         }
+        if toks.len() != count {
+            offsets.push(start);
+        }
     }
-    (toks, comments)
+    let newlines = text
+        .match_indices('\n')
+        .map(|(at, _)| at)
+        .collect::<Vec<_>>();
+    let lines = offsets
+        .into_iter()
+        .map(|at| newlines.partition_point(|&nl| nl < at) + 1)
+        .collect();
+    (toks, comments, lines)
 }
 
 /// The text the digest reads: LF line ends, without whole-line `//`

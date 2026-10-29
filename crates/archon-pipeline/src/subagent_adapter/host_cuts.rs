@@ -75,10 +75,27 @@ impl InactivityBound {
 /// has run. A session never admitted is cut with its own diagnosis.
 async fn no_progress_window(clock: &DispatchClock, timeout_secs: Option<u64>) -> HostCut {
     match timeout_secs {
-        Some(secs) => match clock.cut(Duration::from_secs(secs.max(1))).await {
-            DispatchCut::Execution(_) => HostCut::NoProgress,
-            DispatchCut::NeverAdmitted(limit) => HostCut::NeverAdmitted { limit },
-        },
+        Some(secs) => {
+            let limit = Duration::from_secs(secs.max(1));
+            let shared = if archon_tools::provider_recovery::enabled() {
+                subagent_dispatch_clock::current_call()
+            } else {
+                None
+            };
+            // Keep the session's own bound and use the same existing duration
+            // on its call clock, which survives retries into fresh sessions.
+            let cut = match &shared {
+                Some(shared) => tokio::select! {
+                    cut = clock.cut(limit) => cut,
+                    cut = shared.cut(limit) => cut,
+                },
+                None => clock.cut(limit).await,
+            };
+            match cut {
+                DispatchCut::Execution(_) => HostCut::NoProgress,
+                DispatchCut::NeverAdmitted(limit) => HostCut::NeverAdmitted { limit },
+            }
+        }
         None => std::future::pending().await,
     }
 }
@@ -162,6 +179,12 @@ pub(super) fn name_last_progress(
     if cut != Some(HostCut::NoProgress) {
         return error;
     }
+    let shared = if archon_tools::provider_recovery::enabled() {
+        subagent_dispatch_clock::current_call().filter(|shared| shared.elapsed() >= clock.elapsed())
+    } else {
+        None
+    };
+    let clock = shared.as_deref().unwrap_or(clock);
     anyhow!(
         "{error} without progress (no-progress window; {})",
         clock.cut_text()

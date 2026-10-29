@@ -5,6 +5,9 @@ use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
 };
 
+#[path = "glob_tool_prefix.rs"]
+mod prefix;
+
 pub struct GlobTool;
 
 const MAX_MATCHES: usize = 200;
@@ -152,14 +155,16 @@ async fn bounded_glob_with_state_roots(
         .into_iter()
         .map(|root| root.canonicalize().unwrap_or(root))
         .collect::<Vec<_>>();
-    let full = base.join(pattern);
-    let pattern_path = std::path::Path::new(pattern);
+    let pattern = prefix::normalize_absolute_pattern(pattern);
+    let full = base.join(pattern.as_ref());
+    let pattern_path = std::path::Path::new(pattern.as_ref());
     let targeted_roots = state_roots
         .iter()
         .map(|root| root_targeted_by_pattern(&comparison_base, pattern_path, root))
         .collect::<Vec<_>>();
     let matcher = glob::Pattern::new(&full.to_string_lossy())
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let fixed_prefix = prefix::fixed_prefix(&full);
     let fs = ctx.fs();
     let (global_ignores, _) = ignore::gitignore::GitignoreBuilder::new(&base).build_global();
     let inherited_ignores = ancestor_ignores(base, ctx).await;
@@ -241,6 +246,9 @@ async fn bounded_glob_with_state_roots(
                 }
             }
             if is_dir {
+                if !fixed_prefix.starts_with(&path) && !path.starts_with(&fixed_prefix) {
+                    continue;
+                }
                 // The host's run bookkeeping. Entered anyway while the run's
                 // artifact area or the branch worktree lies beneath it —
                 // both sit inside the store — and pruned once nothing the
@@ -479,3 +487,7 @@ fn ignores_match(
     }
     matches!(global.matched(path, is_dir), ignore::Match::Ignore(_))
 }
+
+#[cfg(test)]
+#[path = "glob_tool_prefix_tests.rs"]
+mod prefix_tests;

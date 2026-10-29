@@ -24,6 +24,10 @@ use serde::{Deserialize, Serialize};
 
 const JOURNAL_SCHEMA_VERSION: u32 = 1;
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(super) struct InvalidJournal(String);
+
 /// Test-only fault injection: the named step aborts the process on the spot.
 #[cfg(test)]
 pub(crate) const CRASH_ENV: &str = "ARCHON_TEST_PUBLISH_CRASH_AT";
@@ -183,13 +187,17 @@ impl Journal {
                 });
             }
         };
-        let journal: Self = serde_json::from_slice(&bytes).with_context(|| {
-            format!(
-                "publish journal {} is not readable; inspect it and the transaction files it names, then remove it",
+        let journal: Self = serde_json::from_slice(&bytes).map_err(|error| InvalidJournal(format!(
+            "publish journal {} is not readable: {error}; inspect it and the transaction files it names, then remove it",
+            paths.journal.display()
+        )))?;
+        journal.validate(paths, scopes).map_err(|error| {
+            if error.downcast_ref::<std::io::Error>().is_some() { error }
+            else { anyhow::Error::new(InvalidJournal(format!(
+                "{error:#}; inspect publish journal {} and the transaction files it names, then remove it",
                 paths.journal.display()
-            )
+            ))) }
         })?;
-        journal.validate(paths, scopes)?;
         Ok(Some(journal))
     }
 

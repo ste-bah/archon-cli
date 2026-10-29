@@ -1,7 +1,7 @@
 use super::{
     extract_object, extract_object_with_markers, reply_entry, reply_entry_with_blocks,
-    resolve_command_block, resolve_command_block_with_markers, unclosed_block_refusal,
-    unclosed_block_refusal_with_markers,
+    reply_entry_with_blocks_and_markers, resolve_command_block, resolve_command_block_with_markers,
+    unclosed_block_refusal, unclosed_block_refusal_with_markers,
 };
 use serde_json::json;
 
@@ -400,5 +400,20 @@ fn midline_fence_boundary_requires_the_first_complete_json_object() {
     assert_eq!(
         unclosed_block_refusal_with_markers(&info_after_marker, markers).unwrap(),
         "the fence opened on line 1 is not closed; line 3 \"```check\" has an info string and cannot close it; put a bare ``` on its own line before the next fence; keep exactly one non-empty check fence for block form"
+    );
+}
+
+#[test]
+fn reply_blocks_brace_reconstruction_refuses_double_fault() {
+    let markers = vec!["TOKEN-X-001".to_string()];
+    let valid =
+        r#"{"id":"AC-X-001","check":{"kind":"command","command":"true","cwd":"project_root"}}"#;
+    assert!(reply_entry_with_blocks_and_markers(valid, "AC-X-001", &markers).is_some());
+    let reply = r#"TOKEN-X-001
+{"id":"AC-X-001","check":{"kind":"command","command":"true","cwd":"project_root"}}},"gap_permitted":false}"#;
+    let result = reply_entry_with_blocks_and_markers(reply, "AC-X-001", &markers);
+    assert!(
+        result.is_none(),
+        "malformed reply was reconstructed: {result:?}"
     );
 }

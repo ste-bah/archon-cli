@@ -1,10 +1,9 @@
 use super::*;
 
-#[path = "workflow_decompose_remediation_lineage_tests.rs"]
-mod lineage_tests;
-
 #[path = "workflow_decompose_remediation_early_resume_tests.rs"]
 mod early_resume_tests;
+#[path = "workflow_decompose_remediation_lineage_tests.rs"]
+mod lineage_tests;
 #[path = "workflow_decompose_remediation_ordinals_tests.rs"]
 mod ordinals_tests;
 #[path = "workflow_decompose_remediation_read_tests.rs"]
@@ -26,7 +25,7 @@ async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_find
     std::fs::create_dir_all(&report_dir).unwrap();
     let finding = "the recorded check had no named input";
     std::fs::write(
-        report_dir.join("report-check-defect.json"),
+        report_dir.join("REPORT-X-001.json"),
         serde_json::json!({
             "checks": [{"check_id":"AC-X-002", "findings":[finding]}]
         })
@@ -34,7 +33,7 @@ async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_find
     )
     .unwrap();
     let ledger = Ledger {
-        report_id: "report-check-defect".into(),
+        report_id: "REPORT-X-001".into(),
         subjects: vec!["AC-X-002".into()],
     };
     let client = crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
@@ -67,8 +66,10 @@ async fn check_ledger_subject_reauthors_even_when_a_task_implements_it_with_find
     );
     let prompt = client.prompts.lock().unwrap()[0].clone();
     assert!(prompt.contains(&format!(
-        "Report report-check-defect said about check AC-X-002: \"{finding}\""
+        "Report REPORT-X-001 (recording time unknown) said about check AC-X-002: \"{finding}\""
     )));
+    assert!(prompt.contains("The report gives no verdict for check AC-X-002."));
+    assert!(prompt.contains("may be out of date"));
 }
 
 #[path = "workflow_decompose_remediation_resume_plan_tests.rs"]
@@ -76,7 +77,6 @@ mod resume_plan_tests;
 
 #[path = "workflow_decompose_remediation_seed_lineage_tests.rs"]
 mod seed_lineage_tests;
-
 #[test]
 fn completed_run_with_ledger_builds_seed_and_other_cases_do_not() {
     let temp = tempfile::tempdir().unwrap();

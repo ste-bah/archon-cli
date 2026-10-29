@@ -96,13 +96,13 @@ pub(crate) fn resume_script_seed(
             Some(seed.clone()),
             format!("harness-transition-{}", seed.transition_index),
         )
-    } else if resume_frozen_chain["acceptance"] != true && resume_frozen_chain["skeleton"] != true {
-        (None, "none".to_string())
     } else if let Some(stored) = read_floor_seed(store, run_id, runtime)? {
         (
             Some(stored),
             format!("floor-seed {}", floor_seed_path(runtime)),
         )
+    } else if resume_frozen_chain["acceptance"] != true && resume_frozen_chain["skeleton"] != true {
+        (None, "none".to_string())
     } else {
         let generation = store.load_state(run_id)?.generation;
         let derived = derive_seed(
@@ -185,7 +185,17 @@ pub(crate) fn resume_script_arguments(
         }
     }
     let mut seeded = seeded_arguments(expected_arguments, script_seed.seed.as_ref());
-    seeded["frozenChain"] = resume_frozen_chain;
+    // A floor seed pins the replay inputs before a repair publishes. Replacing
+    // them with the repaired live chain would change which bodies replay skips.
+    // seeded_arguments already carries that original chain across interruptions.
+    if script_seed
+        .seed
+        .as_ref()
+        .and_then(|seed| seed.resume_frozen_chain.as_ref())
+        .is_none()
+    {
+        seeded["frozenChain"] = resume_frozen_chain;
+    }
     let arguments = crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
         &seeded, prd_text,
     );

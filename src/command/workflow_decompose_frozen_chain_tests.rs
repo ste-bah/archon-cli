@@ -489,3 +489,9 @@ mod launch_args_tests;
 
 #[path = "workflow_decompose_frozen_chain_landing_pending_tests.rs"]
 mod landing_pending_tests;
+
+#[path = "workflow_decompose_frozen_verification_tests.rs"]
+mod verification;
+
+#[path = "workflow_decompose_frozen_admission_tests.rs"]
+mod admission;

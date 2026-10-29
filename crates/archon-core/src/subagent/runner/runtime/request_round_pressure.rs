@@ -184,7 +184,7 @@ pub(super) async fn compact_proactively(
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
     action: crate::agent::CompactAction,
     failure_message: &str,
-) -> bool {
+) -> anyhow::Result<bool> {
     auto_compact.compact_in_flight = true;
     // A reasoning model answers a summarisation prompt with `reasoning_content`
     // and no text, so the summary comes back empty and the attempt fails. The
@@ -240,11 +240,11 @@ pub(super) async fn compact_proactively(
             messages.push(recovery);
             *last_known_context_tokens = 0;
             auto_compact.on_success(after_estimated_tokens);
-            true
+            Ok(true)
         }
         Ok((crate::agent::autocompact::CompactionOutcome::Skipped { .. }, _)) => {
             auto_compact.on_cancel();
-            false
+            Ok(false)
         }
         Err(crate::agent::autocompact::CompactionError::Cancelled) => {
             auto_compact.on_cancel();
@@ -259,7 +259,12 @@ pub(super) async fn compact_proactively(
                 actor = %runner.activity_actor_id.as_deref().unwrap_or("subagent"),
                 "proactive subagent compaction cancelled"
             );
-            false
+            Ok(false)
+        }
+        Err(crate::agent::autocompact::CompactionError::Provider(error))
+            if archon_tools::provider_recovery::enabled() && error.is_operational() =>
+        {
+            Err(error.into())
         }
         Err(error) => {
             auto_compact.on_failure(&error);
@@ -277,7 +282,7 @@ pub(super) async fn compact_proactively(
                 error = %error,
                 "{failure_message}",
             );
-            false
+            Ok(false)
         }
     }
 }

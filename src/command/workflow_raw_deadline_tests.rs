@@ -1,6 +1,6 @@
 use super::*;
 
-struct SlowRetryClient;
+struct SlowRetryClient(std::sync::atomic::AtomicUsize, bool);
 #[async_trait::async_trait]
 impl WorkflowLlmClient for SlowRetryClient {
     /// Scripted replies stand for one continued session (#241).
@@ -27,32 +27,73 @@ impl WorkflowLlmClient for SlowRetryClient {
         // Each attempt takes its slot at once, as the executor reports it.
         use archon_tools::subagent_dispatch_clock::{admitted, current_call, scope_session};
         let clocks = current_call().into_iter().collect();
-        scope_session("slow-author", clocks, async {
-            assert!(admitted("slow-author"));
+        scope_session("AC-X-001", clocks, async {
+            assert!(admitted("AC-X-001"));
             tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 6 {
+                if self.1 {
+                    std::future::pending::<()>().await;
+                }
+                return Ok(WorkflowAgentOutcome {
+                    content: "AC-X-001".into(),
+                    ..Default::default()
+                });
+            }
+            Err(archon_workflow::WorkflowError::StageFailed(
+                "connection reset by peer".into(),
+            ))
         })
-        .await;
-        Err(archon_workflow::WorkflowError::StageFailed(
-            "connection reset by peer".into(),
-        ))
+        .await
     }
 }
 
-#[tokio::test]
-async fn raw_author_deadline_covers_all_transient_retries() {
+#[tokio::test(start_paused = true)]
+async fn raw_author_deadline_excludes_outage_time_but_still_cuts_a_stalled_stream() {
     let (sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
-        Arc::new(SlowRetryClient),
+        Arc::new(SlowRetryClient(
+            std::sync::atomic::AtomicUsize::new(0),
+            false,
+        )),
         sink,
         vec![],
-        "test".into(),
+        "AC-X-001".into(),
         None,
         Some(1),
     )
-    .with_fixed_raw_tool_policy(vec!["Read".into()]);
-    let start = std::time::Instant::now();
+    .with_fixed_raw_tool_policy(vec!["AC-X-001".into()]);
+    let start = tokio::time::Instant::now();
+    let outcome = client
+        .run_agent_raw_request(
+            &request(WorkflowV2HostMethod::Agent, None),
+            "TASK-X-001".into(),
+        )
+        .await
+        .expect("an outage longer than three no-progress windows must recover");
+    assert_eq!(outcome.content, "AC-X-001");
+    assert!(start.elapsed() > std::time::Duration::from_secs(3));
+
+    // A provider that stalls on its first attempt still spends its window.
+    let stalled = Arc::new(SlowRetryClient(
+        std::sync::atomic::AtomicUsize::new(6),
+        true,
+    ));
+    let (sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(
+        stalled.clone(),
+        sink,
+        vec![],
+        "AC-X-001".into(),
+        None,
+        Some(1),
+    )
+    .with_fixed_raw_tool_policy(vec!["AC-X-001".into()]);
+    let start = tokio::time::Instant::now();
     let error = client
-        .run_agent_raw_request(&request(WorkflowV2HostMethod::Agent, None), "author".into())
+        .run_agent_raw_request(
+            &request(WorkflowV2HostMethod::Agent, None),
+            "TASK-X-001".into(),
+        )
         .await
         .unwrap_err();
     assert!(
@@ -61,7 +102,8 @@ async fn raw_author_deadline_covers_all_transient_retries() {
             .contains("author attempt no-progress deadline exceeded after 1s"),
         "{error}"
     );
-    assert!(start.elapsed() < std::time::Duration::from_millis(1800));
+    assert_eq!(start.elapsed(), std::time::Duration::from_secs(1));
+    assert_eq!(stalled.0.load(std::sync::atomic::Ordering::SeqCst), 7);
 }
 
 /// Waits for a subagent slot far longer than the deadline, reporting the wait

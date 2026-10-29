@@ -90,6 +90,8 @@ pub(crate) enum UnprovenCause {
     Host,
     /// Validation, corruption, or an unclassified host diagnostic.
     PermanentHost,
+    /// An inconclusive host probe: retried without a strike or author finding.
+    TransientHost,
     /// The check's site lacks a program (or a tool's subcommand) the host
     /// has, or the host could not tell: a defect of the site the host
     /// built, so no strike ever makes it the author's (F6).
@@ -107,13 +109,15 @@ impl UnprovenCause {
     }
     pub(crate) fn class(self) -> crate::command::workflow_host_fault::Class {
         match self {
-            Self::Host | Self::SiteLacks => crate::command::workflow_host_fault::Class::Transient,
+            Self::Host | Self::TransientHost | Self::SiteLacks => {
+                crate::command::workflow_host_fault::Class::Transient
+            }
             _ => crate::command::workflow_host_fault::Class::Permanent,
         }
     }
     pub(crate) fn code(self) -> &'static str {
         match self {
-            Self::Host => "host_transient",
+            Self::Host | Self::TransientHost => "host_transient",
             Self::SiteLacks => "host_site_lacks",
             Self::ProgramAbsent => "host_program_absent",
             Self::PermanentHost => "host_permanent",

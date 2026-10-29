@@ -57,7 +57,15 @@ impl CompletionAccumulator {
                     self.stop_reason = stop_reason;
                 }
             }
-            StreamEvent::Error { message, .. } => return Err(LlmError::Http(message)),
+            StreamEvent::Error {
+                error_type,
+                message,
+            } => {
+                return Err(crate::provider_fault::from_stream_error(
+                    &error_type,
+                    &message,
+                ));
+            }
             StreamEvent::ContentBlockStop { .. }
             | StreamEvent::MessageStop
             | StreamEvent::Ping

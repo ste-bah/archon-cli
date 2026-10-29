@@ -34,6 +34,20 @@ use crate::tool::ToolContext;
 // Error + outcome side effect types.
 // ---------------------------------------------------------------------------
 
+/// Cloneable provider error source kept intact across executor outcomes.
+#[derive(Debug, Clone)]
+pub struct ProviderSource(pub Arc<dyn std::error::Error + Send + Sync>);
+impl std::fmt::Display for ProviderSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl std::error::Error for ProviderSource {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
+
 /// Error surface returned by `SubagentExecutor::run_to_completion`.
 #[derive(Debug, Clone)]
 pub enum ExecutorError {
@@ -52,6 +66,7 @@ pub enum ExecutorError {
         status: Option<u16>,
         retry_after_secs: Option<u64>,
         overloaded: bool,
+        source: Option<ProviderSource>,
     },
 }
 
@@ -98,6 +113,7 @@ pub enum SubagentOutcome {
         status: Option<u16>,
         retry_after_secs: Option<u64>,
         overloaded: bool,
+        source: Option<ProviderSource>,
     },
     /// Timer fired before the runner finished; the join handle was
     /// abandoned. The runner continues executing in its own task;

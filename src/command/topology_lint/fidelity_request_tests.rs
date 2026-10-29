@@ -101,7 +101,7 @@ async fn an_unknown_envelope_is_reasked_without_claiming_saved_progress() {
 fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let catalog =
         crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev").unwrap();
-    let old_digest = "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7";
+    let old_digest = "83b6c39e67e41a9f0fcd6fececa0e009379ac534bf5e511e8d2ded33afa24472";
     let mut old = catalog.clone();
     old.schema_version = 1;
     let landing = old.capabilities.get_mut("land-task-body").unwrap();
@@ -135,6 +135,6 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "67f5fa337f7d1f46a85634e39a69ce02259848ff3f36beb63f784ff6f5ba6e4f"
+        "0eea1f26f0df90fa988f35a067d40865ea528e8788d6eab3b6d1c035c584eec7"
     );
 }

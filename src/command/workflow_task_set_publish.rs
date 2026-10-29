@@ -131,28 +131,9 @@ const CHAIN_LOCK_REPORT_EVERY: std::time::Duration = std::time::Duration::from_s
 /// checked.
 pub(crate) type ExpectedPrior = [(PathBuf, Option<String>)];
 
-pub(super) fn publish_skeleton_files(
-    tasks_root: &Path,
-    pin_path: &Path,
-    skeleton_bytes: &[u8],
-    lock: &TaskSkeletonLock,
-    pin: &AcceptancePin,
-) -> Result<()> {
-    let _lock = ChainLock::acquire(pin_path, tasks_root)?;
-    publish_files_atomically(
-        pin_path,
-        tasks_root,
-        &[
-            (tasks_root.join(TASK_SKELETON_FILE), skeleton_bytes.to_vec()),
-            (
-                tasks_root.join(TASK_SKELETON_LOCK_FILE),
-                serde_json::to_vec_pretty(lock)?,
-            ),
-            (pin_path.to_path_buf(), serde_json::to_vec_pretty(pin)?),
-        ],
-        "workflow freeze-skeleton",
-    )
-}
+#[path = "workflow_task_set_publish_skeleton.rs"]
+mod skeleton;
+pub(super) use skeleton::publish_skeleton_files;
 
 #[path = "workflow_task_set_publish_acceptance.rs"]
 mod acceptance;
@@ -330,6 +311,9 @@ pub(crate) fn begin_publish(
         .map(|(target, _)| target.clone())
         .collect::<Vec<_>>();
     recover_before_publish(&paths, pin_path, tasks_root)?;
+    crate::command::workflow_decompose_frozen_chain::skeleton_cache::retain_publication_pin(
+        pin_path, tasks_root, files,
+    )?;
     let transaction = uuid::Uuid::new_v4().simple().to_string();
     let mut journal = Journal::new(
         transaction.clone(),
@@ -429,7 +413,10 @@ pub(crate) fn begin_publish(
                 .with_context(|| format!("publishing freeze to {}", entry.target.display()))?;
             crash_point(&format!("renamed-{index}"));
         }
-        sync_parents(targets.iter().map(PathBuf::as_path))
+        sync_parents(targets.iter().map(PathBuf::as_path))?;
+        crate::command::workflow_decompose_frozen_chain::skeleton_cache::retain_publication_pin(
+            pin_path, tasks_root, files,
+        )
     })();
     if let Err(error) = applied {
         return Err(undo(&journal, &paths, error));

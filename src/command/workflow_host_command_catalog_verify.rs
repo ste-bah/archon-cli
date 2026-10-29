@@ -5,9 +5,10 @@
 //! outcome for each skipped stage — the evidence `reconcile` and the final
 //! report carry — so it asks the host to verify the frozen artifact in place.
 //! The child publishes nothing but its gate envelope; the parent's
-//! postcondition is the freeze command's own (bundle, lock, pin, chain), and
-//! `verify-frozen-skeleton` reports the frozen subjects exactly as
-//! `freeze-skeleton` does.
+//! successful postcondition is the freeze command's own (bundle, lock, pin,
+//! chain), and `verify-frozen-skeleton` reports the frozen subjects exactly as
+//! `freeze-skeleton` does. A negative verification returns its finding envelope
+//! with an unsatisfied postcondition, allowing the owning author to repair it.
 use archon_workflow::{CommandCapability, EnvironmentProfileId, RemediationScope, StdinDelivery};
 
 use super::{MIB, capability};
@@ -43,8 +44,13 @@ fn verify_capability(id: &str, stage: &str) -> CommandCapability {
         MIB,
         MIB,
         &["{GATE_ENVELOPE}"],
-        // Verification either holds or fails operationally; there is no
-        // candidate to send a finding back to.
-        &[RemediationScope::Operational],
+        // Verification previously failed only operationally because there was
+        // no candidate to send a finding back to. Attributable authored defects
+        // now reopen the owning stage; error kinds distinguish retry from restore.
+        &[
+            RemediationScope::Operational,
+            RemediationScope::CandidateArtifact,
+            RemediationScope::Skeleton,
+        ],
     )
 }

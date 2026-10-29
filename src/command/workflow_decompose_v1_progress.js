@@ -436,10 +436,9 @@ const PAUSES = new Map();
 async function pauseLoop(w, subject, evidence) {
   const ordinal = (PAUSES.get(subject) || 0) + 1;
   PAUSES.set(subject, ordinal);
-  const components = progressOperationalComponents(evidence.progress_history);
   const recovery = evidence.reason === "operational_no_progress"
-    ? `The run is paused, not failed. Restore the host ${components.join(" and ") || "gate/provider"} component, then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`
-    : `The run is paused, not failed. Repair what the last findings name (the PRD, a gate, the provider), then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`;
+    ? `host ${progressOperationalComponents(evidence.progress_history).join(" and ") || "gate/provider"} ${subject}: ${(evidence.last_findings || []).join(" | ")}. The run retries this component with the recorded inputs.`
+    : "The run keeps the subject pending for repair. Repair the recorded findings, then resume the run.";
   await w.pause(`pause-${subject}-${ordinal}`, {
     subject,
     ordinal,
@@ -457,7 +456,7 @@ function progressOperationalComponents(history) {
     if (entry.outage === true) components.push("provider");
     if (entry.kind === "operational") {
       const label = typeof entry.summary === "string" ? entry.summary.split(":", 1)[0] : "gate";
-      components.push(label === "gate" ? "gate" : "provider");
+      components.push(label === "provider" ? "provider" : "gate");
     }
   }
   return [...new Set(components)];
@@ -465,6 +464,7 @@ function progressOperationalComponents(history) {
 
 // Pauses a loop that `stallReason` stopped, then opens its fresh window.
 async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra) {
+  // loopEvidence bounds last_findings; the recovery text reuses that bounded list.
   await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings), ...(extra || {}) });
   progress.stalled = 0;
   progress.stalledOperational = 0;

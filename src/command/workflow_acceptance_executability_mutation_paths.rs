@@ -7,7 +7,10 @@ mod variables;
 use variables::{VariableFlow, apply_assignments, join_variables, valid_variable};
 #[path = "workflow_acceptance_executability_mutation_paths_fs.rs"]
 mod fs_paths;
-pub(super) use fs_paths::{diagnostic_path, normalize_absolute, relative_path};
+use fs_paths::normalize;
+pub(super) use fs_paths::{
+    diagnostic_path, normalize_absolute, relative_path, whole_tree_path, whole_tree_target,
+};
 
 #[path = "workflow_acceptance_executability_mutation_paths_lex.rs"]
 mod lex;
@@ -18,13 +21,9 @@ pub(super) const SUBSHELL_CLOSE: &str = "\u{0}subshell-close";
 const GROUP_OPEN: &str = "\u{0}group-open";
 const GROUP_CLOSE: &str = "\u{0}group-close";
 
-fn normalize(token: &str) -> &str {
-    token.trim_start_matches("./").trim_end_matches('/')
-}
-
 pub(super) fn path_tokens(text: &str) -> Vec<String> {
     text.split(|c: char| !archon_workflow::acceptance_sibling_paths::is_path_character(c))
-        .filter(|token| !token.ends_with('/'))
+        .filter(|token| !token.ends_with('/') || whole_tree_path(token))
         .map(normalize)
         .filter(|token| {
             !token.is_empty()

@@ -58,7 +58,7 @@ fn fixed_catalog_contains_only_reviewed_symbolic_capabilities() {
 /// provider, write only their envelope, and resolve to the hidden
 /// `verify-frozen-chain` child with the stage baked into the argv.
 #[test]
-fn verify_frozen_chain_capabilities_publish_nothing_but_their_envelope() {
+fn verify_frozen_chain_capabilities_publish_only_envelopes_and_route_owned_findings() {
     let temp = tempfile::tempdir().unwrap();
     let context = context(temp.path());
     let catalog = fixed_decomposition_catalog("rev-1").unwrap();
@@ -81,7 +81,11 @@ fn verify_frozen_chain_capabilities_publish_nothing_but_their_envelope() {
         assert!(resolved.declared_write_set[0].ends_with("gate-envelope.json"));
         assert_eq!(
             resolved.remediation_scopes,
-            BTreeSet::from([RemediationScope::Operational])
+            BTreeSet::from([
+                RemediationScope::CandidateArtifact,
+                RemediationScope::Skeleton,
+                RemediationScope::Operational
+            ])
         );
         let with_stdin = HostCommandRequest::new(id, Some("x".into())).unwrap();
         assert!(resolve_host_command(&with_stdin, &catalog, &context, "call-1").is_err());
@@ -400,5 +404,40 @@ fn issue356_old_total_catalog_resumes_but_its_timeouts_do_not_replay() {
             executor.outcome_limits_hold(&completed).unwrap(),
             "{revision}"
         );
+    }
+}
+
+#[test]
+fn verify_frozen_chain_capabilities_publish_only_their_envelope_and_route_authored_findings() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let catalog = fixed_decomposition_catalog("rev-1").unwrap();
+    for (id, stage) in [
+        ("verify-frozen-acceptance", "acceptance"),
+        ("verify-frozen-skeleton", "skeleton"),
+    ] {
+        let request = HostCommandRequest::new(id, None).unwrap();
+        let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
+        assert_eq!(
+            &resolved.args[..4],
+            ["workflow", "verify-frozen-chain", "--stage", stage]
+        );
+        assert!(resolved.stdin.is_none());
+        assert!(
+            !resolved.environment.contains_key("ARCHON_OAUTH_TOKEN"),
+            "no provider environment"
+        );
+        assert_eq!(resolved.declared_write_set.len(), 1);
+        assert!(resolved.declared_write_set[0].ends_with("gate-envelope.json"));
+        assert_eq!(
+            resolved.remediation_scopes,
+            BTreeSet::from([
+                RemediationScope::CandidateArtifact,
+                RemediationScope::Skeleton,
+                RemediationScope::Operational
+            ])
+        );
+        let with_stdin = HostCommandRequest::new(id, Some("x".into())).unwrap();
+        assert!(resolve_host_command(&with_stdin, &catalog, &context, "call-1").is_err());
     }
 }

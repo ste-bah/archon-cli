@@ -61,6 +61,7 @@ pub mod plan_approval;
 pub mod plan_mode_state;
 mod plan_reconciliation;
 mod process_message;
+pub(crate) mod provider_transport;
 #[cfg(test)]
 mod response_reserve_tests;
 // #178: keep this turn's volatile blocks behind the cacheable prefix.
@@ -303,3 +304,6 @@ pub struct Agent {
     #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
 }
+
+#[cfg(test)]
+mod autocompact_open_tests;

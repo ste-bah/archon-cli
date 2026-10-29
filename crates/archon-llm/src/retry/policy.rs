@@ -26,20 +26,12 @@ const MAX_INLINE_RATE_LIMIT_RETRY_SECS: u64 = 60;
 /// invented: none is known for an error event.
 pub(super) fn stream_error_before_content(error_type: &str, message: &str) -> LlmError {
     let message = archon_observability::redaction::redact_text(message);
-    let text = || format!("stream failed before producing content ({error_type}): {message}");
-    match error_type {
-        "authentication_error" | "invalid_api_key" => LlmError::Rejected {
-            error_type: error_type.to_string(),
-            message: text(),
-        },
-        "billing_error" | "insufficient_quota" => LlmError::QuotaExceeded(text()),
-        "invalid_request_error" | "permission_error" | "not_found_error" | "request_too_large" => {
-            LlmError::Rejected {
-                error_type: error_type.to_string(),
-                message: format!("stream failed before producing content: {message}"),
-            }
-        }
-        _ => LlmError::Http(text()),
+    let diagnostic = format!("stream failed before producing content ({error_type}): {message}");
+    let error = crate::provider_fault::from_stream_error(error_type, &diagnostic);
+    if error.is_operational() {
+        crate::provider_fault::from_native_transport(diagnostic)
+    } else {
+        error
     }
 }
 
@@ -81,7 +73,7 @@ pub enum RetryDecision {
 /// See the parent module docstring for the full mapping rationale.
 pub fn classify(err: &LlmError) -> RetryDecision {
     match err {
-        LlmError::Http(_) => RetryDecision::Retry,
+        LlmError::Http(_) | LlmError::Transport(_) => RetryDecision::Retry,
         LlmError::RateLimited {
             retry_after_secs, ..
         } if *retry_after_secs <= MAX_INLINE_RATE_LIMIT_RETRY_SECS => RetryDecision::Retry,
@@ -107,7 +99,7 @@ pub fn classify(err: &LlmError) -> RetryDecision {
 /// the sole caller.
 pub(super) fn reason_code_for_error(err: &LlmError) -> &'static str {
     match err {
-        LlmError::Http(_) => "http",
+        LlmError::Http(_) | LlmError::Transport(_) => "http",
         LlmError::Auth(_) => "auth",
         LlmError::RateLimited { .. } => "rate_limited",
         LlmError::Overloaded { .. } => "overloaded",
@@ -207,6 +199,7 @@ mod tests {
             retry_after_secs: 30,
             from_provider: true,
             pipeline_retry_after_secs: None,
+            message: String::new(),
         };
 
         assert_eq!(classify(&err), RetryDecision::Retry);
@@ -218,6 +211,7 @@ mod tests {
             retry_after_secs: 8_004,
             from_provider: true,
             pipeline_retry_after_secs: None,
+            message: String::new(),
         };
 
         assert_eq!(classify(&err), RetryDecision::FailFast);

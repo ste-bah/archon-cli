@@ -8,15 +8,18 @@ use super::FIXED_SCRIPT_SOURCE;
 /// The embedded script, or the same files under `ARCHON_TEST_SCRIPT_ROOT` (the
 /// override the Node suites honour), so a script can be tested before it is
 /// embedded and an old script replayed to show a test fails before its fix.
-fn script_source() -> std::borrow::Cow<'static, str> {
+pub(super) fn script_source() -> std::borrow::Cow<'static, str> {
     let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") else {
         return FIXED_SCRIPT_SOURCE.into();
     };
     [
         "workflow_decompose_v1.js",
+        "workflow_decompose_reply_blocks.js",
         "workflow_decompose_v1_acceptance.js",
         "workflow_decompose_v1_set_gate.js",
+        "workflow_decompose_v1_frozen.js",
         "workflow_decompose_v1_progress.js",
+        "workflow_decompose_v1_seed.js",
         "workflow_decompose_v1_context.js",
     ]
     .iter()
@@ -62,6 +65,9 @@ mod refusal_progress;
 mod set_gate;
 #[path = "workflow_decompose_set_gate_skeleton_tests.rs"]
 pub(crate) mod set_gate_skeleton;
+
+#[path = "workflow_decompose_frozen_routing_tests.rs"]
+pub(crate) mod frozen_routing;
 
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
@@ -116,6 +122,7 @@ fn run_js(driver: &str) -> String {
         "PACKAGING_REFUSAL",
         "AUTHOR_CALLS",
         "routeFindings",
+        "authoredSourceMatches",
         "stopFixed",
         "requireCommitted",
         "authorPrompt",
@@ -135,7 +142,16 @@ fn run_js(driver: &str) -> String {
         "historyKey",
         "earlierFindings",
         "requireDispatchable",
+        "repairEvent",
         "authorCandidate",
+        "verifyFrozenStage",
+        "frozenFindingOwner",
+        "repairFrozenStage",
+        "acceptanceStagePolicy",
+        "FROZEN_REPAIRS",
+        "prepareAuthorStages",
+        "frozenBodyReusable",
+        "changedDependencySubjects",
         "acceptanceRepairIds",
     ] {
         script.push_str(&decl(name));
@@ -160,6 +176,8 @@ async function __archonHost(method, payload) {
     let path = dir.path().join("phase.mjs");
     std::fs::write(&path, script).expect("write driver");
     let out = std::process::Command::new("node")
+        .arg("-e")
+        .arg("const r = require('node:child_process').spawnSync(process.execPath, [process.argv[1]], {timeout:30000,stdio:'inherit'}); if (r.error) console.error(r.error); process.exitCode = r.status ?? 1;")
         .arg(&path)
         .output()
         .expect("node must be available");
@@ -168,7 +186,12 @@ async function __archonHost(method, payload) {
         "driver failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 /// A committed artifact carrying a repairable finding must be re-authored.
@@ -185,7 +208,7 @@ const committed = (findings) => ({
   postcondition: { satisfied: true },
   gateEnvelope: { policy_findings: findings },
 });
-const w = {
+const w = { checkpoint: async () => {},
   agent: async () => {
     authorCalls += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{\"candidate\":true}" };
@@ -218,6 +241,33 @@ fn a_repairable_finding_on_a_committed_artifact_drives_another_author_attempt() 
     );
 }
 
+#[test]
+fn frozen_stage_non_operational_findings_stop_with_the_named_artifact() {
+    let driver = r#"
+globalThis.args = {gateMode:"enforce"};
+const w = {hostCommand:async()=>({gateEnvelope:{policy_findings:[{
+  text:"artifact /subjects/acceptance-contract.json is incompatible; replace the artifact",
+  remediation_scope:"candidate_artifact"
+}]}})};
+verifyFrozenStage(w,"verify-frozen-acceptance").then(()=>{throw Error("unexpected reopen");},error=>{
+  if (!error.message.includes("/subjects/acceptance-contract.json")) throw error;
+  console.log("named artifact stops");
+});
+"#;
+    assert_eq!(run_js(driver), "named artifact stops");
+
+    let corrupt = r#"
+globalThis.args = { gateMode: "enforce", frozenChain: { acceptance: true } };
+globalThis.__archonHost = async (_method, payload) => { throw new Error(JSON.parse(payload).reason); };
+const w = { checkpoint: async () => {},  hostCommand: async () => ({ gateEnvelope: { policy_findings: [{ text: "frozen artifact digest mismatch at /run/acceptance.lock", remediation_scope: "host_state" }] } }) };
+verifyFrozenStage(w, "verify-frozen-acceptance").then(() => { throw new Error("corrupt state was reopened"); }, error => {
+  if (!error.message.includes("/run/acceptance.lock")) throw error;
+  console.log("corrupt state stops with exact artifact");
+});
+"#;
+    assert_eq!(run_js(corrupt), "corrupt state stops with exact artifact");
+}
+
 fn driver(first_findings: &str, attempts: u32, always_dirty: bool) -> String {
     format!(
         r#"
@@ -228,14 +278,14 @@ const committed = (findings) => ({{
   postcondition: {{ satisfied: true }},
   gateEnvelope: {{ policy_findings: findings }},
 }});
-const w = {{
+const w = {{ checkpoint: async () => {{}},
   agent: async () => {{
     authorCalls += 1;
     return {{ status: "accepted", stopReason: "end_turn", content: "{{}}" }};
   }},
   pause: async () => {{ throw new Error("paused"); }},
   hostCommand: async () =>
-    ({always_dirty} || authorCalls === 1) ? committed({first_findings}) : committed([]),
+    (({always_dirty} && authorCalls <= 13) || authorCalls === 1) ? committed({first_findings}) : committed([]),
 }};
 const policy = {{
   phase: "acceptance",
@@ -409,5 +459,37 @@ authorCandidate(w, policy).then(() => {
         r#"{"sees_both":true}"#,
         "by the third attempt the author must see both findings it has already \
          triggered, or it will keep alternating between them"
+    );
+}
+
+#[test]
+fn host_repair_regressions_drive_the_embedded_script() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_host_repair_test.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn set_gate_author_loops_pause_without_progress() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_loop_pause_test.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

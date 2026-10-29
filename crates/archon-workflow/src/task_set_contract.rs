@@ -14,6 +14,7 @@ use crate::verifier_strength::verifier_strength_defect;
 mod policy;
 pub use policy::{
     AcceptancePolicyFinding, CHECK_SHAPE_VOCABULARY, acceptance_policy_findings,
+    acceptance_policy_findings_with_roots, acceptance_site_path_defect,
     criterion_prescribes_check_shape, refuted_check_message,
 };
 pub const ACCEPTANCE_CONTRACT_FILE: &str = "acceptance-contract.json";
@@ -158,6 +159,8 @@ pub struct TaskSetContractError {
     pub message: String,
     pub defects: Vec<crate::defect::ValidationDefect>,
     pub io_cause: Option<(std::io::ErrorKind, Option<i32>)>,
+    /// A failed read judged no content; retain its type for verification retry.
+    pub io_kind: Option<std::io::ErrorKind>,
 }
 
 impl fmt::Display for TaskSetContractError {
@@ -199,6 +202,7 @@ pub fn validate_acceptance_contract(
         message: crate::defect::defect_message(&defects),
         defects,
         io_cause: None,
+        io_kind: None,
     })
 }
 
@@ -231,10 +235,12 @@ pub fn validate_acceptance_bundle(
     }
     if let Some(pin) = expected_pin {
         let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|error| {
-            contract_io(&error, format!(
+            let mut failure = contract_io(&error, format!(
                 "task_root {} could not be canonicalized: {error}; restore it or re-run `workflow freeze-acceptance`",
                 tasks_root.display()
-            ))
+            ));
+            failure.io_kind = Some(error.kind());
+            failure
         })?;
         let pinned_root = PathBuf::from(&pin.task_root);
         let canonical_pin = pinned_root
@@ -399,12 +405,14 @@ fn contract_error(message: impl Into<String>) -> TaskSetContractError {
         message: message.into(),
         defects: Vec::new(),
         io_cause: None,
+        io_kind: None,
     }
 }
 
 fn contract_io(error: &std::io::Error, message: String) -> TaskSetContractError {
     let mut fault = contract_error(message);
     fault.io_cause = Some((error.kind(), error.raw_os_error()));
+    fault.io_kind = Some(error.kind());
     fault
 }
 

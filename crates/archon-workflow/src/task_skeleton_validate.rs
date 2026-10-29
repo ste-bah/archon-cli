@@ -71,5 +71,6 @@ pub fn validate_skeleton(skeleton: &TaskSkeleton, expected_digest: &str) -> Skel
         message: defect_message(&defects),
         defects,
         io_cause: None,
+        io_kind: None,
     })
 }

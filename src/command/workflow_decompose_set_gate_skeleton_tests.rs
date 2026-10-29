@@ -59,7 +59,7 @@ const landed = [];
 const prompts = {{}};
 let skeletonReplies = 0, skeletonFreezes = 0, traceCalls = 0;
 let finalInputs = null;
-const w = {{
+const w = {{ checkpoint: async () => {{}},
   pause: async (id) => {{ throw new Error("workflow paused by run control: script requested pause " + id); }},
   agent: async (id, options) => {{
     agentCalls.push(id);

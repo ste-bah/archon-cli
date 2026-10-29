@@ -8,7 +8,7 @@
 //! pause text), and an id an earlier, resumed run already took answers
 //! `{ resumed: true }`.
 
-use super::FIXED_SCRIPT_SOURCE;
+use super::repair_tests::script_source;
 
 /// `scenario` is a JS object literal with optional members:
 /// - `answer(n)`: the agent reply for author call `n` (1-based); defaults to a
@@ -17,12 +17,14 @@ use super::FIXED_SCRIPT_SOURCE;
 ///   for its `n`-th call; defaults to none.
 /// - `operational(n, capability)`: a gate operational error text for the
 ///   gate's `n`-th call, or null; defaults to none.
-/// - `resumed`: pause ids a previous run already took.
+/// - `resumed`: pause ids already credited by the scripted host, including
+///   authored repair windows explicitly resumed by the scenario.
 ///
 /// `entry` is the expression the driver awaits; `subject` and `w` are in scope.
 pub(crate) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
+    let source = script_source();
     let driver = format!(
-        r##"{FIXED_SCRIPT_SOURCE}
+        r##"{source}
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
 // Explicit Node fixture binding; host redaction parity is covered in QuickJS.
@@ -36,17 +38,20 @@ globalThis.args = Object.assign({{
   gateMode: "{gate_mode}", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
 }}, scenario.args || {{}});
 const calls = [];
+const prompts = [];
 const pauses = [];
 const events = [];
+const terminalStops = [];
 let lands = 0;
 const work = [
   [{{ taskId: "TASK-X-001", fileName: "TASK-X-001.md" }}, []],
   [{{ taskId: "TASK-X-002", fileName: "TASK-X-002.md" }}, []],
 ];
 const bodies = new Map();
-const w = {{
+const w = {{ checkpoint: async (_id, options) => {{ console.log(options.task); }},
   agent: async (id, options) => {{
     calls.push(id);
+    prompts.push(options.task);
     events.push("author:" + id);
     if (scenario.answer) return scenario.answer(calls.length, id);
     const content = id.startsWith("acceptance-author-") ? JSON.stringify({{ id: "AC-X-001" }}) : "# body";
@@ -75,10 +80,15 @@ const w = {{
   }},
   finalReport: async () => ({{}}),
 }};
+globalThis.__archonHost = async (method, payload) => {{
+  const stop = JSON.parse(payload);
+  terminalStops.push({{ method, stop }});
+  throw new Error(stop.reason);
+}};
 const subject = {{ taskId: "TASK-X-010", fileName: "TASK-X-010.md" }};
 Promise.resolve().then(() => {entry}).then(
-  () => console.log(JSON.stringify({{ accepted: true, calls: calls.length, lands, pauses, events }})),
-  (error) => console.log(JSON.stringify({{ error: String(error && error.message), calls: calls.length, lands, pauses, events }})),
+  () => console.log(JSON.stringify({{ accepted: true, calls: calls.length, lands, pauses, events, prompts, terminalStops }})),
+  (error) => console.log(JSON.stringify({{ error: String(error && error.message), calls: calls.length, lands, pauses, events, prompts, terminalStops }})),
 );
 "##
     );
@@ -86,6 +96,8 @@ Promise.resolve().then(() => {entry}).then(
     let path = dir.path().join("progress.cjs");
     std::fs::write(&path, driver).expect("write driver");
     let out = std::process::Command::new("node")
+        .arg("-e")
+        .arg("const r = require('node:child_process').spawnSync(process.execPath, [process.argv[1]], {timeout:30000,stdio:'inherit'}); if (r.error) console.error(r.error); process.exitCode = r.status ?? 1;")
         .arg(&path)
         .output()
         .expect("node must be available");
@@ -94,7 +106,23 @@ Promise.resolve().then(() => {entry}).then(
         "driver failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    serde_json::from_slice(&out.stdout).expect("driver json")
+    let lines: Vec<_> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let mut value: serde_json::Value = lines
+        .iter()
+        .rev()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .expect("driver json after progress events");
+    value["progress_events"] = serde_json::Value::Array(
+        lines
+            .iter()
+            .filter(|line| !line.starts_with('{'))
+            .map(|line| serde_json::Value::String(line.clone()))
+            .collect(),
+    );
+    value
 }
 
 pub(crate) const BODY: &str = "authorCandidate(w, bodyPolicy(subject, []))";
@@ -161,6 +189,16 @@ fn findings_that_are_all_new_at_the_same_count_pause() {
         progress_flags(evidence(&out, 0)),
         [true, false, false, false]
     );
+}
+
+#[test]
+fn new_finding_text_at_the_same_count_pauses_at_the_existing_attempt_window() {
+    // A new set of the same size does not establish a new minimum.
+    let out = body(
+        r#"{ findings: (n) => n <= 13 ? ["defect " + String.fromCharCode(96 + n) + "x", "defect " + String.fromCharCode(96 + n) + "y"] : [] }"#,
+    );
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
 }
 
 #[test]

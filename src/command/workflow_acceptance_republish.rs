@@ -228,11 +228,12 @@ fn publish_chain_owned(
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let contract_bytes = serde_json::to_vec_pretty(&repaired)?;
     let findings = findings::acceptance_findings(
+        request.project_root,
         request.prd_path,
         &verified.prd_text,
         &contract_path,
         &repaired,
-    );
+    )?;
     // M4: an extension answers for the PRD as it is now, so its gate holds
     // the coverage a whole-set freeze holds, whatever ids it publishes.
     let coverage = match extension {

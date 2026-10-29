@@ -8,7 +8,7 @@ const source = [
   'workflow_decompose_v1.js',
   'workflow_decompose_reply_blocks.js',
   'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js',
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js',
   'workflow_decompose_v1_progress.js',
   'workflow_decompose_v1_context.js',
 ].map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');

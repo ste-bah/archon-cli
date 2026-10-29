@@ -7,7 +7,7 @@
 //! `requirements-trace` call answers, and the test reads back which calls
 //! were made, in what order, and what the final evidence held.
 
-use super::FIXED_SCRIPT_SOURCE;
+use super::script_source;
 
 const TASK_ROOT: &str = "/p/tasks";
 
@@ -16,8 +16,9 @@ const TASK_ROOT: &str = "/p/tasks";
 /// answers `args.traceRounds` the same way, clean when absent. Every host outcome is committed with a receipt whose id is
 /// the capability plus the call ordinal.
 fn driver(args_json: &str, lint_rounds: &str, tail: &str) -> String {
+    let source = script_source();
     format!(
-        r##"{FIXED_SCRIPT_SOURCE}
+        r##"{source}
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
 // Explicit Node fixture binding; host redaction parity is covered in QuickJS.
@@ -40,9 +41,10 @@ const prompts = {{}};
 let lintCalls = 0;
 const traceRounds = globalThis.args.traceRounds || [[]];
 let traceCalls = 0;
+globalThis.__archonHost = async (_method, payload) => {{ throw new Error(JSON.parse(payload).reason); }};
 let finalInputs = null;
 const pauses = [];
-const w = {{
+const w = {{ checkpoint: async () => {{}},
   pause: async (id, evidence) => {{
     pauses.push({{ id, evidence }});
     if ((globalThis.args.resumedPauses || []).includes(id)) return {{ resumed: true, pause_id: id }};
@@ -58,11 +60,13 @@ const w = {{
     hostCalls.push(capability);
     let findings = [];
     if (capability === "task-set-lint") {{
-      findings = lintRounds[Math.min(lintCalls, lintRounds.length - 1)];
+      findings = globalThis.args.clearAfter !== undefined && lintCalls >= globalThis.args.clearAfter
+        ? [] : lintRounds[Math.min(lintCalls, lintRounds.length - 1)];
       lintCalls += 1;
     }}
     if (capability === "requirements-trace") {{
-      findings = traceRounds[Math.min(traceCalls, traceRounds.length - 1)];
+      findings = globalThis.args.clearAfter !== undefined && traceCalls >= globalThis.args.clearAfter
+        ? [] : traceRounds[Math.min(traceCalls, traceRounds.length - 1)];
       traceCalls += 1;
     }}
     const callId = capability + "-" + hostCalls.length;
@@ -90,6 +94,8 @@ fn run(script: &str) -> serde_json::Value {
     let path = dir.path().join("set-gate.cjs");
     std::fs::write(&path, script).expect("write driver");
     let out = std::process::Command::new("node")
+        .arg("-e")
+        .arg("const r = require('node:child_process').spawnSync(process.execPath, [process.argv[1]], {timeout:30000,stdio:'inherit'}); if (r.error) console.error(r.error); process.exitCode = r.status ?? 1;")
         .arg(&path)
         .output()
         .expect("node must be available");
@@ -98,7 +104,11 @@ fn run(script: &str) -> serde_json::Value {
         "driver failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    serde_json::from_slice(&out.stdout).expect("driver json")
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .and_then(|line| serde_json::from_str(line).ok())
+        .expect("driver json after progress events")
 }
 
 fn body_finding(task: &str, source_path: &str) -> String {

@@ -240,3 +240,241 @@ async function requireDispatchable(w, subject, task) {
     });
   }
 }
+
+// Checkpoints use the same journal and watch path as the host's log primitive.
+async function repairEvent(w, subject, rung, cycle, call, attempts) {
+  if (typeof w.checkpoint !== "function") return;
+  await w.checkpoint(`repair-${subject}-r${rung}-c${cycle}-${call}-a${attempts}`, {
+    task: `${subject} repair rung r${rung}, cycle ${cycle}, attempts ${attempts}`
+  });
+}
+
+// The set gate's retry scopes. Every body was judged alone against its own
+// claims; a finding that only the whole set reveals (an obligation task A
+// claims, hollowed by text in task B) is still a body defect, and Issue-46
+// sends it back to the body it names instead of ending the run.
+const SET_GATE_RETRY_SCOPES = new Set(["body", "candidate_artifact"]);
+
+function authoredSourceMatches(source, fileName) {
+  if (typeof source !== "string" || !source) return false;
+  const normalize = (path) => {
+    const text = String(path).replace(/\\/g, "/");
+    const parts = [];
+    for (const part of text.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === ".." && parts.length && parts[parts.length - 1] !== "..") parts.pop();
+      else if (part !== ".." || !text.startsWith("/")) parts.push(part);
+    }
+    return `${text.startsWith("/") ? "/" : ""}${parts.join("/")}`;
+  };
+  return normalize(source) === normalize(`${args.taskRoot}/${fileName}`);
+}
+
+async function runSetGate(w, capability, subjects) {
+  const outcome = await w.hostCommand(capability, { stdin: null });
+  // Set-level skeleton findings are routed to a skeleton re-author by the
+  // loop (Batch O), never shadowed past.
+  const routed = routeFindings(outcome, SET_GATE_RETRY_SCOPES, new Set(["skeleton"]));
+  for (const finding of routed.fatalFindings.slice()) {
+    const owner = (subjects || []).find((subject) => authoredSourceMatches(finding.source_path, subject.fileName));
+    if (!owner) continue;
+    routed.fatalFindings = routed.fatalFindings.filter((candidate) => candidate !== finding);
+    routed.fatal = routed.fatal.filter((text) => !String(text).includes(String(finding.text || "unnamed policy finding")));
+    routed.retry.push(String(finding.text || "unnamed policy finding"));
+    routed.retryFindings.push(finding);
+  }
+  if (routed.fatal.length > 0) {
+    await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+  }
+  return { capability, outcome, routed };
+}
+
+// Protocol v1 deliberately changes the embedded script digest for a planned release.
+// Only an actual validated host request makes this stop terminal; error text cannot.
+async function stopFixed(reason) {
+  await __archonHost("terminalStop", JSON.stringify({ schemaVersion: 1, reason: String(reason).slice(0, 4096) }));
+  throw new Error("host returned without honoring the terminal stop");
+}
+
+// Batch O: a set gate is accepted only with no finding open, in either
+// mode. Observe used to accept one with findings and build on it.
+function acceptSetGate(gate) {
+  if (gate.routed.all.length > 0) {
+    throw new Error(`${gate.capability} cannot be accepted with findings open: ${gate.routed.all.join(" | ")}`);
+  }
+  requireCommitted(gate.outcome, gate.capability);
+  return gate.outcome;
+}
+
+// A gate operational error (a truncated judge reply, a preparation failure)
+// is returned as `operational`, never thrown: the caller's loop counts it as
+// an attempt without progress and pauses the run when its window closes.
+function routeFindings(outcome, retryScopes, shadowScopes) {
+  if (!outcome || typeof outcome !== "object") throw new Error("host command returned no typed outcome");
+  const routed = {
+    retry: [], retryFindings: [], fatal: [], fatalFindings: [], inherited: [], inheritedFindings: [],
+    shadow: [], shadowFindings: [], all: [], allFindings: [], operational: null,
+    fatalOperational: []
+  };
+  if (outcome.gateEnvelope?.operational_error) {
+    routed.operational = String(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
+    routed.operationalKind = String(outcome.gateEnvelope.operational_error.kind || "");
+    return routed;
+  }
+  const findings = Array.isArray(outcome.gateEnvelope?.policy_findings)
+    ? outcome.gateEnvelope.policy_findings
+    : [];
+  const shadows = shadowScopes || new Set();
+  for (const finding of findings) {
+    const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
+    const scope = finding.remediation_scope;
+    routed.all.push(text);
+    routed.allFindings.push(finding);
+    if (scope === "prd_input" || scope === "operational") {
+      routed.fatal.push(text);
+      routed.fatalFindings.push(finding);
+      routed.fatalOperational[routed.fatal.length - 1] = scope === "operational";
+    }
+    else if (scope === "inherited_predecessor") { routed.inherited.push(text); routed.inheritedFindings.push(finding); }
+    else if (retryScopes.has(scope)) { routed.retry.push(text); routed.retryFindings.push(finding); }
+    else if (shadows.has(scope)) { routed.shadow.push(text); routed.shadowFindings.push(finding); }
+    // Every remaining finding stops the phase. A missing or unrecognised scope
+    // is operational by contract, and a scope this phase cannot act on means
+    // something the candidate does not own changed underneath it. Falling
+    // through here silently left retry and fatal both empty, so the phase
+    // accepted the artifact and reported success.
+    else {
+      routed.fatal.push(`scope '${scope || "missing"}' is not actionable in this phase: ${text}`);
+      routed.fatalFindings.push(finding);
+      routed.fatalOperational[routed.fatal.length - 1] = false;
+    }
+  }
+  return routed;
+}
+
+function requireCommitted(outcome, phase) {
+  if (!outcome.publicationReceipt) throw new Error(`${phase} returned no committed publication receipt`);
+  if (!outcome.postcondition || outcome.postcondition.satisfied !== true) {
+    throw new Error(`${phase} authoritative postcondition is not satisfied`);
+  }
+}
+
+// `authored` is the number of body outcomes this run carries: acceptance,
+// skeleton, one per subject this run authored or re-authored, and the two set
+// gates. A body the frozen chain supplied and the set gates never sent back
+// has no author outcome; the two committed set-gate outcomes, whose
+// postcondition compares every task on disk to the frozen skeleton, are its
+// evidence.
+function reconcile(evidence, authored) {
+  if (!Array.isArray(evidence) || evidence.length !== authored + 4) {
+    throw new Error("Phase E evidence cardinality does not match frozen subjects");
+  }
+  for (const [index, outcome] of evidence.entries()) {
+    requireCommitted(outcome, `Phase E evidence ${index + 1}`);
+    const receiptId = outcome.publicationReceipt.call_id;
+    const recordedId = outcome.result?.data?.publicationReceipt?.call_id;
+    if (typeof receiptId !== "string" || receiptId.length === 0 || receiptId !== recordedId) {
+      throw new Error(`Phase E receipt identity mismatch at evidence ${index + 1}`);
+    }
+  }
+}
+
+function requireSubject(subject) {
+  if (!subject || typeof subject.taskId !== "string" || typeof subject.fileName !== "string") {
+    throw new Error("frozen skeleton returned a malformed host-read subject");
+  }
+}
+
+// Describe only patterns visible in the incomplete reply. Character counts
+// use Unicode code points, and empty content has no lines.
+function incompleteReplyFeedback(content) {
+  const text = typeof content === "string" ? content : "";
+  const characters = Array.from(text).length;
+  const lines = text === "" ? [] : text.split(/\r\n|\r|\n/);
+  const groups = new Map();
+  const fieldType = (value) => {
+    const field = value.trim();
+    if (field === "") return "empty";
+    if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(field)) return "number";
+    if (/^(?:true|false|null)$/i.test(field)) return field.toLowerCase();
+    return "text";
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    let key = null;
+    let kind = null;
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      try {
+        const value = JSON.parse(trimmed);
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          const fields = Object.keys(value).sort().map((name) => {
+            const item = value[name];
+            const type = item === null ? "null" : Array.isArray(item) ? "array" : typeof item;
+            return `${name}:${type}`;
+          }).join(",");
+          key = `json:${fields}`;
+          kind = "one-object-per-line JSON";
+        }
+      } catch (_) { /* A malformed line is not a JSON data row. */ }
+    }
+    if (key === null) {
+      for (const delimiter of [",", "\t"]) {
+        const fields = line.split(delimiter);
+        if (fields.length < 2) continue;
+        key = `delimited:${delimiter}:${fields.length - 1}:${fields.map(fieldType).join(":")}`;
+        kind = delimiter === "," ? "CSV" : "TSV";
+        break;
+      }
+    }
+    if (key !== null) {
+      const group = groups.get(key) || {count:0, kind};
+      group.count++;
+      groups.set(key, group);
+    }
+  }
+  let largest = null;
+  for (const group of groups.values()) if (!largest || group.count > largest.count) largest = group;
+  const size = `The provider cut off an incomplete reply of ${characters} characters across ${lines.length} lines`;
+  if (largest && largest.count > lines.length / 2) {
+    return `${size}; ${largest.count} of ${lines.length} lines share the same literal ${largest.kind} shape. Generate large or repetitive fixture data inside the check with a loop or small program, and keep only what the criterion needs.`;
+  }
+  return `${size}; return a shorter complete artifact.`;
+}
+
+
+// Where the authors read code (Issue-55). The repository root is the ONLY
+// place source paths, test names, module layout and "exists / does not exist"
+// claims are verified; projectRoot holds the PRD, the task root and .mcp.json
+// and nothing an author may cite as source. Before this the authors were told
+// to read "repository source under the project root", which was the working
+// directory: where that is not the code repository they globbed an empty
+// tree (105 live runs read the repository 0-3 times each) and wrote tasks
+// claiming that files which exist "do not exist".
+function groundingRules() {
+  return [
+    `The code repository is ${args.repositoryRoot}. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.`,
+    `${args.projectRoot} is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.`
+  ].join("\n");
+}
+
+// The observation every deliverable path must carry (Issue-56). The host lint
+// (`topology_lint/repository_observations.rs`) parses exactly this grammar and
+// checks it against the checkout, line count included: a path with no
+// observation, an inexact count, or "not observed" wording is a blocking
+// finding, so the words here and the parser there must agree.
+function observationRule() {
+  return [
+    `Every path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (\`${args.repositoryRoot}/<relative path>\` or the repository-relative path), exactly one of these three observations and nothing in their place:`,
+    "  \`<path>\` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);",
+    "  \`<path>\` — exists (directory)   for a directory;",
+    "  \`<path>\` — absent   for a path that is not in the repository.",
+    "The host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root."
+  ].join("\n");
+}
+
+// Directory names the host says are not worth reading, joined for a prompt.
+// Sourced from args so the engine's canonical list stays the single definition.
+function excludedDirs() {
+  const list = Array.isArray(args.excludedDirs) ? args.excludedDirs : [];
+  return list.length > 0 ? list.join(', ') : '.git, node_modules, target';
+}

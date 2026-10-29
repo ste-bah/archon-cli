@@ -56,20 +56,31 @@ pub enum ApiError {
     Rejected { error_type: String, message: String },
 
     /// `from_provider`: see [`crate::provider::LlmError::RateLimited`].
-    #[error("rate limited: retry after {retry_after_secs}s")]
+    #[error("rate limited: retry after {retry_after_secs}s{}", crate::provider_fault::diagnostic_suffix(.message))]
     RateLimited {
+        message: String,
         retry_after_secs: u64,
         from_provider: bool,
     },
 
-    #[error("server overloaded (529)")]
-    Overloaded { retry_after_secs: Option<u64> },
+    #[error("server overloaded (529){}", crate::provider_fault::diagnostic_suffix(.message))]
+    Overloaded {
+        message: String,
+        retry_after_secs: Option<u64>,
+    },
 
     #[error("server error ({status}): {message}")]
-    ServerError { status: u16, message: String },
+    ServerError {
+        status: u16,
+        message: String,
+        retry_after_secs: Option<u64>,
+    },
 
     #[error("serialization error: {0}")]
     SerializeError(String),
+
+    #[error("HTTP error: {0}")]
+    Transport(String),
 }
 
 /// Wire name of the `speed` knob, used as its key in the unsupported registry
@@ -356,6 +367,16 @@ pub(crate) fn classify_error(
     body: &str,
     retry_after_header: Option<&str>,
 ) -> ApiError {
+    if let crate::provider::LlmError::Rejected {
+        error_type,
+        message,
+    } = crate::provider_fault::from_status(status, &Default::default(), body.into())
+    {
+        return ApiError::Rejected {
+            error_type,
+            message,
+        };
+    }
     match status {
         401 | 403 => rejected_error(body).unwrap_or_else(|| ApiError::Rejected {
             error_type: "authentication_error".into(),
@@ -370,18 +391,25 @@ pub(crate) fn classify_error(
             ApiError::RateLimited {
                 retry_after_secs: named.unwrap_or(DEFAULT_RATE_LIMIT_WAIT_SECS),
                 from_provider: named.is_some(),
+                message: crate::provider_fault::diagnostic_message(body),
             }
         }
         529 => ApiError::Overloaded {
             retry_after_secs: retry_after_header
                 .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
+            message: crate::provider_fault::diagnostic_message(body),
         },
-        500 | 502 | 503 => ApiError::ServerError {
+        408 | 500..=599 => ApiError::ServerError {
             status,
-            message: body.to_string(),
+            message: crate::provider_fault::diagnostic_message(body),
+            retry_after_secs: retry_after_header
+                .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
         },
-        _ => rejected_error(body)
-            .unwrap_or_else(|| ApiError::HttpError(format!("HTTP {status}: {body}"))),
+        _ => rejected_error(body).unwrap_or_else(|| ApiError::ServerError {
+            status,
+            message: body.into(),
+            retry_after_secs: None,
+        }),
     }
 }
 
@@ -438,46 +466,8 @@ fn extract_retry_after(body: &str) -> Option<u64> {
 }
 
 #[cfg(test)]
-mod retry_after_tests {
-    use super::*;
-
-    fn rate_limited(header: Option<&str>, body: &str) -> (u64, bool) {
-        match classify_error(429, body, header) {
-            ApiError::RateLimited {
-                retry_after_secs,
-                from_provider,
-            } => (retry_after_secs, from_provider),
-            other => panic!("expected a rate limit, got {other:?}"),
-        }
-    }
-
-    /// Fails before the fix: an HTTP-date Retry-After was dropped silently
-    /// for a 30 s wait that then read as the provider's.
-    #[test]
-    fn a_retry_after_http_date_is_the_wait_until_that_time() {
-        let now = chrono::DateTime::parse_from_rfc2822("Wed, 21 Oct 2026 07:28:00 GMT")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        assert_eq!(
-            retry_after_from_header("Wed, 21 Oct 2026 07:30:00 GMT", now),
-            Some(120)
-        );
-        assert_eq!(
-            retry_after_from_header("Wed, 21 Oct 2026 07:00:00 GMT", now),
-            Some(0)
-        );
-        assert_eq!(retry_after_from_header(" 45 ", now), Some(45));
-        assert_eq!(retry_after_from_header("soon", now), None);
-    }
-
-    #[test]
-    fn a_rate_limit_says_whether_the_provider_named_its_wait() {
-        assert_eq!(rate_limited(Some("12"), ""), (12, true));
-        assert_eq!(rate_limited(None, r#"{"retry_after": 9}"#), (9, true));
-        assert_eq!(rate_limited(Some("soon"), "{}"), (30, false));
-        assert_eq!(rate_limited(None, "not json"), (30, false));
-    }
-}
+#[path = "anthropic_retry_after_tests.rs"]
+mod retry_after_tests;
 
 #[cfg(test)]
 #[path = "anthropic_support_overload_tests.rs"]
@@ -486,3 +476,11 @@ mod overload_tests;
 #[cfg(test)]
 #[path = "anthropic_support_rejection_tests.rs"]
 mod rejection_tests;
+
+#[cfg(test)]
+#[path = "anthropic_header_recovery_tests.rs"]
+mod header_recovery_tests;
+
+#[cfg(test)]
+#[path = "anthropic_diagnostic_redaction_tests.rs"]
+mod diagnostic_redaction_tests;

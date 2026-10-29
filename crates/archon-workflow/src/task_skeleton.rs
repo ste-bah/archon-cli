@@ -80,6 +80,8 @@ pub struct TaskSkeletonError {
     message: String,
     pub defects: Vec<crate::defect::ValidationDefect>,
     pub io_cause: Option<(std::io::ErrorKind, Option<i32>)>,
+    /// A failed read judged no content; retain its type for verification retry.
+    pub io_kind: Option<std::io::ErrorKind>,
 }
 
 impl fmt::Display for TaskSkeletonError {
@@ -410,10 +412,12 @@ fn require_blake3(algorithm: &str, file: &str) -> SkeletonResult<()> {
 
 fn read_required(path: &Path) -> SkeletonResult<Vec<u8>> {
     std::fs::read(path).map_err(|read| {
-        io_error(&read, format!(
+        let mut failure = io_error(&read, format!(
             "required task-set artifact {} could not be read: {read}; restore it or run the named freeze command",
             path.display()
-        ))
+        ));
+        failure.io_kind = Some(read.kind());
+        failure
     })
 }
 
@@ -434,6 +438,7 @@ fn invalid<T>(message: impl Into<String>) -> SkeletonResult<T> {
 fn io_error(source: &std::io::Error, message: String) -> TaskSkeletonError {
     let mut fault = error(message);
     fault.io_cause = Some((source.kind(), source.raw_os_error()));
+    fault.io_kind = Some(source.kind());
     fault
 }
 
@@ -442,6 +447,7 @@ fn error(message: impl Into<String>) -> TaskSkeletonError {
         message: message.into(),
         defects: Vec::new(),
         io_cause: None,
+        io_kind: None,
     }
 }
 

@@ -78,7 +78,7 @@ impl FixedHostCommandExecutor {
                 }
                 if let Some(error) = &mut envelope.operational_error {
                     if matches!(error.kind.as_str(), "input_invalid" | "authored_judge_reply") { return Ok(outcome); }
-                    if error.kind == fault::Class::Transient.kind() { return Err(fault::transient(error.text.clone())); }
+                    if matches!(error.kind.as_str(), "transient" | "transient_host_fault") { return Err(fault::transient(error.text.clone())); }
                     // A legacy/unknown kind is permanent; keep its sealed evidence unchanged.
                     return Ok(outcome);
                 }

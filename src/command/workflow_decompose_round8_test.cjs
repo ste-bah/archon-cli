@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const det = (code, subject, stage, text = `${code} ${subject}`) => ({ text, subject,
   remediation_scope: 'candidate_artifact',
@@ -20,8 +20,9 @@ async function author(findings, { mode = 'enforce', outcome } = {}) {
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   let calls = 0;
-  const pauses = [];
+  const pauses = [], events = [];
   const w = {
+    checkpoint: async (_id, options) => { events.push(options.task); },
     agent: async () => {
       if (++calls > 200) throw new Error('spin');
       return { status: 'accepted', stopReason: 'end_turn', content: '{}' };
@@ -36,9 +37,89 @@ async function author(findings, { mode = 'enforce', outcome } = {}) {
     result = await ctx.authorCandidate(w, { phase: 'skeleton', prompt: () => 'author',
       retryScopes: new Set(['candidate_artifact']) });
   } catch (e) { error = e.message; }
-  return { calls, pauses, error, result };
+  return { calls, pauses, events, error, result };
 }
 const range = (n, f) => Array.from({ length: Math.max(n, 0) }, (_, i) => f(i));
+
+async function changedMembershipWithoutSubsetProgressPausesAtTheExistingAttemptWindow() {
+  const sets = [
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    [1, 2, 3, 4, 5, 6],
+    [1, 7, 3, 8, 4],
+    [7, 8, 4, 6, 9],
+    [7, 8]
+  ];
+  const ctx = { args: { gateMode: 'enforce' } };
+  vm.createContext(withAuthorContext(ctx));
+  vm.runInContext(source, ctx);
+  const attempts = [], events = [];
+  const record = ctx.recordAttempt;
+  ctx.recordAttempt = (progress, ...params) => {
+    const result = record(progress, ...params);
+    attempts.push({ progress: result, stalled: progress.stalled, reason: ctx.stallReason(progress) });
+    return result;
+  };
+  let gates = 0, authors = 0;
+  await assert.rejects(ctx.authorCandidate({
+    agent: async () => { authors++; return { status: 'accepted', stopReason: 'end_turn', content: '{}' }; },
+    hostCommand: async () => ({ publicationReceipt: { call_id: `publication-${++gates}` },
+      postcondition: { satisfied: true }, gateEnvelope: { policy_findings: (sets[gates - 1] || []).map(id => ({
+        subject: `SUBJ-${String(id).padStart(2, '0')}`, text: `finding round ${gates}`,
+        remediation_scope: 'candidate_artifact'
+      })) } }),
+    checkpoint: async (_id, options) => { events.push(options.task); },
+    pause: async () => { throw new Error('existing attempt window pause'); }
+  }, { phase: 'skeleton', prompt: () => 'author', retryScopes: new Set(['candidate_artifact']) }), /existing attempt window pause/);
+  assert.deepEqual(attempts.map(step => step.progress), [true, true, false, false, false]);
+  assert.deepEqual(attempts.map(step => step.stalled), [0, 0, 1, 2, 3]);
+  assert.equal(attempts.at(-1).reason, 'no_progress', 'main requires strict subset progress');
+  assert(events.every(line => line.includes('repair rung')), 'rungs may advance within a progressing window');
+  assert.equal(authors, 5);
+}
+
+async function lowerTierRefusalsNeverEarnSubjectCountCredit() {
+  const judged = n => range(n, i => det('invalid_verifier', `SUBJ-${i + 1}`, 'contracts'));
+  for (const refusal of [det('invalid_json', 'SUBJ-01', 'parse'),
+    det('invalid_candidate_shape', 'SUBJ-01', 'shape')]) {
+    const ctx = {args:{gateMode:'enforce'}};
+    vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
+    const progress = ctx.newProgress();
+    const flags = [judged(6), [refusal], judged(5), judged(4)].map((findings, index) =>
+      ctx.recordAttempt(progress, index + 1, findings));
+    assert.deepEqual(flags, [true, false, true, true], 'a lower-tier refusal cannot earn count credit');
+  }
+  const attempts = [];
+  const ctx = {args:{gateMode:'enforce'}};
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
+  const record = ctx.recordAttempt;
+  ctx.recordAttempt = (progress, ...params) => {
+    const result = record(progress, ...params); attempts.push(result); return result;
+  };
+  let gates = 0;
+  await ctx.authorCandidate({
+    agent:async () => ({status:'accepted',stopReason:'end_turn',content:'{}'}),
+    hostCommand:async () => ({publicationReceipt:{call_id:`publication-${++gates}`}, postcondition:{satisfied:true},
+      gateEnvelope:{policy_findings:[judged(6), [det('invalid_json', 'SUBJ-01', 'parse')], judged(5), judged(4), []][gates - 1]}}),
+    checkpoint:async () => {}, pause:async () => {throw new Error('unexpected pause');}
+  }, {phase:'skeleton',prompt:() => 'author',retryScopes:new Set(['candidate_artifact'])});
+  assert.deepEqual(attempts, [true, false, true, true]);
+}
+async function lowerTierRefusalsPreserveTheJudgedSubjectFrontier() {
+  const ctx = {args:{gateMode:'enforce'}};
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
+  const progress = ctx.newProgress(), flags = [], counts = [];
+  // Equal deterministic totals keep the tier/stage/count rule neutral;
+  // only the number of distinct judged subjects can earn this credit.
+  for (const [index, subjects] of [[1,2,3,4,5,6], null, [1,2,3,4,5], [1,2,3,4]].entries()) {
+    const findings = subjects === null ? [det('invalid_json', 'SUBJ-01', 'parse')]
+      : range(6, i => det('invalid_verifier', `SUBJ-${subjects[i % subjects.length]}`, 'contracts'))
+        .map((finding, i) => ({...finding, deterministic_defect:{...finding.deterministic_defect,location:`slot-${i}`}}));
+    flags.push(ctx.recordAttempt(progress, index + 1, findings));
+    counts.push(progress.bestFailing.size);
+  }
+  assert.deepEqual(counts, [6, 6, 5, 4], 'packaging cannot replace the complete judged frontier');
+  assert.deepEqual(flags, [true, false, true, true]);
+}
 
 // Finding 2: a later-stage repair while an earlier defect remains.
 async function laterStageRepairs() {
@@ -165,7 +246,11 @@ async function pendingBodyKeepsSkeletonReauthorNote() {
   let failed = 0;
   for (const [name, test] of [['finding 2 later-stage repairs', laterStageRepairs],
     ['finding 1 ownership identities', ownership], ['finding 3 element shapes', shapes],
-    ['same-stage total must fall', sameStageTotalMustFall], ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings],
+    ['same-stage total must fall', sameStageTotalMustFall],
+    ['changed membership pauses at the existing attempt window', changedMembershipWithoutSubsetProgressPausesAtTheExistingAttemptWindow],
+    ['lower-tier refusals never earn subject count credit', lowerTierRefusalsNeverEarnSubjectCountCredit],
+    ['lower-tier refusals preserve the judged subject frontier', lowerTierRefusalsPreserveTheJudgedSubjectFrontier],
+    ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings],
     ['authored incomplete freeze judge retry', authoredFreezeJudgeReplyRetriesWithoutOperationalStrike],
     ['persistent authored judge reply pauses on no progress', persistentAuthoredFreezeJudgeReplyPausesOnNoProgress],
     ['pause keeps caller recovery', pauseKeepsCallerRecovery],

@@ -118,7 +118,9 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
                         &provider_id,
                         &resolved_model,
                         WorkflowActivityStatus::Running,
-                        &format!("stage retrying after transient provider error ({attempt}/3)"),
+                        &format!(
+                            "stage retrying after transient provider error (attempt {attempt})"
+                        ),
                     )
                     .await
                 }

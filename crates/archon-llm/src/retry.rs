@@ -49,6 +49,13 @@ use crate::runtime::{
 use crate::streaming::StreamEvent;
 
 pub use policy::{RetryDecision, RetryPolicy, classify};
+
+/// Preserve the existing provider-event classification when a durable caller
+/// consumes the stream directly instead of peeking in this decorator.
+pub fn classify_stream_failure(error_type: &str, message: &str) -> LlmError {
+    crate::provider_fault::from_stream_error(error_type, message)
+}
+
 use policy::{reason_code_for_error, stream_error_before_content};
 
 /// Whether a streaming provider error should be retried by the caller's
@@ -362,7 +369,10 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
                 }
                 Err(err) => {
                     attempt += 1;
-                    if attempt >= max || classify(&err) == RetryDecision::FailFast {
+                    if crate::provider_fault::retry_is_deferred()
+                        || attempt >= max
+                        || classify(&err) == RetryDecision::FailFast
+                    {
                         let reason = reason_code_for_error(&err);
                         self.record_runtime_event(
                             &request,
@@ -401,6 +411,19 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         );
         match self.inner.stream(request.clone()).await {
             Ok(rx) => {
+                // A successful open ends provider-attempt accounting. Waiting
+                // for first content here would hide an opened but stalled
+                // stream from the caller's no-progress clocks.
+                if crate::provider_fault::retry_is_deferred() {
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestSucceeded,
+                        ProviderRuntimeSeverity::Info,
+                        None,
+                        Some(0),
+                    );
+                    return Ok(rx);
+                }
                 // Peek only to classify pre-content provider rejection. A
                 // transient error is replayed as an event for the runner's
                 // no-progress window to own the resend decision.

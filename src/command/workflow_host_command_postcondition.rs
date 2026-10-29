@@ -21,6 +21,42 @@ pub(super) fn read_acceptance_pin(
     serde_json::from_slice(&bytes).map_err(Into::into)
 }
 
+/// A verification's negative answer is its output. Requiring the defective
+/// artifact to satisfy its freeze postcondition would discard that answer.
+/// Successful verifications and every publication retain the normal checks.
+pub(super) fn evaluate_outcome_postcondition(
+    context: &HostCommandResolutionContext,
+    command_id: &str,
+    envelope: &archon_workflow::GateEnvelopeV1,
+) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
+    let _read = crate::command::workflow_task_set::ChainRead::workflow(
+        &context.project_root,
+        &context.task_root,
+    )?;
+    evaluate_outcome_postcondition_locked(context, command_id, envelope)
+}
+
+pub(super) fn evaluate_outcome_postcondition_locked(
+    context: &HostCommandResolutionContext,
+    command_id: &str,
+    envelope: &archon_workflow::GateEnvelopeV1,
+) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
+    if matches!(
+        command_id,
+        "verify-frozen-acceptance" | "verify-frozen-skeleton"
+    ) && (envelope.operational_error.is_some() || !envelope.policy_findings.is_empty())
+    {
+        return Ok((
+            Vec::new(),
+            CommandPostconditionEvaluation {
+                satisfied: false,
+                summary: "frozen verification returned findings or verification inability".into(),
+            },
+        ));
+    }
+    evaluate_postcondition_locked(context, command_id)
+}
+
 pub(super) fn evaluate_postcondition(
     context: &HostCommandResolutionContext,
     command_id: &str,
@@ -76,6 +112,20 @@ pub(super) fn evaluate_postcondition_locked(
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
         .map_err(WorkflowError::port)?;
     if matches!(command_id, "freeze-skeleton" | "verify-frozen-skeleton") {
+        if command_id == "freeze-skeleton" {
+            // The publication is committed and this read authenticated it.
+            // Keep its recovery bytes; ownership was durably retained under
+            // the publication lock before commit and before any successor
+            // can clear the pin. Private-cache I/O cannot turn that committed
+            // publish into a failed command. A later chain inspection retries
+            // the backfill, which no longer writes predecessor ownership.
+            if let Err(error) = super::workflow_decompose_frozen_chain::skeleton_cache::backfill(
+                &context.project_root,
+                &context.task_root,
+            ) {
+                tracing::warn!(%error, "retaining frozen skeleton recovery evidence deferred");
+            }
+        }
         return Ok((
             skeleton
                 .tasks

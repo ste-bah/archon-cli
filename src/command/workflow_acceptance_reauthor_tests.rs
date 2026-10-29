@@ -8,6 +8,9 @@ use crate::command::workflow_task_set::republish::test_fixture::frozen_set_prove
 #[path = "workflow_acceptance_reauthor_tests_parsing.rs"]
 mod parsing_tests;
 
+#[path = "workflow_acceptance_reauthor_brace_tests.rs"]
+mod brace_tests;
+
 #[path = "workflow_acceptance_reauthor_fence_tests.rs"]
 mod fence_tests;
 
@@ -16,6 +19,9 @@ mod path_tests;
 
 #[path = "workflow_acceptance_reauthor_path_agreement_tests.rs"]
 mod path_agreement_tests;
+
+#[path = "workflow_acceptance_site_parity_tests.rs"]
+mod site_parity_tests;
 
 fn scope(
     set: &crate::command::workflow_task_set::republish::test_fixture::FrozenSet,

@@ -38,8 +38,11 @@ pub(super) async fn open_stream_with_retries(
 ) -> anyhow::Result<(tokio::sync::mpsc::Receiver<StreamEvent>, LlmRequest)> {
     let mut attempt_request = request;
     loop {
-        match runner.provider.stream(attempt_request.clone()).await {
+        match super::super::provider_open::open(runner, attempt_request.clone()).await {
             Ok(rx) => return Ok((rx, attempt_request)),
+            Err(error) if archon_tools::provider_recovery::enabled() && error.is_operational() => {
+                return Err(anyhow::Error::new(error));
+            }
             Err(error)
                 if crate::agent::autocompact::request_pressure_kind_for_request(
                     &error,
@@ -55,7 +58,8 @@ pub(super) async fn open_stream_with_retries(
                 )
                 .expect("guarded request pressure classification");
                 let Some(mut tier) = recovery_ladder.next(classification) else {
-                    anyhow::bail!("request pressure recovery exhausted after two bounded retries");
+                    return Err(anyhow::Error::new(error)
+                        .context("request pressure recovery exhausted after two bounded retries"));
                 };
                 attempt_request = match tier {
                     crate::agent::autocompact::RecoveryTier::FullCompaction => {
@@ -72,7 +76,7 @@ pub(super) async fn open_stream_with_retries(
                             }
                             Err(crate::agent::autocompact::CompactionError::NoSafeBoundary) => {
                                 tier = recovery_ladder.next(classification).ok_or_else(|| {
-                                    anyhow::anyhow!(
+                                    anyhow::Error::new(error).context(
                                         "request pressure recovery exhausted after two bounded retries"
                                     )
                                 })?;
@@ -87,9 +91,8 @@ pub(super) async fn open_stream_with_retries(
                                 )
                             }
                             Err(error) => {
-                                return Err(anyhow::anyhow!(
-                                    "reactive subagent compaction failed: {error}"
-                                ));
+                                return Err(anyhow::Error::new(error)
+                                    .context("reactive subagent compaction failed"));
                             }
                         }
                     }
@@ -270,7 +273,8 @@ pub(super) async fn handle_stream_error(
         crate::agent::autocompact::request_pressure_kind_for_request(&err, request)
     {
         let Some(mut tier) = recovery_ladder.next(classification) else {
-            anyhow::bail!("request pressure recovery exhausted after two bounded retries");
+            return Err(anyhow::Error::new(err)
+                .context("request pressure recovery exhausted after two bounded retries"));
         };
         // Recovery telemetry compares before/after body sizes, so both sides
         // must be measured the same way. The round's `request_body_bytes` is
@@ -301,8 +305,8 @@ pub(super) async fn handle_stream_error(
                     }
                     Err(crate::agent::autocompact::CompactionError::NoSafeBoundary) => {
                         tier = recovery_ladder.next(classification).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "request pressure recovery exhausted after two bounded retries"
+                            anyhow::Error::new(err).context(
+                                "request pressure recovery exhausted after two bounded retries",
                             )
                         })?;
                         debug_assert_eq!(
@@ -322,9 +326,8 @@ pub(super) async fn handle_stream_error(
                         );
                     }
                     Err(error) => {
-                        return Err(anyhow::anyhow!(
-                            "reactive subagent compaction failed: {error}"
-                        ));
+                        return Err(anyhow::Error::new(error)
+                            .context("reactive subagent compaction failed"));
                     }
                 }
             }

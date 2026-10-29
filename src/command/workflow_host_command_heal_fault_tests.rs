@@ -245,3 +245,36 @@ async fn host_command_binding_acquisition_preserves_transient_cause_before_admis
     assert_eq!(records(&fixture).len(), 1);
     assert!(records(&fixture)[0].result.data["publicationReceipt"].is_object());
 }
+
+#[tokio::test]
+async fn host_command_main_frozen_transient_kind_recovers_through_dispatch() {
+    let fixture = fixture(0, false);
+    *fixture.process.evaluation.lock().unwrap() = Some(
+        crate::command::workflow_gate::GateEvaluation::new("verification unavailable", Vec::new())
+            .with_operational_error("frozen input temporarily unavailable")
+            .with_operational_error_kind("transient"),
+    );
+    run(&fixture).await.unwrap();
+    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
+    assert!(records(&fixture)[0].result.data["publicationReceipt"].is_object());
+}
+
+#[test]
+fn host_command_w2_typed_transport_recovers_but_rejected_request_stays_permanent() {
+    use crate::command::workflow_host_fault::{Class, classify};
+    use archon_llm::provider::LlmError;
+    assert_eq!(
+        classify(&LlmError::Transport("connection reset".into()).into()),
+        Class::Transient,
+    );
+    assert_eq!(
+        classify(
+            &LlmError::Rejected {
+                error_type: "invalid_request".into(),
+                message: "request quotes a connection reset".into(),
+            }
+            .into()
+        ),
+        Class::Permanent,
+    );
+}

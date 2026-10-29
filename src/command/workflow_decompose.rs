@@ -37,7 +37,7 @@ pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
     include_str!("workflow_decompose_v1_acceptance.js"),
     "\n",
     include_str!("workflow_decompose_v1_set_gate.js"),
-    "\n",
+    include_str!("workflow_decompose_v1_frozen.js"),
     include_str!("workflow_decompose_v1_progress.js"),
     "\n",
     include_str!("workflow_decompose_v1_seed.js"),

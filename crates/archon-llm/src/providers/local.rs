@@ -49,10 +49,10 @@ impl LocalProvider {
         // the response body, killing any generation longer than the cap with a
         // misleading `error decoding response body` (see anthropic.rs). Bound
         // the gap between reads instead, so a slow-but-live stream survives.
-        let http = reqwest::Client::builder()
+        let http = crate::transport_http::client_builder()
             .read_timeout(Duration::from_secs(timeout_secs))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("default HTTP client configuration is valid");
 
         let provider = Self {
             base_url,
@@ -154,15 +154,11 @@ impl LocalProvider {
     /// Returns `Err` if the server is not reachable.
     pub async fn health_check(&self) -> Result<(), LlmError> {
         let url = self.health_check_url();
-        self.http.get(&url).send().await.map_err(|e| {
-            if e.is_connect() {
-                LlmError::Http(format!(
-                    "Ollama not running? Could not connect to {url}: {e}"
-                ))
-            } else {
-                LlmError::Http(e.to_string())
-            }
-        })?;
+        self.http
+            .get(&url)
+            .send()
+            .await
+            .map_err(crate::provider_fault::from_transport)?;
         Ok(())
     }
 
@@ -183,6 +179,7 @@ impl LocalProvider {
     }
 
     async fn do_stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        crate::provider_fault::begin_request();
         // Attempt to pull the model if configured and missing.
         self.maybe_pull_model().await?;
 
@@ -191,26 +188,24 @@ impl LocalProvider {
         let url = format!("{}/chat/completions", self.base_url);
         let resp = match self.http.post(&url).json(&body).send().await {
             Ok(response) => response,
+            Err(error) if error.is_timeout() && crate::provider_fault::retry_is_deferred() => {
+                return Err(crate::provider_fault::opening_timeout());
+            }
             Err(error) if error.is_timeout() => return Ok(crate::transport_idle::receiver()),
             Err(error) => {
-                return Err(LlmError::Http(format!(
-                    "local provider request failed at {}: {error}",
-                    self.base_url
-                )));
+                return Err(crate::provider_fault::from_transport(error));
             }
         };
 
+        let retry_after = crate::transport_http::response_retry_after(&resp);
+        let headers = resp.headers().clone();
         let status = resp.status().as_u16();
+        crate::provider_fault::note_response(status, retry_after);
         if status >= 400 {
-            let msg = match resp.text().await {
-                Ok(body) => body,
-                Err(error) if error.is_timeout() => return Ok(crate::transport_idle::receiver()),
-                Err(error) => {
-                    return Err(LlmError::Http(format!(
-                        "error response body failed: {error}"
-                    )));
-                }
-            };
+            let msg = resp
+                .text()
+                .await
+                .map_err(|error| crate::provider_fault::body_read_error(status, &headers, error))?;
             if let Some(err) = crate::context_window::classify_context_window_body(
                 status,
                 &msg,
@@ -219,11 +214,7 @@ impl LocalProvider {
             ) {
                 return Err(err);
             }
-            return Err(LlmError::Server {
-                status,
-                message: msg,
-                pipeline_retry_after_secs: None,
-            });
+            return Err(crate::provider_fault::from_status(status, &headers, msg));
         }
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
@@ -238,14 +229,13 @@ impl LocalProvider {
                     Ok(b) => b,
                     Err(e) => {
                         let _ = tx
-                            .send(StreamEvent::Error {
-                                error_type: if e.is_timeout() {
-                                    "transport_idle"
-                                } else {
-                                    "http_error"
+                            .send(if e.is_timeout() {
+                                StreamEvent::Error {
+                                    error_type: "transport_idle".into(),
+                                    message: e.to_string(),
                                 }
-                                .into(),
-                                message: e.to_string(),
+                            } else {
+                                crate::provider_fault::transport_event(e)
                             })
                             .await;
                         return;
@@ -390,6 +380,15 @@ impl LlmProvider for LocalProvider {
                 } => {
                     stop_reason = sr;
                 }
+                StreamEvent::Error {
+                    error_type,
+                    message,
+                } => {
+                    return Err(crate::provider_fault::from_stream_error(
+                        &error_type,
+                        &message,
+                    ));
+                }
                 _ => {}
             }
         }
@@ -462,5 +461,16 @@ impl LocalProvider {
         self.reasoning.apply(&mut body, request.effort.as_deref());
 
         body
+    }
+}
+
+#[cfg(test)]
+mod connection_recovery_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn calls_after_sleep_use_fresh_connections() {
+        let client = LocalProvider::new(String::new(), String::new(), 60, false);
+        crate::connection_tests::assert_fresh_connections(client.http).await;
     }
 }

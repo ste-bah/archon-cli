@@ -119,6 +119,7 @@ async fn a_rate_limit_is_waited_inside_the_window_and_paused_past_it() {
             retry_after_secs: secs,
             from_provider: true,
             pipeline_retry_after_secs: None,
+            message: String::new(),
         })
     };
     let mut budget = ResendBudget::new(Duration::from_secs(600));
@@ -248,6 +249,7 @@ async fn a_default_rate_limit_wait_is_not_called_the_providers() {
         retry_after_secs: 60,
         from_provider: false,
         pipeline_retry_after_secs: None,
+        message: String::new(),
     });
     let stop = budget
         .open_failed(limited, "first open could not open")

@@ -274,6 +274,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
     let expected: BTreeSet<_> = exact_criteria.keys().cloned().collect();
     let mut contract = preflight::prepare(
         project_root,
+        tasks_root,
         prd_path,
         &prd_digest,
         &prd_text,

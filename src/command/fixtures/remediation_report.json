@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "REPORT-X-001",
+  "supersedes_id": "REPORT-X-000",
+  "supersedes_digest": "digest",
+  "outcome": "needs_remediation",
+  "calls": [
+    "CALL-X-001"
+  ],
+  "subjects": [
+    {
+      "task_id": "TASK-X-001",
+      "file_name": "TASK-X-001.md",
+      "disk_digest": "digest",
+      "judged_digest": "digest",
+      "logic_version": 1,
+      "logic_digest": "digest",
+      "build": "build",
+      "verdict": "accepted",
+      "findings": []
+    }
+  ],
+  "set_gates": [],
+  "frozen_gates": [],
+  "checks": [
+    {
+      "check_id": "AC-X-001",
+      "verdict": "needs_remediation",
+      "really_ran": true,
+      "setup_failure": false,
+      "real_failure": false,
+      "sibling_paths": [],
+      "findings": [
+        "stored finding",
+        "another stored finding"
+      ]
+    }
+  ]
+}

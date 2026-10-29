@@ -32,6 +32,7 @@ pub(super) async fn generate_summary_with_usage(
         .await;
         match pass1 {
             Err(CompactionError::Cancelled) => return Err(CompactionError::Cancelled),
+            Err(error) if operational(&error) => return Err(error),
             Err(error) => {
                 tracing::warn!(%error, "compaction.two_pass: pass 1 failed, falling back to one pass");
             }
@@ -49,6 +50,7 @@ pub(super) async fn generate_summary_with_usage(
                 .await
                 {
                     Err(CompactionError::Cancelled) => return Err(CompactionError::Cancelled),
+                    Err(error) if operational(&error) => return Err(error),
                     Err(error) => {
                         tracing::warn!(%error, "compaction.two_pass: pass 2 failed, falling back to one pass");
                     }
@@ -123,7 +125,8 @@ async fn generate_summary_single_pass(
             reasoning_encrypted: None,
         };
 
-        let mut rx = match provider.stream(request).await {
+        let opened = super::provider_transport::open_summary(provider, request).await;
+        let mut rx = match opened {
             Ok(rx) => rx,
             Err(archon_llm::provider::LlmError::Aborted) => return Err(CompactionError::Cancelled),
             Err(err)
@@ -140,7 +143,11 @@ async fn generate_summary_single_pass(
         let mut response = String::new();
         let mut stop_reason: Option<String> = None;
         let mut usage = archon_llm::usage::UsageAccumulator::default();
-        while let Some(event) = rx.recv().await {
+        loop {
+            let started = tokio::time::Instant::now();
+            let Some(event) = super::provider_transport::receive_summary(&mut rx).await? else {
+                break;
+            };
             usage.record_event(&event);
             match event {
                 archon_llm::streaming::StreamEvent::TextDelta { text, .. } => {
@@ -160,6 +167,9 @@ async fn generate_summary_single_pass(
                         return Err(CompactionError::Cancelled);
                     }
                     let err = classify_stream_error(provider.name(), &error_type, &message);
+                    if err.is_operational() {
+                        archon_tools::provider_recovery::exclude_silence(started.elapsed());
+                    }
                     if err.is_context_window_exceeded()
                         && super::summary_text::trim_oldest_safe_api_round(
                             &mut context_messages,
@@ -269,4 +279,9 @@ fn serialized_summary_request_overhead(
         }
     }
     serialized_summary_request_len(&messages)
+}
+
+fn operational(error: &CompactionError) -> bool {
+    archon_tools::provider_recovery::enabled()
+        && matches!(error, CompactionError::Provider(error) if error.is_operational())
 }

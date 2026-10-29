@@ -89,7 +89,7 @@ impl FixedHostCommandExecutor {
                     }
                 }
                 let gate = gate.ok_or_else(|| WorkflowError::StateCorrupt(format!("committed receipt {} has no gate envelope; restore its authenticated publication metadata", receipt.call_id)))?;
-                let (subjects, postcondition) = crate::command::workflow_host_command_postcondition::evaluate_postcondition_locked(context, &command.command_id)?;
+                let (subjects, postcondition) = crate::command::workflow_host_command_postcondition::evaluate_outcome_postcondition_locked(context, &command.command_id, &gate)?;
                 Ok((gate, subjects, postcondition))
             })())).await;
         match observed {

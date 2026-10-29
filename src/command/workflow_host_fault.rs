@@ -156,9 +156,10 @@ pub(crate) fn classify(error: &anyhow::Error) -> Class {
             return match error {
                 // An untyped HTTP diagnostic also represents rejected requests.
                 // Only a typed availability cause authorizes another dispatch.
-                LlmError::RateLimited { .. } | LlmError::Overloaded { .. } | LlmError::Aborted => {
-                    Class::Transient
-                }
+                LlmError::RateLimited { .. }
+                | LlmError::Overloaded { .. }
+                | LlmError::Transport(_)
+                | LlmError::Aborted => Class::Transient,
                 LlmError::Server { status, .. }
                     if *status >= 500 || matches!(*status, 408 | 429) =>
                 {
@@ -308,7 +309,10 @@ pub(crate) fn io_class(error: &std::io::Error) -> Class {
     }
 }
 pub(crate) fn is_kind(value: &str) -> bool {
-    matches!(value, "transient_host_fault" | "permanent_host_fault")
+    matches!(
+        value,
+        "transient" | "permanent" | "transient_host_fault" | "permanent_host_fault"
+    )
 }
 pub(crate) fn is_finding_code(value: &str) -> bool {
     matches!(

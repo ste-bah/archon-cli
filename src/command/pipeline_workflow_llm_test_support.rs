@@ -157,3 +157,26 @@ fn an_unknown_client_does_not_claim_a_request_identity() {
     );
     assert_eq!(client.request_identity(), None);
 }
+
+/// Assemble the production adapter with the session inactivity clock used by
+/// recovery tests, without exposing a pipeline dependency through the port.
+pub(crate) fn recovery_client_for_test(
+    provider: Arc<dyn LlmProvider>,
+    root: &std::path::Path,
+    inactivity: u64,
+) -> Arc<dyn WorkflowLlmClient> {
+    let fallback = Arc::new(archon_pipeline::llm_adapter::ProviderLlmAdapter::new(
+        provider.clone(),
+    ));
+    PipelineWorkflowLlmClient::arc(Arc::new(
+        archon_pipeline::subagent_adapter::SubagentPipelineClient::with_provider(
+            fallback,
+            archon_tools::tool::ToolContext {
+                working_dir: root.into(),
+                ..Default::default()
+            },
+            provider,
+        )
+        .with_inactivity_timeout(Some(inactivity)),
+    ))
+}
