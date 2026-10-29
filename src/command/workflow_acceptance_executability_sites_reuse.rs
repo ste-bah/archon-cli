@@ -186,6 +186,25 @@ fn bounded_memo_key(
     data: &[String],
     entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
 ) -> Option<String> {
+    let (version, digest) =
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::verdict_logic()?;
+    bounded_memo_key_for(probe, tree, data, entry, (version, &digest))
+}
+
+/// [`bounded_memo_key`] under freeze-acceptance logic `(version, digest)`.
+///
+/// Issue 288: the key names the logic that judges the check (its version and
+/// pinned source digest) and the check's runtime inputs (environment and
+/// toolchain), not the binary that judged it. A redeploy that changes no
+/// freeze-acceptance logic keeps a bounded verdict. Any other check keeps
+/// the build-bound full-closure key (operator decision 2026-10-14).
+pub(super) fn bounded_memo_key_for(
+    probe: &HostProbe,
+    tree: &Baseline,
+    data: &[String],
+    entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    (logic, logic_digest): (u32, &str),
+) -> Option<String> {
     let site = match &probe.site {
         Site::Scratch(binding) => serde_json::to_string(&binding.policy).ok()?,
         Site::Direct | Site::Hermetic | Site::Unavailable(_) => "hermetic".to_string(),
@@ -203,8 +222,6 @@ fn bounded_memo_key(
     let path =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::bounded_path(command)?;
     let tree_digest = repository_tree_digest(&tree.repository, &tree.commit, path)?;
-    let (logic, logic_digest, build) =
-        crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
     let assessment = crate::command::workflow_task_set::workflow_acceptance_check_reuse::assess(
         command,
         &tree_digest,
@@ -224,7 +241,7 @@ fn bounded_memo_key(
     let key = serde_json::json!([
         check_closure_key,
         site,
-        runtime_identity(probe),
+        runtime_inputs(probe)?,
         tree.repository,
         probe.project,
         data,
@@ -235,13 +252,20 @@ fn bounded_memo_key(
         command.as_bytes(),
         logic,
         logic_digest,
-        build,
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::shell_binary_digest(
             shell_path.as_deref(),
         )?,
         environment,
     ]);
     Some(content_digest(key.to_string().as_bytes()))
+}
+
+/// The probe's runtime identity without the binary revision that leads it:
+/// the environment and toolchain a check runs with. An identity of another
+/// shape names no inputs, so the check gets no bounded key.
+fn runtime_inputs(probe: &HostProbe) -> Option<serde_json::Value> {
+    let parts = runtime_identity(probe).as_array()?;
+    (parts.len() == 3).then(|| serde_json::Value::Array(parts[1..].to_vec()))
 }
 
 /// The original freeze memo key: every check reuses only for the same site,
