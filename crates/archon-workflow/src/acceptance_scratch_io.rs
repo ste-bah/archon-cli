@@ -289,31 +289,11 @@ pub(super) fn readonly(path: &Path) -> WorkflowResult<()> {
     permissions.set_readonly(true);
     std::fs::set_permissions(path, permissions).map_err(|e| WorkflowError::io(path, e))
 }
-pub(super) fn remove_owned_tree(path: &Path) -> WorkflowResult<()> {
-    control::check()?;
-    let meta = match path.symlink_metadata() {
-        Ok(m) => m,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(WorkflowError::io(path, e)),
-    };
-    if meta.is_dir() && !meta.file_type().is_symlink() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                path,
-                std::fs::Permissions::from_mode(meta.permissions().mode() | 0o700),
-            )
-            .map_err(|e| WorkflowError::io(path, e))?;
-        }
-        for item in std::fs::read_dir(path).map_err(|e| WorkflowError::io(path, e))? {
-            remove_owned_tree(&item.map_err(|e| WorkflowError::io(path, e))?.path())?;
-        }
-        std::fs::remove_dir(path).map_err(|e| WorkflowError::io(path, e))
-    } else {
-        std::fs::remove_file(path).map_err(|e| WorkflowError::io(path, e))
-    }
-}
+#[path = "acceptance_scratch_io_remove.rs"]
+mod remove;
+pub(super) use remove::remove_owned_tree;
+#[cfg(test)]
+pub(super) use remove::tests as remove_tests;
 /// Exact byte inventory, including symbolic link targets without following them.
 pub fn inventory(root: &Path) -> WorkflowResult<BTreeMap<String, String>> {
     inventory_with(root, &mut |path, _| {

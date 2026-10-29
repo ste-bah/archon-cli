@@ -137,6 +137,18 @@ pub(super) fn poll(waiting_on: &str) -> WorkflowResult<()> {
         None => Ok(()),
     }
 }
+/// A fresh window for a wait on something outside this process: the active
+/// phase's window and cancellation, else the default. Only its owner renews
+/// it, so work this process does meanwhile (removing what a racing writer
+/// keeps adding) never extends the wait.
+pub(super) fn outside_wait() -> Control {
+    let phase = active();
+    Control {
+        window: (phase.as_ref()).map_or(Duration::from_secs(DEFAULT_WINDOW_SECS), |c| c.window),
+        last: Arc::new(Mutex::new(Instant::now())),
+        cancel: (phase.as_ref()).map_or_else(Default::default, |c| c.cancel.clone()),
+    }
+}
 pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult<String> {
     use std::{io::Read, process::Stdio};
     check()?;
@@ -183,11 +195,7 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
     // Its own renewable window: the active phase's, else the default. Never
     // a total: a long checkout that keeps working is never cut.
     let phase = active();
-    let watch = Control {
-        window: (phase.as_ref()).map_or(Duration::from_secs(DEFAULT_WINDOW_SECS), |c| c.window),
-        last: Arc::new(Mutex::new(Instant::now())),
-        cancel: (phase.as_ref()).map_or_else(Default::default, |c| c.cancel.clone()),
-    };
+    let watch = outside_wait();
     let (mut seen, mut sampled) = (0, Instant::now());
     let outcome = loop {
         let bytes = received.load(Ordering::SeqCst);
