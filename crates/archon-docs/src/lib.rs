@@ -12,6 +12,7 @@ mod cozo_retry;
 pub mod delete;
 pub mod indexing;
 mod indexing_adaptive;
+pub use indexing_adaptive::{BATCH_MAX_ENV, BATCH_MIN_ENV};
 mod indexing_cache;
 mod indexing_options;
 mod indexing_parallel;

@@ -172,7 +172,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "9328c43ef44a83d8d17a7bf0eeebae15c439ee5590c55c990aba783a9e84e15e",
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
+        sources_digest: "50e4535484f3e81eb3636c4a35dc1a113f786e39739270b4042209adb6f4b267",
         build_bound: false,
     },
     CapabilityLogic {
@@ -214,7 +215,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "9328c43ef44a83d8d17a7bf0eeebae15c439ee5590c55c990aba783a9e84e15e",
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
+        sources_digest: "50e4535484f3e81eb3636c4a35dc1a113f786e39739270b4042209adb6f4b267",
         build_bound: false,
     },
     CapabilityLogic {
@@ -284,7 +286,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide this capability's verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide this capability's verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "638226c4a9310bfed9c36a774fc6e050627e6d2f8eef0fc88854d54c07223910",
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
+        sources_digest: "7bc25581cdb2a83d8cce540a56413dc5e7ddd35dda1ecff273bb36b7df9e536d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -340,7 +343,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide topology lint verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide topology lint verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "638226c4a9310bfed9c36a774fc6e050627e6d2f8eef0fc88854d54c07223910",
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
+        sources_digest: "7bc25581cdb2a83d8cce540a56413dc5e7ddd35dda1ecff273bb36b7df9e536d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -417,7 +421,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 20: #497 W4 an authored finding in frozen acceptance verification reopens its owning author; transient inability retries in the progress window; an unsettled publish still pauses the run (Issue 338).
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "84c4805954f70af0cc8befc0bb0563521aefc056e46f35544956ecc667a58b51",
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
+        sources_digest: "6802659f86453d41128094f3566e0f33244c3ee840d558fa14ce2c925d6416b4",
         build_bound: true,
     },
     CapabilityLogic {
@@ -455,7 +460,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #497 W4 an authored finding in frozen skeleton verification reopens its owning author instead of stopping the run.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
-        sources_digest: "84c4805954f70af0cc8befc0bb0563521aefc056e46f35544956ecc667a58b51",
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
+        sources_digest: "6802659f86453d41128094f3566e0f33244c3ee840d558fa14ce2c925d6416b4",
         build_bound: true,
     },
 ];

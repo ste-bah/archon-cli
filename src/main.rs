@@ -39,7 +39,10 @@ use cli_args::Cli;
 
 fn main() -> Result<()> {
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--build-identity")) {
-        println!("{}", env!("ARCHON_BUILD_FINGERPRINT"));
+        println!(
+            "{}",
+            crate::command::workflow_host_command_logic::THIS_BUILD
+        );
         return Ok(());
     }
     // SAFETY: no runtime or application threads exist yet. A limit that

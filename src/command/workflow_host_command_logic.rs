@@ -86,6 +86,9 @@ pub(crate) const LOGIC_BUILD_STAMP: &str = "logicBuild";
 /// This binary's build fingerprint (`build.rs`): it changes with any
 /// source, manifest, toolchain or profile change.
 pub(crate) const THIS_BUILD: &str = env!("ARCHON_BUILD_FINGERPRINT");
+/// The name `build.rs` exports [`THIS_BUILD`] under. `env!` needs a literal,
+/// so a test ties this name to that literal and to `build.rs`.
+pub(crate) const BUILD_FINGERPRINT_ENV: &str = "ARCHON_BUILD_FINGERPRINT";
 
 /// The reuse-key token that carries a version above the baseline.
 pub(crate) const LOGIC_VERSION_TOKEN: &str = "CAPABILITY_LOGIC_VERSION";

@@ -286,8 +286,49 @@ fn warnings(names: BTreeSet<String>) -> Vec<String> {
     unrecognized
 }
 
+fn extra_known_env_literal_locations(text: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let source = production_tokens_at(Path::new("src/setup.rs"), text);
+    let start = source
+        .tokens
+        .windows(2)
+        .position(|tokens| {
+            word(tokens.first()) == Some("fn")
+                && word(tokens.get(1)) == Some("extra_known_env_vars")
+        })
+        .expect("extra_known_env_vars function missing");
+    let body = start
+        + source.tokens[start..]
+            .iter()
+            .position(|token| matches!(token, Tok::Punct('{')))
+            .expect("extra_known_env_vars body missing");
+    let mut depth = 1;
+    let mut end = body + 1;
+    while depth > 0 {
+        match source
+            .tokens
+            .get(end)
+            .expect("unclosed extra_known_env_vars body")
+        {
+            Tok::Punct('{') => depth += 1,
+            Tok::Punct('}') => depth -= 1,
+            _ => {}
+        }
+        end += 1;
+    }
+    owned_name_locations(&[Source {
+        path: source.path,
+        tokens: source.tokens[body..end].to_vec(),
+        lines: source.lines[body..end].to_vec(),
+    }])
+}
+
 #[test]
 fn extra_known_env_host_set_names_are_derived_from_production_sources() {
+    let literals = extra_known_env_literal_locations(include_str!("../setup.rs"));
+    assert!(
+        literals.is_empty(),
+        "extra_known_env_vars must reference production constants, found literals: {literals:#?}"
+    );
     let base = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = production_sources(base);
     let locations = owned_name_locations(&sources);
@@ -334,3 +375,24 @@ fn extra_known_env_host_set_names_are_derived_from_production_sources() {
 
 #[path = "workflow_host_environment_name_origin_tests.rs"]
 mod name_origin_tests;
+
+#[test]
+fn build_fingerprint_name_matches_the_compiled_value_and_build_script() {
+    use crate::command::workflow_host_command_logic::{BUILD_FINGERPRINT_ENV, THIS_BUILD};
+    // `env!` needs a literal: the production read site must name the
+    // constant's value, and build.rs must export the value under it.
+    let reader = include_str!("workflow_host_command_logic.rs");
+    let read_site = format!("THIS_BUILD: &str = env!(\"{BUILD_FINGERPRINT_ENV}\");");
+    assert!(
+        reader.contains(&read_site),
+        "THIS_BUILD must read env!(\"{BUILD_FINGERPRINT_ENV}\")"
+    );
+    let tokens: String = reader.split_whitespace().collect();
+    assert_eq!(tokens.matches("env!(").count(), 1, "one compile-time read");
+    assert_eq!(THIS_BUILD, env!("ARCHON_BUILD_FINGERPRINT"));
+    let script = include_str!("../../build.rs");
+    assert!(
+        script.contains(&format!("cargo:rustc-env={BUILD_FINGERPRINT_ENV}=")),
+        "build.rs must export {BUILD_FINGERPRINT_ENV}"
+    );
+}

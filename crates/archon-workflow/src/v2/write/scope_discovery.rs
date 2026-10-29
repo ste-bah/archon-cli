@@ -40,6 +40,9 @@
 //! not to necessity. The scope grant remains the backstop for the other
 //! direction — it should now fire rarely rather than routinely.
 
+/// Environment switch enabling evidence-based workflow write scope discovery.
+pub const SCOPE_DISCOVERY_ENV: &str = "ARCHON_WORKFLOW_SCOPE_DISCOVERY";
+
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -173,7 +176,7 @@ pub(super) async fn discover_write_scopes(
     // The scope it discovers is an optimisation over the declared one, never a
     // gate, so defaulting it off costs correctness nothing and keeps a new
     // dispatch out of every existing run until it is asked for.
-    if std::env::var("ARCHON_WORKFLOW_SCOPE_DISCOVERY")
+    if std::env::var(SCOPE_DISCOVERY_ENV)
         .map(|value| value.trim() != "1" && !value.trim().eq_ignore_ascii_case("true"))
         .unwrap_or(true)
     {
