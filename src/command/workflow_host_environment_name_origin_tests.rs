@@ -456,3 +456,34 @@ fn host_environment_shell_conservative_words_mutation() {
         );
     }
 }
+
+#[test]
+fn extra_known_env_host_environment_literal_mutation() {
+    for expression in [
+        r#""ARCHON_X_090""#,
+        r##"r#"ARCHON_X_090"#"##,
+        r#""\x41RCHON_X_090""#,
+        r#"concat!("ARCHON_", "X_090")"#,
+        r#"{ let name = "ARCHON_X_090"; name }"#,
+    ] {
+        let text =
+            format!("fn extra_known_env_vars() -> Vec<&'static str> {{ vec![{expression}] }}");
+        assert!(
+            extra_known_env_literal_locations(&text).contains_key("ARCHON_X_090"),
+            "{expression}"
+        );
+    }
+    assert!(
+        extra_known_env_literal_locations(
+            r#"
+        const NAME: &str = "ARCHON_X_090";
+        fn extra_known_env_vars() -> Vec<&'static str> {
+            // "ARCHON_X_090" stays documented here.
+            vec![crate::owner::NAME]
+        }
+        fn unrelated() { let name = "ARCHON_X_090"; }
+        "#
+        )
+        .is_empty()
+    );
+}

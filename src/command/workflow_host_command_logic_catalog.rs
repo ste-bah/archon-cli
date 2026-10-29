@@ -173,6 +173,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         sources_digest: "ee689aba1e57dde7d99abdc0c94ed95df7f242535ce0d6e9e9dbc59d8f09aa8d",
         build_bound: false,
     },
@@ -216,6 +217,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         sources_digest: "ee689aba1e57dde7d99abdc0c94ed95df7f242535ce0d6e9e9dbc59d8f09aa8d",
         build_bound: false,
     },
@@ -287,6 +289,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide this capability's verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         sources_digest: "e45f67a86d6f69af5e0f89f2e407cd0100eadce386ccb6efa51ba46833d56aa2",
         build_bound: false,
     },
@@ -344,6 +347,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide topology lint verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         sources_digest: "e45f67a86d6f69af5e0f89f2e407cd0100eadce386ccb6efa51ba46833d56aa2",
         build_bound: false,
     },
@@ -423,6 +427,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         sources_digest: "f6146ffce45f883dfe9fbefd7109c5e42e36b5924be82685a9d2ed87a6720452",
         build_bound: true,
     },
@@ -462,6 +467,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
+        // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         sources_digest: "f6146ffce45f883dfe9fbefd7109c5e42e36b5924be82685a9d2ed87a6720452",
         build_bound: true,
     },

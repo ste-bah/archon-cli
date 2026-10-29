@@ -1,3 +1,6 @@
+/// Environment override for the Archon credentials file path.
+pub const CREDENTIALS_FILE_ENV: &str = "ARCHON_CREDENTIALS_FILE";
+
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
@@ -207,7 +210,7 @@ pub fn credentials_path() -> PathBuf {
     // could not point it at a scratch profile -- and users had no way to move
     // the credential file at all. The `#[cfg(test)]` hook above only ever
     // helped in-process unit tests.
-    if let Some(path) = std::env::var_os("ARCHON_CREDENTIALS_FILE")
+    if let Some(path) = std::env::var_os(CREDENTIALS_FILE_ENV)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
     {

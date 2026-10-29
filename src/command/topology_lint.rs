@@ -36,7 +36,7 @@ mod fidelity_candidate_fallback;
 mod fidelity_critic;
 mod fidelity_resume;
 pub(crate) use fidelity_resume::LintIncomplete;
-mod fidelity_store;
+pub(crate) mod fidelity_store;
 mod fidelity_waivers;
 mod focused_test_files;
 mod graph_load;

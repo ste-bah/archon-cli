@@ -85,7 +85,8 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   questions, reply checks and stored verdict meaning are unchanged.
 // Typed idle recovery preserves the question, reply validation and stored verdict meaning.
 // #497 W3 merge with main and review fixes, version unchanged: the gate evaluation travels with an incomplete lint and host faults keep their typed cause; no question, verdict assertion or acceptance rule changed.
-pub const SOURCES_DIGEST: &str = "fc7bba195197c9813b1d63856c698fccaaab9fdfc76a99c47e01a1e8d1f13d05";
+// #527 re-pin only: the sources-digest env name became a named constant; no verdict meaning changed.
+pub const SOURCES_DIGEST: &str = "88fdc3f6a259b7cc4b4c2a7d0151315f8ec057d5c3268155485b95b4a42708a7";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

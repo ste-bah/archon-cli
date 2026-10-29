@@ -422,6 +422,7 @@ mod project_inputs_report;
 mod project_inputs_seed;
 mod result;
 mod scope_discovery;
+pub use scope_discovery::SCOPE_DISCOVERY_ENV;
 #[cfg(test)]
 #[path = "scope_discovery_tests.rs"]
 mod scope_discovery_tests;
