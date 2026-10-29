@@ -62,12 +62,14 @@ where
     F: FnMut(usize) -> Fut,
     Fut: Future<Output = WorkflowResult<()>>,
 {
-    let work = archon_tools::provider_recovery::scope(run_agent_retry_loop(
+    // #246: keep the retry loop on the heap before the task-local wrappers
+    // carry it through fixed-decomposition dispatch and deadline frames.
+    let work = archon_tools::provider_recovery::scope(Box::pin(run_agent_retry_loop(
         llm,
         agent_request,
         continuing,
         on_retry,
-    ));
+    )));
     if archon_tools::subagent_dispatch_clock::current_call().is_some() {
         work.await
     } else {

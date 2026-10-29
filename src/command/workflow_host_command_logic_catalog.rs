@@ -170,6 +170,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 67: #497 W3 a judge batch that stops with decided refutations returns them at once and leaves undecided checks uncached; transient host faults heal by retry instead of pausing.
         // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
         // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
+        // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         sources_digest: "717932c2137c4e541d02726661e94ec04a8d3fc716f27e21015d39d7eb84ff69",
         build_bound: false,
     },
@@ -210,6 +211,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #364 re-pin only: typed provider faults and outage backoff do not change skeleton freeze verdicts.
         // 6: #497 W4 the outgoing skeleton pin is retained under the publication lock before rebind; a stale lock or cache pair after interrupted retention is refused.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
+        // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
         sources_digest: "717932c2137c4e541d02726661e94ec04a8d3fc716f27e21015d39d7eb84ff69",
         build_bound: false,
     },
