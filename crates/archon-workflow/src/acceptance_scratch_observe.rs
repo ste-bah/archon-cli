@@ -376,7 +376,11 @@ pub async fn observe_commands_hooked(
     }
     // Before any check ran, a failed setup is safe to retry only after both
     // cleanup and the live-root audit confirm the observation left no residue.
-    let setup_error = execution.err().filter(|_| result.checks.is_empty());
+    // Invalid execution inputs (including an absent forwarded variable) are
+    // operational outcomes of the selected checks, not a failed observation.
+    let setup_error = execution.err().filter(|error| {
+        result.checks.is_empty() && !matches!(error, WorkflowError::SpecInvalid(_))
+    });
     let cleanup = match roots.as_mut() {
         Some(roots) => roots.cleanup(),
         None => Ok(()), // prepare performs its own cleanup before returning an error.

@@ -96,6 +96,11 @@ pub(crate) fn bind_request(
     let pin = read_acceptance_pin(&context)?;
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
         .map_err(|error| {
+            // An invalid predecessor cannot bind this candidate. Replay must
+            // skip it while its owning phase repairs the frozen chain.
+            if error.io_cause.is_none() {
+                return WorkflowError::SpecInvalid(error.to_string());
+            }
             crate::command::workflow_host_fault::workflow(
                 error.into(),
                 format!(
