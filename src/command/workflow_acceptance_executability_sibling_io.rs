@@ -160,7 +160,7 @@ mod tests {
         let fault = crate::command::workflow_host_fault_test_hooks::inject(
             crate::command::workflow_host_fault_test_hooks::Point::Link,
             &destination,
-            Box::new(|| Err(std::io::Error::from_raw_os_error(5))),
+            Box::new(|| Err(crate::command::workflow_host_fault_test_hooks::transient_native_io())),
         );
         let error = link_repository_copy(&target, &destination).unwrap_err();
         assert!(fault.fired());

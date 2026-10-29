@@ -11,6 +11,22 @@ pub(crate) fn fire(path: &Path) -> WorkflowResult<()> {
     Ok(())
 }
 
+/// Absolute toolchain directories in this host's own PATH syntax. On Windows
+/// `/usr/bin` names no drive, so it is not absolute and the policy refuses it;
+/// the host's own absolute PATH entries hold the POSIX tools the checks run.
+fn toolchain_path() -> String {
+    if cfg!(windows) {
+        let host = std::env::var_os("PATH").unwrap_or_default();
+        let absolute = std::env::split_paths(&host).filter(|path| path.is_absolute());
+        std::env::join_paths(absolute)
+            .expect("host PATH entries rejoin")
+            .into_string()
+            .expect("host PATH is Unicode")
+    } else {
+        "/usr/bin:/bin".into()
+    }
+}
+
 #[tokio::test]
 async fn acceptance_scratch_rebuild_preserves_native_io_and_completed_findings() {
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
@@ -32,7 +48,7 @@ async fn acceptance_scratch_rebuild_preserves_native_io_and_completed_findings()
             let policy = ScratchPolicy {
                 repository, project, task_root, scratch_parent: temp.path().join("scratch"),
                 project_inputs: vec![], project_input_excludes: vec![], combined: false,
-                toolchain_path: "/usr/bin:/bin".into(), environment: BTreeMap::new(),
+                toolchain_path: toolchain_path(), environment: BTreeMap::new(),
                 environment_allowlist: vec![], cargo_seed: None, timeout_secs: 30,
                 output_bytes: 4096, scratch_bytes: 16777216, build_cache: None,
             };
@@ -127,7 +143,7 @@ async fn host_command_scratch_setup_retains_native_io_after_verified_cleanup() {
         project_inputs: vec![],
         project_input_excludes: vec![],
         combined: false,
-        toolchain_path: "/usr/bin:/bin".into(),
+        toolchain_path: toolchain_path(),
         environment: BTreeMap::new(),
         environment_allowlist: vec![],
         cargo_seed: None,

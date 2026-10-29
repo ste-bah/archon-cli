@@ -74,3 +74,34 @@ pub(crate) fn fire(point: Point, path: &Path) -> std::io::Result<()> {
     let hook = HOOKS.lock().unwrap().remove(&(point, key(path)));
     hook.map_or(Ok(()), |hook| hook())
 }
+
+/// A native I/O error the host classifies as transient, in this platform's own
+/// error numbering. Raw 5 is `EIO` on Unix but `ERROR_ACCESS_DENIED` on
+/// Windows, a permission fault that stays permanent there as `EACCES` does on
+/// Unix; Windows reports a file another process holds open as
+/// `ERROR_SHARING_VIOLATION` (32).
+pub(crate) fn transient_native_io() -> std::io::Error {
+    std::io::Error::from_raw_os_error(if cfg!(windows) { 32 } else { 5 })
+}
+
+#[test]
+fn host_fault_native_io_codes_follow_platform_numbering() {
+    use crate::command::workflow_host_fault::{Class, io_class};
+    let raw = |code| io_class(&std::io::Error::from_raw_os_error(code));
+    assert_eq!(io_class(&transient_native_io()), Class::Transient);
+    if cfg!(windows) {
+        // ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION heal.
+        assert_eq!(raw(32), Class::Transient);
+        assert_eq!(raw(33), Class::Transient);
+        // ERROR_ACCESS_DENIED and ERROR_FILE_NOT_FOUND keep their remedy.
+        assert_eq!(raw(5), Class::Permanent);
+        assert_eq!(raw(2), Class::Permanent);
+    } else {
+        // EIO and EBUSY heal.
+        assert_eq!(raw(5), Class::Transient);
+        assert_eq!(raw(16), Class::Transient);
+        // EACCES and ENOENT keep their remedy.
+        assert_eq!(raw(13), Class::Permanent);
+        assert_eq!(raw(2), Class::Permanent);
+    }
+}

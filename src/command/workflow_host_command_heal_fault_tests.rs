@@ -230,7 +230,7 @@ async fn host_command_binding_acquisition_preserves_transient_cause_before_admis
     let fault = crate::command::workflow_host_fault_test_hooks::inject(
         crate::command::workflow_host_fault_test_hooks::Point::ChainRead,
         &context.task_root,
-        Box::new(|| Err(std::io::Error::from_raw_os_error(5))),
+        Box::new(|| Err(crate::command::workflow_host_fault_test_hooks::transient_native_io())),
     );
     let body = std::fs::read_to_string(context.task_root.join("TASK-X-001.md")).unwrap();
     let source = format!(
