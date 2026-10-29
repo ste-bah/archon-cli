@@ -474,16 +474,9 @@ pub(crate) fn sync_parent(path: &Path) -> Result<()> {
     }
 }
 
-/// Flush each distinct parent directory of `paths` once.
-pub(crate) fn sync_parents<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<()> {
-    let mut seen = std::collections::BTreeSet::new();
-    for path in paths {
-        if seen.insert(path.parent().map(Path::to_path_buf)) {
-            sync_parent(path)?;
-        }
-    }
-    Ok(())
-}
+#[path = "workflow_task_set_publish_sync_parents.rs"]
+mod sync_parents_impl;
+pub(crate) use sync_parents_impl::sync_parents;
 
 pub(super) fn sibling_transaction_path(target: &Path, transaction: &str, role: &str) -> PathBuf {
     let name = target

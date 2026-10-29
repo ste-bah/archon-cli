@@ -37,10 +37,15 @@
 //!
 //! # Policy
 //!
-//! Typed transient faults retry inside the unpublished call with backoff;
-//! permanent and unknown host faults return once with their diagnostic.
-//! Progress markers remain evidence. Confirmed teardown, staging integrity
-//! and unsettled-publication fences precede availability classification.
+//! An operational ending with a typed transient fault retries in place: the
+//! same call and input, with backoff and no total time cap. Progress markers
+//! remain evidence; neither a missing baseline nor stalled persisted progress
+//! exhausts availability recovery (#497). Each physical attempt has a fresh
+//! staging directory, so partial writes never reach the next attempt's audit.
+//! Permanent and unknown host faults return once with their diagnostic.
+//! Confirmed teardown, staging integrity and unsettled-publication fences
+//! precede availability classification. A safety or operator pause records the
+//! call as interrupted, never failed, so resume re-executes instead of reusing it.
 //! The former progress policy helpers remain available only to historical tests.
 
 //! An interrupted settlement is fenced before retry. Nothing retries

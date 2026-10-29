@@ -1,4 +1,5 @@
-//! Safe setup failures retain their typed availability cause for recovery.
+//! The run's answer when staging cannot be prepared, sealed or removed (#297
+//! round 7): safe I/O setup failures retain their typed availability cause for recovery.
 //! Unsafe residue or unconfirmed teardown leaves the run
 //! paused, never failed, and the pause names the staging path. When the call
 //! no longer owns the run (an operator paused or cancelled it, or a resume
@@ -50,9 +51,9 @@ impl StagingPause {
     }
 
     /// The call's staging, created empty under its anchor, after its residue
-    /// record. Stale staging that cannot be cleared,
-    /// pauses the run naming it. Safe residue-record I/O retains its typed
-    /// availability cause so the host can retry it before any child runs.
+    /// record. Stale staging that cannot be cleared pauses the run naming its
+    /// path. A residue record that cannot be written retains its typed I/O cause
+    /// so transient failures heal before a child runs; unsafe residue pauses.
     pub(crate) fn prepare(
         &self,
         run_root: &Path,

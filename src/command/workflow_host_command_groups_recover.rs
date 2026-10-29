@@ -51,6 +51,19 @@ pub(crate) async fn settle_before_resume(
                         .await?
                     }
                 },
+                |attempt, delay, error| {
+                    let root = run_dir
+                        .parent()
+                        .context("run directory has no store root")?;
+                    crate::command::workflow_host_retry::record_retry(
+                        &archon_workflow::WorkflowStore::new(root),
+                        run_id,
+                        &record.command_id,
+                        attempt,
+                        delay,
+                        error,
+                    )
+                },
                 |delay| {
                     crate::command::workflow_host_retry::controlled_by(&check, async move {
                         tokio::time::sleep(delay).await;

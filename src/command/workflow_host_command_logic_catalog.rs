@@ -124,7 +124,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // identity; #523 the host refutes external-program usage errors; #478 bare . and ..
         // are whole-tree inputs; #490 a pending skeleton is reported, not compared.
         // #524 the can-pass instruction names the evidence tree, not only the pre-implementation tree.
-        version: 66,
+        version: 67,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -167,9 +167,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 64: #533 a listing probe stopped before any output is a transient host fault, never an author finding; a silent scratch overrun says the host could not tell.
         // 65: #515 a re-author reply whose first entry is followed by a misplaced closing brace is refused, naming the continued field.
         // 66: #213 #466 #478 #498 #501 the acceptance site refuses only a closed list of operands that leave it (redirections, path-reading programs, cd/pushd targets, program-text file-open literals); a data heredoc for a text tool is not refused.
+        // 67: #497 W3 a judge batch that stops with decided refutations returns them at once and leaves undecided checks uncached; transient host faults heal by retry instead of pausing.
         // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
         // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
-        sources_digest: "c444be2139f825d682ed78c1173cb032479e4615fe59f3756bfad474ab843dd0",
+        sources_digest: "4b42a579d9e0f88e6f81adeaa1b02df92c26af1483cb05390ec1bf73c78e479b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -208,7 +209,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: skeleton freeze verdicts do not run the acceptance site path policy; freeze-acceptance 66 counts the change.
         // #364 re-pin only: typed provider faults and outage backoff do not change skeleton freeze verdicts.
         // 6: #497 W4 the outgoing skeleton pin is retained under the publication lock before rebind; a stale lock or cache pair after interrupted retention is refused.
-        sources_digest: "c444be2139f825d682ed78c1173cb032479e4615fe59f3756bfad474ab843dd0",
+        // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
+        sources_digest: "4b42a579d9e0f88e6f81adeaa1b02df92c26af1483cb05390ec1bf73c78e479b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -277,7 +279,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #514/#515/#527 re-pin only: the acceptance re-author reply parser does not decide this capability's verdicts.
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide this capability's verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide this capability's verdicts.
-        sources_digest: "bfdcba721617f95f4b24883ede94eb14bdd20ee673f91075ac52ff2b63cdc9d3",
+        // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
+        sources_digest: "4ae199f3ccee84a94c2c69ea22928e0615a5a79726785fca54745552e6353677",
         build_bound: false,
     },
     CapabilityLogic {
@@ -332,7 +335,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #514/#515/#527 re-pin only: the acceptance re-author reply parser does not decide topology lint verdicts.
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide topology lint verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide topology lint verdicts.
-        sources_digest: "bfdcba721617f95f4b24883ede94eb14bdd20ee673f91075ac52ff2b63cdc9d3",
+        // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
+        sources_digest: "4ae199f3ccee84a94c2c69ea22928e0615a5a79726785fca54745552e6353677",
         build_bound: false,
     },
     CapabilityLogic {
@@ -353,7 +357,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide requirement trace verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide requirement trace verdicts.
-        sources_digest: "1d815844796ea63924225b3711ea9506ce5432f9345ab6ea9da9fb0c65a2825c",
+        // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
+        sources_digest: "e200aa17683b5721645a184373c3ee5ecf1e4946faa271b9b02481241912ee7a",
         build_bound: true,
     },
     CapabilityLogic {
@@ -406,7 +411,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 19: #533 a listing probe stopped before any output is a transient host fault, never an author finding.
         // #213/#466/#478/#498/#501 re-pin only: frozen acceptance verification reads stored policy findings; it does not run the acceptance site path policy.
         // 20: #497 W4 an authored finding in frozen acceptance verification reopens its owning author; transient inability retries in the progress window; an unsettled publish still pauses the run (Issue 338).
-        sources_digest: "dbb402c6c16f49ebf1d38eaffc5a9db9ebec7c0eb2bc24fe1da3a664ecc4d87d",
+        // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
+        sources_digest: "321fa7f087e46161e53ed2a66a50a95ae1c9ae7dd798950947eb233c17bc03fc",
         build_bound: true,
     },
     CapabilityLogic {
@@ -442,7 +448,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #533 re-pin only: skeleton reverify verdicts do not run subcommand listing probes.
         // #213/#466/#478/#498/#501 re-pin only: frozen skeleton verification reads stored policy findings; it does not run the acceptance site path policy.
         // 7: #497 W4 an authored finding in frozen skeleton verification reopens its owning author instead of stopping the run.
-        sources_digest: "dbb402c6c16f49ebf1d38eaffc5a9db9ebec7c0eb2bc24fe1da3a664ecc4d87d",
+        // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
+        sources_digest: "321fa7f087e46161e53ed2a66a50a95ae1c9ae7dd798950947eb233c17bc03fc",
         build_bound: true,
     },
 ];

@@ -116,7 +116,7 @@ impl HostSecrets {
     /// Seals the call's staging. On a failure the whole tree is removed;
     /// unsafe removal or permanent I/O keeps the safety pause naming the path.
     /// A transient error returns only after safe removal, allowing recovery;
-    /// an integrity refusal keeps its error.
+    /// only an integrity refusal (a dishonest manifest) keeps its failure (#297).
     pub(crate) fn seal_staged_evidence(
         &self,
         anchor: &StagingAnchor,

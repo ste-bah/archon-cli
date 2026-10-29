@@ -140,6 +140,7 @@ async fn an_operator_pause_releases_executor_lease_without_synthetic_stage_trans
         process.clone(),
     );
 
+    // No progress no longer exhausts transient retries; an operator pause wins.
     let work = execute_under_lease(&store, &run_id, &executor);
     tokio::pin!(work);
     tokio::select! {

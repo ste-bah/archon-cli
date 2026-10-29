@@ -9,9 +9,6 @@ use super::workflow_host_command_operational::{
     PausedRunAuthorization, require_run_owned_authorized,
 };
 
-const INITIAL_DELAY: Duration = Duration::from_millis(500);
-const MAX_DELAY: Duration = Duration::from_secs(8);
-
 /// Existing ownership/control checks also authorize read-only paused reverification.
 pub(crate) type Control<'a> = (
     &'a WorkflowStore,
@@ -25,28 +22,42 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,
 {
-    retry_waiting(capability, work, |delay| wait(control, delay)).await
+    retry_waiting(
+        capability,
+        work,
+        |attempt, delay, error| {
+            record_retry(control.0, control.1, capability, attempt, delay, error)
+        },
+        |delay| wait(control, delay),
+    )
+    .await
 }
 
 /// The same backoff for recovery admission, whose existing control check
 /// permits its initial paused state while it holds the executor lease.
-pub(crate) async fn retry_waiting<T, F, Fut, W, Waiting>(
+pub(crate) async fn retry_waiting<T, F, Fut, N, W, Waiting>(
     capability: &str,
     mut work: F,
+    mut notify: N,
     mut wait: W,
 ) -> Result<T>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,
+    N: FnMut(u64, Duration, &anyhow::Error) -> Result<()>,
     W: FnMut(Duration) -> Waiting,
     Waiting: Future<Output = Result<()>>,
 {
     let mut attempt = 1u64;
-    let mut delay = INITIAL_DELAY;
     loop {
         match work().await {
             Ok(value) => return Ok(value),
             Err(error) if transient(&error) => {
+                let delay = archon_workflow::llm_retry::retry_delay(
+                    usize::try_from(attempt).unwrap_or(usize::MAX),
+                );
+                // Evidence is mandatory: a failed event write ends this loop.
+                notify(attempt, delay, &error)?;
                 tracing::warn!(
                     component = "host_command",
                     capability,
@@ -57,7 +68,6 @@ where
                 );
                 wait(delay).await?;
                 attempt = attempt.saturating_add(1);
-                delay = (delay * 2).min(MAX_DELAY);
             }
             Err(error) => {
                 return Err(error);
@@ -116,3 +126,30 @@ pub(crate) async fn controlled_by<T>(
 pub(crate) fn transient(error: &anyhow::Error) -> bool {
     super::workflow_host_fault::classify(error) == super::workflow_host_fault::Class::Transient
 }
+
+/// Every failed transient attempt is visible in the run, including its redacted cause.
+pub(crate) fn record_retry(
+    store: &WorkflowStore,
+    run_id: &str,
+    capability: &str,
+    attempt: u64,
+    delay: Duration,
+    error: &anyhow::Error,
+) -> Result<()> {
+    super::workflow_host_command_operational::emit(
+        store,
+        run_id,
+        archon_workflow::WorkflowEventKind::StageStalled,
+        serde_json::json!({
+            "event": "host_capability_retry", "capability": capability,
+            "attempt": attempt, "next_attempt": attempt.saturating_add(1),
+            "next_delay_ms": delay.as_millis() as u64,
+            "cause": archon_observability::redaction::redact_text(&format!("{error:#}")),
+        }),
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "workflow_host_retry_tests.rs"]
+mod tests;

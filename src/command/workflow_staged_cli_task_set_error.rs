@@ -7,6 +7,8 @@ pub(super) fn body_input_finding(error: &Error) -> Option<GateEvaluation> {
 }
 
 pub(crate) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
+    // Unanswered fidelity batches retain their resumable evidence. Typed transient
+    // causes heal inside the host call; permanent causes return with a remedy.
     if let Some(incomplete) = crate::command::topology_lint::LintIncomplete::caused(error) {
         eprintln!("{}", incomplete.report());
     }
@@ -67,6 +69,16 @@ mod tests {
             envelope.operational_error.unwrap().kind,
             "authored_judge_reply"
         );
+    }
+
+    #[test]
+    fn host_command_unknown_provider_failure_returns_its_permanent_diagnostic() {
+        let envelope = gate_error_evaluation(&Error::msg("provider gave no reply"))
+            .into_envelope()
+            .unwrap();
+        let error = envelope.operational_error.unwrap();
+        assert_eq!(error.kind, "permanent_host_fault");
+        assert!(error.text.contains("provider gave no reply"));
     }
 
     #[test]

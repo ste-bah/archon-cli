@@ -178,7 +178,11 @@ async fn host_command_timeouts_recover_within_one_record_and_resume_reexecutes_o
     fixture.process.mode.store(GENUINE_EXIT_1, Ordering::SeqCst);
     run_script(&fixture).await.unwrap();
     assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 4);
-    assert_eq!(record(&fixture).attempt, first.attempt + 1);
+    let rerun = record(&fixture);
+    assert_eq!(rerun.attempt, first.attempt + 1);
+    assert_ne!(rerun.result.data["interrupted"], "paused");
+    assert!(!is_reusable_status(first.status));
+    assert_eq!(rerun.result.data["exitCode"], 1);
 }
 
 #[tokio::test]

@@ -237,7 +237,7 @@ pub(super) async fn complete_reply(
                 continuing = true;
                 if let Some(partial) = partial
                     && !partial
-                        .extended(&reply, chunks, outcome.content.len())
+                        .try_extended(&reply, chunks, outcome.content.len())
                         .map_err(JudgeIncomplete::host_error)?
                 {
                     // The host could not save a usable reply: its fault.

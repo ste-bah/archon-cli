@@ -1,4 +1,8 @@
-//! One supervised physical attempt, fenced by confirmed teardown and sealed evidence.
+//! The fixed executor's answer to an operational ending (Issue #255): supervise
+//! one physical attempt with confirmed teardown and sealed evidence. The outer
+//! unpublished call retries transient faults with backoff even without growing
+//! progress (#497); control and safety fences still pause or cancel the run.
+//! The outcome contract lives in `workflow_host_command_operational`.
 use super::*;
 use crate::command::workflow_host_command_operational::{
     OperationalAttempt, OperationalReport, pause_for_unsettled_publish,
@@ -122,8 +126,11 @@ impl FixedHostCommandExecutor {
         }
     }
 
-    /// Supervise one physical attempt. Availability recovery surrounds the whole
-    /// unpublished command, while teardown and unsettled-publication fences win.
+    /// Supervise one physical attempt until it completes. A timeout or typed
+    /// transient incomplete exit returns to the outer unpublished call's backoff,
+    /// independent of progress. Control pauses record the call as interrupted so
+    /// resume runs it again. Teardown and unsettled-publication fences win over
+    /// retry; completed exits and permanent faults retain their sealed evidence.
     pub(super) async fn execute_supervised_attempt(
         &self,
         command: &ResolvedHostCommand,
@@ -260,6 +267,9 @@ impl FixedHostCommandExecutor {
             if fault.kind == crate::command::workflow_host_fault::Class::Transient.kind() {
                 let mut evidence = history[0].clone();
                 evidence.progress = observed.progress;
+                if let Some(kind) = observed.kind {
+                    evidence.reason = kind.label();
+                }
                 let attempts = [evidence];
                 let retry = OperationalReport {
                     attempts: &attempts,

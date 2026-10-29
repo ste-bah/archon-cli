@@ -105,6 +105,16 @@ async fn an_incomplete_batch_delivers_refutations_and_leaves_undecided_checks_un
     .expect("a partial refutation is already actionable");
     assert!(refuted.contains_key("AC-X-001"));
     assert!(!refuted.contains_key("AC-X-002"));
+    let deferred: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| !refuted.contains_key(&candidate.id))
+        .map(|candidate| candidate.id.clone())
+        .collect();
+    assert_eq!(
+        deferred,
+        ["AC-X-002".to_string()],
+        "a decided check is not pending"
+    );
     let saved = store
         .load("key-AC-X-001")
         .expect("the decided verdict is saved");

@@ -177,7 +177,8 @@ fn non_retryable_provider_error(error: &WorkflowError) -> bool {
     provider_error(error).is_some_and(|fault| fault.is_permanent())
 }
 
-fn retry_delay(attempt: usize) -> Duration {
+/// Shared saturating backoff after a failed attempt, numbered from one.
+pub fn retry_delay(attempt: usize) -> Duration {
     let exponent = u32::try_from(attempt.saturating_sub(1)).unwrap_or(u32::MAX);
     INITIAL_AGENT_RETRY_DELAY
         .saturating_mul(2u32.saturating_pow(exponent))

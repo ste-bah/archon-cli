@@ -119,8 +119,7 @@ pub(super) fn rooted_policy_findings(
         // availability cannot be proven here, so retain portable validation.
         return Ok(acceptance_policy_findings(contract));
     };
-    let repository = live_root::freeze_repository(project, tasks, binding.as_ref())
-        .map_err(anyhow::Error::msg)?;
+    let repository = live_root::freeze_repository_typed(project, tasks, binding.as_ref())?;
     // Configured freeze sites select their cache after capture, just as the
     // re-author's site scope does. The captured field is still unset here.
     let build_cache = binding.is_some();

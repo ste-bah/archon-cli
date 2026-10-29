@@ -245,3 +245,43 @@ async fn host_command_freeze_returns_partial_refutation_despite_remaining_judge_
         JudgeDecision::Accepted
     );
 }
+
+#[tokio::test]
+async fn host_command_freeze_repository_lock_missing_during_read_is_permanent() {
+    let (project, _outside, tasks, prd) = outside_set(ABSENT);
+    let candidate = std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
+    // A legacy set without a lock may use the project. A lock that disappears
+    // during its read must instead retain the permanent repair instruction.
+    let fault = crate::command::workflow_host_fault_test_hooks::inject(
+        crate::command::workflow_host_fault_test_hooks::Point::Repository,
+        &tasks,
+        Box::new(|| Err(std::io::Error::from(std::io::ErrorKind::NotFound))),
+    );
+    let error = prepare_acceptance_freeze_resumable(
+        project.path(),
+        &tasks,
+        &prd,
+        GateMode::Observe,
+        candidate,
+        Arc::new(EvidenceJudge::default()),
+        &FreezeResume::none(),
+    )
+    .await
+    .err()
+    .expect("missing repository lock during read must require repair");
+    assert!(fault.fired());
+    assert_eq!(
+        crate::command::workflow_host_fault::classify(&error),
+        crate::command::workflow_host_fault::Class::Permanent,
+        "{error:#}"
+    );
+    assert!(
+        matches!(error.downcast_ref::<archon_workflow::WorkflowError>(),
+            Some(archon_workflow::WorkflowError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound),
+        "{error:#}"
+    );
+    let text = format!("{error:#}");
+    let lock = archon_workflow::repository_record::repository_record_path(&tasks);
+    assert!(text.contains(&format!("restore {} as its decomposition wrote it, or remove the task set and decompose again, then re-run: the task set's repository root is unknown", lock.display())), "{text}");
+}

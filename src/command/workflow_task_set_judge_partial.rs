@@ -141,7 +141,7 @@ impl<'a> PartialReply<'a> {
     }
 
     /// Saves `reply`, now built of `chunks` chunks, and reports one unit.
-    pub(super) fn extended(
+    pub(super) fn try_extended(
         &self,
         reply: &str,
         chunks: u64,
@@ -160,6 +160,14 @@ impl<'a> PartialReply<'a> {
         }
         self.progress.saved(true);
         Ok(true)
+    }
+
+    /// Keep the original boolean test interface to successful persistence; a
+    /// write error fails the test rather than silently losing its credit.
+    #[cfg(test)]
+    fn extended(&self, reply: &str, chunks: u64, added_bytes: usize) -> bool {
+        self.try_extended(reply, chunks, added_bytes)
+            .expect("persist partial reply")
     }
 
     /// The reply is spent (judged, unusable or discarded): the next ask
