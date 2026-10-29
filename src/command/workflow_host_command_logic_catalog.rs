@@ -170,7 +170,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 67: #497 W3 a judge batch that stops with decided refutations returns them at once and leaves undecided checks uncached; transient host faults heal by retry instead of pausing.
         // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
         // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
-        sources_digest: "4b42a579d9e0f88e6f81adeaa1b02df92c26af1483cb05390ec1bf73c78e479b",
+        sources_digest: "717932c2137c4e541d02726661e94ec04a8d3fc716f27e21015d39d7eb84ff69",
         build_bound: false,
     },
     CapabilityLogic {
@@ -210,7 +210,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #364 re-pin only: typed provider faults and outage backoff do not change skeleton freeze verdicts.
         // 6: #497 W4 the outgoing skeleton pin is retained under the publication lock before rebind; a stale lock or cache pair after interrupted retention is refused.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "4b42a579d9e0f88e6f81adeaa1b02df92c26af1483cb05390ec1bf73c78e479b",
+        sources_digest: "717932c2137c4e541d02726661e94ec04a8d3fc716f27e21015d39d7eb84ff69",
         build_bound: false,
     },
     CapabilityLogic {
@@ -280,7 +280,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide this capability's verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide this capability's verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "4ae199f3ccee84a94c2c69ea22928e0615a5a79726785fca54745552e6353677",
+        sources_digest: "638226c4a9310bfed9c36a774fc6e050627e6d2f8eef0fc88854d54c07223910",
         build_bound: false,
     },
     CapabilityLogic {
@@ -336,7 +336,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: the acceptance site path policy does not decide topology lint verdicts.
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide topology lint verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "4ae199f3ccee84a94c2c69ea22928e0615a5a79726785fca54745552e6353677",
+        sources_digest: "638226c4a9310bfed9c36a774fc6e050627e6d2f8eef0fc88854d54c07223910",
         build_bound: false,
     },
     CapabilityLogic {
