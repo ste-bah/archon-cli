@@ -271,7 +271,11 @@ async fn preflight_connection_drop_is_typed() {
         let peer = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buf = [0; 8192];
-            socket.read(&mut buf).await.unwrap();
+            let n = socket.read(&mut buf).await.unwrap();
+            assert!(
+                n > 0,
+                "preflight must send request bytes before the peer drops"
+            );
         });
         let error = codex::tls_preflight::run_codex_tls_preflight_url(
             &archon_llm::transport_http::client_builder()

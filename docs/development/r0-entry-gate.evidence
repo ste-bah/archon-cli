@@ -129,7 +129,16 @@ anchor = crates/archon-llm/src/anthropic_stream.rs :: chunk = stream\.next\(\)
 # #356 split the class only: a reqwest read timeout is reported as
 # "transport_idle", every other read error still as "network"; both branches
 # send the error event and end the reader, so no read error is swallowed.
-anchor = crates/archon-llm/src/anthropic_stream.rs :: send_stream_error\(&tx, if idle \{ "transport_idle" \} else \{ "network" \}, error\)
+# W2 preserves idle events and emits other read failures through the typed
+# transport helper. Anchor both sends and the helper's error-event construction:
+# neither branch may silently swallow a failure after partial output. Anchor
+# the transport class without constraining diagnostic redaction.
+anchor = crates/archon-llm/src/anthropic_stream.rs :: send_stream_error\(&tx, "transport_idle", error\)\.await
+anchor = crates/archon-llm/src/anthropic_stream.rs :: \.send\(crate::provider_fault::native_transport_event\(error\)\)
+anchor = crates/archon-llm/src/provider_fault.rs :: ^[[:space:]]+LlmError::Transport\(
+anchor = crates/archon-llm/src/provider_fault.rs :: LlmError::Transport\(_\) => "network"
+anchor = crates/archon-llm/src/provider_fault.rs :: error_event\(from_native_transport\(error\)\)
+anchor = crates/archon-llm/src/provider_fault.rs :: crate::streaming::StreamEvent::Error \{
 absent = crates/archon-llm/src/anthropic_stream.rs :: \.text\(\)\.await
 absent = crates/archon-llm/src/anthropic_stream.rs :: unwrap_or_default
 wired = crates/archon-llm/src/anthropic.rs :: return self\.spawn_stream_reader\(response, auth_header_value\)\.await

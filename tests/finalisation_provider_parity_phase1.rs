@@ -157,6 +157,7 @@ fn phase3_subagents_and_team_use_active_provider() {
         "crates/archon-core/src/subagent/runner.rs",
         "crates/archon-core/src/subagent/runner/runtime.rs",
         "crates/archon-core/src/subagent/runner/runtime/request_round.rs",
+        "crates/archon-core/src/subagent/runner/runtime/provider_open.rs",
         "crates/archon-core/src/subagent/runner/runtime/stream_round.rs",
         "crates/archon-core/src/subagent/runner/runtime/stream_round_recovery.rs",
     ]);
@@ -180,10 +181,19 @@ fn phase3_subagents_and_team_use_active_provider() {
     // spelling: the auto-compaction refactor (v1.2.2) collapsed
     // `.provider\n  .stream(request)` onto one line, and the stream-round split
     // moved the call off `self` onto a passed-in `runner`. Accept any receiver.
+    // W2's transport-accounting split passes that field through provider_transport::open.
     assert!(
-        runner.contains(".provider.stream(") || runner.contains(".provider\n"),
+        runner.contains(".provider.stream(")
+            || runner.contains(".provider\n")
+            || runner.contains("provider_transport::open(runner.provider.as_ref(), request)"),
         "subagent runner must stream through its injected provider"
     );
+    assert!(runner.contains("provider_transport::open(runner.provider.as_ref(), request)"));
+    assert!(runner.contains("provider_open::open(runner, request.clone())"));
+    assert!(runner.contains("provider_open::open(runner, attempt_request.clone())"));
+    let transport = read("crates/archon-core/src/agent/provider_transport.rs");
+    assert!(transport.contains("provider: &dyn LlmProvider"));
+    assert!(transport.contains("provider.stream(request)"));
     assert!(runner.contains("request_origin: Some(\"subagent\".into())"));
 }
 

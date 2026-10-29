@@ -169,7 +169,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 66: #213 #466 #478 #498 #501 the acceptance site refuses only a closed list of operands that leave it (redirections, path-reading programs, cd/pushd targets, program-text file-open literals); a data heredoc for a text tool is not refused.
         // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
         // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
-        sources_digest: "c444be2139f825d682ed78c1173cb032479e4615fe59f3756bfad474ab843dd0",
+        // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
+        sources_digest: "30407ae3d680986f492b47e0c4762de65455f66302ec45b300fc0fbc3ed7356e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -208,7 +209,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: skeleton freeze verdicts do not run the acceptance site path policy; freeze-acceptance 66 counts the change.
         // #364 re-pin only: typed provider faults and outage backoff do not change skeleton freeze verdicts.
         // 6: #497 W4 the outgoing skeleton pin is retained under the publication lock before rebind; a stale lock or cache pair after interrupted retention is refused.
-        sources_digest: "c444be2139f825d682ed78c1173cb032479e4615fe59f3756bfad474ab843dd0",
+        // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
+        sources_digest: "30407ae3d680986f492b47e0c4762de65455f66302ec45b300fc0fbc3ed7356e",
         build_bound: false,
     },
     CapabilityLogic {

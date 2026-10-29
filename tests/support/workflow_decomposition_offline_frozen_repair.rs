@@ -94,6 +94,7 @@ fn pause_held(root: &Path, run_id: &str, hold: &Path, child: &mut std::process::
 }
 
 fn refresh_older_receipts(root: &Path, run_dir: &Path) {
+    let canonical_root = root.canonicalize().unwrap();
     for entry in fs::read_dir(run_dir.join("v2/results")).unwrap() {
         let path = entry.unwrap().path();
         let mut record: serde_json::Value =
@@ -112,15 +113,25 @@ fn refresh_older_receipts(root: &Path, run_dir: &Path) {
             .and_then(|r| r.get_mut("entries"))
             .and_then(serde_json::Value::as_array_mut)
         {
+            let mut refreshed = 0;
             for entry in entries {
                 let destination = Path::new(entry["destination_path"].as_str().unwrap());
-                if destination.starts_with(root.canonicalize().unwrap()) && destination.exists() {
+                // Receipts use plain forward-slash paths; Windows canonicalize
+                // returns a verbatim root. Compare their filesystem identities.
+                if archon_shell::paths::path_starts_with(destination, &canonical_root)
+                    && destination.exists()
+                {
                     let bytes = fs::read(destination).unwrap();
+                    refreshed += 1;
                     entry["byte_len"] = bytes.len().into();
                     entry["blake3"] =
                         archon_workflow::task_set_contract::content_digest(&bytes).into();
                 }
             }
+            assert!(
+                refreshed > 0,
+                "freeze-skeleton receipt must name project artifacts"
+            );
         }
         fs::write(path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
     }
