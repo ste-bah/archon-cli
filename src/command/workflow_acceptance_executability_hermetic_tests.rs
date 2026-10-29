@@ -474,5 +474,7 @@ mod sibling_tests;
 #[path = "workflow_acceptance_executability_sibling_identity_tests.rs"]
 mod sibling_identity_tests;
 
+// The heal tests drive the Unix-only probe fixtures (probe_tests, with_copy_parent).
+#[cfg(unix)]
 #[path = "workflow_acceptance_executability_hermetic_heal_tests.rs"]
 mod heal_tests;
