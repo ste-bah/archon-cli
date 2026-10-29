@@ -171,7 +171,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #364 re-pin only: typed provider faults and outage backoff change how judge calls are retried, not what any verdict rule decides.
         // #497 W4 re-pin only: retention ordering and frozen routing do not change acceptance freeze verdict rules.
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
-        sources_digest: "717932c2137c4e541d02726661e94ec04a8d3fc716f27e21015d39d7eb84ff69",
+        // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
+        sources_digest: "9328c43ef44a83d8d17a7bf0eeebae15c439ee5590c55c990aba783a9e84e15e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -212,7 +213,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #497 W4 the outgoing skeleton pin is retained under the publication lock before rebind; a stale lock or cache pair after interrupted retention is refused.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #541 re-pin only: the provider retry loop future is boxed to fit the debug stack budget; no verdict rule changed.
-        sources_digest: "717932c2137c4e541d02726661e94ec04a8d3fc716f27e21015d39d7eb84ff69",
+        // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
+        sources_digest: "9328c43ef44a83d8d17a7bf0eeebae15c439ee5590c55c990aba783a9e84e15e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -414,7 +416,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: frozen acceptance verification reads stored policy findings; it does not run the acceptance site path policy.
         // 20: #497 W4 an authored finding in frozen acceptance verification reopens its owning author; transient inability retries in the progress window; an unsettled publish still pauses the run (Issue 338).
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "321fa7f087e46161e53ed2a66a50a95ae1c9ae7dd798950947eb233c17bc03fc",
+        // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
+        sources_digest: "84c4805954f70af0cc8befc0bb0563521aefc056e46f35544956ecc667a58b51",
         build_bound: true,
     },
     CapabilityLogic {
@@ -451,7 +454,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #213/#466/#478/#498/#501 re-pin only: frozen skeleton verification reads stored policy findings; it does not run the acceptance site path policy.
         // 7: #497 W4 an authored finding in frozen skeleton verification reopens its owning author instead of stopping the run.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
-        sources_digest: "321fa7f087e46161e53ed2a66a50a95ae1c9ae7dd798950947eb233c17bc03fc",
+        // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
+        sources_digest: "84c4805954f70af0cc8befc0bb0563521aefc056e46f35544956ecc667a58b51",
         build_bound: true,
     },
 ];
