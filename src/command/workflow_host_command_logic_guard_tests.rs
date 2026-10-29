@@ -167,6 +167,30 @@ fn logic_361_every_referenced_module_is_hashed_or_denied() {
     }
 }
 
+/// Issue 288: every denylist exception sits under a denylist entry (or it
+/// would not need one), says why, and is hashed by some capability.
+#[test]
+fn logic_361_every_denylist_exception_is_hashed() {
+    use crate::command::workflow_host_command_logic_closure::LOGIC_DENYLIST_EXCEPTIONS;
+    let hashed: BTreeSet<&Path> = REPOSITORY
+        .values()
+        .flat_map(|hashed| hashed.closure.files.iter().map(PathBuf::as_path))
+        .collect();
+    for (file, reason) in LOGIC_DENYLIST_EXCEPTIONS {
+        assert!(reason.len() > 20, "{file}: an exception needs its reason");
+        assert!(
+            LOGIC_DENYLIST
+                .iter()
+                .any(|(entry, _)| entry.ends_with('/') && file.starts_with(entry)),
+            "{file}: no denylist entry covers it; remove the exception"
+        );
+        assert!(
+            hashed.contains(Path::new(file)),
+            "{file}: no capability hashes it; remove the exception"
+        );
+    }
+}
+
 /// The logic changes that landed outside round 1's hand lists now trip the
 /// guard of the capabilities whose verdicts they changed.
 #[test]

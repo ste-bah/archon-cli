@@ -2,27 +2,104 @@ use super::super::probe_tests::trees;
 use super::*;
 use archon_workflow::task_set_contract::TrustedCwd;
 
-#[test]
-fn changed_binary_environment_or_toolchain_never_reuses_a_verdict_key() {
-    let trees = trees(&[("AC-I-001", "test -f feature.txt", TrustedCwd::RepoRoot)]);
+/// A key function for check `check` in one fixture: the key under a probe
+/// whose runtime identity is `[binary revision, environment, toolchain]`.
+fn keys_for(check: &str) -> impl Fn(serde_json::Value) -> String {
+    let id = "AC-I-001";
+    let trees = trees(&[(id, check, TrustedCwd::RepoRoot)]);
+    move |identity| key_under(&trees, id, identity)
+}
+
+/// The key of check `id` of `trees` under a probe whose runtime identity is
+/// `identity`.
+fn key_under(
+    trees: &super::super::probe_tests::Trees,
+    id: &str,
+    identity: serde_json::Value,
+) -> String {
     let tree = Baseline {
         repository: trees.repo.clone(),
         commit: git_head(&trees.repo).unwrap(),
     };
-    let key = |identity| {
-        let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
-        probe.identity.set(identity).unwrap();
-        check_key(&probe, &tree, &trees.contract(), "AC-I-001").unwrap()
-    };
-    let original =
-        key(serde_json::json!(["revision", {"PATH":"/bin", "LANG":"C"}, ["rustc 1", "cargo 1"]]));
-    for identity in [
-        serde_json::json!(["other", {"PATH":"/bin", "LANG":"C"}, ["rustc 1", "cargo 1"]]),
-        serde_json::json!(["revision", {"PATH":"/bin", "LANG":"en"}, ["rustc 1", "cargo 1"]]),
-        serde_json::json!(["revision", {"PATH":"/bin", "LANG":"C"}, ["rustc 2", "cargo 1"]]),
-    ] {
-        assert_ne!(original, key(identity));
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    probe.identity.set(identity).unwrap();
+    check_key(&probe, &tree, &trees.contract(), id).unwrap()
+}
+
+// Issue 288 (cross-build reuse): replaces
+// `changed_binary_environment_or_toolchain_never_reuses_a_verdict_key`. Every
+// environment and toolchain assertion is kept; a binary revision alone no
+// longer re-keys a bounded check (see
+// `unrelated_build_change_reuses_identical_bounded_verdict`).
+#[test]
+fn changed_environment_or_toolchain_never_reuses_a_verdict_key() {
+    for check in ["test -f feature.txt", "cargo test"] {
+        let key = keys_for(check);
+        let original = key(
+            serde_json::json!(["revision", {"PATH":"/bin", "LANG":"C"}, ["rustc 1", "cargo 1"]]),
+        );
+        for identity in [
+            serde_json::json!(["revision", {"PATH":"/bin", "LANG":"en"}, ["rustc 1", "cargo 1"]]),
+            serde_json::json!(["revision", {"PATH":"/bin", "LANG":"C"}, ["rustc 2", "cargo 1"]]),
+        ] {
+            assert_ne!(original, key(identity), "{check}");
+        }
     }
+}
+
+/// Issue 288: a redeploy that changes no freeze-acceptance logic keeps the
+/// verdict of a bounded literal check. Its key names the logic version and
+/// pinned digest, not the binary that judged it.
+#[test]
+fn unrelated_build_change_reuses_identical_bounded_verdict() {
+    let keys = keys_for("test -f feature.txt");
+    let key = |revision: &str| {
+        keys(serde_json::json!([revision, {"PATH":"/bin", "LANG":"C"}, ["rustc 1", "cargo 1"]]))
+    };
+    assert_eq!(key("revision"), key("other"));
+}
+
+/// Issue 288, operator decision 2026-10-14: only bounded literal checks
+/// reuse a verdict across builds. Any other check still runs after a
+/// redeploy.
+#[test]
+fn unbounded_check_still_executes_after_redeploy() {
+    let keys = keys_for("cargo test");
+    let key = |revision: &str| {
+        keys(serde_json::json!([revision, {"PATH":"/bin", "LANG":"C"}, ["rustc 1", "cargo 1"]]))
+    };
+    assert_eq!(key("revision"), key("revision"));
+    assert_ne!(key("revision"), key("other"));
+}
+
+/// Issue 288: the bounded key binds the freeze-acceptance logic. Another
+/// version or another pinned source digest never reuses a verdict.
+#[test]
+fn freeze_logic_digest_change_invalidates_verdict() {
+    let trees = trees(&[("AC-I-004", "test -f feature.txt", TrustedCwd::RepoRoot)]);
+    let tree = Baseline {
+        repository: trees.repo.clone(),
+        commit: git_head(&trees.repo).unwrap(),
+    };
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    probe
+        .identity
+        .set(serde_json::json!(["revision", {"PATH":"/bin"}, ["rustc 1", "cargo 1"]]))
+        .unwrap();
+    let data = data_state(&probe, &tree).unwrap();
+    let contract = trees.contract();
+    let entry = contract
+        .acceptance
+        .iter()
+        .find(|entry| entry.id == "AC-I-004")
+        .unwrap();
+    let key = |version: u32, digest: &str| {
+        reuse::bounded_memo_key_for(&probe, &tree, &data, entry, (version, digest)).unwrap()
+    };
+    let original = key(7, "digest-a");
+    assert_eq!(original, key(7, "digest-a"));
+    assert_ne!(original, key(8, "digest-a"));
+    assert_ne!(original, key(7, "digest-b"));
 }
 
 #[test]

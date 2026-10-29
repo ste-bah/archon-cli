@@ -133,3 +133,66 @@ fn acceptance_freeze_reuse_logic_selected_shell_path_change_reruns() {
         "a different selected shell path must invalidate reuse"
     );
 }
+
+/// Issue 288: a bounded verdict key binds the freeze-acceptance logic version
+/// and pinned source digest instead of the build. That is sound only when the
+/// code that runs and judges such a check is in the digest's closure.
+#[test]
+fn bounded_verdict_logic_closure_covers_check_execution() {
+    use crate::command::workflow_host_command_logic::{CAPABILITY_LOGIC, LOGIC_DENYLIST};
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let logic = CAPABILITY_LOGIC
+        .iter()
+        .find(|logic| logic.id == "freeze-acceptance")
+        .expect("freeze-acceptance has a logic version");
+    let roots = logic.sources.concat();
+    let mut workspace = crate::command::workflow_host_command_logic_closure::Workspace::new(&repo);
+    let closure = workspace.closure(&roots, LOGIC_DENYLIST);
+    let hashed: std::collections::BTreeSet<String> = closure
+        .files
+        .iter()
+        .map(|file| file.to_string_lossy().replace('\\', "/"))
+        .collect();
+    let missing: Vec<_> = [
+        "src/command/workflow_acceptance_check_reuse.rs",
+        "src/command/workflow_acceptance_executability_sites.rs",
+        "src/command/workflow_acceptance_executability_sites_reuse.rs",
+        "src/command/workflow_acceptance_executability_resume.rs",
+        "src/command/workflow_acceptance_executability_hermetic.rs",
+        "crates/archon-workflow/src/acceptance_scratch_process.rs",
+        "crates/archon-workflow/src/acceptance_check_environment.rs",
+        "crates/archon-shell/src/lib.rs",
+        // Sets the resource environment of every check just before launch.
+        "crates/archon-tools/src/workflow_resource_env.rs",
+    ]
+    .into_iter()
+    .filter(|file| !hashed.contains(*file))
+    .collect();
+    assert!(
+        missing.is_empty(),
+        "freeze-acceptance logic digest does not hash {missing:?}"
+    );
+    // Everything the check process launcher reaches shapes the process
+    // (environment, argv, cwd, shell): none of it may stop at a denylist
+    // entry, or a change there would keep a bounded verdict.
+    let launcher =
+        std::path::PathBuf::from("crates/archon-workflow/src/acceptance_scratch_process.rs");
+    let denied: std::collections::BTreeSet<_> = closure.denied.values().flatten().collect();
+    let mut seen = std::collections::BTreeSet::from([launcher.clone()]);
+    let mut queue = std::collections::VecDeque::from([launcher]);
+    let mut unhashed = Vec::new();
+    while let Some(file) = queue.pop_front() {
+        for target in closure.references.get(&file).into_iter().flatten() {
+            if denied.contains(target) {
+                unhashed.push(format!("{} (from {})", target.display(), file.display()));
+            } else if closure.files.contains(target) && seen.insert(target.clone()) {
+                queue.push_back(target.clone());
+            }
+        }
+    }
+    assert!(
+        unhashed.is_empty(),
+        "the check launcher reaches code outside the freeze-acceptance digest:\n{}",
+        unhashed.join("\n")
+    );
+}
