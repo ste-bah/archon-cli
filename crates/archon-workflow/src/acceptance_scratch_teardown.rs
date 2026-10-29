@@ -43,11 +43,27 @@ impl ScratchRoots {
         }
         if self.registered {
             self.relink()?;
-            if let Err(error) = git(
-                &self.live_repository,
-                &["worktree", "remove", "--force"],
-                &[&self.repository],
-            ) {
+            // Git lists each worktree by its resolved path: this site's copy
+            // is compared by its own resolved identity, taken before git
+            // removes it (an aliased root never reads as unregistered).
+            let owned = resolved(&self.repository).ok_or_else(|| {
+                invalid(format!(
+                    "cannot resolve the owned scratch worktree {}; its registration is unverifiable",
+                    self.repository.display()
+                ))
+            })?;
+            let remove = || {
+                git(
+                    &self.live_repository,
+                    &["worktree", "remove", "--force"],
+                    &[&self.repository],
+                )
+            };
+            #[cfg(test)]
+            let removal = io::remove_tests::worktree_remove(&self.repository, remove);
+            #[cfg(not(test))]
+            let removal = remove();
+            if let Err(error) = removal {
                 let text = error.to_string();
                 let path = self.repository.to_string_lossy();
                 let check_removal = text.contains("failed to delete")
@@ -60,22 +76,30 @@ impl ScratchRoots {
                         &["worktree", "list", "--porcelain"],
                         &[],
                     ) {
-                        let expected = format!("worktree {}", self.repository.display());
-                        self.registered = listed.lines().any(|line| line == expected);
+                        self.registered = registered_in(&listed, &self.repository, &owned);
                     }
                     if !self.registered {
                         return Err(WorkflowError::ScratchSiteRemoval(text));
                     }
                 }
-                return Err(error);
+                // #534: a writer outside this host can add an entry to the
+                // copy while git deletes it. Git still unregisters the
+                // worktree; the owned removal below takes what is left.
+                let listed = git(
+                    &self.live_repository,
+                    &["worktree", "list", "--porcelain"],
+                    &[],
+                );
+                if !listed.is_ok_and(|listed| !registered_in(&listed, &self.repository, &owned)) {
+                    return Err(error);
+                }
             }
             let listed = git(
                 &self.live_repository,
                 &["worktree", "list", "--porcelain"],
                 &[],
             )?;
-            let expected = format!("worktree {}", self.repository.display());
-            if listed.lines().any(|line| line == expected) {
+            if registered_in(&listed, &self.repository, &owned) {
                 return Err(invalid(
                     "owned scratch worktree remains registered after removal",
                 ));
@@ -130,6 +154,27 @@ impl ScratchRoots {
             _ => false,
         }
     }
+}
+
+/// Where `path` resolves: its canonical spelling, or, once it is gone, its
+/// parent's canonical spelling with its name. `None` when neither resolves.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    let canonical = |path: &Path| std::fs::canonicalize(path).map(archon_shell::paths::plain);
+    if let Ok(path) = canonical(path) {
+        return Some(path);
+    }
+    Some(canonical(path.parent()?).ok()?.join(path.file_name()?))
+}
+
+/// Whether `git worktree list --porcelain` output still registers the copy
+/// at `path`, whose resolved identity is `owned`. A listed path that no
+/// longer resolves counts when it is spelled as `path`.
+fn registered_in(listed: &str, path: &Path, owned: &Path) -> bool {
+    listed
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(Path::new)
+        .any(|named| named == path || resolved(named).is_some_and(|named| named == owned))
 }
 
 impl Drop for ScratchRoots {

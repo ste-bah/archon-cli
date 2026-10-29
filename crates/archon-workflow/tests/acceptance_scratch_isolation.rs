@@ -287,3 +287,32 @@ async fn a_writer_a_check_left_cannot_reach_the_next_checks_site_without_a_build
     }
     assert_siblings_judged(&result, 0);
 }
+
+/// #534 review r3: a check that leaves a directory without any owner access
+/// in its site (`chmod 000`) does not void the site rebuild or teardown:
+/// its siblings keep their own verdicts and the site is removed.
+#[tokio::test]
+async fn a_check_leaving_a_directory_without_owner_access_keeps_sibling_verdicts() {
+    let locked = "mkdir -p \"$HOME/locked/inner\" && touch \"$HOME/locked/inner/file\" && chmod 000 \"$HOME/locked/inner\" \"$HOME/locked\" && test -f data/value";
+    let (_t, result) = observe(&[
+        (locked, "project_root"),
+        (
+            "test ! -e \"$HOME/locked\" && test -f data/value",
+            "project_root",
+        ),
+        ("test -f data/value", "project_root"),
+    ])
+    .await;
+    for index in [1, 2] {
+        let check = &result.checks[index];
+        assert_eq!(check.exit_code, Some(0), "sibling {index}: {result:?}");
+        assert!(
+            check.operational_error.is_none(),
+            "sibling {index}: {result:?}"
+        );
+    }
+    assert!(
+        result.operational_errors.is_empty() && result.teardown_verified,
+        "{result:?}"
+    );
+}
