@@ -124,7 +124,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // identity; #523 the host refutes external-program usage errors; #478 bare . and ..
         // are whole-tree inputs; #490 a pending skeleton is reported, not compared.
         // #524 the can-pass instruction names the evidence tree, not only the pre-implementation tree.
-        version: 67,
+        // 68: #534 a sibling check rebuilt after a racing writer gets a real verdict instead of
+        // host-unproven; #495 setup-path roots follow the site layout (process groups inside the
+        // scratch tree, a cached target outside it); #544 a stored result whose masked copy would
+        // decide differently is re-run, not reused.
+        version: 68,
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -175,7 +179,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
-        sources_digest: "6ed983c3c17f1e2f81de0830780165bdc25e7556975a8b2764f97dddf0416793",
+        // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
+        sources_digest: "03eb7b9bdbf2b51c61bb35f8a66f225ffb94c4ec2528aa789f2d6c54519f9a93",
         build_bound: false,
     },
     CapabilityLogic {
@@ -220,7 +225,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
-        sources_digest: "6ed983c3c17f1e2f81de0830780165bdc25e7556975a8b2764f97dddf0416793",
+        // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
+        sources_digest: "03eb7b9bdbf2b51c61bb35f8a66f225ffb94c4ec2528aa789f2d6c54519f9a93",
         build_bound: false,
     },
     CapabilityLogic {
@@ -293,7 +299,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
-        sources_digest: "fcdc5b728d1e602b62a35051504f6c49a1b2dd3919a693896e46c7f4ae1847f5",
+        // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
+        sources_digest: "d56b2cc36d08e4cf39db9023e66b697cd17a8c87c04bf2b13087fc470842cc9e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -352,7 +359,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
-        sources_digest: "fcdc5b728d1e602b62a35051504f6c49a1b2dd3919a693896e46c7f4ae1847f5",
+        // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
+        sources_digest: "d56b2cc36d08e4cf39db9023e66b697cd17a8c87c04bf2b13087fc470842cc9e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -376,7 +384,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
-        sources_digest: "c30734f7c04d512f71da4ed17ad55ca73d6d38d7c6e3d14a34c17bd9d245a463",
+        // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
+        sources_digest: "a05d0fd40221a6620f2c15797985ac1d5aa35e00487835b0152fe3ce67c99eb8",
         build_bound: true,
     },
     CapabilityLogic {
@@ -434,7 +443,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
-        sources_digest: "bc0a421eb2c4e9848c3da215661a4ab77170b9f85383884d0544a420f1a72c20",
+        // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
+        sources_digest: "be87fdb5d5367fdfc2b68576d7dd9a3b080f3e32128ee49194fe1b37b5830fa1",
         build_bound: true,
     },
     CapabilityLogic {
@@ -475,7 +485,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
-        sources_digest: "bc0a421eb2c4e9848c3da215661a4ab77170b9f85383884d0544a420f1a72c20",
+        // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
+        sources_digest: "be87fdb5d5367fdfc2b68576d7dd9a3b080f3e32128ee49194fe1b37b5830fa1",
         build_bound: true,
     },
 ];
