@@ -31,6 +31,15 @@ enum Git {
     Race,
     /// Git fails before it unregisters the worktree: it stays registered.
     Refuse,
+    /// A writer outside the host deletes the live repository's
+    /// administrative entry for the copy just before git runs (after the
+    /// host's own check): git refuses, and the copy is no longer listed.
+    AdminGone,
+    /// Git fails removing its own administrative entry (ENOTEMPTY), and a
+    /// writer then puts a link to a recreated copy at that entry's path: the
+    /// diagnostic names the entry, never the copy.
+    #[cfg(unix)]
+    AdminAliased,
 }
 
 fn fire(slot: &'static Slot, path: &Path) {
@@ -106,6 +115,28 @@ pub(crate) fn worktree_remove(
             failed()
         }
         Git::Refuse => failed(),
+        #[cfg(unix)]
+        Git::AdminAliased => {
+            let link = std::fs::read_to_string(repository.join(".git")).unwrap();
+            let admin = repository.join(link.trim_end().strip_prefix("gitdir: ").unwrap());
+            let admin = std::fs::canonicalize(admin).unwrap();
+            remove()?;
+            std::fs::create_dir_all(repository).unwrap();
+            std::fs::write(repository.join("leak"), b"x").unwrap();
+            let _ = std::fs::remove_dir_all(&admin);
+            std::fs::create_dir_all(admin.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(repository, &admin).unwrap();
+            Err(invalid(format!(
+                "scratch git command failed: error: failed to delete '{}': Directory not empty",
+                admin.display()
+            )))
+        }
+        Git::AdminGone => {
+            let link = std::fs::read_to_string(repository.join(".git")).unwrap();
+            let admin = repository.join(link.trim_end().strip_prefix("gitdir: ").unwrap());
+            std::fs::remove_dir_all(admin).unwrap();
+            remove()
+        }
     }
 }
 
@@ -288,6 +319,46 @@ fn teardown_takes_the_copy_git_left_after_a_racing_writer() {
         !git(&policy.repository, &["worktree", "list", "--porcelain"]).contains(&site),
         "the site's worktree stays unregistered"
     );
+}
+
+/// H5 (review r6): the live repository's administrative entry deleted after
+/// the host found it intact and before git reads it: git refuses ("not a
+/// working tree") and the copy is unlisted, but git never reached the copy,
+/// so the teardown is never reported verified.
+#[test]
+fn teardown_admin_entry_deleted_before_git_reads_it_is_never_verified() {
+    let (_temp, policy, commit) = git_site();
+    let mut roots = ScratchRoots::prepare(&policy, &commit).unwrap();
+    WORKTREE.set(Git::AdminGone);
+    let error = roots
+        .cleanup()
+        .expect_err("damage outside the site is never a verified teardown");
+    assert_eq!(
+        WORKTREE.get(),
+        Git::Real,
+        "teardown must reach the git removal"
+    );
+    assert!(error.to_string().contains("not a working tree"), "{error}");
+}
+
+/// Review r7: git's diagnostic names its administrative entry, which a
+/// writer turned into a link to a recreated copy: the name is compared as
+/// text with the copy's spellings taken before git ran, never resolved.
+#[cfg(unix)]
+#[test]
+fn teardown_admin_diagnostic_aliased_to_the_copy_is_never_copy_deletion() {
+    let (_temp, policy, commit) = git_site();
+    let mut roots = ScratchRoots::prepare(&policy, &commit).unwrap();
+    WORKTREE.set(Git::AdminAliased);
+    let error = roots
+        .cleanup()
+        .expect_err("an administrative-entry failure is never the copy's deletion");
+    assert_eq!(
+        WORKTREE.get(),
+        Git::Real,
+        "teardown must reach the git removal"
+    );
+    assert!(error.to_string().contains("worktrees"), "{error}");
 }
 
 /// Review P1-1: git lists the resolved path; a site reached through an
