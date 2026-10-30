@@ -45,10 +45,11 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
     extra_inputs: &[String],
     cache: &mut PrefetchSourceCache,
 ) -> Vec<serde_json::Value> {
-    resolve_named_files(criterion, roots, extra_inputs, cache)
+    resolve_named_files(criterion, roots, extra_inputs, cache, Some(*remaining))
         .into_iter()
         .map(|file| match file.bytes {
             Some(bytes) => supplied(&file.path, &bytes, remaining),
+            None if file.status == "over_budget" => over_budget(&file.path),
             None => serde_json::json!({"path": file.path, "status": file.status}),
         })
         .collect()
@@ -61,7 +62,13 @@ struct ResolvedNamedFile {
 }
 
 impl ResolvedNamedFile {
-    fn supplied(path: String, bytes: Vec<u8>) -> Self {
+    fn supplied(path: String, bytes: Vec<u8>, remaining: &mut Option<usize>) -> Self {
+        if let Some(left) = remaining {
+            if bytes.len() > *left {
+                return Self::unavailable(path, "over_budget");
+            }
+            *left -= bytes.len();
+        }
         Self {
             path,
             bytes: Some(bytes),
@@ -78,14 +85,14 @@ impl ResolvedNamedFile {
     }
 }
 
-/// Resolve paths and complete raw bytes once for both the prompt digest and
-/// the full-content judgment reuse key. The caller chooses how to render the
-/// supplied bytes (budgeted and redacted for prompts, hashed raw for reuse).
+/// Resolve prompt bodies only when they fit the remaining shared budget.
+/// Full-content judgment reuse passes no budget and hashes complete raw bytes.
 fn resolve_named_files(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
     extra_inputs: &[String],
     cache: &mut PrefetchSourceCache,
+    mut remaining: Option<usize>,
 ) -> Vec<ResolvedNamedFile> {
     let root = match &criterion.check {
         archon_workflow::task_set_contract::AcceptanceCheck::Command {
@@ -155,6 +162,22 @@ fn resolve_named_files(
                     return ResolvedNamedFile::unavailable(path_text, status);
                 };
                 let stored_path = archon_shell::paths::stored_text(&path);
+                if let Some(left) = remaining {
+                    let Some(size) =
+                        repository_regular_blob_size(&repository, commit, &stored_path)
+                    else {
+                        let status = repository_missing_status(
+                            &repository,
+                            Some(commit),
+                            &stored_path,
+                            &path,
+                        );
+                        return ResolvedNamedFile::unavailable(path_text, status);
+                    };
+                    if size > left as u64 {
+                        return ResolvedNamedFile::unavailable(path_text, "over_budget");
+                    }
+                }
                 let resolved_path = repository.join(&path);
                 let lookup = (repository.clone(), commit.to_string(), stored_path.clone());
                 let cached = cache
@@ -176,7 +199,7 @@ fn resolve_named_files(
                         repository_missing_status(&repository, Some(commit), &stored_path, &path);
                     return ResolvedNamedFile::unavailable(path_text, status);
                 };
-                return ResolvedNamedFile::supplied(path_text, content_bytes);
+                return ResolvedNamedFile::supplied(path_text, content_bytes, &mut remaining);
             } else {
                 match absolute.symlink_metadata() {
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -216,13 +239,29 @@ fn resolve_named_files(
             if !canonical.starts_with(&root) || !canonical.is_file() {
                 return ResolvedNamedFile::unavailable(path_text, "not_supplied");
             }
+            let Ok(metadata) = canonical.metadata() else {
+                return ResolvedNamedFile::unavailable(path_text, "not_supplied");
+            };
+            if remaining.is_some_and(|left| metadata.len() > left as u64) {
+                return ResolvedNamedFile::unavailable(path_text, "over_budget");
+            }
             // A file the host cannot read is reported, never dropped.
+            #[cfg(test)]
+            budget_tests::record_body_read();
             let Ok(bytes) = std::fs::read(&canonical) else {
                 return ResolvedNamedFile::unavailable(path_text, "not_supplied");
             };
-            ResolvedNamedFile::supplied(path_text, bytes)
+            ResolvedNamedFile::supplied(path_text, bytes, &mut remaining)
         })
         .collect()
+}
+
+fn over_budget(path: &str) -> serde_json::Value {
+    serde_json::json!({
+        "path": path,
+        "status": "not_supplied",
+        "detail": "[not supplied: larger than the judged-source byte limit left for this batch]"
+    })
 }
 
 /// The entry for a named file whose `bytes` the host read: supplied whole
@@ -232,11 +271,7 @@ fn resolve_named_files(
 /// spends none of the budget.
 fn supplied(path: &str, bytes: &[u8], remaining: &mut usize) -> serde_json::Value {
     if bytes.len() > *remaining {
-        return serde_json::json!({
-            "path": path,
-            "status": "not_supplied",
-            "detail": "[not supplied: larger than the judged-source byte limit left for this batch]"
-        });
+        return over_budget(path);
     }
     *remaining -= bytes.len();
     let content =
@@ -298,7 +333,7 @@ pub(in crate::command::workflow_task_set) fn named_files_content_digest(
         }
     }
     let mut cache = PrefetchSourceCache::default();
-    let files = resolve_named_files(criterion, &resolved_roots, &[], &mut cache)
+    let files = resolve_named_files(criterion, &resolved_roots, &[], &mut cache, None)
         .into_iter()
         .map(|file| match file.bytes {
             Some(bytes) => serde_json::json!({
@@ -362,6 +397,19 @@ fn normalize_named_path(path: &Path) -> Option<PathBuf> {
     (!normalized.as_os_str().is_empty()).then_some(normalized)
 }
 
+fn repository_regular_blob_size(repository: &Path, commit: &str, path: &str) -> Option<u64> {
+    let entry = repository_tree_entry(repository, commit, path)?;
+    if !(entry.starts_with(b"100644 blob ") || entry.starts_with(b"100755 blob ")) {
+        return None;
+    }
+    std::str::from_utf8(&entry)
+        .ok()?
+        .split_whitespace()
+        .nth(3)?
+        .parse()
+        .ok()
+}
+
 fn repository_regular_blob(repository: &Path, commit: &str, path: &str) -> Option<Vec<u8>> {
     let entry = repository_tree_entry(repository, commit, path)?;
     // Git regular files are blobs with mode 100644 or 100755. In particular,
@@ -369,6 +417,8 @@ fn repository_regular_blob(repository: &Path, commit: &str, path: &str) -> Optio
     if !(entry.starts_with(b"100644 blob ") || entry.starts_with(b"100755 blob ")) {
         return None;
     }
+    #[cfg(test)]
+    budget_tests::record_body_read();
     let output = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
@@ -382,7 +432,14 @@ fn repository_tree_entry(repository: &Path, commit: &str, path: &str) -> Option<
     let tree_entry = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
-        .args(["ls-tree", "-z", commit, "--", &format!(":(literal){path}")])
+        .args([
+            "ls-tree",
+            "-l",
+            "-z",
+            commit,
+            "--",
+            &format!(":(literal){path}"),
+        ])
         .output()
         .ok()?;
     if !tree_entry.status.success() {
@@ -435,3 +492,7 @@ fn project_file_is_copied(project_root: &Path, relative: &Path) -> bool {
     }
     !relative.as_os_str().is_empty()
 }
+
+#[cfg(test)]
+#[path = "workflow_task_set_judge_named_files_budget_tests.rs"]
+pub(crate) mod budget_tests;

@@ -148,7 +148,8 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   const preparation = newProgress();
   for (;;) {
     try {
-      task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order)}\n${acceptanceReplyFormat()}`;
+      task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order)}`;
+      task = namedFilesContext(task, state.entries?.get(id) || {id, criterion:text}, [text, own, ...currentAuthorFindings(prompt)], `\n${acceptanceReplyFormat()}`);
       task = await requireDispatchable(w, `acceptance-prompt-${id}`, task);
       break;
     } catch (error) {

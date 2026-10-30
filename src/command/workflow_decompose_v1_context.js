@@ -241,6 +241,33 @@ async function requireDispatchable(w, subject, task) {
   }
 }
 
+function currentAuthorFindings(prompt) {
+  const marker = "Repair these exact authoritative findings:\n- ";
+  const start = prompt.indexOf(marker);
+  if (start < 0) return [];
+  return prompt.slice(start + marker.length)
+    .split("\nEarlier attempts in this phase already triggered the following.")[0]
+    .split("\n- ");
+}
+
+// The supplied files sit before `tail` (the reply format), which stays the
+// final task section; the room for them leaves the tail's bytes free.
+function namedFilesContext(task, entry, notes, tail = "") {
+  const base = `${task}\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: `;
+  if (utf8Bytes(base) + utf8Bytes("[]") + utf8Bytes(tail) > AUTHOR_PROMPT_LIMIT) return `${task}${tail}`;
+  const room = Math.max(0, AUTHOR_PROMPT_LIMIT - utf8Bytes(base) - utf8Bytes(tail));
+  const supplied = typeof __archonNamedFiles === "function"
+    ? JSON.parse(__archonNamedFiles(JSON.stringify(entry), JSON.stringify(notes), room)) : [];
+  const files = [];
+  for (const file of supplied) {
+    let shown = file;
+    if (utf8Bytes(JSON.stringify([...files, shown])) > room) shown = {path:file.path, status:"not_supplied"};
+    if (utf8Bytes(JSON.stringify([...files, shown])) > room) break;
+    files.push(shown);
+  }
+  return `${base}${JSON.stringify(files)}${tail}`;
+}
+
 // Checkpoints use the same journal and watch path as the host's log primitive.
 async function repairEvent(w, subject, rung, cycle, call, attempts) {
   if (typeof w.checkpoint !== "function") return;

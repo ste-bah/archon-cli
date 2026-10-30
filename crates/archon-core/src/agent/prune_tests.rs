@@ -404,3 +404,43 @@ fn reclaimed_bytes_match_the_shrinkage() {
     let after = content_of(&outcome.messages, "r1").len();
     assert_eq!(outcome.bytes_reclaimed, before - after);
 }
+
+#[tokio::test]
+async fn read_guard_whole_default_and_explicit_range_survive_history_pruning() {
+    use crate::dispatch::ToolRegistry;
+    use archon_tools::tool::ToolContext;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("decision.data");
+    let body = (0..2002)
+        .map(|i| format!("row-{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&path, body).unwrap();
+    let ctx = ToolContext {
+        working_dir: dir.path().to_owned(),
+        read_result_replay_limit_bytes: archon_tools::READ_REPLAY_CONTEXT_BYTES,
+        ..Default::default()
+    };
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(archon_tools::file_read::ReadTool));
+    let whole_input = json!({"file_path":path});
+    let range_input = json!({"file_path":path,"limit":2000});
+    let whole = registry.dispatch("Read", whole_input.clone(), &ctx).await;
+    let range = registry.dispatch("Read", range_input.clone(), &ctx).await;
+    assert!(whole.content.contains("2002\trow-2001"));
+    assert!(!range.content.contains("2001\trow-2000"));
+    let messages = vec![
+        call("AC-X-001", "Read", whole_input),
+        result("AC-X-001", &whole.content),
+        call("AC-X-002", "Read", range_input),
+        result("AC-X-002", &range.content),
+    ];
+    let outcome = prune_mechanical(&messages, PruneConfig::default());
+    assert!(
+        content_of(&outcome.messages, "AC-X-001").contains("2002\trow-2001"),
+        "the whole-file tail was pruned after a bounded read"
+    );
+    assert!(!outcome.rules_fired.contains(&RULE_REPEATED_READS));
+}

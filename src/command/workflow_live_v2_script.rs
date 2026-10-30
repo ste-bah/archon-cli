@@ -24,6 +24,8 @@ use tokio::sync::Mutex;
 use super::WorkflowV2ScriptRuntime;
 #[path = "workflow_live_v2_script_config.rs"]
 mod config;
+#[path = "workflow_author_named_files.rs"]
+mod named_files;
 use super::execute_v2_live_call;
 use super::workflow_live_v2_client::LiveV2AgentClient;
 use archon_workflow::poll_v2_run_control;
@@ -270,6 +272,7 @@ impl WorkflowV2ScriptRunner {
         let js_result = context
             .async_with(async move |ctx| {
                 crate::command::workflow::install_entry_validator(&ctx)?;
+                named_files::install(&ctx, script_args.as_ref())?;
                 archon_workflow::v2::script::author_context::install_for_run(&ctx, &run_dir)?;
                 ctx.globals().set(
                     "__archonHost",

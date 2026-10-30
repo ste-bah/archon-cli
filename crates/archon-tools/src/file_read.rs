@@ -88,7 +88,7 @@ impl Tool for ReadTool {
             .map(|v| v as usize)
             .unwrap_or(2000);
 
-        let end = offset.saturating_add(limit).min(lines.len());
+        let mut end = offset.saturating_add(limit).min(lines.len());
         if offset >= lines.len() {
             return ToolResult::error(format!(
                 "Offset {offset} is beyond file length ({} lines)",
@@ -96,12 +96,37 @@ impl Tool for ReadTool {
             ));
         }
 
-        let numbered: String = lines[offset..end]
-            .iter()
-            .enumerate()
-            .map(|(i, line)| format!("{}\t{}", offset + i + 1, line))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let number = |end| {
+            lines[offset..end]
+                .iter()
+                .enumerate()
+                .map(|(i, line)| format!("{}\t{}", offset + i + 1, line))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let mut numbered = number(end);
+        let note = ctx
+            .workflow_read_guard
+            .as_ref()
+            .and_then(|guard| guard.result_note_for(ctx, "Read", &input));
+        if offset == 0
+            && input.get("limit").is_none()
+            && end < lines.len()
+            && text.len()
+                <= crate::workflow_read_guard::effective_replay_limit(
+                    ctx.read_result_replay_limit_bytes,
+                )
+        {
+            let whole = number(lines.len());
+            if crate::workflow_read_guard::result_fits_replay(
+                &whole,
+                ctx.read_result_replay_limit_bytes,
+                note.as_deref(),
+            ) {
+                end = lines.len();
+                numbered = whole;
+            }
+        }
 
         if let Some(guard) = &ctx.workflow_read_guard {
             match guard.read_result(
@@ -112,7 +137,7 @@ impl Tool for ReadTool {
                 end - offset,
                 numbered.as_bytes(),
                 ctx.read_result_replay_limit_bytes,
-                guard.result_note_for(ctx, "Read", &input).as_deref(),
+                note.as_deref(),
                 input
                     .get("force_refresh")
                     .and_then(|v| v.as_bool())
