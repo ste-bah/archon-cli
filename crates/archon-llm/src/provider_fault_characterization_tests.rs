@@ -10,7 +10,7 @@ include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/characterization/classifier_characterization_variants.rs"
 ));
-#[path = "provider_fault_characterization_reference.rs"]
+#[path = "provider_fault_characterization_reference_tests.rs"]
 mod main_reference;
 // Adapt legacy test-only types; every reference function body stays unchanged.
 fn check_pressure_variant(

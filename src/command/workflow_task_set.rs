@@ -46,6 +46,49 @@ pub(crate) mod passability;
 mod preflight;
 use judge::{gate_stamp, predecessor_findings};
 
+/// Issue 495: the site path rule the first author and every publication
+/// apply, held to a contract already published. Each refused check id maps
+/// to the rule's own finding text.
+pub(crate) fn site_path_refusals(
+    contract: &AcceptanceContract,
+    project_root: &Path,
+    tasks_root: &Path,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut refusals = std::collections::BTreeMap::<String, String>::new();
+    for finding in preflight::rooted_policy_findings(contract, project_root, tasks_root)? {
+        if !finding
+            .identity
+            .as_ref()
+            .is_some_and(|identity| identity.code == "unavailable_site_path")
+        {
+            continue;
+        }
+        let id = finding
+            .field
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        refusals
+            .entry(id)
+            .and_modify(|text| {
+                text.push_str("; ");
+                text.push_str(&finding.message);
+            })
+            .or_insert(finding.message);
+    }
+    Ok(refusals)
+}
+
+pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
+    let canonical = tasks_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| tasks_root.to_path_buf());
+    let key = content_digest(canonical.to_string_lossy().as_bytes());
+    archon_workflow::task_set_lineage::pin_store_dir(project_root).join(format!("{key}.json"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FreezeAcceptanceResult {
     pub(crate) acceptance_digest: String,
@@ -104,25 +147,6 @@ pub(crate) use crate::command::workflow_task_set_candidate::CandidateRejected;
 pub(crate) use enforce::{freeze_acceptance, freeze_skeleton};
 pub(crate) use prd::{script_arguments_with_prd_requirement_texts, validate_prd_input};
 
-#[cfg(test)]
-pub(crate) async fn prepare_acceptance_freeze(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    mode: GateMode,
-    client: Arc<dyn WorkflowLlmClient>,
-) -> Result<PreparedAcceptanceFreeze> {
-    prepare_acceptance_freeze_with_limits(
-        project_root,
-        tasks_root,
-        prd_path,
-        mode,
-        client,
-        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
-    )
-    .await
-}
-
 pub(crate) async fn prepare_acceptance_freeze_with_limits(
     project_root: &Path,
     tasks_root: &Path,
@@ -142,28 +166,6 @@ pub(crate) async fn prepare_acceptance_freeze_with_limits(
         candidate,
         client,
         resource_limits,
-    )
-    .await
-}
-
-/// The unstaged freeze of a candidate: unlimited, nothing saved.
-#[cfg(test)]
-pub(crate) async fn prepare_acceptance_freeze_from_candidate(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    mode: GateMode,
-    candidate: Vec<u8>,
-    client: Arc<dyn WorkflowLlmClient>,
-) -> Result<PreparedAcceptanceFreeze> {
-    prepare_acceptance_freeze_from_candidate_with_limits(
-        project_root,
-        tasks_root,
-        prd_path,
-        mode,
-        candidate,
-        client,
-        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
 }
@@ -217,29 +219,6 @@ fn resumable(
         }
         _ => error,
     }
-}
-
-#[cfg(test)]
-pub(crate) async fn prepare_acceptance_freeze_resumable(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    mode: GateMode,
-    candidate: Vec<u8>,
-    client: Arc<dyn WorkflowLlmClient>,
-    resume: &crate::command::workflow_freeze_budget::FreezeResume,
-) -> Result<PreparedAcceptanceFreeze> {
-    prepare_acceptance_freeze_resumable_with_limits(
-        project_root,
-        tasks_root,
-        prd_path,
-        mode,
-        candidate,
-        client,
-        resume,
-        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
-    )
-    .await
 }
 
 pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
@@ -482,4 +461,11 @@ mod read_race_tests;
 #[path = "workflow_task_set_site_paths.rs"]
 mod site_paths;
 use site_paths::project_relative;
-pub(crate) use site_paths::{acceptance_pin_path, site_path_refusals};
+#[cfg(test)]
+#[path = "workflow_task_set_test_wrappers.rs"]
+mod test_wrappers;
+#[cfg(test)]
+pub(crate) use test_wrappers::{
+    prepare_acceptance_freeze, prepare_acceptance_freeze_from_candidate,
+    prepare_acceptance_freeze_resumable,
+};

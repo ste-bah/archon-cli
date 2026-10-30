@@ -130,183 +130,206 @@ pub struct RetryProvider<P: LlmProvider + ?Sized> {
     supervisor: Option<Arc<Mutex<ProviderRuntimeSupervisor>>>,
 }
 
-impl<P: LlmProvider + ?Sized> RetryProvider<P> {
-    pub fn new(inner: Arc<P>, policy: RetryPolicy) -> Self {
-        Self {
-            inner,
-            policy,
-            supervisor: None,
-        }
+#[async_trait]
+impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
+    fn name(&self) -> &str {
+        self.inner.name()
     }
 
-    pub fn new_with_supervisor(
-        inner: Arc<P>,
-        policy: RetryPolicy,
-        supervisor: Arc<Mutex<ProviderRuntimeSupervisor>>,
-    ) -> Self {
-        Self {
-            inner,
-            policy,
-            supervisor: Some(supervisor),
-        }
+    fn models(&self) -> Vec<ModelInfo> {
+        self.inner.models()
     }
 
-    /// Expose the policy for telemetry/introspection.
-    pub fn policy(&self) -> &RetryPolicy {
-        &self.policy
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.inner.request_identity(request)
     }
 
-    /// Expose the wrapped provider.
-    pub fn inner(&self) -> &Arc<P> {
-        &self.inner
+    fn supports_temperature(&self) -> bool {
+        self.inner.supports_temperature()
     }
 
-    pub fn supervisor(&self) -> Option<Arc<Mutex<ProviderRuntimeSupervisor>>> {
-        self.supervisor.as_ref().map(Arc::clone)
+    fn supports_feature(&self, feature: ProviderFeature) -> bool {
+        self.inner.supports_feature(feature)
     }
 
-    /// Peek at a freshly opened stream until it either produces content or
-    /// fails.
-    ///
-    /// Everything consumed while peeking is replayed into a new channel ahead
-    /// of the rest of the stream, so the caller sees an identical sequence —
-    /// peeking must not cost the consumer the opening events.
-    ///
-    /// "Content" means anything the consumer can act on. Bookkeeping events
-    /// (MessageStart, ContentBlockStart) do not count: a stream that announces
-    /// a block and then dies has still produced nothing, and is the exact case
-    /// worth retrying.
-    async fn drain_until_content_or_error(mut rx: Receiver<StreamEvent>) -> StreamProbe {
-        let mut buffered: Vec<StreamEvent> = Vec::new();
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        self.inner.data_flow_classification()
+    }
+
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        self.inner.compaction_provider_family()
+    }
+
+    fn compaction_policy(&self) -> crate::compaction_policy::CompactionPolicy {
+        self.inner.compaction_policy()
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        self.inner.resolve_alias(alias)
+    }
+
+    fn resolve_request_model(&self, request: &mut LlmRequest) {
+        self.inner.resolve_request_model(request)
+    }
+
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        self.inner.cache_strategy(model)
+    }
+
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        self.inner.cache_platform()
+    }
+
+    fn as_anthropic(&self) -> Option<&AnthropicClient> {
+        self.inner.as_anthropic()
+    }
+
+    async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        self.record_runtime_event(
+            &request,
+            ProviderRuntimeEventType::RequestStarted,
+            ProviderRuntimeSeverity::Debug,
+            None,
+            None,
+        );
+        let max = self.policy.max_attempts.max(1);
+        let mut attempt: u32 = 0;
         loop {
-            match rx.recv().await {
-                Some(StreamEvent::Error {
-                    error_type,
-                    message,
-                }) if buffered.iter().all(|event| !Self::is_content(event)) => {
-                    return StreamProbe::FailedBeforeContent {
+            match self.inner.complete(request.clone()).await {
+                Ok(resp) => {
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestSucceeded,
+                        ProviderRuntimeSeverity::Info,
+                        None,
+                        Some(attempt),
+                    );
+                    return Ok(resp);
+                }
+                Err(err) => {
+                    attempt += 1;
+                    if crate::provider_fault::retry_is_deferred()
+                        || attempt >= max
+                        || classify(&err) == RetryDecision::FailFast
+                    {
+                        let reason = reason_code_for_error(&err);
+                        self.record_runtime_event(
+                            &request,
+                            ProviderRuntimeEventType::RequestFailed,
+                            ProviderRuntimeSeverity::Error,
+                            Some(reason),
+                            Some(attempt),
+                        );
+                        return Err(err);
+                    }
+                    let reason = reason_code_for_error(&err);
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestRetry,
+                        ProviderRuntimeSeverity::Warn,
+                        Some(reason),
+                        Some(attempt),
+                    );
+                    let sleep = self.sleep_for_error(&err, attempt - 1);
+                    tokio::time::sleep(sleep).await;
+                }
+            }
+        }
+    }
+
+    /// The runner owns streaming retries through its no-progress window.
+    /// This wrapper only classifies pre-content rejection events and forwards
+    /// transient errors so the runner can resend them under that window.
+    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        self.record_runtime_event(
+            &request,
+            ProviderRuntimeEventType::RequestStarted,
+            ProviderRuntimeSeverity::Debug,
+            None,
+            None,
+        );
+        match self.inner.stream(request.clone()).await {
+            Ok(rx) => {
+                // A successful open ends provider-attempt accounting. Waiting
+                // for first content here would hide an opened but stalled
+                // stream from the caller's no-progress clocks.
+                if crate::provider_fault::retry_is_deferred() {
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestSucceeded,
+                        ProviderRuntimeSeverity::Info,
+                        None,
+                        Some(0),
+                    );
+                    return Ok(rx);
+                }
+                // Peek only to classify pre-content provider rejection. A
+                // transient error is replayed as an event for the runner's
+                // no-progress window to own the resend decision.
+                match Self::drain_until_content_or_error(rx).await {
+                    StreamProbe::Usable(rx) => {
+                        self.record_runtime_event(
+                            &request,
+                            ProviderRuntimeEventType::RequestSucceeded,
+                            ProviderRuntimeSeverity::Info,
+                            None,
+                            Some(0),
+                        );
+                        return Ok(rx);
+                    }
+                    StreamProbe::FailedBeforeContent {
                         error_type,
                         message,
-                    };
-                }
-                Some(event) => {
-                    let is_content = Self::is_content(&event);
-                    buffered.push(event);
-                    if is_content {
-                        break;
+                    } => {
+                        // Streaming retries belong to the runner's existing
+                        // no-progress window. Classify rejections here, but
+                        // replay transient provider errors for the runner.
+                        let error = stream_error_before_content(&error_type, &message);
+                        if classify(&error) == RetryDecision::FailFast {
+                            self.record_runtime_event(
+                                &request,
+                                ProviderRuntimeEventType::RequestFailed,
+                                ProviderRuntimeSeverity::Error,
+                                Some("stream_failed_before_content"),
+                                Some(0),
+                            );
+                            return Err(error);
+                        }
+                        let (tx, rx) = tokio::sync::mpsc::channel(1);
+                        let message = crate::provider::DiagnosticMessage::redacted_at_source(
+                            message.as_str(),
+                        );
+                        let _ = tx
+                            .send(StreamEvent::Error {
+                                error_type,
+                                message,
+                            })
+                            .await;
+                        self.record_runtime_event(
+                            &request,
+                            ProviderRuntimeEventType::RequestFailed,
+                            ProviderRuntimeSeverity::Warn,
+                            Some("stream_failed_before_content"),
+                            Some(0),
+                        );
+                        return Ok(rx);
                     }
                 }
-                None => break, // clean end with no content — nothing to retry
             }
-        }
-        let (tx, new_rx) = tokio::sync::mpsc::channel(64);
-        tokio::spawn(async move {
-            for event in buffered {
-                if tx.send(event).await.is_err() {
-                    return;
-                }
-            }
-            while let Some(event) = rx.recv().await {
-                // 86fbab995 redacted forwarded error text here.
-                let event = match event {
-                    StreamEvent::Error {
-                        error_type,
-                        message,
-                    } => StreamEvent::Error {
-                        error_type,
-                        message: crate::provider::DiagnosticMessage::redacted_at_source(
-                            message.as_str(),
-                        ),
-                    },
-                    event => event,
-                };
-                if tx.send(event).await.is_err() {
-                    return;
-                }
-            }
-        });
-        StreamProbe::Usable(new_rx)
-    }
-
-    fn is_content(event: &StreamEvent) -> bool {
-        matches!(
-            event,
-            StreamEvent::TextDelta { .. }
-                | StreamEvent::InputJsonDelta { .. }
-                | StreamEvent::ContentBlockStop { .. }
-                | StreamEvent::MessageStop
-                // Anthropic keep-alives are visible activity. Releasing the
-                // stream at the first ping keeps the caller's idle clock and
-                // HTTP read backstop in control while preserving pre-content
-                // error classification for streams that fail before activity.
-                | StreamEvent::Ping
-        )
-    }
-
-    /// Compute the sleep duration for retry `attempt` (0-indexed), honoring
-    /// `max_backoff` clamp and optional ±25% jitter.
-    fn backoff_for_attempt(&self, attempt: u32) -> Duration {
-        let initial_ms = self.policy.initial_backoff.as_millis() as f64;
-        let raw = initial_ms * self.policy.multiplier.powi(attempt as i32);
-        let cap = self.policy.max_backoff.as_millis() as f64;
-        let clamped = raw.min(cap);
-        let final_ms = if self.policy.jitter {
-            // ±25% jitter: uniform in [0.75, 1.25).
-            let j = rand::random::<f64>() * 0.5 + 0.75;
-            clamped * j
-        } else {
-            clamped
-        };
-        Duration::from_millis(final_ms.round() as u64)
-    }
-
-    /// Determine how long to sleep after the given error on retry `attempt`.
-    /// `LlmError::RateLimited` overrides the formula with the server hint.
-    fn sleep_for_error(&self, err: &LlmError, attempt: u32) -> Duration {
-        if let LlmError::RateLimited {
-            retry_after_secs, ..
-        } = err
-        {
-            return Duration::from_secs(*retry_after_secs);
-        }
-        self.backoff_for_attempt(attempt)
-    }
-
-    fn record_runtime_event(
-        &self,
-        request: &LlmRequest,
-        event_type: ProviderRuntimeEventType,
-        severity: ProviderRuntimeSeverity,
-        reason_code: Option<&str>,
-        retry_count: Option<u32>,
-    ) {
-        let Some(supervisor) = &self.supervisor else {
-            return;
-        };
-        let mut event = ProviderRuntimeEvent::new(
-            self.inner.name().to_string(),
-            request
-                .request_origin
-                .clone()
-                .unwrap_or_else(|| "provider_builder".to_string()),
-            event_type,
-            severity,
-        )
-        .with_model(request.model.clone());
-        if let Some(reason) = reason_code {
-            event = event.with_reason(reason);
-        }
-        if let Some(count) = retry_count {
-            event = event.with_retry_count(count);
-        }
-        if let Ok(mut guard) = supervisor.lock() {
-            let _ = guard.record_event(event);
+            Err(LlmError::Rejected {
+                error_type,
+                message,
+            }) => Err(LlmError::Rejected {
+                error_type,
+                message: crate::provider::DiagnosticMessage::redacted_at_source(message.as_str()),
+            }),
+            Err(err) => Err(err),
         }
     }
 }
 
-#[path = "retry_provider_impl.rs"]
-mod provider_impl;
+#[path = "retry_helpers.rs"]
+mod helpers;
 
 #[cfg(test)]
 #[path = "retry/tests.rs"]
