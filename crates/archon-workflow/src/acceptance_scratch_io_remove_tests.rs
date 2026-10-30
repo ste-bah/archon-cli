@@ -5,6 +5,7 @@
 #![cfg_attr(not(unix), allow(dead_code))]
 use super::*;
 use std::cell::{Cell, RefCell};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 type Hook = Box<dyn FnMut(&Path)>;
@@ -217,6 +218,10 @@ fn owned_tree_removal_tolerates_disappearing_entry() {
     assert!(!root.exists());
 }
 
+// The writer seam fires only in the Unix removal, and off Unix preparation
+// refuses before any check could leave a writer ("native scratch target links
+// require a supported Unix host", `acceptance_scratch.rs`).
+#[cfg(unix)]
 #[test]
 fn owned_tree_removal_persistent_writer_is_a_resumable_stall() {
     let (_temp, root) = site();
@@ -299,6 +304,9 @@ fn git(repository: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+// A prepared site exists only on Unix: off Unix preparation always refuses
+// ("native scratch target links require a supported Unix host", `acceptance_scratch.rs`).
+#[cfg(unix)]
 #[test]
 fn teardown_takes_the_copy_git_left_after_a_racing_writer() {
     let (_temp, policy, commit) = git_site();
@@ -325,6 +333,9 @@ fn teardown_takes_the_copy_git_left_after_a_racing_writer() {
 /// the host found it intact and before git reads it: git refuses ("not a
 /// working tree") and the copy is unlisted, but git never reached the copy,
 /// so the teardown is never reported verified.
+// A prepared site exists only on Unix: off Unix preparation always refuses
+// ("native scratch target links require a supported Unix host", `acceptance_scratch.rs`).
+#[cfg(unix)]
 #[test]
 fn teardown_admin_entry_deleted_before_git_reads_it_is_never_verified() {
     let (_temp, policy, commit) = git_site();

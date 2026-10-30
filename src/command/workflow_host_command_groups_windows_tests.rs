@@ -249,7 +249,20 @@ fn a_windows_job_refusal_names_the_run_and_its_job() {
         .unwrap();
     job.adopt_suspended(child.as_raw_handle(), child.id())
         .unwrap();
-    crashed_record(run.path(), Some(&name));
+    // A settled stall with known (empty) survivors is judged by its job. An
+    // unsettled marker is not: while its job runs, its writer is never proven
+    // gone on Windows, so that record is a stall with unknown survivors.
+    let kept = record_group(
+        &run.path().join(GROUP_RECORDS_DIR),
+        42,
+        42,
+        None,
+        Some(&name),
+        "cmd",
+    )
+    .unwrap()
+    .keep(Some(&[]));
+    assert_eq!(kept, None, "the stall record is settled");
     let refused = require_no_running_groups(run.path(), "wf-generic");
     assert_eq!(job.kill_and_confirm(Duration::from_secs(5)).unwrap(), 0);
     child.wait().unwrap();
