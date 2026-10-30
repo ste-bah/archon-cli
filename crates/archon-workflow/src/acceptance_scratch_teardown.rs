@@ -52,6 +52,12 @@ impl ScratchRoots {
                     self.repository.display()
                 ))
             })?;
+            // Whether the live repository's own administrative entry for this
+            // copy is intact before git removes it: only then can a failed
+            // removal that leaves the copy unregistered be git's own
+            // unregistering (#534). An entry already gone or damaged is damage
+            // outside the site (H5), never a teardown this host verified.
+            let intact = self.links_own_worktree(&self.repository.join(".git"));
             let remove = || {
                 git(
                     &self.live_repository,
@@ -85,6 +91,13 @@ impl ScratchRoots {
                 // #534: a writer outside this host can add an entry to the
                 // copy while git deletes it. Git still unregisters the
                 // worktree; the owned removal below takes what is left.
+                // Only when git reached that deletion: its own C-locale
+                // failure for this copy (`git` runs with LC_ALL=C). A lookup
+                // or validation refusal ("not a working tree") never did,
+                // whatever the listing shows afterwards.
+                if !intact || !raced_copy_delete(&text, &self.repository, &owned) {
+                    return Err(error);
+                }
                 let listed = git(
                     &self.live_repository,
                     &["worktree", "list", "--porcelain"],
@@ -164,6 +177,26 @@ fn resolved(path: &Path) -> Option<PathBuf> {
         return Some(path);
     }
     Some(canonical(path.parent()?).ok()?.join(path.file_name()?))
+}
+
+/// Whether git's failure is the one `git worktree remove` gives after it found
+/// the worktree and began deleting the copy at `path` (resolved `owned`), and
+/// a racing writer kept a directory non-empty (builtin/worktree.c
+/// `delete_git_work_tree`: "failed to delete '<path>'" with the errno text).
+/// The named path is compared as text with the copy's spellings taken before
+/// git ran, never resolved: after the failure a writer may have made any
+/// path (git's administrative entry included) a link to a recreated copy.
+fn raced_copy_delete(text: &str, path: &Path, owned: &Path) -> bool {
+    text.lines().any(|line| {
+        let Some((_, rest)) = line.split_once("failed to delete '") else {
+            return false;
+        };
+        let Some(named) = rest.trim_end().strip_suffix("': Directory not empty") else {
+            return false;
+        };
+        let named = Path::new(named);
+        named == path || named == owned
+    })
 }
 
 /// Whether `git worktree list --porcelain` output still registers the copy
