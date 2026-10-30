@@ -187,7 +187,7 @@ pretty_assertions = "1.4"
 rstest = "0.22"
 # zip: dev-only ??? builds minimal .xlsx fixtures for spreadsheet-ingest tests
 # (stored entries only, so no compression features needed).
-zip = { version = "8", default-features = false }
+zip = { version = "9", default-features = false }
 
 [[bin]]
 name = "archon"
