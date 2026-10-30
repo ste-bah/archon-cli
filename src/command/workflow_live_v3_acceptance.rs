@@ -416,6 +416,11 @@ async fn evaluate(
             !defects.contains_key(&criterion.id) && !authored_pending.contains(&criterion.id)
         })
         .collect();
+    // Issue 544: the tip's failure fingerprints, from the raw captures.
+    let tip_signatures: std::collections::BTreeMap<String, String> = results
+        .iter()
+        .filter_map(|(id, result)| Some((id.clone(), regression::typed_signature(result)?)))
+        .collect();
     for criterion in &all {
         let result = results.remove(&criterion.id);
         if let Some(result) = &result {
@@ -456,7 +461,7 @@ async fn evaluate(
     // at and, from there, for the landing that broke it, so the remediation
     // reaches the task that can fix it; the rest carry what the search found.
     poll_v2_run_control(store, run_id, call_id)?;
-    regression::attribute(
+    regression::attribute_with(
         &context,
         &selected,
         &chain_digest,
@@ -464,6 +469,7 @@ async fn evaluate(
         &evidence_dir,
         record,
         archon_workflow::v2::acceptance_regression::SearchBudget::default(),
+        &tip_signatures,
     )
     .await?;
     use archon_workflow::v2::acceptance_routing as routing;

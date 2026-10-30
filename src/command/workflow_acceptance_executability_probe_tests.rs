@@ -167,10 +167,13 @@ pub(crate) fn scratch_left(scratch: &Path) -> Vec<std::ffi::OsString> {
 const PROJECT: TrustedCwd = TrustedCwd::ProjectRoot;
 const REPO: TrustedCwd = TrustedCwd::RepoRoot;
 
-/// The complete can-fail path accepts a read-only assertion when moving its
-/// three named inputs makes the check fail on its own assertion.
+/// The complete can-fail path accepts a read-only check when moving its
+/// three named inputs makes it fail. The host records what it observed (the
+/// exit status and the last stderr line), never which test decided it.
+/// (Replaces `a_mutated_read_only_check_is_accepted_as_a_regression_guard`,
+/// whose "failed on its own assertion" claim the host cannot observe.)
 #[tokio::test]
-async fn a_mutated_read_only_check_is_accepted_as_a_regression_guard() {
+async fn a_mutated_read_only_check_is_a_guard_described_by_its_observed_exit() {
     let trees = trees(&[(
         "AC-P-009",
         "test -f data/state.txt && test -f data/other.txt && test -f data/third.txt",
@@ -185,9 +188,11 @@ async fn a_mutated_read_only_check_is_accepted_as_a_regression_guard() {
     assert!(findings.is_empty(), "{findings:?}");
     let evidence = &guards["AC-P-009"];
     assert!(
-        evidence.contains("failed on its own assertion"),
+        evidence.contains("failed with exit 1 when the inputs were moved aside"),
         "{evidence}"
     );
+    assert!(evidence.contains("last stderr line: "), "{evidence}");
+    assert!(!evidence.contains("own assertion"), "{evidence}");
     assert!(evidence.contains("data/state.txt"), "{evidence}");
     assert!(evidence.contains("data/other.txt"), "{evidence}");
     assert!(evidence.contains("data/third.txt"), "{evidence}");
@@ -432,6 +437,7 @@ fn a_placeholder_original_is_never_a_verdict_to_hold_a_repair_to() {
     let mut contract = frozen_set(&[]).contract();
     contract.acceptance = vec![placeholder, authored];
     let failed = |id: &str| archon_workflow::acceptance_scratch::CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: id.into(),

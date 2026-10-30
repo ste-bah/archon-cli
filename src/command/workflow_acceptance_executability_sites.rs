@@ -117,7 +117,11 @@ pub(super) async fn run_at(
                 .flatten()
         })
         .collect();
-    let store = probe.store();
+    // Issue 544: the store keeps only results whose masked copy reads as
+    // their raw capture did.
+    let store = probe
+        .store()
+        .map(|store| store.with_oracle(super::silent::verdict_oracle(probe, contract)));
     let seen: Vec<Option<CheckEvidence>> = (keys.iter())
         .enumerate()
         .map(|(index, key)| {
@@ -232,6 +236,7 @@ pub(super) async fn run_at(
             project: binding.policy.project.clone(),
             siblings: Vec::new(),
             check_siblings: BTreeMap::new(),
+            site_build_cache: Some(binding.policy.build_cache.is_some()),
         };
         let cancel = CancelOnDrop(Arc::new(AtomicBool::new(false)));
         tokio::spawn(observe(
@@ -290,7 +295,12 @@ pub(super) async fn run_at(
                     .get(&evidence.acceptance_id)
                     .is_none_or(|predicate| predicate(&evidence.result))
                 {
-                    store.save_evidence(key, &evidence.result, evidence.copy_layout.clone());
+                    store.save_evidence(
+                        key,
+                        &evidence.result,
+                        evidence.copy_layout.clone(),
+                        save_predicates.get(&evidence.acceptance_id),
+                    );
                 }
             }
         }

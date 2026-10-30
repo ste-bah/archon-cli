@@ -97,6 +97,7 @@ fn production_key_covers_the_full_baseline_evidence() {
         evidence_reference: None,
     };
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        verdict_streams: Default::default(),
         acceptance_id: entry.id.clone(),
         exit_code: Some(1),
         quota_walk_count: 0,

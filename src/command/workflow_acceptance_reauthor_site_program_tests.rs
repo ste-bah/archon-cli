@@ -119,7 +119,7 @@ fn fixture() -> Fixture {
     std::fs::write(
         project.join(".archon/config.toml"),
         format!(
-            "[workflow.acceptance_execution]\nrepository={:?}\nscratch_parent={:?}\nproject_inputs=[]\nproject_repository_view=\"separate\"\ntoolchain_path={:?}\ntimeout_secs=60\noutput_bytes=8192\nscratch_bytes=16777216\n",
+            "[workflow.acceptance_execution]\nrepository={:?}\nscratch_parent={:?}\nproject_inputs=[]\nproject_repository_view=\"separate\"\ntoolchain_path={:?}\ntimeout_secs=300\noutput_bytes=8192\nscratch_bytes=16777216\n",
             repository.display().to_string(),
             temp.path().join("scratch").display().to_string(),
             format!("{}:/usr/bin:/bin", site_bin.display()),

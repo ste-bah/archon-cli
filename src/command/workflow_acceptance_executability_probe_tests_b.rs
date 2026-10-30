@@ -456,3 +456,6 @@ async fn the_republish_path_holds_a_repair_to_its_originals_failing_verdict() {
         prompts[1]
     );
 }
+
+#[path = "workflow_acceptance_executability_prove_observation_tests.rs"]
+mod observation_tests;

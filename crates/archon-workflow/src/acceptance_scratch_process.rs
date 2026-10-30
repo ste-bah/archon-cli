@@ -37,6 +37,91 @@ pub struct CheckResult {
     /// Classification of raw output, never recomputed from redacted evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::acceptance_check_crash::CheckClassification>,
+    /// Issue 544: the streams as captured, before redaction, for host
+    /// verdicts only. Never serialized, stored, printed or shown.
+    #[serde(skip)]
+    pub verdict_streams: VerdictStreams,
+}
+
+/// The raw streams of one capture, held in memory for verdicts (Issue 544),
+/// with the nonce of the host mutation protocol the capture carried. Its
+/// `Debug` shows no content, so no log or panic message can carry it.
+#[derive(Clone, Default)]
+pub struct VerdictStreams(Option<std::sync::Arc<RawCapture>>);
+
+struct RawCapture {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    protocol_nonce: Option<String>,
+}
+
+impl std::fmt::Debug for VerdictStreams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "VerdictStreams(kept)"
+        } else {
+            "VerdictStreams(none)"
+        })
+    }
+}
+
+impl CheckResult {
+    /// Keep the streams as they are now (raw), before redaction changes
+    /// them, with the nonce of the mutation protocol they may carry.
+    pub fn keep_verdict_streams(&mut self, protocol_nonce: Option<&str>) {
+        self.verdict_streams = VerdictStreams(Some(std::sync::Arc::new(RawCapture {
+            stdout: self.stdout.clone(),
+            stderr: self.stderr.clone(),
+            protocol_nonce: protocol_nonce.map(str::to_string),
+        })));
+    }
+
+    /// The nonce of the host mutation protocol in this capture, if any.
+    pub fn protocol_nonce(&self) -> Option<&str> {
+        self.verdict_streams.0.as_deref()?.protocol_nonce.as_deref()
+    }
+
+    /// The stdout a host verdict reads: the raw capture when kept, else the
+    /// (redacted) stored stream.
+    pub fn verdict_stdout(&self) -> &[u8] {
+        self.verdict_streams
+            .0
+            .as_deref()
+            .map_or(self.stdout.as_slice(), |raw| raw.stdout.as_slice())
+    }
+
+    /// The stderr a host verdict reads (see [`Self::verdict_stdout`]).
+    pub fn verdict_stderr(&self) -> &[u8] {
+        self.verdict_streams
+            .0
+            .as_deref()
+            .map_or(self.stderr.as_slice(), |raw| raw.stderr.as_slice())
+    }
+
+    /// Whether the output reports zero work (Issue 544): the capture's own
+    /// classification of the raw streams when it has one, else the streams a
+    /// verdict reads. Never redacted evidence when the raw capture is known.
+    pub fn reports_zero_work(&self) -> bool {
+        match &self.classification {
+            Some(classification) => classification.zero_work,
+            None => crate::acceptance::output_reports_zero_work(
+                &String::from_utf8_lossy(self.verdict_stdout()),
+                &String::from_utf8_lossy(self.verdict_stderr()),
+            ),
+        }
+    }
+
+    /// A copy whose streams are the ones host verdicts read, for verdict code
+    /// that takes a whole result. Never store or show it.
+    pub fn for_verdict(&self) -> Self {
+        let mut copy = self.clone();
+        copy.stdout = self.verdict_stdout().to_vec();
+        copy.stderr = self.verdict_stderr().to_vec();
+        // The copy's own streams are now the raw ones: later edits to them
+        // (filtering protocol lines) are what its readers see.
+        copy.verdict_streams = VerdictStreams::default();
+        copy
+    }
 }
 
 /// One input the host will move for a mutation check. Both operation paths
@@ -215,6 +300,15 @@ impl CommandSite<'_> {
     fn redact(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
         match self.redactor {
             Some(roots) => roots.redact_output(bytes, truncated),
+            None => bytes.to_vec(),
+        }
+    }
+
+    /// Issue 544: a stream with each secret as an indexed placeholder, for
+    /// typed facts computed from the raw capture (see `io::placeholders`).
+    pub(super) fn placeholder(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
+        match self.redactor {
+            Some(roots) => roots.placeholder_output(bytes, truncated),
             None => bytes.to_vec(),
         }
     }
@@ -447,6 +541,7 @@ pub async fn run_at(
         error = Some(evidence);
     }
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault,
         classification: None,
         acceptance_id: id.into(),

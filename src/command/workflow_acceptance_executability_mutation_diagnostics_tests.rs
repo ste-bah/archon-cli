@@ -255,6 +255,7 @@ fn a_sibling_alias_resolving_inside_the_repository_is_movable_from_its_copy() {
                 site_repository: Some(copied_repository.clone()),
             }],
         )]),
+        site_build_cache: None,
     };
     let result = input_discovery_for_check(
         &entry(
@@ -316,6 +317,7 @@ fn nested_directory_named_repo_uses_the_recorded_site_repository_root() {
                 site_repository: Some(site_repository.clone()),
             }],
         )]),
+        site_build_cache: None,
     };
     let result = input_discovery_for_check(
         &entry("grep -q focused ../alias/tests/focused.rs", "project_root"),
@@ -363,6 +365,7 @@ fn absolute_project_symlink_to_live_repository_is_outside_the_copy() {
         project: site.path().join("project"),
         siblings: Vec::new(),
         check_siblings: std::collections::BTreeMap::new(),
+        site_build_cache: None,
     };
     let result = input_discovery_for_check(
         &entry("grep -q focused live-test.rs", "project_root"),

@@ -156,6 +156,7 @@ async fn a_missing_parent_snapshot_without_a_moved_ancestor_stays_unproven() {
         &plan.inputs[0].aside_path,
     )];
     let mut result = CheckResult {
+        verdict_streams: Default::default(),
         acceptance_id: "AC-X-001".into(),
         exit_code: Some(1),
         quota_walk_count: 0,
@@ -209,6 +210,7 @@ fn a_snapshot_error_with_a_recreated_input_records_unsafe_reason_and_recreation_
     )];
     std::fs::write(site_path.join("d/f"), "recreated").unwrap();
     let mut result = CheckResult {
+        verdict_streams: Default::default(),
         acceptance_id: "AC-X-001".into(),
         exit_code: Some(0),
         quota_walk_count: 0,

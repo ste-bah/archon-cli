@@ -63,6 +63,7 @@ fn fixture(output: &[u8]) -> (AcceptanceContract, BaselineRuns) {
     contract.acceptance[0].id = "AC-X-001".into();
     contract.acceptance[0].judgment.verdict = JudgeDecision::Accepted;
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-X-001".into(),
         environment_note: None,

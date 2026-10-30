@@ -136,6 +136,7 @@ fn a_mutated_check_resolves_like_its_original_under_the_host_policy() {
 fn sh(dir: &Path, script: &str) -> CheckResult {
     let out = super::super::test_helpers::run_with_host_mutation(dir, script);
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC".into(),

@@ -408,7 +408,7 @@ async fn r7_crash_feedback_redacts_and_fences_inert_program_output() {
     const SECRET: &str = "tok-r7-0123456789";
     crate::command::workflow_task_set::passability::test_secret("SERVICE_TOKEN", SECRET);
     let set = frozen_set(&[("AC-F-001", CRASHING, true)]);
-    let result = archon_workflow::acceptance_scratch::CheckResult {
+    let result = archon_workflow::acceptance_scratch::CheckResult { verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC-F-001".into(), exit_code: Some(1), quota_walk_count: 0, stdout: vec![],

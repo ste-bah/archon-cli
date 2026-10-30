@@ -82,6 +82,7 @@ fn direct_site(context: &StageContext) -> DirectSite {
 
 fn operational(id: &str, error: String) -> CheckResult {
     CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: id.into(),

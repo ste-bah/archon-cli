@@ -61,6 +61,7 @@ impl HermeticCopy {
             project: self.project.clone(),
             siblings: Vec::new(),
             check_siblings: std::collections::BTreeMap::new(),
+            site_build_cache: None,
         }
     }
 }

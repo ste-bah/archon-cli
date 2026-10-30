@@ -320,8 +320,9 @@ pub(crate) fn may_be_host_failure(result: &CheckResult) -> bool {
 fn output(result: &CheckResult) -> String {
     format!(
         "{}\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
+        // Issue 544: verdicts read the raw capture when it is kept.
+        String::from_utf8_lossy(result.verdict_stdout()),
+        String::from_utf8_lossy(result.verdict_stderr())
     )
 }
 

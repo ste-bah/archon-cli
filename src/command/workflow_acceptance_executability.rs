@@ -382,11 +382,11 @@ pub(crate) fn crash_findings_at<'a>(
                 .chain(&contract.supplementary)
                 .find(|entry| entry.id == result.acceptance_id)?;
             let (_, text) = executed_text(entry)?;
-            let stdout = String::from_utf8_lossy(&result.stdout);
-            let stderr = String::from_utf8_lossy(&result.stderr);
+            // Issue 544: the capture's typed fact; the finding text below
+            // shows only redacted output.
             if result.operational_error.is_none()
                 && result.exit_code == Some(0)
-                && archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr)
+                && result.reports_zero_work()
             {
                 let output = program_output(&result.stdout, &redactor, FINDING_TAIL_BYTES);
                 return Some((entry.id.clone(), format!(

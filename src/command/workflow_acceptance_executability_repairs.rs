@@ -38,6 +38,11 @@ pub(super) struct TreeRun {
 }
 
 impl TreeRun {
+    /// The environment repairs the host made before this run, oldest first.
+    pub(super) fn repairs(&self) -> &[String] {
+        &self.repairs
+    }
+
     /// Verdicts already observed, no run made.
     pub(super) fn known(results: &[CheckEvidence], why: &str) -> Self {
         Self {

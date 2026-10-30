@@ -466,6 +466,7 @@ fn empty_sibling_layout_serializes_like_the_original_layout_shape() {
         project: PathBuf::from("copy/project"),
         siblings: Vec::new(),
         check_siblings: std::collections::BTreeMap::new(),
+        site_build_cache: None,
     };
     let encoded = serde_json::to_string(&layout).unwrap();
     assert_eq!(
