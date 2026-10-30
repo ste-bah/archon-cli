@@ -458,7 +458,7 @@ fn classify_branch_error(error: &str) -> BranchFailureKind {
         || lower.contains("tool execution failed")
         || lower.contains("process failed")
         || lower.contains("timed out")
-        || lower.contains("rate limit")
+        || archon_llm::provider_fault::rate_limit_text_matches(&lower)
         || lower.contains("cancelled")
     {
         return BranchFailureKind::Execution;

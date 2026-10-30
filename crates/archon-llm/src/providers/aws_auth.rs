@@ -68,7 +68,8 @@ pub async fn resolve_credentials() -> Result<AwsCredentials, LlmError> {
     Err(LlmError::Auth(
         "AWS credentials not found. Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, \
          configure ~/.aws/credentials, or attach an EC2 instance profile"
-            .to_string(),
+            .to_string()
+            .into(),
     ))
 }
 
@@ -86,7 +87,7 @@ fn load_credentials_file() -> Result<Option<AwsCredentials>, LlmError> {
     }
 
     let content = std::fs::read_to_string(&creds_path)
-        .map_err(|e| LlmError::Auth(format!("failed to read ~/.aws/credentials: {e}")))?;
+        .map_err(|e| LlmError::Auth(format!("failed to read ~/.aws/credentials: {e}").into()))?;
 
     parse_ini_credentials(&content)
 }

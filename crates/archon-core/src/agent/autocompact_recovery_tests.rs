@@ -77,17 +77,17 @@ fn transient_provider_failures_enter_cooldown_without_disabling_compaction() {
             retry_after_secs: 30,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         }),
         CompactionError::Provider(LlmError::Overloaded {
             status: None,
             retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         }),
         CompactionError::Provider(LlmError::Overloaded {
             status: Some(529),
             retry_after_secs: Some(37),
-            message: String::new(),
+            message: String::new().into(),
         }),
         CompactionError::Provider(LlmError::Server {
             status: 503,
@@ -112,7 +112,7 @@ fn expired_transient_cooldown_allows_later_successful_compaction() {
         retry_after_secs: 30,
         from_provider: true,
         pipeline_retry_after_secs: None,
-        message: String::new(),
+        message: String::new().into(),
     }));
     state.cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
 
@@ -143,7 +143,7 @@ fn ordinary_success_resets_transient_compaction_state() {
         retry_after_secs: 30,
         from_provider: true,
         pipeline_retry_after_secs: None,
-        message: String::new(),
+        message: String::new().into(),
     }));
 
     state.on_ordinary_success();

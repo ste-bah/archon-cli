@@ -156,7 +156,7 @@ async fn send_stream_error(
     let _ = tx
         .send(StreamEvent::Error {
             error_type: error_type.into(),
-            message: error.to_string(),
+            message: error.to_string().into(),
         })
         .await;
 }

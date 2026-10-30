@@ -56,9 +56,9 @@ impl CodexAutoProvider {
                 Err(error) => {
                     self.record_tool_fallback_denied("codex_direct_fallback_provider_unavailable")
                         .await;
-                    return Err(LlmError::Auth(format!(
-                        "direct Codex fallback unavailable: {error:#}"
-                    )));
+                    return Err(LlmError::Auth(
+                        format!("direct Codex fallback unavailable: {error:#}").into(),
+                    ));
                 }
             };
         *direct = Some(Arc::clone(&provider));

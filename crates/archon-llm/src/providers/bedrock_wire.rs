@@ -431,20 +431,20 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
     match status {
         400 => LlmError::Server {
             status,
-            message: format!("Bad request: {body}"),
+            message: format!("Bad request: {body}").into(),
             pipeline_retry_after_secs: None,
         },
-        401 | 403 => LlmError::Auth(body),
+        401 | 403 => LlmError::Auth(body.into()),
         429 => LlmError::RateLimited {
             retry_after_secs: 60,
             from_provider: false,
             pipeline_retry_after_secs: None,
-            message: crate::provider_fault::diagnostic_message(&body),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(&body),
         },
         500 | 503 => LlmError::Overloaded {
             status: Some(status),
             retry_after_secs: None,
-            message: crate::provider_fault::diagnostic_message(&body),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(&body),
         },
         _ => error,
     }
@@ -456,4 +456,13 @@ mod diagnostic_redaction_tests {
         super::map_http_error(status, body.into())
     }
     include!("../provider_fault_redaction_cases.rs");
+}
+
+#[cfg(test)]
+#[test]
+fn server_redaction_bedrock_400() {
+    crate::server_redaction_tests::check(map_http_error(
+        400,
+        crate::server_redaction_tests::BODY.into(),
+    ));
 }

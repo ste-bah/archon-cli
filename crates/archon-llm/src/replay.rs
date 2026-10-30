@@ -123,32 +123,37 @@ impl ReplayProvider {
 
     fn real(&self) -> Result<&Arc<dyn LlmProvider>, LlmError> {
         match &self.mode {
-            ReplayMode::Invalid(value) => Err(LlmError::Unsupported(format!(
-                "{MODE_ENV} is set to {value:?}; expected \"record\" or \"replay\". \
+            ReplayMode::Invalid(value) => Err(LlmError::Unsupported(
+                format!(
+                    "{MODE_ENV} is set to {value:?}; expected \"record\" or \"replay\". \
                  Refusing to call a provider rather than guess which was meant."
-            ))),
-            _ => self.inner.as_ref().ok_or_else(|| {
-                LlmError::Unsupported(format!(
+                )
+                .into(),
+            )),
+            _ => {
+                self.inner.as_ref().ok_or_else(|| {
+                    LlmError::Unsupported(format!(
                     "{MODE_ENV}=record needs a real provider to record from, and none was given"
-                ))
-            }),
+                ).into())
+                })
+            }
         }
     }
 
     fn load(&self, request: &LlmRequest) -> Result<Cassette, LlmError> {
         if let ReplayMode::Invalid(value) = &self.mode {
-            return Err(LlmError::Unsupported(format!(
-                "{MODE_ENV} is set to {value:?}; expected \"record\" or \"replay\""
-            )));
+            return Err(LlmError::Unsupported(
+                format!("{MODE_ENV} is set to {value:?}; expected \"record\" or \"replay\"").into(),
+            ));
         }
         let key = digest(request);
         let path = Cassette::path_in(&self.dir, &key);
         if !path.exists() {
-            return Err(LlmError::Unsupported(miss_message(
-                &key, &self.dir, request,
-            )));
+            return Err(LlmError::Unsupported(
+                miss_message(&key, &self.dir, request).into(),
+            ));
         }
-        Cassette::load(&path).map_err(LlmError::Serialize)
+        Cassette::load(&path).map_err(|message| LlmError::Serialize(message.into()))
     }
 
     fn write(&self, request: &LlmRequest, cassette: Cassette) {

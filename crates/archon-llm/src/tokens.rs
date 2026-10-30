@@ -112,7 +112,7 @@ pub async fn refresh_token(
             crate::transport_http::response_error(response, |status, message| {
                 crate::provider::LlmError::Server {
                     status,
-                    message,
+                    message: message.into(),
                     pipeline_retry_after_secs: None,
                 }
             })
@@ -125,7 +125,7 @@ pub async fn refresh_token(
         } else {
             AuthError::Provider(crate::provider::LlmError::Server {
                 status: status.as_u16(),
-                message: format!("failed to read refresh response: {e}"),
+                message: format!("failed to read refresh response: {e}").into(),
                 pipeline_retry_after_secs: None,
             })
         }

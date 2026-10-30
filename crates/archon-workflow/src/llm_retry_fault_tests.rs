@@ -69,7 +69,7 @@ async fn assert_once(fault: LlmError) {
 fn status_fault(status: u16, remedy: &str) -> LlmError {
     LlmError::Server {
         status,
-        message: format!("request timed out; {remedy}"),
+        message: format!("request timed out; {remedy}").into(),
         pipeline_retry_after_secs: None,
     }
 }
@@ -106,4 +106,106 @@ async fn typed_context_overflow_reaches_the_caller_once_with_its_remedy() {
         model: None,
     })
     .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn llm_retry_r4_send_uses_raw_typed_facts() {
+    struct Recovering(AtomicUsize);
+    #[async_trait::async_trait]
+    impl WorkflowLlmClient for Recovering {
+        async fn send_message(
+            &self,
+            _: Vec<Value>,
+            _: Vec<Value>,
+            _: Vec<Value>,
+            _: &str,
+        ) -> WorkflowResult<WorkflowAgentOutcome> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(WorkflowError::port(LlmError::Http(
+                    "Cookie: opaque; connection reset".into(),
+                )))
+            } else {
+                Ok(WorkflowAgentOutcome::default())
+            }
+        }
+    }
+    let fake = Arc::new(Recovering(AtomicUsize::new(0)));
+    let client: Arc<dyn WorkflowLlmClient> = fake.clone();
+    let mut retries = Vec::new();
+    // 86fbab995's send-message policy read the redacted Display, where the
+    // cookie line hides "connection reset": it did not retry.
+    let result =
+        send_message_with_transient_retry(&client, vec![], vec![], vec![], "test", |attempt| {
+            retries.push(attempt);
+            async { Ok(()) }
+        })
+        .await;
+    assert!(result.is_err());
+    assert!(retries.is_empty());
+    assert_eq!(fake.0.load(Ordering::SeqCst), 1);
+}
+
+// llm_retry_r4_log_class_uses_raw_typed_facts lives in its own test binary,
+// tests/llm_retry_log_class.rs: tracing caches callsite interest per process.
+
+struct OnceThenOk(AtomicUsize, Mutex<Option<WorkflowError>>);
+
+#[async_trait::async_trait]
+impl WorkflowLlmClient for OnceThenOk {
+    async fn send_message(
+        &self,
+        _: Vec<Value>,
+        _: Vec<Value>,
+        _: Vec<Value>,
+        _: &str,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.next()
+    }
+    async fn run_agent(&self, _: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.next()
+    }
+}
+
+impl OnceThenOk {
+    fn new(error: WorkflowError) -> Arc<Self> {
+        Arc::new(Self(AtomicUsize::new(0), Mutex::new(Some(error))))
+    }
+    fn next(&self) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        match self.1.lock().unwrap().take() {
+            Some(error) => Err(error),
+            None => Ok(WorkflowAgentOutcome::default()),
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn llm_retry_r6_agent_retry_reads_visible_wrapper_text_like_main() {
+    // 86fbab995: is_operational() || the visible display's transient text.
+    // The wrapper's own "request failed" text is visible, so main retried.
+    let fake = OnceThenOk::new(WorkflowError::port(WrappedFault(LlmError::Http(
+        "unclassified failure".into(),
+    ))));
+    let client: Arc<dyn WorkflowLlmClient> = fake.clone();
+    run_agent_with_transient_retry(&client, super::tests::request(false), |_| async { Ok(()) })
+        .await
+        .unwrap();
+    assert_eq!(fake.0.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn llm_retry_r6_send_reads_visible_wrapper_text_like_main() {
+    #[derive(Debug, thiserror::Error)]
+    #[error("HTTP 503")]
+    struct Visible(#[source] LlmError);
+    let fake = OnceThenOk::new(WorkflowError::port(Visible(LlmError::Http(
+        "ordinary failure".into(),
+    ))));
+    let client: Arc<dyn WorkflowLlmClient> = fake.clone();
+    send_message_with_transient_retry(&client, vec![], vec![], vec![], "test", |_| async {
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(fake.0.load(Ordering::SeqCst), 2);
 }

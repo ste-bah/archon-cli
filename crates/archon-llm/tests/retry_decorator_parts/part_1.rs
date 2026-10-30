@@ -1,4 +1,3 @@
-
 #[test]
 fn classify_fail_fast_variants() {
     assert_eq!(
@@ -82,7 +81,7 @@ async fn rate_limited_sleeps_for_retry_after() {
             retry_after_secs: 2,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         }),
         Ok(ok_response()),
     ]));

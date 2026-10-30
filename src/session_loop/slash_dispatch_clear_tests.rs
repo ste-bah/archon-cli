@@ -56,13 +56,17 @@ impl LlmProvider for UnusedProvider {
         _request: LlmRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
         Err(LlmError::Unsupported(
-            "the clear-alias fixture must not run a turn".to_string(),
+            "the clear-alias fixture must not run a turn"
+                .to_string()
+                .into(),
         ))
     }
 
     async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
         Err(LlmError::Unsupported(
-            "the clear-alias fixture must not run a turn".to_string(),
+            "the clear-alias fixture must not run a turn"
+                .to_string()
+                .into(),
         ))
     }
 

@@ -104,11 +104,14 @@ impl LlmProvider for OpenAiCompatProvider {
     async fn complete(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
         self.resolve_request_model(&mut request);
         if !request.tools.is_empty() && !self.supports_feature(ProviderFeature::ToolUse) {
-            return Err(LlmError::Unsupported(format!(
-                "{} does not advertise tool use; refusing to drop {} tool definition(s)",
-                self.name(),
-                request.tools.len()
-            )));
+            return Err(LlmError::Unsupported(
+                format!(
+                    "{} does not advertise tool use; refusing to drop {} tool definition(s)",
+                    self.name(),
+                    request.tools.len()
+                )
+                .into(),
+            ));
         }
         let url = self.build_chat_url();
         let body = self.to_openai_wire(&request);
@@ -158,19 +161,21 @@ impl LlmProvider for OpenAiCompatProvider {
     async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.resolve_request_model(&mut request);
         if !request.tools.is_empty() && !self.supports_feature(ProviderFeature::ToolUse) {
-            return Err(LlmError::Unsupported(format!(
-                "{} does not advertise tool use; refusing to drop {} tool definition(s)",
-                self.name(),
-                request.tools.len()
-            )));
+            return Err(LlmError::Unsupported(
+                format!(
+                    "{} does not advertise tool use; refusing to drop {} tool definition(s)",
+                    self.name(),
+                    request.tools.len()
+                )
+                .into(),
+            ));
         }
         // Feature gate FIRST — never touch the network if streaming is off.
         // Validation Criterion 6.
         if !self.descriptor.supports.streaming {
-            return Err(LlmError::Unsupported(format!(
-                "{}: streaming not supported by this provider",
-                self.name()
-            )));
+            return Err(LlmError::Unsupported(
+                format!("{}: streaming not supported by this provider", self.name()).into(),
+            ));
         }
 
         // Build request body and inject `stream: true`. `to_openai_wire`

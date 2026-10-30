@@ -128,7 +128,7 @@ impl OpenAiCompatProvider {
     ) -> LlmError {
         let error = crate::provider_fault::from_status(status.as_u16(), headers, body.clone());
         match error {
-            LlmError::Auth(_) => LlmError::Auth(format!("{provider}: {body}")),
+            LlmError::Auth(_) => LlmError::Auth(format!("{provider}: {body}").into()),
             error => error,
         }
     }

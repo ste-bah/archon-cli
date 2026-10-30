@@ -289,7 +289,7 @@ mod tests {
                 retry_after_secs: 60,
                 from_provider: true,
                 pipeline_retry_after_secs: None,
-                message: String::new(),
+                message: String::new().into(),
             },
         );
 

@@ -185,9 +185,9 @@ fn parse_tool_input(
         return Ok(json!({}));
     }
     serde_json::from_str(input_json).map_err(|e| {
-        LlmError::Serialize(format!(
-            "malformed tool arguments for `{tool_name}` ({tool_id}): {e}"
-        ))
+        LlmError::Serialize(
+            format!("malformed tool arguments for `{tool_name}` ({tool_id}): {e}").into(),
+        )
     })
 }
 

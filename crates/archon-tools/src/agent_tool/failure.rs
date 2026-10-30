@@ -11,16 +11,11 @@
 pub fn classify_failure_prefix(err: &str) -> &'static str {
     let low = err.to_lowercase();
 
-    // Rate limit: requires HTTP 429 OR the explicit phrase "rate limit"
-    // surrounded by word boundaries.
-    if low.contains("429 ")
-        || low.contains(" 429")
-        || low == "429"
-        || low.contains(" rate limit ")
-        || low.starts_with("rate limit ")
-        || low.ends_with(" rate limit")
-        || low.contains("rate-limit")
-    {
+    // Preserve the original HTTP/phrase specificity in the shared matcher.
+    if archon_llm::provider_fault::rate_limit_matches(
+        &low,
+        archon_llm::provider_fault::RateLimitEvidence::SubagentFailure,
+    ) {
         return "[subagent_rate_limited]";
     }
 
@@ -52,3 +47,7 @@ pub fn classify_failure_prefix(err: &str) -> &'static str {
     // generically so the LLM knows it was a subagent failure.
     "[subagent_failure]"
 }
+
+#[cfg(test)]
+#[path = "failure_characterization.rs"]
+mod c0_characterization;

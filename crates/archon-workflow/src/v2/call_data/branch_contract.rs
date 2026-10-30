@@ -74,7 +74,7 @@ pub(super) fn is_actual_execution_failure(outcome: &WorkflowV2BranchOutcome) -> 
         || error.contains("tool execution failed")
         || error.contains("process failed")
         || error.contains("timed out")
-        || error.contains("rate limit")
+        || archon_llm::provider_fault::rate_limit_text_matches(&error)
 }
 
 pub(super) fn failure_kind_for_outcome(
@@ -103,7 +103,7 @@ pub(super) fn failure_kind_for_outcome(
                 || error.contains("tool execution failed")
                 || error.contains("process failed")
                 || error.contains("timed out")
-                || error.contains("rate limit")
+                || archon_llm::provider_fault::rate_limit_text_matches(&error)
                 || error.contains("cancelled")
             {
                 Some(BranchFailureKind::Execution)

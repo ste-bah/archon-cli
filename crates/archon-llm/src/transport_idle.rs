@@ -9,7 +9,7 @@ pub(crate) fn receiver() -> tokio::sync::mpsc::Receiver<crate::streaming::Stream
     let (tx, rx) = tokio::sync::mpsc::channel(1);
     let _ = tx.try_send(crate::streaming::StreamEvent::Error {
         error_type: "transport_idle".into(),
-        message: TransportIdle.to_string(),
+        message: TransportIdle.to_string().into(),
     });
     rx
 }

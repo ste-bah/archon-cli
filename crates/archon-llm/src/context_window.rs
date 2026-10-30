@@ -43,6 +43,24 @@ pub enum RequestPressureKind {
     OpeningPrompt,
 }
 
+pub(crate) fn field_limit_text_matches(lower: &str) -> bool {
+    [
+        "string should have at most",
+        "string too long",
+        "maximum length",
+        "max string length",
+        "field too long",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+pub(crate) fn tool_result_text_matches(lower: &str) -> bool {
+    ["tool_result", "tool result", ".output", ".content"]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
 pub fn classify_request_pressure_error(
     status: Option<u16>,
     error_type: Option<&str>,
@@ -64,34 +82,51 @@ pub fn classify_request_pressure_error(
     }
     text.push_str(message);
     let lower = text.to_ascii_lowercase();
-    let field_limit = [
-        "string should have at most",
-        "string too long",
-        "maximum length",
-        "max string length",
-        "field too long",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle));
-    if field_limit
-        && ["tool_result", "tool result", ".output", ".content"]
-            .iter()
-            .any(|needle| lower.contains(needle))
-    {
+    request_pressure_parts(
+        field_limit_text_matches(&lower),
+        tool_result_text_matches(&lower),
+        context_window_text_matches(status, error_type, code, message),
+    )
+}
+
+/// The original precedence over substring facts of one (possibly composed) text.
+pub(crate) fn request_pressure_parts(
+    field_limit: bool,
+    tool_result: bool,
+    context_window: bool,
+) -> Option<RequestPressureKind> {
+    if field_limit && tool_result {
         return Some(RequestPressureKind::ToolResultField);
     }
-    classify_context_window_error(status, error_type, code, message, None, None)
-        .map(|_| RequestPressureKind::AggregateContext)
+    context_window.then_some(RequestPressureKind::AggregateContext)
 }
 
 pub fn classify_context_window_error(
     status: Option<u16>,
     error_type: Option<&str>,
     code: Option<&str>,
-    message: &str,
+    message: impl Into<crate::provider::DiagnosticMessage>,
     provider: Option<&str>,
     model: Option<&str>,
 ) -> Option<LlmError> {
+    let message = message.into();
+    if context_window_text_matches(status, error_type, code, message.raw()) {
+        Some(LlmError::ContextWindowExceeded {
+            provider_message: message,
+            provider: provider.map(Into::into),
+            model: model.map(Into::into),
+        })
+    } else {
+        None
+    }
+}
+
+pub(crate) fn context_window_text_matches(
+    status: Option<u16>,
+    error_type: Option<&str>,
+    code: Option<&str>,
+    message: &str,
+) -> bool {
     let mut haystack = String::new();
     if let Some(error_type) = error_type {
         haystack.push_str(error_type);
@@ -122,15 +157,7 @@ pub fn classify_context_window_error(
     .iter()
     .any(|needle| lower.contains(needle));
 
-    if status_matches && text_matches {
-        Some(LlmError::ContextWindowExceeded {
-            provider_message: message.to_string(),
-            provider: provider.map(str::to_string),
-            model: model.map(str::to_string),
-        })
-    } else {
-        None
-    }
+    status_matches && text_matches
 }
 
 pub fn classify_context_window_body(

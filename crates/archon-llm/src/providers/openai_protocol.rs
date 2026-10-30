@@ -49,17 +49,17 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
         return error;
     }
     match status {
-        401 => LlmError::Auth(body),
+        401 => LlmError::Auth(body.into()),
         429 => LlmError::RateLimited {
             retry_after_secs: 60,
             from_provider: false,
             pipeline_retry_after_secs: None,
-            message: crate::provider_fault::diagnostic_message(&body),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(&body),
         },
         500 | 503 => LlmError::Overloaded {
             status: Some(status),
             retry_after_secs: None,
-            message: crate::provider_fault::diagnostic_message(&body),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(&body),
         },
         _ => error,
     }
