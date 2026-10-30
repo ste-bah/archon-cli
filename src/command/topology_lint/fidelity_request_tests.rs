@@ -131,10 +131,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // H1: an operational (host-unproven) finding beside an authored finding stops nothing; alone it still stops the phase.
     // Issue 495: check-path guidance reflects the copied repository sibling alias.
     // Issues 529/530: a shrinking failing-subject set is progress; a max_tokens retry names its size.
+    // Issue 494: acceptance author prompts carry the named-files block before the reply format.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "0eea1f26f0df90fa988f35a067d40865ea528e8788d6eab3b6d1c035c584eec7"
+        "330eab7816cd5149f3a5158aadf31b22a9fc6de00614a80150f75457973b38c0"
     );
 }

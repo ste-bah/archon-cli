@@ -174,7 +174,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
-        sources_digest: "ee689aba1e57dde7d99abdc0c94ed95df7f242535ce0d6e9e9dbc59d8f09aa8d",
+        // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
+        sources_digest: "6ed983c3c17f1e2f81de0830780165bdc25e7556975a8b2764f97dddf0416793",
         build_bound: false,
     },
     CapabilityLogic {
@@ -218,7 +219,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
-        sources_digest: "ee689aba1e57dde7d99abdc0c94ed95df7f242535ce0d6e9e9dbc59d8f09aa8d",
+        // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
+        sources_digest: "6ed983c3c17f1e2f81de0830780165bdc25e7556975a8b2764f97dddf0416793",
         build_bound: false,
     },
     CapabilityLogic {
@@ -290,7 +292,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
-        sources_digest: "e45f67a86d6f69af5e0f89f2e407cd0100eadce386ccb6efa51ba46833d56aa2",
+        // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
+        sources_digest: "fcdc5b728d1e602b62a35051504f6c49a1b2dd3919a693896e46c7f4ae1847f5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -348,7 +351,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
-        sources_digest: "e45f67a86d6f69af5e0f89f2e407cd0100eadce386ccb6efa51ba46833d56aa2",
+        // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
+        sources_digest: "fcdc5b728d1e602b62a35051504f6c49a1b2dd3919a693896e46c7f4ae1847f5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -371,7 +375,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W4 re-pin only: frozen-stage routing and ladder progress do not decide requirement trace verdicts.
         // #497 W3 re-pin only: host-command fault healing (typed transient retry with observable attempts, committed publications never re-run) does not change this capability's verdict rules.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
-        sources_digest: "5f26b8656be764e519d6a231f2fef3ea9158c93bdbb0bd2ac496f172bc5c7047",
+        // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
+        sources_digest: "c30734f7c04d512f71da4ed17ad55ca73d6d38d7c6e3d14a34c17bd9d245a463",
         build_bound: true,
     },
     CapabilityLogic {
@@ -428,7 +433,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
-        sources_digest: "f6146ffce45f883dfe9fbefd7109c5e42e36b5924be82685a9d2ed87a6720452",
+        // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
+        sources_digest: "bc0a421eb2c4e9848c3da215661a4ab77170b9f85383884d0544a420f1a72c20",
         build_bound: true,
     },
     CapabilityLogic {
@@ -468,7 +474,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #497 W3 r9 + #541 merge re-pin only: invalid inputs map to SpecInvalid as on main and the provider retry future is boxed; no verdict rule changed, so versions are kept.
         // #543 re-pin only: scratch teardown releases the held site root before removing it (Windows sharing violation); no verdict rule changed.
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
-        sources_digest: "f6146ffce45f883dfe9fbefd7109c5e42e36b5924be82685a9d2ed87a6720452",
+        // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
+        sources_digest: "bc0a421eb2c4e9848c3da215661a4ab77170b9f85383884d0544a420f1a72c20",
         build_bound: true,
     },
 ];
