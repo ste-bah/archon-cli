@@ -355,6 +355,55 @@ pub(super) fn inventory_with(
     Ok(result)
 }
 /// Host setting values replaced in child output, longest first.
+/// Issue 544: `bytes` with each secret value replaced by a stable indexed
+/// placeholder (`<secret#1>`, `<secret#2>`, ...) instead of one shared
+/// marker, so distinct secrets stay distinct and no secret value is kept or
+/// hashed. Indexes follow the secret set's own order, which is the same for
+/// every observation made under the same bindings. (Sentry's message-based
+/// grouping replaces variable values with placeholders before it groups.)
+pub(super) fn placeholders(
+    host_environment: &BTreeMap<String, String>,
+    bytes: &[u8],
+    truncated: bool,
+) -> Vec<u8> {
+    let secrets = archon_observability::secret_values::SecretValues::for_evidence(
+        host_environment.values().map(String::as_str),
+    );
+    let mut output = bytes.to_vec();
+    for (index, value) in secrets.iter().enumerate() {
+        let needle = value.as_bytes();
+        let marker = format!("<secret#{}>", index + 1);
+        let mut clean = Vec::with_capacity(output.len());
+        let mut at = 0;
+        while at < output.len() {
+            if output[at..].starts_with(needle) {
+                clean.extend_from_slice(marker.as_bytes());
+                at += needle.len();
+            } else {
+                clean.push(output[at]);
+                at += 1;
+            }
+        }
+        // A stream the collector cut can end inside a secret: its prefix is
+        // the secret too, by the rule `redact` uses.
+        for n in (1..if truncated {
+            needle.len().min(clean.len() + 1)
+        } else {
+            1
+        })
+            .rev()
+        {
+            if clean.ends_with(&needle[..n]) {
+                clean.truncate(clean.len() - n);
+                clean.extend_from_slice(marker.as_bytes());
+                break;
+            }
+        }
+        output = clean;
+    }
+    output
+}
+
 pub(super) fn redact(
     host_environment: &BTreeMap<String, String>,
     bytes: &[u8],

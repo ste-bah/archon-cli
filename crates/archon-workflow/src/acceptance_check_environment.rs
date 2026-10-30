@@ -344,6 +344,40 @@ pub fn site_variables(
 /// The values of the variables a policy forwards, from `host`. A name that
 /// fails Issue 282's data rule, or that the host has no Unicode value for, is
 /// an error naming it: the check does not run.
+/// Issue 544: every value the host binds into a check's environment that
+/// output must never show, for capture-time redaction: the forwarded host
+/// values (whole), the site policy's credential-named values, the host's own
+/// credential-named values, and every value carrying URL credentials (whose
+/// password the evidence redactor extracts). Non-credential bindings stay
+/// out, so ordinary output is not shredded. Keys only label the values.
+pub fn redaction_values(
+    forwarded: &BTreeMap<String, String>,
+    policy_environment: &BTreeMap<String, String>,
+    host: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    /// A whole value shorter than this is never redacted on its name alone.
+    const MIN_NAMED_SECRET_CHARS: usize = 8;
+    let carries_url_credential = |value: &str| {
+        !archon_observability::secret_values::SecretValues::default()
+            .with_url_credentials(value)
+            .is_empty()
+    };
+    let mut values: BTreeMap<String, String> = forwarded
+        .iter()
+        .map(|(name, value)| (format!("forwarded:{name}"), value.clone()))
+        .collect();
+    for (origin, environment) in [("policy", policy_environment), ("host", host)] {
+        for (name, value) in environment {
+            let named = archon_observability::shared_redactor::is_credential_key(name)
+                && value.chars().count() >= MIN_NAMED_SECRET_CHARS;
+            if named || carries_url_credential(value) {
+                values.insert(format!("{origin}:{name}"), value.clone());
+            }
+        }
+    }
+    values
+}
+
 pub fn forwarded_values(
     host: &BTreeMap<String, String>,
     names: &[String],

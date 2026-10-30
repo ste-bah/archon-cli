@@ -83,11 +83,16 @@ impl CheckObserver for ScratchObserver<'_> {
                     let verdict = if check.exit_code == Some(0) {
                         Verdict::Held(true)
                     } else {
-                        Verdict::Failed(failure_signature(
-                            check.exit_code,
-                            &String::from_utf8_lossy(&check.stderr),
-                            &String::from_utf8_lossy(&check.stdout),
-                        ))
+                        // Issue 544: the fingerprint the capture computed
+                        // from the raw streams (secrets as indexed
+                        // placeholders); stored text only for older results.
+                        Verdict::Failed(typed_signature(&check).unwrap_or_else(|| {
+                            failure_signature(
+                                check.exit_code,
+                                &String::from_utf8_lossy(check.verdict_stderr()),
+                                &String::from_utf8_lossy(check.verdict_stdout()),
+                            )
+                        }))
                     };
                     (check.acceptance_id, verdict)
                 })
@@ -108,6 +113,40 @@ pub(super) async fn attribute(
     evidence_dir: &std::path::Path,
     record: &mut AcceptanceRoundRecordV1,
     budget: SearchBudget,
+) -> WorkflowResult<()> {
+    attribute_with(
+        context,
+        criteria,
+        chain_digest,
+        run_dir,
+        evidence_dir,
+        record,
+        budget,
+        &BTreeMap::new(),
+    )
+    .await
+}
+
+/// A failure fingerprint the capture computed from the raw streams.
+pub(super) fn typed_signature(
+    result: &archon_workflow::acceptance_scratch::CheckResult,
+) -> Option<String> {
+    result.classification.as_ref()?.failure_signature.clone()
+}
+
+/// [`attribute`], with the tip's typed failure fingerprints (Issue 544):
+/// the record keeps only masked tails, which would make distinct
+/// secret-bearing failures look alike.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn attribute_with(
+    context: &StageContext,
+    criteria: &[&AcceptanceCriterion],
+    chain_digest: &str,
+    run_dir: &std::path::Path,
+    evidence_dir: &std::path::Path,
+    record: &mut AcceptanceRoundRecordV1,
+    budget: SearchBudget,
+    tip_signatures: &BTreeMap<String, String>,
 ) -> WorkflowResult<()> {
     let commands: BTreeMap<&str, (&AcceptanceCriterion, String)> = criteria
         .iter()
@@ -139,7 +178,12 @@ pub(super) async fn attribute(
         failing.push(FailingCheck {
             id: check.check_id.clone(),
             owners: check.owning_tasks.clone(),
-            signature: failure_signature(check.exit_code, &check.stderr_tail, &check.stdout_tail),
+            signature: tip_signatures
+                .get(&check.check_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    failure_signature(check.exit_code, &check.stderr_tail, &check.stdout_tail)
+                }),
             fingerprint: command_fingerprint(command),
         });
     }

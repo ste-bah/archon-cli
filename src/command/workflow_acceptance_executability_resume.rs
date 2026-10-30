@@ -46,14 +46,29 @@ struct Saved {
 pub(super) struct ResultStore {
     pub(super) dir: PathBuf,
     redactor: Arc<Redactor>,
+    /// Issue 544: whether the raw and the masked copy of one result give the
+    /// same text verdicts at this probe's site (see `save_evidence`).
+    oracle: Option<VerdictOracle>,
 }
+
+/// True when two copies of one result (raw, masked) give the same verdicts
+/// that the host reads from output text.
+pub(super) type VerdictOracle = Arc<dyn Fn(&CheckResult, &CheckResult) -> bool + Send + Sync>;
 
 impl ResultStore {
     pub(super) fn new(dir: PathBuf, redactor: Redactor) -> Self {
         Self {
             dir,
             redactor: Arc::new(redactor),
+            oracle: None,
         }
+    }
+
+    /// This store, refusing to keep a result whose masked copy would read
+    /// as a different verdict than its raw capture (Issue 544).
+    pub(super) fn with_oracle(mut self, oracle: VerdictOracle) -> Self {
+        self.oracle = Some(oracle);
+        self
     }
 
     pub(super) fn path(&self, key: &str) -> Option<PathBuf> {
@@ -95,14 +110,19 @@ impl ResultStore {
     /// Save `result` under `key`, atomically; false when it was not saved.
     #[cfg(test)]
     pub(super) fn save(&self, key: &str, result: &CheckResult) -> bool {
-        self.save_evidence(key, result, None)
+        self.save_evidence(key, result, None, None)
     }
 
+    /// Save `result` under `key`. Issue 544: `predicate` (a mutation run's
+    /// own reuse rule) is also judged on the exact bytes to be persisted,
+    /// against the raw capture: a stored copy that would decide differently
+    /// is not kept.
     pub(super) fn save_evidence(
         &self,
         key: &str,
         result: &CheckResult,
         copy_layout: Option<CopyLayout>,
+        predicate: Option<&SavePredicate>,
     ) -> bool {
         let Some(path) = self.path(key) else {
             return false;
@@ -112,6 +132,7 @@ impl ResultStore {
         if result.operational_error.is_some() || super::verdict::may_be_host_failure(result) {
             return false;
         }
+        let original = result;
         let mut result = result.clone();
         // Native command results are already classified at capture. Declarative
         // results have no command and cannot be a script crash.
@@ -126,6 +147,42 @@ impl ResultStore {
         }
         result.stdout = self.redactor.redact_bytes(&result.stdout);
         result.stderr = self.redactor.redact_bytes(&result.stderr);
+        // Issue 544: a reused verdict re-reads the stored (masked) text, so a
+        // result is kept only when that text reads as the raw capture did:
+        // the host's mutation protocol lines unchanged, and the same text
+        // verdicts (no-verdict cause, setup path) at this site. Otherwise a
+        // retry runs the check again and decides from its raw capture.
+        if result.stdout != original.verdict_stdout() || result.stderr != original.verdict_stderr()
+        {
+            let raw = original.for_verdict();
+            let mut masked = result.clone();
+            masked.verdict_streams = Default::default();
+            let protocol = |result: &CheckResult| -> Vec<String> {
+                [&result.stdout, &result.stderr]
+                    .iter()
+                    .flat_map(|stream| {
+                        String::from_utf8_lossy(stream)
+                            .lines()
+                            .filter(|line| line.starts_with("archon-mutation-"))
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            };
+            // The persisted candidate seen with the raw capture beside it, so
+            // the predicate compares raw against the final masked bytes.
+            let mut candidate = result.clone();
+            candidate.verdict_streams = original.verdict_streams.clone();
+            if protocol(&raw) != protocol(&masked)
+                || self
+                    .oracle
+                    .as_ref()
+                    .is_some_and(|same| !same(&raw, &masked))
+                || predicate.is_some_and(|keep| !keep(&candidate))
+            {
+                return false;
+            }
+        }
         let saved = Saved {
             schema: SCHEMA,
             key: key.to_string(),
@@ -374,6 +431,7 @@ impl HostProbe {
                         key,
                         result,
                         copy_layout.lock().ok().and_then(|layout| layout.clone()),
+                        save_predicates.get(&result.acceptance_id),
                     )
                 {
                     written.lock().expect("written lock").push(key.clone());

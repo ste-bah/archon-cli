@@ -102,6 +102,7 @@ fn acceptance_freeze_reuse_logic_file_content_change_invalidates_reuse_and_uncha
     let same = super::reuse::key(&context, &check).expect("file state is readable");
     assert_eq!(first, same, "unchanged inputs must retain their key");
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: check.id.clone(),
         exit_code: Some(0),

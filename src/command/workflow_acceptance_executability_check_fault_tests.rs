@@ -98,7 +98,7 @@ fn mutation_run(
     signal: &str,
     error: Option<&str>,
 ) -> repairs::TreeRun {
-    let result = CheckResult {
+    let result = CheckResult { verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: id.into(),

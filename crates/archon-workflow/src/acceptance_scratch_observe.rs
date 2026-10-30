@@ -123,7 +123,20 @@ pub async fn observe_commands_hooked(
         after: BTreeMap::new(),
     };
     let mut roots = None;
-    let mut redaction_environment = BTreeMap::new();
+    // Issue 544: the full capture redaction from the start, so a setup
+    // error is redacted as fully as a check's output.
+    let mut redaction_environment = crate::acceptance_check_environment::forwarded_values(
+        &crate::acceptance_check_environment::host_environment(),
+        &policy.environment_allowlist,
+    )
+    .map(|forwarded| {
+        crate::acceptance_check_environment::redaction_values(
+            &forwarded,
+            &policy.environment,
+            &crate::acceptance_check_environment::host_environment(),
+        )
+    })
+    .unwrap_or_default();
     let mut dirty = false;
     let mut fresh = true;
     let mut dirty_owner: Option<usize> = None;
@@ -173,7 +186,7 @@ pub async fn observe_commands_hooked(
         roots =
             Some(phase().run(|| ScratchRoots::prepare_inner_with_checks(policy, commit, &checks))?);
         let prepared = roots.as_ref().expect("prepared");
-        redaction_environment = prepared.host_environment.clone();
+        redaction_environment = prepared.redaction_environment.clone();
         result.copied_project_manifest = phase().run(|| inventory(prepared.project()))?;
         let mut baseline = phase().run(|| identity::capture(prepared, policy))?;
         result.source_manifest_digest = content_digest(&serde_json::to_vec(
@@ -462,6 +475,21 @@ pub async fn observe_commands_hooked(
     }
     for check in &mut result.checks {
         *check = result_helpers::redacted_environment(&redaction_environment, check);
+    }
+    // Issue 544: the result also records the policy's bindings and each
+    // check's environment; their secrets are masked like its output.
+    let redact_text = |text: &str| {
+        String::from_utf8_lossy(&io::redact(&redaction_environment, text.as_bytes(), false))
+            .into_owned()
+    };
+    for value in result.policy.environment.values_mut() {
+        *value = redact_text(value);
+    }
+    for item in &mut result.check_evidence {
+        item.before_identity.redact_environment(&redact_text);
+        if let Some(after) = &mut item.after_identity {
+            after.redact_environment(&redact_text);
+        }
     }
     std::fs::create_dir_all(evidence).map_err(|e| WorkflowError::io(evidence, e))?;
     let path = evidence.join("observation.json");

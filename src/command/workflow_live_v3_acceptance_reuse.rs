@@ -161,6 +161,7 @@ pub(super) fn evaluate_snapshot(
         _ => return None,
     };
     Some(CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: criterion.id.clone(),
         exit_code: Some(if passed { 0 } else { 1 }),

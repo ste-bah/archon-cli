@@ -465,6 +465,10 @@ mod tests;
 #[path = "workflow_host_command_groups_windows_tests.rs"]
 mod windows_tests;
 
+#[cfg(test)]
+#[path = "workflow_host_command_groups_wording_tests.rs"]
+mod wording_tests;
+
 #[cfg(all(test, unix))]
 thread_local! {
     pub(crate) static REGISTER_DELAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

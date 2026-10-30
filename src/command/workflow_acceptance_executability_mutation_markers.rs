@@ -61,7 +61,7 @@ impl Markers {
 
     pub(crate) fn moved(&self, result: &CheckResult, inputs: &[String]) -> Vec<String> {
         let prefix = self.moved_prefix();
-        String::from_utf8_lossy(&result.stderr)
+        String::from_utf8_lossy(result.verdict_stderr())
             .lines()
             .filter_map(|line| line.strip_prefix(prefix.as_str()))
             .filter_map(|index| {
@@ -79,7 +79,7 @@ impl Markers {
         inputs: &[String],
     ) -> BTreeMap<String, String> {
         let prefix = self.move_state_prefix();
-        String::from_utf8_lossy(&result.stderr)
+        String::from_utf8_lossy(result.verdict_stderr())
             .lines()
             .filter_map(|line| {
                 let rest = line.strip_prefix(&prefix)?;
@@ -94,7 +94,7 @@ impl Markers {
 
     pub(crate) fn generated(&self, result: &CheckResult, inputs: &[String]) -> BTreeSet<String> {
         let prefix = self.generated_prefix();
-        String::from_utf8_lossy(&result.stderr)
+        String::from_utf8_lossy(result.verdict_stderr())
             .lines()
             .filter_map(|line| line.strip_prefix(prefix.as_str()))
             .filter_map(|index| {
@@ -108,7 +108,7 @@ impl Markers {
 
     pub(crate) fn recreated(&self, result: &CheckResult, inputs: &[String]) -> BTreeSet<String> {
         let prefix = format!("archon-mutation-check-recreated-{}: ", self.nonce);
-        String::from_utf8_lossy(&result.stderr)
+        String::from_utf8_lossy(result.verdict_stderr())
             .lines()
             .filter_map(|line| line.strip_prefix(prefix.as_str()))
             .filter_map(|index| {
@@ -126,7 +126,7 @@ impl Markers {
         inputs: &[String],
     ) -> BTreeMap<String, String> {
         let prefix = format!("archon-mutation-state-{}: ", self.nonce);
-        String::from_utf8_lossy(&result.stdout)
+        String::from_utf8_lossy(result.verdict_stdout())
             .lines()
             .filter_map(|line| {
                 let rest = line.strip_prefix(&prefix)?;
@@ -139,7 +139,7 @@ impl Markers {
 
     pub(crate) fn status(&self, result: &CheckResult) -> Option<String> {
         let prefix = format!("archon-mutation-status-{}: ", self.nonce);
-        String::from_utf8_lossy(&result.stdout)
+        String::from_utf8_lossy(result.verdict_stdout())
             .lines()
             .find_map(|line| line.strip_prefix(&prefix).map(str::to_string))
     }
@@ -153,13 +153,13 @@ impl Markers {
     #[cfg(test)]
     pub(crate) fn restored_all(&self, result: &CheckResult) -> bool {
         let restored = self.restored();
-        String::from_utf8_lossy(&result.stdout)
+        String::from_utf8_lossy(result.verdict_stdout())
             .lines()
             .any(|line| line == restored)
     }
 
     pub(crate) fn guarded(&self, result: &CheckResult) -> bool {
         result.exit_code == Some(GUARD_STATUS)
-            && String::from_utf8_lossy(&result.stderr).contains(&self.guard())
+            && String::from_utf8_lossy(result.verdict_stderr()).contains(&self.guard())
     }
 }

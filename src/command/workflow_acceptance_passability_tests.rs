@@ -411,6 +411,7 @@ async fn reauthor_decisions_are_written_to_the_audit_directory() {
     let mut contract = crate::command::workflow_task_set::judge::continuation_tests::contract();
     contract.acceptance[0].judgment.verdict = JudgeDecision::Accepted;
     let failed = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-X-001".into(),
         environment_note: None,

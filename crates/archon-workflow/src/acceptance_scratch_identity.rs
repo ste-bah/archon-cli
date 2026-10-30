@@ -13,6 +13,14 @@ pub struct BuildIdentity {
     cargo_configuration: BTreeMap<String, String>,
 }
 impl BuildIdentity {
+    /// Issue 544: the recorded check environment with every bound secret
+    /// masked, for evidence that leaves the observation.
+    pub(super) fn redact_environment(&mut self, redact: &dyn Fn(&str) -> String) {
+        for value in self.environment.values_mut() {
+            *value = redact(value);
+        }
+    }
+
     /// The parts of `other` that differ from this identity, named as
     /// [`super::faults::check_fault`] reads them.
     pub(super) fn changed_parts(&self, other: &Self) -> Vec<&'static str> {

@@ -7,11 +7,8 @@ pub fn passed(result: &CheckResult) -> bool {
     if let Some(classification) = &result.classification {
         return result.operational_error.is_none() && classification.passed;
     }
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    result.operational_error.is_none()
-        && result.exit_code == Some(0)
-        && !archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr)
+    // Issue 544: the capture's classification of the raw streams.
+    result.operational_error.is_none() && result.exit_code == Some(0) && !result.reports_zero_work()
 }
 
 /// Author findings, keyed by id, for every check of `refs` that cannot be

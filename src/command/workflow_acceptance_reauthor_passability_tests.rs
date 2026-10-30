@@ -31,6 +31,7 @@ impl ExecutabilityProbe for OneBaselineFailureProbe {
     }
     fn take_baseline_runs(&self) -> Option<BaselineRuns> {
         let failed = CheckResult {
+            verdict_streams: Default::default(),
             fault: None,
             acceptance_id: "AC-F-001".into(),
             environment_note: None,

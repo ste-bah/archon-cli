@@ -40,7 +40,8 @@ pub(super) use helpers::operational_error_diagnostics;
 pub(super) use helpers::unattributed_recreation_finding;
 pub(super) use helpers::{
     MutationFinding, all_moved_inputs_restored, describe_states, describe_status, input_states,
-    mutation_host_or_author_finding, recreated_inputs, recreated_paths,
+    last_stderr_line, mutation_crashed, mutation_host_or_author_finding, mutation_observation,
+    observed, recreated_inputs, recreated_paths, setup_reason_with_repairs,
 };
 
 use super::*;
@@ -59,6 +60,7 @@ pub(super) async fn prove(
 ) -> BTreeMap<String, String> {
     let short: String = baseline.commit.chars().take(12).collect();
     let mut findings = BTreeMap::new();
+    let redactor = probe.output_redactor();
     let live = [
         baseline
             .repository
@@ -174,14 +176,29 @@ pub(super) async fn prove(
             mutation::mutated(contract, &inputs, &move_paths, &move_roots, &live, &markers);
         let save_predicate_markers = markers.clone();
         let save_predicate_names = names.clone();
+        let save_predicate_contract = contract.clone();
         let save_predicates = BTreeMap::from([(
             id.clone(),
             Arc::new(
                 move |result: &archon_workflow::acceptance_scratch::CheckResult| {
+                    // Issue 544: a reused copy is reclassified from its masked
+                    // stderr, so it is kept only when that reads as the raw
+                    // capture does (a crash stays a crash). The store calls
+                    // this once more on the exact bytes it will persist.
+                    let mut masked = result.clone();
+                    masked.verdict_streams = Default::default();
                     all_moved_inputs_restored(
                         result,
                         &save_predicate_markers,
                         &save_predicate_names,
+                    ) && mutation_crashed(
+                        &save_predicate_contract,
+                        &result.for_verdict(),
+                        &save_predicate_markers,
+                    ) == mutation_crashed(
+                        &save_predicate_contract,
+                        &masked,
+                        &save_predicate_markers,
                     )
                 },
             ) as super::resume::SavePredicate,
@@ -236,7 +253,8 @@ pub(super) async fn prove(
                 id,
                 &diagnostics,
             ) {
-                findings.insert(id.clone(), finding);
+                let observation = mutation_observation(result, &markers, &names, &redactor);
+                findings.insert(id.clone(), observed(finding, &observation));
             }
             continue;
         }
@@ -245,7 +263,9 @@ pub(super) async fn prove(
                 let at =
                     super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
                 match super::silent::setup_path_failure_off_thread(&mutated, result, &at).await {
-                    Ok(finding) => finding,
+                    Ok(finding) => {
+                        finding.map(|reason| setup_reason_with_repairs(reason, run.repairs()))
+                    }
                     Err(error) => {
                         probe.unproven(
                             id,
@@ -263,6 +283,8 @@ pub(super) async fn prove(
             super::sites::discard_mutation_evidence(probe, baseline, &mutated, id);
         }
         let result = result.expect("no-result case handled above");
+        // Issue 492: every verdict reached from this run keeps what it showed.
+        let observation = mutation_observation(&result.result, &markers, &names, &redactor);
         let generated = markers.generated(result, &names);
         let recreated = recreated_inputs(result, &markers, &names);
         let moved: BTreeSet<String> = markers.moved(result, &names).into_iter().collect();
@@ -294,7 +316,7 @@ pub(super) async fn prove(
             Some(MutationFinding::HostUnproven(reason)) => {
                 // What the check's own run caused is its author's (D1).
                 let unproven = format!(
-                    "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail"
+                    "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail; mutation observation: {observation}"
                 );
                 let fault = super::check_fault::of_mutation(&result.result, &markers);
                 let at = format!(
@@ -303,12 +325,12 @@ pub(super) async fn prove(
                 let key = (Some(baseline.commit.as_str()), &mutated, id.as_str());
                 if let Some(finding) = super::check_fault::settle(probe, key, fault, &at, unproven)
                 {
-                    findings.insert(id.clone(), finding);
+                    findings.insert(id.clone(), observed(finding, &observation));
                 }
                 continue;
             }
             Some(MutationFinding::AuthorFinding(finding)) => {
-                findings.insert(id.clone(), finding);
+                findings.insert(id.clone(), observed(finding, &observation));
                 continue;
             }
             None => {}
@@ -326,23 +348,8 @@ pub(super) async fn prove(
         // shell text is not the author's original inline program. Reclassify
         // the captured stderr against the original command before deciding
         // whether a failed mutation was an assertion or the check's own crash.
-        let mut raw_mutation_result = result.result.clone();
-        raw_mutation_result.classification = None;
-        let protocol = [
-            markers.moved_prefix(),
-            markers.move_state_prefix(),
-            markers.generated_prefix(),
-            markers.recreated_prefix(),
-            format!("archon-mutation-check-recreated-{}: ", markers.nonce()),
-            format!("archon-mutation-guard-{}:", markers.nonce()),
-        ];
-        raw_mutation_result.stderr = String::from_utf8_lossy(&raw_mutation_result.stderr)
-            .lines()
-            .filter(|line| !protocol.iter().any(|prefix| line.starts_with(prefix)))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .into_bytes();
-        let crashed = !super::crash_findings(contract, [&raw_mutation_result]).is_empty();
+        // Issue 544: reclassify the raw capture, never redacted evidence.
+        let crashed = mutation_crashed(contract, &result.result.for_verdict(), &markers);
         let silent = if crashed {
             None
         } else {
@@ -360,22 +367,31 @@ pub(super) async fn prove(
         if moved.is_empty() {
             findings.insert(
                 id.clone(),
-                format!("{baseline_finding}; no movable input exists under the selected root"),
+                observed(
+                    format!("{baseline_finding}; no movable input exists under the selected root"),
+                    &observation,
+                ),
             );
         } else if super::baseline::passed(result) {
             if !recreated.is_empty() {
                 findings.insert(
                     id.clone(),
-                    author_recreated_finding(&baseline_finding, &recreated),
+                    observed(
+                        author_recreated_finding(&baseline_finding, &recreated),
+                        &observation,
+                    ),
                 );
             } else if !original_recreated.is_empty() {
                 findings.insert(
                     id.clone(),
-                    unattributed_recreation_finding(&baseline_finding),
+                    observed(
+                        unattributed_recreation_finding(&baseline_finding),
+                        &observation,
+                    ),
                 );
             } else if bound_accepted && !crashed {
                 let move_states = markers.move_states(&result.result, &names);
-                let output = output_evidence(&result.result);
+                let output = output_evidence_with(&result.result, &redactor);
                 let basis = format!(
                     "accepted on the stored judge verdict because the check passed on the pre-implementation tree at {short}; mutation proof: inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
                     result.result.exit_code
@@ -387,25 +403,38 @@ pub(super) async fn prove(
             } else {
                 findings.insert(
                     id.clone(),
-                    format!(
-                        "{baseline_finding}; it still passed with {} moved aside, so it does not depend on them",
-                        moved.join(", ")
+                    observed(
+                        format!(
+                            "{baseline_finding}; it still passed with {} moved aside, so it does not depend on them",
+                            moved.join(", ")
+                        ),
+                        &observation,
                     ),
                 );
             }
         } else if crashed {
             findings.insert(
                 id.clone(),
-                format!(
+                observed(
+                    format!(
                         "{baseline_finding}; with {} moved aside it only crashed, failed to start a program or failed to build, which says nothing about its criterion",
-                    moved.join(", ")
+                        moved.join(", ")
+                    ),
+                    &observation,
                 ),
             );
         } else {
             let move_states = markers.move_states(&result.result, &names);
-            let output = output_evidence(&result.result);
+            let output = output_evidence_with(&result.result, &redactor);
+            // The host sees the exit status and the output, not which test
+            // in the check decided it: it says only what it observed.
             let basis = format!(
-                "the check passed on the pre-implementation tree at {short} and failed on its own assertion with inputs moved; inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
+                "the check passed on the pre-implementation tree at {short} and failed with exit {} when the inputs were moved aside; last stderr line: {}; inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
+                result
+                    .result
+                    .exit_code
+                    .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
+                last_stderr_line(&result.result, &markers, &redactor),
                 result.result.exit_code
             );
             probe.note_regression_guard(id, basis.clone());
@@ -418,15 +447,32 @@ pub(super) async fn prove(
     findings
 }
 
+#[cfg(test)]
 fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
+    output_evidence_with(
+        result,
+        &crate::command::workflow_task_set::passability::evidence::Redactor::for_environment(
+            std::iter::empty(),
+            &[],
+        ),
+    )
+}
+
+fn output_evidence_with(
+    result: &archon_workflow::acceptance_scratch::CheckResult,
+    redactor: &crate::command::workflow_task_set::passability::evidence::Redactor,
+) -> String {
     // Captured output is already bounded by the capture limit, so the whole
     // capture is redacted before the excerpt keeps its tail: a cut before
     // redaction could split a secret and leave part of it in the record.
-    fn bounded_excerpt(bytes: &[u8], budget: usize) -> String {
-        let decoded = String::from_utf8_lossy(bytes);
+    // Every value the host binds into the check's environment (`redactor`)
+    // is masked as well as credential-shaped text, so a value spanning
+    // lines goes whole.
+    let bounded_excerpt = |bytes: &[u8], budget: usize| -> String {
+        let decoded = redactor.redact(&String::from_utf8_lossy(bytes));
         let redacted = archon_observability::redaction::redact_secret_values(&decoded);
         archon_workflow::failure_evidence::failure_evidence(redacted.as_bytes(), budget)
-    }
+    };
     let stdout = bounded_excerpt(
         &result.stdout,
         crate::command::workflow_task_set::passability::evidence::STDOUT_BYTES,

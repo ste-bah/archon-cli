@@ -235,3 +235,31 @@ fn legacy_unstalled_empty_identity_markers_need_exit_evidence() {
         drop(job);
     }
 }
+
+/// Issue 522: the Job Object refusal names the run, not a run kind.
+#[test]
+fn a_windows_job_refusal_names_the_run_and_its_job() {
+    let run = tempfile::tempdir().unwrap();
+    let name = name();
+    let job = Job::create(Some(&name)).unwrap();
+    let mut child = archon_shell::spawn::command("ping")
+        .args(["-n", "30", "127.0.0.1"])
+        .creation_flags(CREATE_SUSPENDED_FLAG)
+        .spawn()
+        .unwrap();
+    job.adopt_suspended(child.as_raw_handle(), child.id())
+        .unwrap();
+    crashed_record(run.path(), Some(&name));
+    let refused = require_no_running_groups(run.path(), "wf-generic");
+    assert_eq!(job.kill_and_confirm(Duration::from_secs(5)).unwrap(), 0);
+    child.wait().unwrap();
+    let refusal = refused.expect_err("a live job refuses").to_string();
+    assert!(
+        refusal.starts_with("run wf-generic cannot resume"),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("fixed decomposition"), "{refusal}");
+    // The job is shown in Debug form, which escapes the namespace separator.
+    let unique = name.rsplit('\\').next().unwrap();
+    assert!(refusal.contains(unique), "{refusal}");
+}

@@ -365,3 +365,6 @@ async fn normal_run_saves_and_reuses_evidence_with_an_existing_lock_path() {
 }
 
 include!("workflow_acceptance_executability_sites_scratch_regression_tests.rs");
+
+#[path = "workflow_acceptance_executability_scratch_mechanics_tests.rs"]
+mod mechanics_tests;

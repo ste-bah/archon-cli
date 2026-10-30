@@ -10,6 +10,7 @@ async fn passability_audit_reuses_the_same_evidence_and_rejudges_changed_output(
     let audit = tempfile::tempdir().unwrap();
     let runs = |stderr: &[u8]| {
         let result = archon_workflow::acceptance_scratch::CheckResult {
+            verdict_streams: Default::default(),
             acceptance_id: "AC-X-001".into(),
             exit_code: Some(1),
             quota_walk_count: 0,
@@ -88,6 +89,7 @@ fn a_silent_stall_finding_routes_to_reauthoring_and_states_only_what_ran() {
             .unwrap();
     let audit = tempfile::tempdir().unwrap();
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        verdict_streams: Default::default(),
         acceptance_id: "AC-X-001".into(),
         exit_code: Some(1),
         quota_walk_count: 0,

@@ -72,23 +72,23 @@ pub(super) fn baseline_context(
 /// holds `repo` and `project` (`HermeticCopy::at`), or keeps a project its
 /// repository tracks inside `repo`, at its depth there. The live tree is no
 /// copy (`None`): a path above a check's directory may be real there.
+/// Issue 495: the scratch names come from the site's own list, with the
+/// build target placed as the run's build cache placed it.
 fn scratch_copy_tree(
     probe: &HostProbe,
     contract: &AcceptanceContract,
     layout: Option<&super::hermetic::CopyLayout>,
 ) -> Option<(usize, Vec<String>)> {
-    const SCRATCH: &[&str] = &[
-        "repo",
-        "project",
-        "home",
-        "tmp",
-        "cargo-home",
-        "target",
-        "project-baseline",
-    ];
-    match probe.site {
-        Site::Scratch(_) => {
-            let mut roots: Vec<String> = SCRATCH.iter().map(|root| (*root).to_string()).collect();
+    match &probe.site {
+        Site::Scratch(binding) => {
+            let build_cache = layout
+                .and_then(|layout| layout.site_build_cache)
+                .unwrap_or(binding.policy.build_cache.is_some());
+            let mut roots: Vec<String> =
+                archon_workflow::acceptance_scratch::site_internal_directories(build_cache)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect();
             roots.extend(layout.map_or_else(
                 || {
                     hermetic::siblings::copied_root_names(
@@ -153,6 +153,26 @@ pub(super) fn silent_failure(
     at: &Context,
 ) -> Option<String> {
     silent_failure_cause(contract, result, at).map(|(why, _)| why)
+}
+
+/// Issue 544: whether two copies of one result (its raw capture and its
+/// masked copy) give the same text verdicts at `probe`'s site: the
+/// no-verdict cause and the setup-path rule. A result store keeps a result
+/// only when they agree, so a reused verdict never differs from the raw one.
+pub(super) fn verdict_oracle(
+    probe: &HostProbe,
+    contract: &AcceptanceContract,
+) -> super::resume::VerdictOracle {
+    let (contract, at) = (contract.clone(), context(probe, contract));
+    std::sync::Arc::new(move |raw: &CheckResult, masked: &CheckResult| {
+        let cause = |result: &CheckResult| {
+            silent_failure_cause(&contract, result, &at).map(|(_, cause)| cause)
+        };
+        let setup = |result: &CheckResult| setup_path_failure(&contract, result, &at).is_some();
+        super::verdict::may_be_host_failure(raw) == super::verdict::may_be_host_failure(masked)
+            && cause(raw) == cause(masked)
+            && setup(raw) == setup(masked)
+    })
 }
 
 /// [`silent_failure`] with its cause ([`UnprovenCause`]).
@@ -494,3 +514,7 @@ mod clock_strike_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_silent_fence_tests.rs"]
 mod fence_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_setup_roots_tests.rs"]
+mod setup_roots_tests;

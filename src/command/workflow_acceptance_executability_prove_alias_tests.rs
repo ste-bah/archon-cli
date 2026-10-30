@@ -78,7 +78,7 @@ fn repository_alias_diagnostic_keeps_the_named_path_and_site_copy_note_when_move
 fn recreated_input_with_operational_failure_is_host_unproven() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string(), "data/other.txt".to_string()];
-    let result = CheckResult {
+    let result = CheckResult { verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
@@ -114,14 +114,21 @@ fn recreated_input_with_operational_failure_is_host_unproven() {
     assert!(host.contains("the host could not complete the run"));
 }
 
+/// Issue 495 (replaces `a_setup_path_failure_after_environment_repair_is_an_author_finding`):
+/// the finding names an environment repair only when the host made one.
 #[test]
-fn a_setup_path_failure_after_environment_repair_is_an_author_finding() {
+fn a_setup_path_failure_is_an_author_finding_naming_only_real_repairs() {
     let (result, markers, inputs) = run_real_wrapper("test -f data/state.txt");
+    let reason = "it names ../archon-cli/Cargo.toml, absent from the probe copy";
+    let repaired = super::setup_reason_with_repairs(
+        reason.into(),
+        &["re-ran it on a freshly built copy".to_string()],
+    );
     let finding = mutation_host_or_author_finding(
         &result,
         &markers,
         &inputs,
-        Some("it names ../archon-cli/Cargo.toml, absent from the probe copy".into()),
+        Some(repaired),
         "check 'AC-1': it passed",
     )
     .expect("identified setup failure goes to the check author");
@@ -129,7 +136,67 @@ fn a_setup_path_failure_after_environment_repair_is_an_author_finding() {
         panic!("setup path failure must not become a host error");
     };
     assert!(author.contains("../archon-cli/Cargo.toml"), "{author}");
-    assert!(author.contains("after the host repaired its environment"));
+    assert!(
+        author.contains("the host had repaired its environment before this run: re-ran it on a freshly built copy"),
+        "{author}"
+    );
+    let finding = mutation_host_or_author_finding(
+        &result,
+        &markers,
+        &inputs,
+        Some(super::setup_reason_with_repairs(reason.into(), &[])),
+        "check 'AC-1': it passed",
+    )
+    .expect("identified setup failure goes to the check author");
+    let MutationFinding::AuthorFinding(author) = finding else {
+        panic!("setup path failure must not become a host error");
+    };
+    assert!(author.contains("../archon-cli/Cargo.toml"), "{author}");
+    assert!(!author.contains("repaired its environment"), "{author}");
+}
+
+/// Issue 495: the setup-failure finding carries the output it cites. The
+/// check runs for real in the mutation wrapper with its input moved aside.
+#[test]
+fn mutation_setup_finding_carries_the_output_it_cites() {
+    let (result, markers, inputs) =
+        run_real_wrapper("test -f data/state.txt || cd ../archon-absent-root/inner");
+    let reason = "it names the path `../archon-absent-root/inner` (cd), which the site does not create because it lies outside the tree it ran in; its output reports the path absent: a setup failure of its site, not a failure of its criterion";
+    let finding = mutation_host_or_author_finding(
+        &result,
+        &markers,
+        &inputs,
+        Some(super::setup_reason_with_repairs(reason.into(), &[])),
+        "check 'AC-1': it passed",
+    )
+    .expect("identified setup failure goes to the check author");
+    let MutationFinding::AuthorFinding(author) = finding else {
+        panic!("setup path failure must not become a host error");
+    };
+    let finding = super::observed(
+        author,
+        &super::mutation_observation(&result.result, &markers, &inputs, &host_redactor()),
+    );
+    assert!(
+        finding
+            .contains("with the data it names moved aside, the check stopped at a setup failure"),
+        "{finding}"
+    );
+    assert!(!finding.contains("repaired its environment"), "{finding}");
+    let observed = finding
+        .split_once("; mutation observation: ")
+        .expect("observation")
+        .1;
+    assert!(
+        observed.contains("../archon-absent-root/inner"),
+        "the output the reason cites is kept: {observed}"
+    );
+    assert!(
+        !observed.contains("mutated_exit_code=Some(0)"),
+        "{observed}"
+    );
+    assert!(observed.contains("data/state.txt"), "{observed}");
+    assert!(!observed.contains("archon-mutation-"), "{observed}");
 }
 
 fn run_real_wrapper(command: &str) -> (CheckEvidence, super::mutation::Markers, Vec<String>) {
@@ -153,6 +220,7 @@ fn run_real_wrapper_with_inputs(
     let output = super::super::mutation::run_with_host_mutation(project.path(), &wrapped);
     let evidence = CheckEvidence {
         result: CheckResult {
+            verdict_streams: Default::default(),
             fault: None,
             classification: None,
             acceptance_id: "AC-1".into(),
@@ -293,6 +361,7 @@ fn timeout_diagnostics_keep_known_states_and_report_unavailable_inputs() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string(), "data/other.txt".to_string()];
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
@@ -323,7 +392,7 @@ fn timeout_diagnostics_keep_known_states_and_report_unavailable_inputs() {
 fn operational_error_mutation_diagnostics_keep_input_states_and_exit_signal() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string(), "data/other.txt".to_string()];
-    let result = CheckResult {
+    let result = CheckResult { verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
@@ -351,6 +420,7 @@ fn recreated_input_is_not_marked_restored_for_cache_reuse() {
     let markers = super::mutation::Markers::new();
     let inputs = vec!["data/state.txt".to_string()];
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
@@ -391,6 +461,7 @@ fn unrelated_sibling_touch_keeps_the_parent_metadata_signal_on_legacy_path() {
     );
     let output = super::super::mutation::run_with_host_mutation(project.path(), &wrapped);
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC-1".into(),
@@ -419,4 +490,39 @@ fn unrelated_sibling_touch_keeps_the_parent_metadata_signal_on_legacy_path() {
         finding.contains("does not identify who wrote the input"),
         "{finding}"
     );
+}
+
+/// Review of #542: the whole stderr is redacted before its last line is
+/// picked, so a credential spanning lines never leaves its tail behind.
+#[test]
+fn last_stderr_line_masks_a_multi_line_credential_whole() {
+    crate::command::workflow_task_set::passability::test_secret(
+        "REVIEW_TOKEN",
+        "review-prefix\nreview-secret-tail",
+    );
+    let markers = super::mutation::Markers::new();
+    let result = CheckResult {
+        verdict_streams: Default::default(),
+        fault: None,
+        classification: None,
+        acceptance_id: "AC-1".into(),
+        exit_code: Some(1),
+        quota_walk_count: 0,
+        stdout: b"review-prefix\nreview-secret-tail\n".to_vec(),
+        stderr: b"started\nreview-prefix\nreview-secret-tail\n".to_vec(),
+        operational_error: None,
+        environment_note: None,
+    };
+    let line = super::last_stderr_line(&result, &markers, &host_redactor());
+    assert!(!line.contains("review-secret-tail"), "{line}");
+    assert!(line.contains("REDACTED"), "{line}");
+    let observation = super::mutation_observation(&result, &markers, &[], &host_redactor());
+    assert!(!observation.contains("review-secret-tail"), "{observation}");
+}
+
+fn host_redactor() -> crate::command::workflow_task_set::passability::evidence::Redactor {
+    crate::command::workflow_task_set::passability::evidence::Redactor::for_environment(
+        std::iter::empty(),
+        &[],
+    )
 }

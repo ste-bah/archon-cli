@@ -33,6 +33,51 @@ const SECRET_NAME_PARTS: &[&str] = &[
     "SESSION",
 ];
 
+/// The password of every `scheme://user:password@host` URL in `value`, as
+/// written and, when it differs, percent-decoded.
+fn url_passwords(value: &str) -> Vec<String> {
+    let mut passwords = Vec::new();
+    let mut rest = value;
+    while let Some(at) = rest.find("://") {
+        rest = &rest[at + 3..];
+        let authority_end = rest
+            .find(|c: char| matches!(c, '/' | '?' | '#') || c.is_whitespace())
+            .unwrap_or(rest.len());
+        let authority = &rest[..authority_end];
+        if let Some((userinfo, _)) = authority.rsplit_once('@')
+            && let Some((_, password)) = userinfo.split_once(':')
+            && !password.is_empty()
+        {
+            passwords.push(password.to_string());
+            let decoded = percent_decoded(password);
+            if decoded != password {
+                passwords.push(decoded);
+            }
+        }
+        rest = &rest[authority_end..];
+    }
+    passwords
+}
+
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'%'
+            && let Some(hex) = text.get(at + 1..at + 3)
+            && let Ok(byte) = u8::from_str_radix(hex, 16)
+        {
+            out.push(byte);
+            at += 3;
+        } else {
+            out.push(bytes[at]);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub(crate) const BEGIN: &str = "[begin untrusted program output]";
 pub(crate) const END: &str = "[end untrusted program output]";
 
@@ -62,14 +107,25 @@ impl Redactor {
         vars: impl IntoIterator<Item = (String, String)>,
         forwarded: &[String],
     ) -> Self {
-        let mut secrets: Vec<(String, String)> = (vars.into_iter())
+        let vars: Vec<(String, String)> = vars.into_iter().collect();
+        let mut secrets: Vec<(String, String)> = (vars.iter())
             .filter(|(name, value)| {
                 let upper = name.to_ascii_uppercase();
                 value.chars().count() >= MIN_SECRET_CHARS
                     && (forwarded.iter().any(|f| f.eq_ignore_ascii_case(name))
                         || SECRET_NAME_PARTS.iter().any(|part| upper.contains(part)))
             })
+            .cloned()
             .collect();
+        // Issue 544: a URL's password is a credential whatever the variable
+        // is called (`RUSTUP_HOME=https://user:password@host/...`).
+        for (name, value) in &vars {
+            for password in url_passwords(value) {
+                if password.chars().count() >= MIN_SECRET_CHARS {
+                    secrets.push((name.clone(), password));
+                }
+            }
+        }
         // The longest first: a secret that contains another is replaced whole.
         secrets.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
         secrets.dedup_by(|a, b| a.1 == b.1);

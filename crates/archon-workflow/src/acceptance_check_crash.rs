@@ -109,7 +109,8 @@ pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass 
         None => return CheckRunClass::Failed,
         Some(_) => {}
     }
-    let stderr = String::from_utf8_lossy(&result.stderr);
+    // Issue 544: the raw capture when it is kept, never redacted evidence.
+    let stderr = String::from_utf8_lossy(result.verdict_stderr());
     let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
     let code = result.exit_code.unwrap_or_default();
     python_defect(command, code, &lines)
@@ -123,6 +124,11 @@ pub struct CheckClassification {
     pub passed: bool,
     pub zero_work: bool,
     pub crash: CheckRunClass,
+    /// Issue 544: the failure's regression fingerprint, computed from the
+    /// raw capture with each secret as an indexed placeholder, so stored
+    /// results compare as the raw ones would without holding a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_signature: Option<String>,
 }
 
 impl CheckResult {
@@ -132,8 +138,8 @@ impl CheckResult {
             return;
         }
         let zero_work = crate::acceptance::output_reports_zero_work(
-            &String::from_utf8_lossy(&self.stdout),
-            &String::from_utf8_lossy(&self.stderr),
+            &String::from_utf8_lossy(self.verdict_stdout()),
+            &String::from_utf8_lossy(self.verdict_stderr()),
         );
         let mut crash = classify_check_run(command, self);
         if let CheckRunClass::ScriptDefect(defect) = &mut crash {
@@ -144,6 +150,7 @@ impl CheckResult {
             passed: self.operational_error.is_none() && self.exit_code == Some(0) && !zero_work,
             zero_work,
             crash,
+            failure_signature: None,
         });
     }
 }

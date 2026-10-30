@@ -49,7 +49,7 @@ impl ObservationResult {
 }
 
 pub(super) fn redacted(roots: &ScratchRoots, check: &CheckResult) -> CheckResult {
-    redacted_environment(&roots.host_environment, check)
+    redacted_environment(&roots.redaction_environment, check)
 }
 
 pub(super) fn redacted_environment(
@@ -72,6 +72,7 @@ pub(super) fn redacted_environment(
 
 pub(super) fn operational(id: &str, error: String) -> CheckResult {
     CheckResult {
+        verdict_streams: Default::default(),
         classification: None,
         acceptance_id: id.into(),
         exit_code: None,

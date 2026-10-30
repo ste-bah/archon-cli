@@ -77,12 +77,12 @@ pub use observe::AttributedTeardown;
 pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
 pub(crate) use process::drain_counted;
-pub use process::{CHECK_TIMED_OUT, CheckResult, MutationInputPlan, MutationPlan};
+pub use process::{CHECK_TIMED_OUT, CheckResult, MutationInputPlan, MutationPlan, VerdictStreams};
 pub use site_path::{
     SITE_BASELINE_DIRECTORY, SITE_CARGO_HOME_DIRECTORY, SITE_HOME_DIRECTORY,
     SITE_INTERNAL_DIRECTORIES, SITE_PROCESS_GROUPS_DIRECTORY, SITE_PROJECT_DIRECTORY,
     SITE_REPOSITORY_DIRECTORY, SITE_TARGET_DIRECTORY, SITE_TEMP_DIRECTORY, SitePathRefusal,
-    site_path_alone,
+    site_internal_directories, site_path_alone,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -170,6 +170,9 @@ pub struct ScratchRoots {
     cleaned: bool,
     cleanup_timeout_secs: u64,
     host_environment: BTreeMap<String, String>,
+    /// Issue 544: what capture redacts (see
+    /// `acceptance_check_environment::redaction_values`).
+    redaction_environment: BTreeMap<String, String>,
     siblings: siblings::Copied,
 }
 impl ScratchRoots {
@@ -283,6 +286,11 @@ impl ScratchRoots {
             worktree_link: None,
             cleaned: false,
             cleanup_timeout_secs: policy.timeout_secs.max(5),
+            redaction_environment: crate::acceptance_check_environment::redaction_values(
+                &host_environment,
+                &policy.environment,
+                &crate::acceptance_check_environment::host_environment(),
+            ),
             host_environment,
             siblings: siblings::Copied::default(),
         };
@@ -495,6 +503,10 @@ impl ScratchRoots {
         self.redact_output(bytes, false)
     }
     pub(super) fn redact_output(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
-        io::redact(&self.host_environment, bytes, truncated)
+        io::redact(&self.redaction_environment, bytes, truncated)
+    }
+    /// See `io::placeholders`.
+    pub(super) fn placeholder_output(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
+        io::placeholders(&self.redaction_environment, bytes, truncated)
     }
 }
