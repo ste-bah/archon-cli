@@ -29,7 +29,7 @@ pub(in crate::v2::write) fn write_branch_error_kind(error: &str) -> BranchFailur
         || lower.contains("tool execution failed")
         || lower.contains("process failed")
         || lower.contains("timed out")
-        || lower.contains("rate limit")
+        || archon_llm::provider_fault::rate_limit_text_matches(&lower)
         || lower.contains("cancelled")
     {
         return BranchFailureKind::Execution;

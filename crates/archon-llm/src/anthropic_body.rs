@@ -110,6 +110,6 @@ impl AnthropicClient {
         } else {
             remove_cache_directives(&mut body);
         }
-        serde_json::to_string(&body).map_err(|e| ApiError::SerializeError(format!("{e}")))
+        serde_json::to_string(&body).map_err(|e| ApiError::SerializeError(format!("{e}").into()))
     }
 }

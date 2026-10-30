@@ -265,7 +265,7 @@ fn redacted(error: anyhow::Error) -> anyhow::Error {
         Ok(error) => error,
         Err(other) => return other,
     };
-    let clean = |text: String| bounded_text(&text);
+    let clean = |text: archon_llm::provider::DiagnosticMessage| text.map_text(bounded_text);
     anyhow::Error::new(match error {
         LlmError::Http(text) => LlmError::Http(clean(text)),
         LlmError::Auth(text) => LlmError::Auth(clean(text)),
@@ -278,7 +278,7 @@ fn redacted(error: anyhow::Error) -> anyhow::Error {
             pipeline_retry_after_secs,
         } => LlmError::Server {
             status,
-            message: clean(message.into()).into(),
+            message: clean(message),
             pipeline_retry_after_secs,
         },
         LlmError::Rejected {

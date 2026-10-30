@@ -38,9 +38,9 @@ pub async fn run_agentic_tool_loop(
         persist_tool_exchange(&mut request, &outcome);
         request.tool_results = execute_tools(&outcome.tool_calls, executor).await?;
     }
-    Err(LlmError::Unsupported(format!(
-        "agentic loop exceeded {max_turns} tool turns"
-    )))
+    Err(LlmError::Unsupported(
+        format!("agentic loop exceeded {max_turns} tool turns").into(),
+    ))
 }
 
 async fn execute_tools(

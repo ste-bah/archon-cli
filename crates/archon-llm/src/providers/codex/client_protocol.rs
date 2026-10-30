@@ -69,9 +69,9 @@ pub fn validate_spoof_headers(spoof: &SpoofConfig) -> Result<(), LlmError> {
     for key in spoof.extra_headers.keys() {
         let lower = key.to_lowercase();
         if RESERVED_HEADERS.contains(&lower.as_str()) {
-            return Err(LlmError::Auth(format!(
-                "spoof.extra_headers contains reserved header: {key}"
-            )));
+            return Err(LlmError::Auth(
+                format!("spoof.extra_headers contains reserved header: {key}").into(),
+            ));
         }
     }
     Ok(())
@@ -83,21 +83,23 @@ pub(super) fn insert_header(
     value: &str,
 ) -> Result<(), LlmError> {
     let name = HeaderName::from_bytes(key.as_bytes())
-        .map_err(|e| LlmError::Serialize(format!("invalid header name `{key}`: {e}")))?;
-    let value = HeaderValue::from_str(value)
-        .map_err(|e| LlmError::Serialize(format!("invalid header value for `{key}`: {e}")))?;
+        .map_err(|e| LlmError::Serialize(format!("invalid header name `{key}`: {e}").into()))?;
+    let value = HeaderValue::from_str(value).map_err(|e| {
+        LlmError::Serialize(format!("invalid header value for `{key}`: {e}").into())
+    })?;
     headers.insert(name, value);
     Ok(())
 }
 
 pub(super) fn is_retryable(status: u16, body: &str) -> bool {
     matches!(status, 429 | 500 | 502 | 503 | 504)
+        || crate::provider_fault::rate_limit_matches(
+            &body.to_ascii_lowercase(),
+            crate::provider_fault::RateLimitEvidence::Codex,
+        )
         || contains_any(
             body,
             &[
-                "rate limit",
-                "rate-limit",
-                "ratelimit",
                 "overloaded",
                 "service unavailable",
                 "upstream connect",
@@ -127,13 +129,13 @@ pub(super) fn map_codex_error(status: u16, body: String, refreshed: bool) -> Llm
     let error = crate::provider_fault::from_status(status, &Default::default(), body.clone());
     match status {
         401 if refreshed => LlmError::Auth("Codex token rejected after refresh".into()),
-        401 | 403 => LlmError::Auth(body),
-        429 if is_quota_exceeded(&body) => LlmError::QuotaExceeded(body),
+        401 | 403 => LlmError::Auth(body.into()),
+        429 if is_quota_exceeded(&body) => LlmError::QuotaExceeded(body.into()),
         429 => LlmError::RateLimited {
             retry_after_secs: 1,
             from_provider: false,
             pipeline_retry_after_secs: None,
-            message: crate::provider_fault::diagnostic_message(&body),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(&body),
         },
         500..=599 => LlmError::Server {
             status,
@@ -155,3 +157,7 @@ mod diagnostic_redaction_tests {
     }
     include!("../../provider_fault_redaction_cases.rs");
 }
+
+#[cfg(test)]
+#[path = "client_protocol_characterization_tests.rs"]
+mod c0_characterization;

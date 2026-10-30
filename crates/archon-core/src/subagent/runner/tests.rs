@@ -363,7 +363,7 @@ impl LlmProvider for RateLimitThenSuccessProvider {
                 retry_after_secs: 30,
                 from_provider: true,
                 pipeline_retry_after_secs: None,
-                message: String::new(),
+                message: String::new().into(),
             }),
             (RateLimitFailureMode::MidStream, 0) => Ok(stream_from_events(vec![
                 StreamEvent::Error {

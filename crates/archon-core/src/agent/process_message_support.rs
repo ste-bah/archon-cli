@@ -106,8 +106,8 @@ impl Agent {
 
     pub(super) async fn handle_stream_error(
         &mut self,
-        error_type: String,
-        message: String,
+        error_type: archon_llm::provider::DiagnosticMessage,
+        message: archon_llm::provider::DiagnosticMessage,
         prepared: &PreparedTurnRequest,
         recovery_ladder: &mut autocompact::RecoveryLadder,
         reactive_rate_limit_retried: &mut bool,

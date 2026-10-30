@@ -107,7 +107,7 @@ impl LlmProvider for FakeProvider {
     }
 
     async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        Err(LlmError::Unsupported("fake provider".to_string()))
+        Err(LlmError::Unsupported("fake provider".to_string().into()))
     }
 
     fn supports_feature(&self, _feature: ProviderFeature) -> bool {

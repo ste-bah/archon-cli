@@ -18,22 +18,22 @@ use crate::types::Usage;
 // Error type
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, serde::Serialize)]
 #[non_exhaustive]
 pub enum LlmError {
-    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
-    Http(String),
+    #[error("HTTP error: {0}")]
+    Http(DiagnosticMessage),
 
-    #[error("authentication error: {}", crate::provider_fault::diagnostic_message(.0))]
-    Auth(String),
+    #[error("authentication error: {0}")]
+    Auth(DiagnosticMessage),
 
     /// `from_provider` is true when the provider named the wait (a
     /// Retry-After header or body field); false when `retry_after_secs` is
     /// this client's default wait because the provider named none.
     #[error("rate limited: retry after {retry_after_secs}s{}", crate::provider_fault::diagnostic_suffix(.message))]
     RateLimited {
-        /// Original provider diagnostic, empty when no diagnostic was supplied.
-        message: String,
+        /// Redacted provider diagnostic, empty when no diagnostic was supplied.
+        message: DiagnosticMessage,
         retry_after_secs: u64,
         from_provider: bool,
         /// Optional provider wait hint for the pipeline's outer retry loop.
@@ -44,15 +44,18 @@ pub enum LlmError {
     /// The provider rejected the request itself (an error event such as
     /// `invalid_request_error`, `permission_error` or `not_found_error`).
     /// Sending it again cannot help. No HTTP status is known.
-    #[error("provider rejected the request ({}): {}", crate::provider_fault::diagnostic_message(.error_type), crate::provider_fault::diagnostic_message(.message))]
-    Rejected { error_type: String, message: String },
+    #[error("provider rejected the request ({error_type}): {message}")]
+    Rejected {
+        error_type: DiagnosticMessage,
+        message: DiagnosticMessage,
+    },
 
     /// Provider status and optional Retry-After metadata; this error keeps the
     /// same retry semantics and display text regardless of those fields.
     #[error("server overloaded{}", crate::provider_fault::diagnostic_suffix(.message))]
     Overloaded {
-        /// Original provider diagnostic, independent of retry metadata.
-        message: String,
+        /// Redacted provider diagnostic, independent of retry metadata.
+        message: DiagnosticMessage,
         status: Option<u16>,
         retry_after_secs: Option<u64>,
     },
@@ -66,35 +69,39 @@ pub enum LlmError {
         pipeline_retry_after_secs: Option<u64>,
     },
 
-    #[error("serialization error: {}", crate::provider_fault::diagnostic_message(.0))]
-    Serialize(String),
+    #[error("serialization error: {0}")]
+    Serialize(DiagnosticMessage),
 
-    #[error("feature not supported: {}", crate::provider_fault::diagnostic_message(.0))]
-    Unsupported(String),
+    #[error("feature not supported: {0}")]
+    Unsupported(DiagnosticMessage),
 
     #[error("provider '{name}' not found — available: [{available}]")]
-    ProviderNotFound { name: String, available: String },
+    ProviderNotFound {
+        name: DiagnosticMessage,
+        available: DiagnosticMessage,
+    },
 
-    #[error("quota exceeded: {}", crate::provider_fault::diagnostic_message(.0))]
-    QuotaExceeded(String),
+    #[error("quota exceeded: {0}")]
+    QuotaExceeded(DiagnosticMessage),
 
     #[error("request aborted")]
     Aborted,
 
-    #[error("context window exceeded: {}", crate::provider_fault::diagnostic_message(.provider_message))]
+    #[error("context window exceeded: {provider_message}")]
     ContextWindowExceeded {
-        provider_message: String,
-        provider: Option<String>,
-        model: Option<String>,
+        provider_message: DiagnosticMessage,
+        provider: Option<DiagnosticMessage>,
+        model: Option<DiagnosticMessage>,
     },
 
-    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
-    Transport(String),
+    #[error("HTTP error: {0}")]
+    Transport(DiagnosticMessage),
 }
 
 // Request-pressure and context-window classification of an error.
 #[path = "provider_error_class.rs"]
 mod error_class;
+pub use error_class::ShownTest;
 
 // ---------------------------------------------------------------------------
 // Feature flags
@@ -462,8 +469,8 @@ impl ProviderRegistry {
             let mut sorted = available;
             sorted.sort_unstable();
             LlmError::ProviderNotFound {
-                name: config_provider.to_string(),
-                available: sorted.join(", "),
+                name: config_provider.to_string().into(),
+                available: sorted.join(", ").into(),
             }
         })
     }

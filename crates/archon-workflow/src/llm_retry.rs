@@ -113,8 +113,7 @@ where
             Err(error) => {
                 let message = error.to_string();
                 let provider = provider_error(&error);
-                let retryable = provider.is_some_and(|fault| fault.is_operational())
-                    || transient_live_agent_error_for_request(&agent_request, &message);
+                let retryable = agent_error_retryable(&agent_request, &error, &message);
                 if retryable {
                     // Typed metadata distinguishes a server hint from a
                     // client's default wait. Display text cannot override it.
@@ -125,7 +124,10 @@ where
                             .unwrap_or_default(),
                     );
                     let operational = provider.map_or_else(
-                        || archon_llm::provider::LlmError::Http(message.clone()).is_operational(),
+                        || {
+                            archon_llm::provider::LlmError::Http(message.clone().into())
+                                .is_operational()
+                        },
                         |fault| fault.is_operational(),
                     );
                     // Refund failed-attempt time only. Existing no-progress
@@ -149,7 +151,7 @@ where
                             component = "workflow_agent",
                             attempt,
                             next_delay_ms = delay.as_millis() as u64,
-                            error_class = retry_error_class(&message),
+                            error_class = retry_error_class(&error),
                             "retrying after transient provider failure"
                         );
                     }
@@ -188,17 +190,77 @@ fn retry_is_visible(attempt: usize) -> bool {
     attempt.is_power_of_two() || attempt >= 8
 }
 
-fn retry_error_class(message: &str) -> &'static str {
-    let text = message.to_ascii_lowercase();
-    if text.contains("rate limit") || text.contains("rate limited") || text.contains("429") {
-        "rate_limit"
-    } else if text.contains("overloaded") {
-        "overload"
-    } else if text.contains("connection") || text.contains("socket") || text.contains("request") {
-        "connection"
-    } else {
-        "transient"
-    }
+/// The provider fault this error's Display may show: the first one in the
+/// source chain, including one held by a transparent wrapper.
+fn shown_fault(error: &WorkflowError) -> Option<&archon_llm::provider::LlmError> {
+    let root: &(dyn std::error::Error + 'static) = match error {
+        WorkflowError::Port(source) => source.as_ref(),
+        other => other,
+    };
+    archon_llm::provider::LlmError::in_chain(root)
+}
+
+/// One closed text test over this error's Display, as 86fbab995 saw that
+/// text: a shown provider fault reads with that commit's Display.
+pub(crate) fn display_is(
+    error: &WorkflowError,
+    message: &str,
+    test: archon_llm::provider::ShownTest,
+) -> bool {
+    shown_fault(error).map_or_else(
+        || test.matches(message),
+        |fault| fault.shown_is(message, test),
+    )
+}
+
+fn retry_error_class(error: &WorkflowError) -> &'static str {
+    let message = error.to_string();
+    shown_fault(error).map_or_else(
+        || archon_llm::provider_fault::retry_error_class_text(&message),
+        |fault| fault.shown_log_class(&message),
+    )
+}
+
+fn transient_workflow_error(error: &WorkflowError) -> bool {
+    send_retry(error, &error.to_string())
+}
+
+/// `transient_live_agent_error` over the display text 86fbab995 saw.
+fn send_retry(error: &WorkflowError, message: &str) -> bool {
+    use archon_llm::provider::ShownTest;
+    !display_is(
+        error,
+        message,
+        ShownTest::Contains(crate::error::NO_PROGRESS_STOP_MARKER),
+    ) && display_is(error, message, ShownTest::SendRetry)
+}
+
+/// Main's agent-loop policy: a typed operational fault anywhere in the source
+/// chain, or the request-aware text policy over the visible display.
+fn agent_error_retryable(
+    request: &WorkflowAgentCall,
+    error: &WorkflowError,
+    message: &str,
+) -> bool {
+    provider_error(error).is_some_and(|fault| fault.is_operational())
+        || transient_agent_error_for_request(request, error, message)
+}
+
+/// `transient_live_agent_error_for_request`, each rule over the display text
+/// 86fbab995 saw.
+fn transient_agent_error_for_request(
+    request: &WorkflowAgentCall,
+    error: &WorkflowError,
+    message: &str,
+) -> bool {
+    use archon_llm::provider::ShownTest;
+    !display_is(
+        error,
+        message,
+        ShownTest::Contains(crate::error::HOST_CALL_TIMEOUT_MARKER),
+    ) && !(request.disable_auto_background
+        && foreground_stop(|test| display_is(error, message, test)))
+        && send_retry(error, message)
 }
 
 pub async fn send_message_with_transient_retry<F, Fut>(
@@ -221,8 +283,7 @@ where
         {
             Ok(response) => return Ok(response),
             Err(error) => {
-                let message = error.to_string();
-                if attempt < LIVE_AGENT_TRANSIENT_ATTEMPTS && transient_live_agent_error(&message) {
+                if attempt < LIVE_AGENT_TRANSIENT_ATTEMPTS && transient_workflow_error(&error) {
                     last_error = Some(error);
                     on_retry(attempt).await?;
                     tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
@@ -247,46 +308,8 @@ pub fn transient_live_agent_error(message: &str) -> bool {
     if crate::error::is_no_progress_stop_text(message) {
         return false;
     }
-    let text = message.to_ascii_lowercase();
-    if let Some(status) = archon_llm::provider_fault::status_field(&text) {
-        return matches!(status, 408 | 429 | 500..=599);
-    }
-    if non_retryable_provider_fault(&text) {
-        return false;
-    }
-    [
-        "llm stream error",
-        "server_error",
-        "error decoding response body",
-        "error sending request",
-        "request failed",
-        "connection reset",
-        "connection closed",
-        "connection refused",
-        "broken pipe",
-        "timed out",
-        "timeout",
-        "temporar",
-        "rate limit",
-        "server overloaded",
-    ]
-    .iter()
-    .any(|needle| text.contains(needle))
-}
-
-fn non_retryable_provider_fault(text: &str) -> bool {
-    if [
-        "context window exceeded",
-        "context-too-large",
-        "context too large",
-    ]
-    .iter()
-    .any(|marker| text.contains(marker))
-    {
-        return true;
-    }
-
-    false
+    // One rule source for this text and for typed faults (ShownTest::SendRetry).
+    archon_llm::provider_fault::send_retry_text(message)
 }
 
 /// The pipeline-type guard this used to carry is gone with the concrete
@@ -306,11 +329,20 @@ pub fn transient_live_agent_error_for_request(request: &WorkflowAgentCall, messa
 /// host's own decisions, not provider blinks: re-asking them here would
 /// restart the session the host just ended.
 fn foreground_subagent_timeout_or_cancel(message: &str) -> bool {
-    let text = message.to_ascii_lowercase();
-    crate::error::is_inactivity_timeout_text(message)
-        || text.contains("subagent timed out")
-        || text.contains("subagent cancelled")
-        || text.contains("subagent auto-backgrounded")
+    foreground_stop(|test| test.matches(message))
+}
+
+/// One marker list for display text and for a typed fault's shown text.
+fn foreground_stop(test: impl Fn(archon_llm::provider::ShownTest) -> bool) -> bool {
+    use archon_llm::provider::ShownTest;
+    test(ShownTest::Contains(crate::error::INACTIVITY_TIMEOUT_MARKER))
+        || [
+            "subagent timed out",
+            "subagent cancelled",
+            "subagent auto-backgrounded",
+        ]
+        .into_iter()
+        .any(|marker| test(ShownTest::ContainsLowercase(marker)))
 }
 
 #[cfg(test)]
@@ -324,3 +356,7 @@ mod fault_tests;
 #[cfg(test)]
 #[path = "llm_retry_connection_tests.rs"]
 mod connection_tests;
+
+#[cfg(test)]
+#[path = "llm_retry_characterization.rs"]
+mod c0_characterization;

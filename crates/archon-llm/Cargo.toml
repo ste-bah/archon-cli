@@ -69,6 +69,8 @@ tokio = { workspace = true, features = ["test-util"] }
 axum = { workspace = true }
 futures-util = { workspace = true }
 tempfile.workspace = true
+# #538: capture tracing output in the diagnostic egress tests.
+tracing-subscriber.workspace = true
 
 [features]
 test-support = []

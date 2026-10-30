@@ -392,7 +392,7 @@ fn classify_retry_variants() {
             retry_after_secs: 1,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         }),
         RetryDecision::Retry,
         "RateLimited -> Retry"
@@ -401,7 +401,7 @@ fn classify_retry_variants() {
         classify(&LlmError::Overloaded {
             status: None,
             retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         }),
         RetryDecision::Retry,
         "Overloaded -> Retry"

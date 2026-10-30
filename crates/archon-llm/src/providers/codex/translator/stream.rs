@@ -68,14 +68,14 @@ impl StreamAccumulator {
                     .map(|e| (e.code, e.message))
                     .unwrap_or_else(|| ("response_failed".into(), "Codex response failed".into()));
                 vec![Ok(StreamEvent::Error {
-                    error_type,
-                    message,
+                    error_type: error_type.into(),
+                    message: message.into(),
                 })]
             }
             ResponseStreamEvent::Error { code, message, .. } => {
                 vec![Ok(StreamEvent::Error {
-                    error_type: code,
-                    message,
+                    error_type: code.into(),
+                    message: message.into(),
                 })]
             }
             ResponseStreamEvent::RefusalDelta { item_id, delta, .. } => {

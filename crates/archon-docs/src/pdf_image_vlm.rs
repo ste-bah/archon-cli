@@ -74,7 +74,7 @@ fn is_retryable(result: &VlmImageResult) -> bool {
         VlmImageResult::Failed(message) => {
             message.contains("did not contain text")
                 || message.contains("provider returned empty")
-                || message.contains("rate limit")
+                || archon_llm::provider_fault::rate_limit_text_matches(&message)
                 || message.contains("timed out")
                 || message.contains("status 5")
                 || message.contains("HTTP 5")

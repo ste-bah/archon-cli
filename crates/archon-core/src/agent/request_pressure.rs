@@ -157,18 +157,14 @@ pub(crate) fn large_request_retry_body_bytes(config: &crate::config::ContextConf
 pub(crate) fn is_rate_limited_error(error: &archon_llm::provider::LlmError) -> bool {
     match error {
         archon_llm::provider::LlmError::RateLimited { .. } => true,
-        archon_llm::provider::LlmError::Http(message) => rate_limit_message(message),
-        archon_llm::provider::LlmError::Server { message, .. } => rate_limit_message(message),
+        archon_llm::provider::LlmError::Http(message) => message.is_rate_limited(),
+        // A server message was redacted when stored at 86fbab995.
+        archon_llm::provider::LlmError::Server { message, .. } => {
+            archon_llm::provider::DiagnosticMessage::redacted_at_source(message.as_str())
+                .is_rate_limited()
+        }
         _ => false,
     }
-}
-
-fn rate_limit_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("429")
-        || lower.contains("rate limit")
-        || lower.contains("rate_limited")
-        || lower.contains("rate_limit_error")
 }
 
 #[cfg(test)]
@@ -178,12 +174,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rate_limit_classifier_preserves_raw_authorization_suffix() {
+        let error = LlmError::Server {
+            status: 400,
+            message: "Authorization: Bearer example-token; rate limit".into(),
+            pipeline_retry_after_secs: None,
+        };
+        // 86fbab995 stored a server message redacted: the authorization line,
+        // "rate limit" included, was gone before this classifier ran.
+        assert!(
+            !is_rate_limited_error(&error),
+            "classified text 86fbab995 never saw: {error}"
+        );
+        assert!(!error.to_string().contains("example-token"));
+    }
+
+    #[test]
     fn rate_limit_classifier_covers_typed_and_http_errors() {
         assert!(is_rate_limited_error(&LlmError::RateLimited {
             retry_after_secs: 30,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         }));
         assert!(is_rate_limited_error(&LlmError::Http(
             "HTTP 429: rate_limited".into()
@@ -243,3 +255,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "request_pressure_characterization.rs"]
+mod c0_characterization;

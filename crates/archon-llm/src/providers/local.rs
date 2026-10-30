@@ -232,7 +232,7 @@ impl LocalProvider {
                             .send(if e.is_timeout() {
                                 StreamEvent::Error {
                                     error_type: "transport_idle".into(),
-                                    message: e.to_string(),
+                                    message: e.to_string().into(),
                                 }
                             } else {
                                 crate::provider_fault::transport_event(e)

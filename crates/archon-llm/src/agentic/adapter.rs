@@ -267,10 +267,10 @@ async fn parse_tool_arguments(
     match serde_json::from_str(&tool.arguments_raw) {
         Ok(arguments) => Ok(Some(arguments)),
         Err(err) => {
-            let message = format!(
+            let message = crate::provider::DiagnosticMessage::from(format!(
                 "malformed tool arguments for `{}` ({}): {err}",
                 tool.name, tool.id
-            );
+            ));
             sink.emit(AgenticTurnEvent::ProviderError {
                 message: message.clone(),
             })

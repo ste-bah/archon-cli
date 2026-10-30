@@ -52,16 +52,24 @@ pub use policy::{RetryDecision, RetryPolicy, classify};
 
 /// Preserve the existing provider-event classification when a durable caller
 /// consumes the stream directly instead of peeking in this decorator.
-pub fn classify_stream_failure(error_type: &str, message: &str) -> LlmError {
+pub fn classify_stream_failure(
+    error_type: &str,
+    message: impl Into<crate::provider::DiagnosticMessage>,
+) -> LlmError {
     crate::provider_fault::from_stream_error(error_type, message)
 }
 
-use policy::{reason_code_for_error, stream_error_before_content};
+use policy::reason_code_for_error;
+pub(crate) use policy::stream_error_before_content;
 
 /// Whether a streaming provider error should be retried by the caller's
 /// no-progress policy. Rejections remain fail-fast; transient and unknown
 /// provider error types use the shared retry classification.
-pub fn stream_error_is_retryable(error_type: &str, message: &str) -> bool {
+pub fn stream_error_is_retryable(
+    error_type: &str,
+    message: impl Into<crate::provider::DiagnosticMessage>,
+) -> bool {
+    let message = message.into();
     match error_type {
         // Provider SSE errors whose semantics explicitly describe a transient
         // failure. Other known events stay on the runner's existing route:
@@ -76,7 +84,7 @@ pub fn stream_error_is_retryable(error_type: &str, message: &str) -> bool {
         | "network"
         | "http_error" => true,
         // Preserve the runner's original protocol recovery condition exactly.
-        "protocol" => message.contains("stream ended before message_stop"),
+        "protocol" => message.is_incomplete_stream(),
         // transport_idle keeps its dedicated stall handling in the runner.
         "transport_idle" => false,
         "server_error"
@@ -102,7 +110,10 @@ enum StreamProbe {
     Usable(Receiver<StreamEvent>),
     /// The stream errored before any content existed, so replaying the request
     /// duplicates nothing.
-    FailedBeforeContent { error_type: String, message: String },
+    FailedBeforeContent {
+        error_type: crate::provider::DiagnosticMessage,
+        message: crate::provider::DiagnosticMessage,
+    },
 }
 
 /// Decorator that retries retryable `LlmError`s according to a `RetryPolicy`.
@@ -196,13 +207,16 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
                 }
             }
             while let Some(event) = rx.recv().await {
+                // 86fbab995 redacted forwarded error text here.
                 let event = match event {
                     StreamEvent::Error {
                         error_type,
                         message,
                     } => StreamEvent::Error {
                         error_type,
-                        message: archon_observability::redaction::redact_text(&message),
+                        message: crate::provider::DiagnosticMessage::redacted_at_source(
+                            message.as_str(),
+                        ),
                     },
                     event => event,
                 };
@@ -457,7 +471,9 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
                             return Err(error);
                         }
                         let (tx, rx) = tokio::sync::mpsc::channel(1);
-                        let message = archon_observability::redaction::redact_text(&message);
+                        let message = crate::provider::DiagnosticMessage::redacted_at_source(
+                            message.as_str(),
+                        );
                         let _ = tx
                             .send(StreamEvent::Error {
                                 error_type,
@@ -480,7 +496,7 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
                 message,
             }) => Err(LlmError::Rejected {
                 error_type,
-                message: archon_observability::redaction::redact_text(&message),
+                message: crate::provider::DiagnosticMessage::redacted_at_source(message.as_str()),
             }),
             Err(err) => Err(err),
         }

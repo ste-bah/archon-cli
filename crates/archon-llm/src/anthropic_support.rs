@@ -41,31 +41,34 @@ impl Default for MessageRequest {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum ApiError {
     #[error("provider transport read-idle backstop expired; resumable")]
     IdleTimeout,
 
-    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
-    HttpError(String),
+    #[error("HTTP error: {0}")]
+    HttpError(crate::provider::DiagnosticMessage),
 
-    #[error("authentication error: {}", crate::provider_fault::diagnostic_message(.0))]
-    AuthError(String),
+    #[error("authentication error: {0}")]
+    AuthError(crate::provider::DiagnosticMessage),
 
-    #[error("request rejected ({}): {}", crate::provider_fault::diagnostic_message(.error_type), crate::provider_fault::diagnostic_message(.message))]
-    Rejected { error_type: String, message: String },
+    #[error("request rejected ({error_type}): {message}")]
+    Rejected {
+        error_type: crate::provider::DiagnosticMessage,
+        message: crate::provider::DiagnosticMessage,
+    },
 
     /// `from_provider`: see [`crate::provider::LlmError::RateLimited`].
     #[error("rate limited: retry after {retry_after_secs}s{}", crate::provider_fault::diagnostic_suffix(.message))]
     RateLimited {
-        message: String,
+        message: crate::provider::DiagnosticMessage,
         retry_after_secs: u64,
         from_provider: bool,
     },
 
     #[error("server overloaded (529){}", crate::provider_fault::diagnostic_suffix(.message))]
     Overloaded {
-        message: String,
+        message: crate::provider::DiagnosticMessage,
         retry_after_secs: Option<u64>,
     },
 
@@ -76,11 +79,11 @@ pub enum ApiError {
         retry_after_secs: Option<u64>,
     },
 
-    #[error("serialization error: {}", crate::provider_fault::diagnostic_message(.0))]
-    SerializeError(String),
+    #[error("serialization error: {0}")]
+    SerializeError(crate::provider::DiagnosticMessage),
 
-    #[error("HTTP error: {}", crate::provider_fault::diagnostic_message(.0))]
-    Transport(String),
+    #[error("HTTP error: {0}")]
+    Transport(crate::provider::DiagnosticMessage),
 }
 
 /// Wire name of the `speed` knob, used as its key in the unsupported registry
@@ -380,7 +383,7 @@ pub(crate) fn classify_error(
     match status {
         401 | 403 => rejected_error(body).unwrap_or_else(|| ApiError::Rejected {
             error_type: "authentication_error".into(),
-            message: archon_observability::redaction::redact_text(&format!(
+            message: crate::provider::DiagnosticMessage::redacted_at_source(&format!(
                 "HTTP {status}: {body}"
             )),
         }),
@@ -391,13 +394,13 @@ pub(crate) fn classify_error(
             ApiError::RateLimited {
                 retry_after_secs: named.unwrap_or(DEFAULT_RATE_LIMIT_WAIT_SECS),
                 from_provider: named.is_some(),
-                message: crate::provider_fault::diagnostic_message(body),
+                message: crate::provider::DiagnosticMessage::redacted_at_source(body),
             }
         }
         529 => ApiError::Overloaded {
             retry_after_secs: retry_after_header
                 .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
-            message: crate::provider_fault::diagnostic_message(body),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(body),
         },
         408 | 500..=599 => ApiError::ServerError {
             status,
@@ -429,8 +432,8 @@ fn rejected_error(body: &str) -> Option<ApiError> {
             | "insufficient_quota"
     )
     .then(|| ApiError::Rejected {
-        error_type: error_type.to_string(),
-        message: archon_observability::redaction::redact_text(body),
+        error_type: error_type.to_string().into(),
+        message: crate::provider::DiagnosticMessage::redacted_at_source(body),
     })
 }
 

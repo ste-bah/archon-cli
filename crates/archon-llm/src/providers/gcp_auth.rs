@@ -82,10 +82,10 @@ pub fn sign_jwt(key: &ServiceAccountKey) -> Result<String, LlmError> {
 
     let header = Header::new(Algorithm::RS256);
     let encoding_key = EncodingKey::from_rsa_pem(key.private_key.as_bytes())
-        .map_err(|e| LlmError::Auth(format!("invalid service account private key: {e}")))?;
+        .map_err(|e| LlmError::Auth(format!("invalid service account private key: {e}").into()))?;
 
     encode(&header, &claims, &encoding_key)
-        .map_err(|e| LlmError::Auth(format!("JWT signing failed: {e}")))
+        .map_err(|e| LlmError::Auth(format!("JWT signing failed: {e}").into()))
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ pub async fn get_access_token(
             if error.is_operational() || matches!(error, LlmError::Rejected { .. }) {
                 error
             } else {
-                LlmError::Auth(format!("GCP token endpoint returned {status}: {body}"))
+                LlmError::Auth(format!("GCP token endpoint returned {status}: {body}").into())
             }
         })
         .await);
@@ -171,13 +171,11 @@ pub fn adc_file_path() -> String {
 /// Returns `Err` if the file is missing or cannot be parsed as a service account key.
 pub fn load_credentials_from_path(path: &str) -> Result<ServiceAccountKey, LlmError> {
     let content = std::fs::read_to_string(path).map_err(|e| {
-        LlmError::Auth(format!("failed to read GCP credentials file '{path}': {e}"))
+        LlmError::Auth(format!("failed to read GCP credentials file '{path}': {e}").into())
     })?;
 
     let key: ServiceAccountKey = serde_json::from_str(&content).map_err(|e| {
-        LlmError::Auth(format!(
-            "failed to parse GCP credentials file '{path}': {e}"
-        ))
+        LlmError::Auth(format!("failed to parse GCP credentials file '{path}': {e}").into())
     })?;
 
     Ok(key)
@@ -234,7 +232,8 @@ pub fn resolve_credentials(credentials_file: Option<&str>) -> Result<ServiceAcco
     Err(LlmError::Auth(
         "GCP credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS or configure \
          application default credentials with `gcloud auth application-default login`"
-            .to_string(),
+            .to_string()
+            .into(),
     ))
 }
 

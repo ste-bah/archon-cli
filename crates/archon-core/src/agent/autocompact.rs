@@ -305,7 +305,10 @@ pub(super) fn compaction_attempt_attribution(
     attribution
 }
 
-pub(super) fn is_cancelled_stream_error(error_type: &str, message: &str) -> bool {
+pub(super) fn is_cancelled_stream_error(
+    error_type: &str,
+    message: impl Into<archon_llm::provider::DiagnosticMessage>,
+) -> bool {
     let error_type = error_type.trim().to_ascii_lowercase();
     if matches!(
         error_type.as_str(),
@@ -322,13 +325,7 @@ pub(super) fn is_cancelled_stream_error(error_type: &str, message: &str) -> bool
     ) {
         return true;
     }
-    let message = message.trim().to_ascii_lowercase();
-    message.contains("cancelled by user")
-        || message.contains("canceled by user")
-        || message.contains("user cancelled")
-        || message.contains("user canceled")
-        || message.contains("aborted by user")
-        || message.contains("user aborted")
+    message.into().is_user_cancelled()
 }
 
 pub fn compact_json_messages_apply_with_summary(
