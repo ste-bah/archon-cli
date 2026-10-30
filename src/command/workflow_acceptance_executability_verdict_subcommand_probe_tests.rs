@@ -3,7 +3,8 @@
 //! `cargo-*` program) but no `cargo-nextest`, which the host has, is
 //! unproven -- never a proof. The site lacks what the host has, so it
 //! stays the host's after a resume too (F6): no strike makes it the
-//! author's.
+//! author's. Issue 548: no host repair makes the site provide it, so it
+//! goes to its author at once instead, with no strike.
 
 use super::super::super::probe_tests::{Trees, scratch_left, trees};
 use super::super::super::verdict_probe_tests::REPO;
@@ -28,8 +29,14 @@ fn configure(trees: &Trees, toolchain: &str) -> std::path::PathBuf {
     scratch
 }
 
+/// Issue 548 (replaces `a_scratch_freeze_never_counts_a_missing_cargo_subcommand_as_a_proof`):
+/// the host never makes the site provide `cargo-nextest`, so the check goes
+/// to its author on the first freeze -- never a proof, never held unproven
+/// for a repair that does not exist -- and again after a resume, with no
+/// strike: the finding says what the site lacks and never that it is the
+/// host's.
 #[tokio::test]
-async fn a_scratch_freeze_never_counts_a_missing_cargo_subcommand_as_a_proof() {
+async fn issue548_a_scratch_freeze_sends_a_missing_cargo_subcommand_to_its_author_not_a_proof() {
     let Some(cargo) = host_cargo() else {
         eprintln!("skipped: no cargo on the host's PATH");
         return;
@@ -48,14 +55,14 @@ async fn a_scratch_freeze_never_counts_a_missing_cargo_subcommand_as_a_proof() {
     let findings = first.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = first.take_unproven();
     let runs = first.take_baseline_runs().expect("a baseline");
-    assert!(
-        findings.is_empty(),
-        "never the author's at first: {findings:?}"
-    );
     assert!(runs.failures.is_empty(), "no proof: {runs:?}");
-    let why = unproven.get("AC-331-001").unwrap_or_else(|| {
+    assert!(
+        !unproven.contains_key("AC-331-001"),
+        "no host repair makes the site provide it: {unproven:?}"
+    );
+    let why = findings.get("AC-331-001").unwrap_or_else(|| {
         panic!(
-            "a missing subcommand is no proof: {unproven:?} {:?}",
+            "a missing subcommand is its author's at once: {findings:?} {unproven:?} {:?}",
             first.take_diagnostics()
         )
     });
@@ -63,15 +70,25 @@ async fn a_scratch_freeze_never_counts_a_missing_cargo_subcommand_as_a_proof() {
         why.contains("`cargo nextest`") && why.contains(&bin.path()),
         "{why}"
     );
-    let second = freeze();
-    let findings = second.script_defects(&trees.contract(), &trees.ids()).await;
-    assert!(findings.is_empty(), "never the author's: {findings:?}");
-    let why =
-        (second.take_unproven().remove("AC-331-001")).expect("still the host's after a resume");
     assert!(
-        why.contains("`cargo nextest`") && why.contains("never its author's"),
+        (why.to_lowercase()).contains("check the criterion with what the site provides"),
         "{why}"
     );
+    assert!(!why.contains("never its author's"), "{why}");
+    let second = freeze();
+    let findings = second.script_defects(&trees.contract(), &trees.ids()).await;
+    assert!(
+        !second.take_unproven().contains_key("AC-331-001"),
+        "never the host's after a resume"
+    );
+    let why = findings
+        .get("AC-331-001")
+        .expect("still its author's after a resume");
+    assert!(
+        why.contains("`cargo nextest`") && !why.contains("never its author's"),
+        "{why}"
+    );
+    assert!(!why.contains("It failed so again"), "no strike: {why}");
     assert!(
         scratch_left(&scratch).is_empty(),
         "{:?}",

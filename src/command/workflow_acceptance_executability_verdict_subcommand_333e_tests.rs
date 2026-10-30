@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use archon_workflow::acceptance_scratch::ScratchPolicy;
 
-use super::super::super::{HostProbe, Original};
-use super::super::no_verdict;
+use super::super::super::{HostProbe, Original, UnprovenCause};
+use super::super::{no_verdict, no_verdict_cause};
 use super::tests::{Bin, SIBLING, host_cargo, result};
 use super::tests_333::warm;
 use super::tests_333b::contract;
@@ -222,7 +222,25 @@ fn each_cell_tells_its_author_what_to_do() {
             Some(guard) => {
                 let why = why.unwrap_or_else(|| panic!("{tool}: never a proof"));
                 assert_eq!(why.contains(GUARD), guard, "{tool}: {why}");
-                assert_eq!(why.contains(MUST_NOT), !guard, "{tool}: {why}");
+                // Issue 548: no host plugin means a failed listing blames
+                // neither the check nor its site, and is retried instead.
+                let transient = tool == "archon333cd";
+                assert_eq!(
+                    why.contains(MUST_NOT),
+                    !guard && !transient,
+                    "{tool}: {why}"
+                );
+                if transient {
+                    assert_eq!(
+                        no_verdict_cause(&text, &run, &bin.context()).unwrap().1,
+                        UnprovenCause::TransientHost
+                    );
+                    assert!(why.contains("the host retries its listing probe"), "{why}");
+                    assert!(
+                        why.contains("gives no evidence that the check or its site is at fault"),
+                        "{why}"
+                    );
+                }
             }
         }
         // The run start says the same, where it names the command at all.

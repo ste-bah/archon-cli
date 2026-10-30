@@ -331,8 +331,16 @@ pub(crate) async fn reauthor_partial_with_cache(
                 .collect();
             // F6: only a program neither the site nor the host has is the
             // author's; a site lacking what the host has stays the host's.
+            // Issue 548 replaces that second half: no host repair ever makes
+            // a site provide a program it lacks, so that check is its
+            // author's too, in the same budget and with no strike: no retry
+            // can prove it.
             for (id, (reason, cause)) in unproven {
-                if cause == super::executability::UnprovenCause::ProgramAbsent {
+                if matches!(
+                    cause,
+                    super::executability::UnprovenCause::ProgramAbsent
+                        | super::executability::UnprovenCause::SiteLacks
+                ) {
                     crashed.insert(
                         id.clone(),
                         format!("the check invokes a program unavailable at the probe site ({reason}); choose a check using what the site provides"),

@@ -121,9 +121,13 @@ async fn host_command_mixed_real_gate_returns_authored_findings_immediately() {
     );
 }
 
+/// Issue 548 (replaces `host_command_site_lacks_program_is_not_an_install_remedy`):
+/// a site that lacks a program the host has is never an install remedy and
+/// never the host's to retry: no host repair makes the site provide it, so
+/// the freeze returns it at once as its author's finding.
 #[cfg(unix)]
 #[tokio::test]
-async fn host_command_site_lacks_program_is_not_an_install_remedy() {
+async fn host_command_site_lacks_program_goes_to_its_author_not_an_install_remedy() {
     use crate::command::workflow_task_set::executability::{HOST_PATH, probe_tests::trees};
     use archon_workflow::task_set_contract::TrustedCwd;
     let trees = trees(&[(
@@ -161,22 +165,34 @@ async fn host_command_site_lacks_program_is_not_an_install_remedy() {
     assert_eq!(probed.findings.len(), 1);
     assert_eq!(
         probed.findings[0].remediation_scope,
-        archon_workflow::RemediationScope::Operational
+        archon_workflow::RemediationScope::CandidateArtifact
     );
+    let text = &probed.findings[0].text;
     assert!(
-        probed.findings[0]
-            .text
-            .contains("its site lacks what the host has"),
+        text.contains("the host has `capability-x`, but the check's site does not provide it"),
         "{:?}",
         probed.findings
     );
+    assert!(!text.contains("install"), "{text}");
+    assert!(!text.contains("its site lacks what the host has"), "{text}");
     let fixture = fixture(0, false);
     *fixture.process.evaluation.lock().unwrap() = Some(
         crate::command::workflow_gate::GateEvaluation::new("freeze", probed.findings),
     );
-    run(&fixture).await.unwrap();
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
-    assert!(records(&fixture)[0].result.data["publicationReceipt"].is_object());
+    let outcome = run_script(&fixture, r#"async function workflow(w) { return await w.hostCommand("freeze-acceptance", { stdin: "{}" }); }"#).await;
+    assert_eq!(
+        fixture.process.calls.load(Ordering::SeqCst),
+        1,
+        "an authored finding returns at once, never retried as the host's: {outcome:?}"
+    );
+    outcome.unwrap();
+    assert_eq!(
+        records(&fixture)[0].result.data["gateEnvelope"]["policy_findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[cfg(unix)]

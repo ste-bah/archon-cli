@@ -263,7 +263,7 @@ pub(crate) fn no_verdict_cause(
                 "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks; {}",
                 if cause == UnprovenCause::SiteLacks {
                     format!(
-                        "the host provides `{name}`; repair the scratch site's search path and program provisioning"
+                        "the host has `{name}`, but the check's site does not provide it: the check must not depend on it; check the criterion with what the site provides"
                     )
                 } else {
                     format!(

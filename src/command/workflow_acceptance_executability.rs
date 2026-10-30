@@ -95,6 +95,8 @@ pub(crate) enum UnprovenCause {
     /// The check's site lacks a program (or a tool's subcommand) the host
     /// has, or the host could not tell: a defect of the site the host
     /// built, so no strike ever makes it the author's (F6).
+    /// Issue 548: no host repair makes the site provide it, so it goes to
+    /// its author at once, in the same budget, with no strike saved.
     SiteLacks,
     /// The check runs a program neither its site nor the host provides.
     ProgramAbsent,

@@ -215,8 +215,17 @@ pub(super) fn settle_as(
     let signature = setup_path_signature(contract, id, result, why, at);
     let retried = match cause {
         UnprovenCause::TransientHost => "the host retries its inconclusive listing probe",
+        // Issue 548: nothing in the host adds a program to the site it
+        // built (its search path is the configured toolchain path, its
+        // cargo home holds only the seed's caches), so a site that lacks
+        // what the check runs never comes to provide it, and no retry can
+        // prove it. It goes to its author at once, in the same budget, with
+        // no strike saved: nothing is held against the author (F6), and no
+        // attempt is spent on it.
         UnprovenCause::SiteLacks => {
-            "its site lacks what the host has, which is the host's to repair and never its author's; it is probed again once the site provides it"
+            return Some(format!(
+                "check '{id}': it cannot be proven on the base commit {short}: {why}. The host has no repair that makes the check's site provide it, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides, without depending on that program or subcommand"
+            ));
         }
         UnprovenCause::Host | UnprovenCause::PermanentHost | UnprovenCause::ProgramAbsent => {
             "it is probed again on retry, and goes to its author if it fails so again"

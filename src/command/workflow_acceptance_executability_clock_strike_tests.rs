@@ -318,13 +318,15 @@ fn issue475_absolute_setup_paths_are_normalized_by_the_real_classifier() {
     assert_eq!(normalize_path("/tmp/a/../b///"), "/tmp/b");
 }
 
-/// F6 across a resume: a site that lacks a program the host has is the
-/// site's defect, so an existing strike never makes the check its author's;
-/// it stays the host's, with no progress credit, on every attempt. A cause
-/// the strike rule is for (a crash in its own code) still goes to its
-/// author the second time.
+/// Issue 548 (replaces `f6_a_site_lacking_a_program_the_host_has_stays_the_hosts_after_a_resume`):
+/// a site that lacks a program the host has never comes to provide it (no
+/// host repair adds a program to a site), so the check goes to its author
+/// on the first attempt and on every resume, with a text that is true, and
+/// no strike is saved or held against the author (F6): no progress credit,
+/// no strike file. A cause the strike rule is for (a crash in its own code)
+/// still goes to its author only the second time.
 #[test]
-fn f6_a_site_lacking_a_program_the_host_has_stays_the_hosts_after_a_resume() {
+fn issue548_a_site_lacking_a_program_the_host_has_goes_to_its_author_without_a_strike() {
     let text = "sh -c true";
     let site = trees(&[("AC-X-001", text, TrustedCwd::RepoRoot)]);
     let contract = site.contract();
@@ -336,18 +338,37 @@ fn f6_a_site_lacking_a_program_the_host_has_stays_the_hosts_after_a_resume() {
     let (why, cause) =
         super::super::verdict::no_verdict_cause(text, &result, &at).expect("no verdict");
     assert_ne!(cause, UnprovenCause::ProgramAbsent, "the host has it");
+    assert_eq!(cause, UnprovenCause::SiteLacks, "{why}");
     for attempt in 1..=3 {
         // A fresh probe per attempt: each is a resume of the run.
         let probe = HostProbe::for_task_set(site.set.project.path(), &site.set.tasks);
-        let finding = settle_as(&probe, &site.base, &contract, &result, (&why, cause), &at);
-        assert!(finding.is_none(), "attempt {attempt}: {finding:?}");
-        let unproven = probe.take_unproven_causes();
-        let (reason, recorded) = unproven.get("AC-X-001").expect("unproven");
-        assert_eq!(*recorded, cause, "attempt {attempt}");
-        assert!(!reason.contains("goes to its author"), "{reason}");
-        if attempt > 1 {
-            assert_eq!(probe.resume.progress.saved_count(), 0, "no credit");
+        let finding = settle_as(&probe, &site.base, &contract, &result, (&why, cause), &at)
+            .unwrap_or_else(|| panic!("attempt {attempt}: the author gets it at once"));
+        assert!(finding.starts_with("check 'AC-X-001': "), "{finding}");
+        assert!(finding.contains("`sh`"), "{finding}");
+        assert!(
+            finding.contains("check the criterion with what the site provides")
+                && finding.contains("Check the criterion with what the site provides"),
+            "{finding}"
+        );
+        for false_claim in [
+            "never its author's",
+            "host's to repair",
+            "repair the scratch site",
+            "It failed so again",
+            "probed again once the site provides it",
+        ] {
+            assert!(!finding.contains(false_claim), "{false_claim}: {finding}");
         }
+        assert!(
+            probe.take_unproven_causes().is_empty(),
+            "attempt {attempt}: not the host's"
+        );
+        assert_eq!(probe.resume.progress.saved_count(), 0, "no credit");
+        assert!(
+            !strike(&probe, &site.base, &contract, "AC-X-001").exists(),
+            "attempt {attempt}: no strike is saved against its author"
+        );
     }
     let crash = ("it crashed in its own shell code", UnprovenCause::Host);
     let other = trees(&[("AC-X-001", "sh -c 'exit 3'", TrustedCwd::RepoRoot)]);

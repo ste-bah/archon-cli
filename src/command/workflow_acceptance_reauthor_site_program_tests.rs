@@ -3,7 +3,8 @@
 //! host has the program the site lacks, the site the host built is at
 //! fault: the check stays the host's (pending), never its author's. Only
 //! when neither the site nor the host has it does the author get a finding
-//! and replace the check.
+//! and replace the check. Issue 548: no host repair makes the site provide
+//! it, so both cases now go to the author in the same budget.
 
 use super::*;
 use crate::command::workflow_task_set::executability::HOST_PATH;
@@ -174,38 +175,39 @@ async fn reauthor(
     (result, prompts)
 }
 
+/// Issue 548 (replaces `a_subcommand_the_host_has_but_the_site_lacks_stays_pending_for_the_host`):
+/// no host repair makes the site provide the program the host has, so the
+/// check goes back to its author in the same re-author budget, with a true
+/// text, and its replacement publishes: nothing stays pending for a repair
+/// that does not exist.
 #[tokio::test]
-async fn a_subcommand_the_host_has_but_the_site_lacks_stays_pending_for_the_host() {
+async fn a_subcommand_the_host_has_but_the_site_lacks_goes_to_its_author_and_publishes() {
     let fixture = fixture();
     let host_bin = fixture.temp.path().join("host-bin");
     std::fs::create_dir_all(&host_bin).unwrap();
     executable(&host_bin.join("fixturetool-extra"), "#!/bin/sh\nexit 0\n");
-    let before = std::fs::read(fixture.tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
     let host_path = format!(
         "{}:{}:/usr/bin:/bin",
         host_bin.display(),
         fixture.site_bin.display()
     );
     let (result, prompts) = reauthor(&fixture, host_path).await;
-    let result = result.expect("a host-unproven check is a pending outcome");
-    let why = result.unproven.get(ID).unwrap_or_else(|| {
-        panic!(
-            "the site's defect keeps the check pending: {:?} prompts {prompts:#?}",
-            result.unproven
-        )
-    });
-    assert!(why.contains("though the host has one at"), "{why}");
+    let result = result.expect("the author's replacement publishes");
     assert_eq!(
         prompts.len(),
-        1,
-        "the author is never asked to replace a check for the site's defect"
+        2,
+        "the author is asked again in the same budget: {prompts:#?}"
     );
-    assert!(!result.published);
-    assert_eq!(
-        std::fs::read(fixture.tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
-        before,
-        "the frozen entry stays in place"
+    let finding = &prompts[1];
+    assert!(finding.contains("though the host has one at"), "{finding}");
+    assert!(
+        finding.contains("check the criterion with what the site provides"),
+        "{finding}"
     );
+    assert!(!finding.contains("never its author's"), "{finding}");
+    assert!(!finding.contains("host's to repair"), "{finding}");
+    assert!(result.unproven.is_empty(), "{:?}", result.unproven);
+    assert!(result.published);
 }
 
 #[tokio::test]
