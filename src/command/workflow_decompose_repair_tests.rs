@@ -493,3 +493,6 @@ fn set_gate_author_loops_pause_without_progress() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[path = "workflow_decompose_context_equivalence_tests.rs"]
+mod context_equivalence;

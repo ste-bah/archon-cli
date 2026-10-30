@@ -132,10 +132,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 495: check-path guidance reflects the copied repository sibling alias.
     // Issues 529/530: a shrinking failing-subject set is progress; a max_tokens retry names its size.
     // Issue 494: acceptance author prompts carry the named-files block before the reply format.
+    // Windows CPU fix re-pin only: native byte counting and incremental JSON sizing preserve bytes.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "330eab7816cd5149f3a5158aadf31b22a9fc6de00614a80150f75457973b38c0"
+        "2cc983445e9f8581df63e54fa004f0b9c8ac1b74b65fe3dc1cbcba97a5ddd986"
     );
 }

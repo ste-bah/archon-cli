@@ -29,12 +29,11 @@ const CUT_MARK = " [cut]";
 const AUTHOR_PROMPT_LIMIT = 262144;
 
 function utf8Bytes(text) {
-  let bytes = 0;
-  for (const char of String(text)) {
-    const code = char.codePointAt(0);
-    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-  }
-  return bytes;
+  const value = String(text);
+  // Each UTF-16 unit costs 1/2/3 bytes; a valid pair costs 4, not 6.
+  return value.length + value.replace(/[^\u0080-\uffff]/g, "").length
+    + value.replace(/[^\u0800-\uffff]/g, "").length
+    - 2 * (value.match(/[\ud800-\udbff][\udc00-\udfff]/g) || []).length;
 }
 
 // `text` cut to at most `max` UTF-8 bytes, CUT_MARK included, at a character
@@ -259,13 +258,20 @@ function namedFilesContext(task, entry, notes, tail = "") {
   const supplied = typeof __archonNamedFiles === "function"
     ? JSON.parse(__archonNamedFiles(JSON.stringify(entry), JSON.stringify(notes), room)) : [];
   const files = [];
+  let used = 2; // The array brackets; each later element also needs a comma.
   for (const file of supplied) {
-    let shown = file;
-    if (utf8Bytes(JSON.stringify([...files, shown])) > room) shown = {path:file.path, status:"not_supplied"};
-    if (utf8Bytes(JSON.stringify([...files, shown])) > room) break;
+    const comma = files.length > 0 ? 1 : 0;
+    let shown = JSON.stringify(file);
+    let size = utf8Bytes(shown);
+    if (used + comma + size > room) {
+      shown = JSON.stringify({path:file.path, status:"not_supplied"});
+      size = utf8Bytes(shown);
+    }
+    if (used + comma + size > room) break;
     files.push(shown);
+    used += comma + size;
   }
-  return `${base}${JSON.stringify(files)}${tail}`;
+  return `${base}[${files.join(",")}]${tail}`;
 }
 
 // Checkpoints use the same journal and watch path as the host's log primitive.
