@@ -14,9 +14,9 @@ async fn host_retry_records_every_transport_failure_with_redacted_cause_and_atte
             attempts.set(attempts.get() + 1);
             std::future::ready(if attempts.get() <= 7 {
                 Err(anyhow::Error::new(
-                    archon_llm::provider::LlmError::Transport(format!(
-                        "TLS handshake unavailable: {secret}"
-                    )),
+                    archon_llm::provider::LlmError::Transport(
+                        format!("TLS handshake unavailable: {secret}").into(),
+                    ),
                 ))
             } else {
                 Ok(42)

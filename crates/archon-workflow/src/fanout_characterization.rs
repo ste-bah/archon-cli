@@ -5,7 +5,7 @@ use super::*;
 use archon_llm::provider::LlmError;
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/classifier_characterization_rows.rs"
+    "/../../tests/characterization/classifier_characterization_rows.rs"
 ));
 mod main_reference {
     #![allow(dead_code)]
@@ -29,7 +29,7 @@ mod main_reference {
 }
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/classifier_characterization_variants.rs"
+    "/../../tests/characterization/classifier_characterization_variants.rs"
 ));
 // A port error whose display is `text`; `source` is reachable only via source().
 #[derive(Debug, thiserror::Error)]

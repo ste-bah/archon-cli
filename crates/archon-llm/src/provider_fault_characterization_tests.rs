@@ -4,11 +4,11 @@
 use super::*;
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/classifier_characterization_rows.rs"
+    "/../../tests/characterization/classifier_characterization_rows.rs"
 ));
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/classifier_characterization_variants.rs"
+    "/../../tests/characterization/classifier_characterization_variants.rs"
 ));
 mod main_reference {
     #![allow(dead_code)]

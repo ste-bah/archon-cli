@@ -5,7 +5,7 @@ use super::*;
 use archon_llm::provider::LlmError;
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/classifier_characterization_rows.rs"
+    "/../../tests/characterization/classifier_characterization_rows.rs"
 ));
 mod main_reference {
     #![allow(dead_code)]
@@ -69,7 +69,7 @@ struct Shows(#[source] LlmError);
 const CONTEXTS: [&str; 4] = ["HTTP 503", "ordinary context", "HTTP 400", "429 busy"];
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/classifier_characterization_variants.rs"
+    "/../../tests/characterization/classifier_characterization_variants.rs"
 ));
 #[test]
 fn c0_retry_main_equivalence() {
