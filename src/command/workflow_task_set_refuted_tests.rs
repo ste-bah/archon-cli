@@ -143,7 +143,11 @@ async fn a_refuted_check_is_never_staged_and_its_finding_returns_to_the_author()
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_judge_refutation_reaches_its_author_while_a_sibling_is_host_unproven() {
+/// #549 replaces `a_judge_refutation_reaches_its_author_while_a_sibling_is_host_unproven`:
+/// each check is judged in its own call, so the staged freeze cache keeps one
+/// record per check instead of one record holding both; every other
+/// assertion is kept.
+async fn a_judge_refutation_reaches_its_author_while_a_sibling_is_host_unproven_549() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, candidate) = seed(&temp);
     std::fs::write(
@@ -225,17 +229,18 @@ async fn a_judge_refutation_reaches_its_author_while_a_sibling_is_host_unproven(
             serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap()
         })
         .collect();
-    assert!(
+    let saved_verdict = |id: &str, verdict: &str| {
         saved.iter().any(|record| {
             let entries = record["judged"]["acceptance"].as_array();
             entries.is_some_and(|entries| {
-                entries.iter().any(|entry| {
-                    entry["id"] == "AC-X-001" && entry["judgment"]["verdict"] == "refuted"
-                }) && entries.iter().any(|entry| {
-                    entry["id"] == "AC-X-002" && entry["judgment"]["verdict"] == "accepted"
-                })
+                entries
+                    .iter()
+                    .any(|entry| entry["id"] == id && entry["judgment"]["verdict"] == verdict)
             })
-        }),
+        })
+    };
+    assert!(
+        saved_verdict("AC-X-001", "refuted") && saved_verdict("AC-X-002", "accepted"),
         "the judged verdicts remain in the staged freeze cache"
     );
     let (evaluation, outputs) = prepared.into_staged_parts();

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use archon_workflow::task_set_contract::{AcceptanceContract, refuted_check_message};
+use archon_workflow::task_set_contract::AcceptanceContract;
 
 /// One line per named check: its id and what the judge said about it.
 pub(crate) fn not_accepted_lines(
@@ -12,13 +12,7 @@ pub(crate) fn not_accepted_lines(
         .iter()
         .chain(&contract.supplementary)
         .filter(|entry| ids.contains(&entry.id))
-        .map(|entry| {
-            refuted_check_message(
-                &entry.id,
-                &entry.judgment.reason,
-                &entry.judgment.counterexample,
-            )
-        })
+        .map(crate::command::workflow_task_set::judge::author_note)
         .collect()
 }
 

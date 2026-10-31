@@ -256,7 +256,7 @@ fn resolve_named_files(
         .collect()
 }
 
-fn over_budget(path: &str) -> serde_json::Value {
+pub(super) fn over_budget(path: &str) -> serde_json::Value {
     serde_json::json!({
         "path": path,
         "status": "not_supplied",
@@ -312,26 +312,7 @@ pub(in crate::command::workflow_task_set) fn named_files_content_digest(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
 ) -> String {
-    let mut resolved_roots = roots.clone();
-    if resolved_roots.repository_commit.is_none() {
-        if let Some(repository) = resolved_roots
-            .repository
-            .as_deref()
-            .and_then(|path| path.canonicalize().ok())
-        {
-            let output = archon_shell::spawn::command("git")
-                .arg("-C")
-                .arg(repository)
-                .args(["rev-parse", "HEAD"])
-                .output();
-            resolved_roots.repository_commit = output.ok().and_then(|output| {
-                output
-                    .status
-                    .success()
-                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-            });
-        }
-    }
+    let resolved_roots = super::each::with_commit(roots);
     let mut cache = PrefetchSourceCache::default();
     let files = resolve_named_files(criterion, &resolved_roots, &[], &mut cache, None)
         .into_iter()
@@ -347,32 +328,26 @@ pub(in crate::command::workflow_task_set) fn named_files_content_digest(
     named_files_digest_for_list(&files)
 }
 
+/// The complete byte size of each named file of `criterion` the host can
+/// read, in path order, under `roots` with its commit already resolved.
+pub(super) fn named_file_sizes(
+    criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    roots: &JudgeRoots,
+) -> Vec<(String, usize)> {
+    let mut cache = PrefetchSourceCache::default();
+    resolve_named_files(criterion, roots, &[], &mut cache, None)
+        .into_iter()
+        .filter_map(|file| Some((file.path, file.bytes?.len())))
+        .collect()
+}
+
 #[cfg(test)]
 pub(in crate::command::workflow_task_set) fn named_files_digest_with_budget(
     criterion: &archon_workflow::task_set_contract::AcceptanceCriterion,
     roots: &JudgeRoots,
     remaining: &mut usize,
 ) -> String {
-    let mut resolved = roots.clone();
-    if resolved.repository_commit.is_none() {
-        if let Some(repository) = resolved
-            .repository
-            .as_deref()
-            .and_then(|p| p.canonicalize().ok())
-        {
-            let output = archon_shell::spawn::command("git")
-                .arg("-C")
-                .arg(repository)
-                .args(["rev-parse", "HEAD"])
-                .output();
-            resolved.repository_commit = output.ok().and_then(|output| {
-                output
-                    .status
-                    .success()
-                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-            });
-        }
-    }
+    let resolved = super::each::with_commit(roots);
     named_files_digest_for_list(&named_files_with_budget(criterion, &resolved, remaining))
 }
 

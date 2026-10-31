@@ -302,13 +302,23 @@ pub(super) async fn judge(
     let mut judged_ids = BTreeSet::new();
     if !subset.acceptance.is_empty() || !subset.supplementary.is_empty() {
         judged_ids.extend(subset_ids.iter().cloned());
-        let judged = match store {
-            Some(store) => store.judge_subset(client, subset, &subset_ids).await?,
-            None => {
-                judge::judge_contract_subset_resumable_with_roots(client, subset, None, roots)
-                    .await?
+        // #549: one call per check, each with its own named-file budget and
+        // its own saved verdict, so no check's files starve another's.
+        let judged = judge::judge_each(subset, roots, |one| async move {
+            match store {
+                Some(store) => {
+                    let ids = (one.acceptance.iter().chain(&one.supplementary))
+                        .map(|entry| entry.id.clone())
+                        .collect::<BTreeSet<_>>();
+                    store.judge_subset(client, one, &ids).await
+                }
+                None => {
+                    judge::judge_contract_subset_resumable_with_roots(client, one, None, roots)
+                        .await
+                }
             }
-        };
+        })
+        .await?;
         merge_judgments(&mut contract, &judged);
     }
     let mut pinned_ids = BTreeSet::new();

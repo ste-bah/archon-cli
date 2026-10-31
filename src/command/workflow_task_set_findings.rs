@@ -36,6 +36,15 @@ pub(super) fn finish_acceptance(
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let mut findings =
         acceptance_findings(project_root, prd_path, prd_text, &contract_path, contract)?;
+    // #549: a check the host did not judge (its own named files exceed the
+    // judged-source limit of one check) goes back to its author with what it
+    // names and the limit, never as a refutation of content nobody saw.
+    let not_judged = judge::not_judged_findings(&contract_path, contract);
+    findings.retain(|finding| {
+        !(not_judged.iter().any(|own| own.subject == finding.subject)
+            && (finding.text).starts_with(&format!("check '{}' was refuted", finding.subject)))
+    });
+    findings.extend(not_judged);
     // Issue 275: a check refuted because it cannot pass as written has its
     // own finding, carrying its pre-implementation output; the generic
     // refutation would only tell its author to make it fail.

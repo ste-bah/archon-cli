@@ -49,6 +49,11 @@ pub(crate) fn named_files_for_reauthor_cached(
     )
 }
 
+#[path = "workflow_task_set_judge_each.rs"]
+mod each;
+#[cfg(test)]
+pub(crate) use each::not_judged;
+pub(crate) use each::{author_note, judge_each, not_judged_findings};
 #[path = "workflow_task_set_judge_rounds.rs"]
 mod rounds;
 use rounds::judge_prompted_with_roots;
@@ -104,26 +109,7 @@ pub(super) fn batched_judge_prompt_with_roots(
     contract: &AcceptanceContract,
     roots: &JudgeRoots,
 ) -> Result<String> {
-    let mut resolved_roots = roots.clone();
-    if resolved_roots.repository_commit.is_none() {
-        if let Some(repository) = resolved_roots
-            .repository
-            .as_deref()
-            .and_then(|path| path.canonicalize().ok())
-        {
-            let output = archon_shell::spawn::command("git")
-                .arg("-C")
-                .arg(repository)
-                .args(["rev-parse", "HEAD"])
-                .output();
-            resolved_roots.repository_commit = output.ok().and_then(|output| {
-                output
-                    .status
-                    .success()
-                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-            });
-        }
-    }
+    let resolved_roots = each::with_commit(roots);
     let mut named_file_bytes_remaining =
         archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     let checks = contract
@@ -390,17 +376,21 @@ pub(super) async fn judge_contract_subset_resumable_with_roots(
     .await
 }
 
-/// Judge a subset of a contract's checks — the ones being re-authored — in
-/// one batch. The subset is not a contract on its own (it may hold no
-/// acceptance entry at all), so only each judged entry's recorded fields are
-/// required, exactly as the full-contract structure check requires them.
+/// Judge a subset of a contract's checks — the ones being re-authored — one
+/// call per check (#549). The subset is not a contract on its own (it may
+/// hold no acceptance entry at all), so only each judged entry's recorded
+/// fields are required, exactly as the full-contract structure check
+/// requires them. A check the host did not judge carries its author note.
 pub(super) async fn judge_entries_with_roots(
     client: &dyn WorkflowLlmClient,
     subset: AcceptanceContract,
     model: &str,
     roots: &JudgeRoots,
 ) -> Result<AcceptanceContract> {
-    judge_batch(client, subset, model, require_judged_prose, None, roots).await
+    judge_each(subset, roots, |one| {
+        judge_batch(client, one, model, require_judged_prose, None, roots)
+    })
+    .await
 }
 
 /// Every judged entry of `attempt` carries its counterexample and reason.

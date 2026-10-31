@@ -10,9 +10,7 @@ use std::collections::BTreeMap;
 use archon_core::agents::harness::HOST_READ_ONLY_TOOLS;
 #[cfg(test)]
 use archon_workflow::task_set_contract::AcceptanceCheck;
-use archon_workflow::task_set_contract::{
-    AcceptanceCriterion, JudgeDecision, refuted_check_message,
-};
+use archon_workflow::task_set_contract::{AcceptanceCriterion, JudgeDecision};
 
 use super::executability::ExecutabilityProbe;
 use super::*;
@@ -182,7 +180,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                 "check '{id}' was named for re-authoring; replace it with a check that fails whenever the criterion is false"
             )
         } else {
-            refuted_check_message(id, &frozen.judgment.reason, &frozen.judgment.counterexample)
+            judge::author_note(frozen)
         };
         feedback.insert(id.clone(), vec![first]);
     }
@@ -311,11 +309,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                         let id = candidate.id.clone();
                         *entry_mut(&mut working, &id).expect("named id") = candidate;
                     } else if let Some(notes) = feedback.get_mut(&candidate.id) {
-                        notes.push(refuted_check_message(
-                            &candidate.id,
-                            &candidate.judgment.reason,
-                            &candidate.judgment.counterexample,
-                        ));
+                        notes.push(judge::author_note(&candidate));
                     }
                 }
             }

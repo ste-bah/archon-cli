@@ -71,11 +71,44 @@ impl WorkflowLlmClient for JudgeClient {
         }
         match &self.result {
             Ok(content) => Ok(WorkflowAgentOutcome {
-                content: content.clone(),
+                content: asked_decisions(messages[0]["content"].as_str(), content),
                 stop_reason: Some("end_turn".into()),
                 ..WorkflowAgentOutcome::default()
             }),
             Err(message) => Err(WorkflowError::port(std::io::Error::other(message.clone()))),
         }
     }
+}
+
+/// The scripted decisions for the checks this call asks about (#549: one
+/// call per check), when the script answers every one of them; otherwise
+/// the script unchanged, so a scripted malformed or incomplete reply stays
+/// exactly what the test wrote.
+fn asked_decisions(prompt: Option<&str>, scripted: &str) -> String {
+    let asked = prompt
+        .and_then(|prompt| prompt.rsplit_once("Checks: "))
+        .and_then(|(_, checks)| serde_json::from_str::<Vec<serde_json::Value>>(checks).ok())
+        .map(|checks| {
+            (checks.iter())
+                .filter_map(|check| check["id"].as_str().map(str::to_string))
+                .collect::<std::collections::BTreeSet<_>>()
+        });
+    let Ok(mut reply) = serde_json::from_str::<serde_json::Value>(scripted) else {
+        return scripted.to_string();
+    };
+    let (Some(asked), Some(decisions)) = (asked, reply["decisions"].as_array_mut()) else {
+        return scripted.to_string();
+    };
+    let answers =
+        |decision: &serde_json::Value| decision["id"].as_str().is_some_and(|id| asked.contains(id));
+    if decisions
+        .iter()
+        .filter(|decision| answers(decision))
+        .count()
+        != asked.len()
+    {
+        return scripted.to_string();
+    }
+    decisions.retain(answers);
+    reply.to_string()
 }
