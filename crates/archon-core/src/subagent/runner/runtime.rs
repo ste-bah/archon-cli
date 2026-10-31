@@ -246,6 +246,7 @@ impl SubagentRunner {
                 }
                 window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
                 let mut content = stream.text_content.clone();
+                let mut stop_reason = stream.stop_reason.clone();
                 match self
                     .judge_landed_reply(&stream.text_content, &mut incomplete_audit_replies)?
                 {
@@ -260,7 +261,11 @@ impl SubagentRunner {
                         messages.push(feedback);
                         continue;
                     }
-                    landed_reply::LandedReply::Complete(completion) => content = completion,
+                    // The host's completion is a whole final reply.
+                    landed_reply::LandedReply::Complete(completion) => {
+                        content = completion;
+                        stop_reason = Some("end_turn".to_owned());
+                    }
                 }
                 // Record final assistant text to transcript (AGT-024)
                 if !stream.text_content.is_empty() {
@@ -272,7 +277,7 @@ impl SubagentRunner {
                 self.emit_activity_stream("final", "subagent turn complete", None, false);
                 return Ok(completion_usage::from_stream(
                     content,
-                    stream.stop_reason,
+                    stop_reason,
                     self.progress.as_ref(),
                 ));
             }

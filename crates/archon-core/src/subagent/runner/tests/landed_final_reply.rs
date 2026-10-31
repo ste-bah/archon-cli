@@ -167,3 +167,35 @@ async fn issue550_a_loop_guard_stop_completes_from_retained_records() {
     assert_eq!(completion.stop_reason.as_deref(), Some("end_turn"));
     assert_eq!(provider.requests().len(), ROUNDS_TO_STOP);
 }
+
+#[tokio::test]
+async fn issue550_a_host_completion_is_a_whole_reply_whatever_the_cut_off_stop_reason() {
+    let host = Arc::new(Host::default());
+    host.land(serde_json::from_str(&record("TASK-X-001")).unwrap())
+        .unwrap();
+    let wrong = r#"{"records_landed":9}"#;
+    // The third incomplete reply arrives cut off by the provider's budget.
+    let mut cut_off = text_response(wrong);
+    let stop = cut_off.len() - 1;
+    cut_off.insert(
+        stop,
+        StreamEvent::MessageDelta {
+            stop_reason: Some("max_tokens".into()),
+            usage: None,
+        },
+    );
+    let provider = Arc::new(MockProvider::new(vec![
+        text_response(wrong),
+        text_response(wrong),
+        cut_off,
+    ]));
+    let runner = runner_with(provider.clone(), host, 5);
+
+    let completion = runner
+        .run_with_completion("author the skeleton")
+        .await
+        .expect("completed from the retained record");
+
+    assert_eq!(completion.content, r#"{"records_landed":1}"#);
+    assert_eq!(completion.stop_reason.as_deref(), Some("end_turn"));
+}
