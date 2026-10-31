@@ -172,7 +172,7 @@ function earlierFindings(history, feedback) {
   const entries = Array.isArray(history) ? history.slice() : [];
   // The attempt the current findings came from is not an earlier attempt.
   const newest = entries[entries.length - 1];
-  if (newest && newest.attempt !== 0 && JSON.stringify((newest.findings || []).map(historyKey)) === JSON.stringify([...(feedback || [])].map(historyKey))) entries.pop();
+  if (newest && newest.attempt !== 0 && (newest.findings || []).every((text) => current.has(historyKey(text)))) entries.pop();
   for (const entry of entries) {
     for (const text of entry.findings || []) {
       const key = historyKey(text);
@@ -210,7 +210,7 @@ function authorPrompt(base, attempt, feedback, history) {
     : `${found.count === 1 ? `attempt ${found.last}` : `attempts ${found.first}-${found.last}, ${found.count} times`}: ${found.text}`));
   const lines = fitLines(full.map((line) => clipBytes(line, HISTORY_RECORD_BYTES)), HISTORY_SHARE);
   if (lines.length > 0) {
-    prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
+    prompt += `\nEarlier attempts in this phase raised the following; a finding not in the list above is no longer reported, so it is not one to fix now. Do not regress them: keep every one satisfied at once; repairing a finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
   }
   const hidden = records.slice(lines.length);
   if (hidden.length > 0) {

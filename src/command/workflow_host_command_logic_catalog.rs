@@ -182,7 +182,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "f496a46628df748e2f54adc07bdf204a6c59b0c740c7bbf7b7330a2cf274151d",
+        sources_digest: "4fa38c2766cda219e6427dd0e7e971c6dbec23ace329fe63de6ff13702b2a983",
         build_bound: false,
     },
     CapabilityLogic {
@@ -229,7 +229,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "f496a46628df748e2f54adc07bdf204a6c59b0c740c7bbf7b7330a2cf274151d",
+        sources_digest: "4fa38c2766cda219e6427dd0e7e971c6dbec23ace329fe63de6ff13702b2a983",
         build_bound: false,
     },
     CapabilityLogic {
@@ -304,7 +304,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "d9db23ac53fa34e8671bbb81811d6c73a276996d5d6fad0a801bf4acbfb1a011",
+        sources_digest: "5d9a843e50494cfae4ba05b409261f891f030fc6c2eaad6a5585660387ad7063",
         build_bound: false,
     },
     CapabilityLogic {
@@ -365,7 +365,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "d9db23ac53fa34e8671bbb81811d6c73a276996d5d6fad0a801bf4acbfb1a011",
+        sources_digest: "5d9a843e50494cfae4ba05b409261f891f030fc6c2eaad6a5585660387ad7063",
         build_bound: false,
     },
     CapabilityLogic {
@@ -451,7 +451,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "59221eb9d337b5ec2319f29aa839d854c3cb5069fdf030fd0f801c4fd3f1545e",
+        sources_digest: "7fe24c83f1fc42a9c19fbb281fb41fc66561671dc1be352abf31d9224c901078",
         build_bound: true,
     },
     CapabilityLogic {
@@ -494,7 +494,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "59221eb9d337b5ec2319f29aa839d854c3cb5069fdf030fd0f801c4fd3f1545e",
+        sources_digest: "7fe24c83f1fc42a9c19fbb281fb41fc66561671dc1be352abf31d9224c901078",
         build_bound: true,
     },
 ];

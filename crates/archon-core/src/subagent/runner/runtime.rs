@@ -6,6 +6,7 @@ mod context_fit;
 #[cfg(test)]
 mod context_fit_tests;
 mod flatten_history;
+mod landed_reply;
 mod message_history;
 mod progress_novelty;
 mod progress_stop;
@@ -244,33 +245,22 @@ impl SubagentRunner {
                     continue;
                 }
                 window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
-                if let Some(landing) = &self.tool_context.audit_landing {
-                    let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
-                    let compact = parsed.as_ref().ok().and_then(|v| {
-                        if landing.tool_name() == "land-audit-record" {
-                            v.pointer("/data/repository_audit")
-                        } else {
-                            v.get("data")
-                                .filter(|d| d.get("records_landed").is_some())
-                                .or(Some(v))
-                        }
-                    });
-                    if let Some(value) = compact.filter(|v| v.get("records_landed").is_some())
-                        && let Err(error) = landing.complete(value)
-                    {
-                        if incomplete_audit_replies >= 2 {
-                            anyhow::bail!("incomplete landed artifact: {error}");
-                        }
-                        incomplete_audit_replies += 1;
+                let mut content = stream.text_content.clone();
+                match self
+                    .judge_landed_reply(&stream.text_content, &mut incomplete_audit_replies)?
+                {
+                    landed_reply::LandedReply::Final => {}
+                    landed_reply::LandedReply::Retry(feedback) => {
                         let answer =
                             serde_json::json!({"role":"assistant","content":stream.text_content});
                         self.record_transcript(&answer);
                         messages.push(answer);
-                        let feedback = serde_json::json!({"role":"user","content":format!("Landed artifact incomplete: {error}. {}",landing.hint().unwrap_or_default())});
+                        let feedback = serde_json::json!({"role":"user","content":feedback});
                         self.record_transcript(&feedback);
                         messages.push(feedback);
                         continue;
                     }
+                    landed_reply::LandedReply::Complete(completion) => content = completion,
                 }
                 // Record final assistant text to transcript (AGT-024)
                 if !stream.text_content.is_empty() {
@@ -281,7 +271,7 @@ impl SubagentRunner {
                 }
                 self.emit_activity_stream("final", "subagent turn complete", None, false);
                 return Ok(completion_usage::from_stream(
-                    stream.text_content,
+                    content,
                     stream.stop_reason,
                     self.progress.as_ref(),
                 ));
@@ -373,6 +363,17 @@ impl SubagentRunner {
                         "read-only session kept getting the same results; inspection withdrawn and the deliverable requested"
                     );
                     continue;
+                }
+                // Issue-550: retained records the host can complete from end it instead.
+                if let Some(completion) = self.retained_landed_completion() {
+                    self.emit_activity_stream("final", reason, None, false);
+                    // The host's completion is a whole final reply.
+                    let stop = Some("end_turn".to_owned());
+                    return Ok(completion_usage::from_stream(
+                        completion,
+                        stop,
+                        self.progress.as_ref(),
+                    ));
                 }
                 self.emit_activity_stream("error", reason.clone(), None, true);
                 anyhow::bail!("{reason}");

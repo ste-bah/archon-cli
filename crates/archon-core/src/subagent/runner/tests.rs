@@ -476,5 +476,8 @@ mod child_result_delivery;
 #[path = "tests/audit_evidence.rs"]
 mod audit_evidence;
 
+#[path = "tests/landed_final_reply.rs"]
+mod landed_final_reply;
+
 #[path = "tests/focused_test_completion.rs"]
 mod focused_test_completion;

@@ -16,6 +16,11 @@ pub trait LandingHost: Send + Sync {
     fn land(&self, record: Value) -> Result<String, String>;
     fn hint(&self) -> Result<String, String>;
     fn complete(&self, value: &Value) -> Result<(), String>;
+    /// Issue-550: the final reply the host can give from retained records
+    /// alone when the session ends without one; `None` when it cannot.
+    fn retained_completion(&self) -> Option<Value> {
+        None
+    }
 }
 struct Progress {
     last_landed: Instant,
@@ -81,6 +86,27 @@ impl AuditLanding {
     pub fn complete(&self, value: &Value) -> Result<(), String> {
         self.host.complete(value)
     }
+    pub fn retained_completion(&self) -> Option<Value> {
+        self.host.retained_completion()
+    }
+    /// Land one record, whether it came through the tool or as a final reply.
+    pub fn land(&self, input: Value) -> Result<String, String> {
+        let path = input
+            .get("declared_path")
+            .or_else(|| input.get("subject"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let hint = self.host.land(input)?;
+        if self.landed.lock().unwrap().insert(path) {
+            *self.progress.lock().unwrap() = Progress {
+                last_landed: Instant::now(),
+                last_nudge: None,
+                nudges: 0,
+            };
+        }
+        Ok(hint)
+    }
 }
 tokio::task_local! { static CURRENT: Arc<AuditLanding>; }
 pub async fn scope<T>(landing: Arc<AuditLanding>, work: impl std::future::Future<Output = T>) -> T {
@@ -107,23 +133,8 @@ impl Tool for LandAuditRecordTool {
         let Some(landing) = &ctx.audit_landing else {
             return ToolResult::refusal("land-audit-record requires host audit authority");
         };
-        let path = input
-            .get("declared_path")
-            .or_else(|| input.get("subject"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        match landing.host.land(input) {
-            Ok(hint) => {
-                if landing.landed.lock().unwrap().insert(path) {
-                    *landing.progress.lock().unwrap() = Progress {
-                        last_landed: Instant::now(),
-                        last_nudge: None,
-                        nudges: 0,
-                    };
-                }
-                ToolResult::success(hint)
-            }
+        match landing.land(input) {
+            Ok(hint) => ToolResult::success(hint),
             Err(error) => ToolResult::error(error),
         }
     }

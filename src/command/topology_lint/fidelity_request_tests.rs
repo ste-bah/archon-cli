@@ -133,10 +133,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issues 529/530: a shrinking failing-subject set is progress; a max_tokens retry names its size.
     // Issue 494: acceptance author prompts carry the named-files block before the reply format.
     // Windows CPU fix re-pin only: native byte counting and incremental JSON sizing preserve bytes.
+    // Issue 551: repair prompts list the latest open findings as current; earlier ones only as do-not-regress history.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "2cc983445e9f8581df63e54fa004f0b9c8ac1b74b65fe3dc1cbcba97a5ddd986"
+        "14ce0a0080a87a1d8f5abac5945ed8fc75af60573c756e0fb566d21df12bab93"
     );
 }

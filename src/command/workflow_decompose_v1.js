@@ -229,7 +229,9 @@ async function authorCandidate(w, policy) {
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
-  const allFindings = feedback.slice();
+  // Issue 551: the findings open in the latest gate result. Earlier findings
+  // stay in `history`, shown as ones not to regress, never as current.
+  let openFindings = [];
   let judgeFeedback = [];
   let repairRung = Number.isInteger(policy.initialRung) ? policy.initialRung : 1;
   let repairCycle = 1;
@@ -239,7 +241,7 @@ async function authorCandidate(w, policy) {
   const seeded = args.phaseSeed && !seedWouldReplaceLiveFeedback(policy)
     ? seedAuthorLoop(policy, authorState)
     : null;
-  if (seeded) [feedback, lastFindings] = [seeded.feedback.slice(), seeded.feedback.slice()];
+  if (seeded) [feedback, lastFindings, openFindings] = [seeded.feedback.slice(), seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
   for (;;) {
     const stall = stallReason(progress);
@@ -262,9 +264,12 @@ async function authorCandidate(w, policy) {
         repairCycle += 1;
         // Entry authors keep their own refusal in authorState; do not copy
         // a sibling's finding into another entry's fresh-context prompt.
-        feedback = policy.author ? judgeFeedback.slice()
-          : [...new Set([...allFindings, ...lastFindings])];
-        history.length = 0;
+        // Other authors keep their open findings and the history that marks
+        // repeats and earlier findings (Issue 551).
+        if (policy.author) {
+          feedback = judgeFeedback.slice();
+          history.length = 0;
+        }
       }
       await repairEvent(w, policy.phase, repairRung, repairCycle, call, progress.calls);
     }
@@ -280,7 +285,8 @@ async function authorCandidate(w, policy) {
     const groupFeedback = repairRung === 3 && feedback.length > 1
       ? (nextCall % 2 === 1 ? feedback.slice(0, midpoint) : feedback.slice(midpoint))
       : feedback;
-    const promptFeedback = [...new Set([...(policy.initialFeedback || []), ...(policy.author ? feedback : [...allFindings, ...feedback])])];
+    const promptFeedback = [...new Set(policy.author ? [...(policy.initialFeedback || []), ...feedback]
+      : [...feedback, ...openFindings, ...(policy.initialFeedback || [])])];
     let authored;
     try {
       const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
@@ -338,10 +344,7 @@ async function authorCandidate(w, policy) {
         recordOperational(progress, call, authored.summary, advanced, round, "provider");
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
-      if (authored.refusals || authored.malformed) {
-        attempt += 1;
-        for (const finding of lastFindings) if (!allFindings.includes(finding)) allFindings.push(finding);
-      }
+      if (authored.refusals || authored.malformed) attempt += 1;
       continue;
     }
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
@@ -350,7 +353,6 @@ async function authorCandidate(w, policy) {
         ? incompleteReplyFeedback(authored.content)
         : `Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
-      for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
       recordAnswered(progress, call, "incomplete", false, !measuredReplies);
       continue;
     }
@@ -375,7 +377,6 @@ async function authorCandidate(w, policy) {
         feedback = [`freeze judge reply unusable: ${routed.operational}`];
         judgeFeedback = feedback.slice();
         lastFindings = feedback.slice();
-        for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
         continue;
       }
       // The gate never judged the candidate; only the round that made it can
@@ -459,7 +460,7 @@ async function authorCandidate(w, policy) {
     feedback = routed.retry;
     if (policy.author) judgeFeedback = feedback.slice();
     lastFindings = routed.retry.slice();
-    for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
+    openFindings = routed.retry.slice();
     // `advanced` is not credited here on purpose: the gate measured the whole
     // candidate, and that measure decides (Issue 261).
     recordAttempt(progress, call, routed.retryFindings, !measuredReplies, round);
