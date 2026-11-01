@@ -187,6 +187,16 @@ function attributeEntryFindings(findings, ids, published, candidate, held) {
   return { own, phase };
 }
 
+// #555 review: the phase-level findings of the latest gate are current; an
+// earlier one it no longer reports is kept as one not to regress, and one it
+// reports again is current again, as settleGateFindings keeps an entry's.
+function settlePhaseFindings(state, latest) {
+  const earlier = (state.earlierPhaseFindings || []).slice();
+  for (const text of state.phaseFindings || []) if (!latest.includes(text) && !earlier.includes(text)) earlier.push(text);
+  state.earlierPhaseFindings = earlier.filter((text) => !latest.includes(text));
+  state.phaseFindings = latest;
+}
+
 async function repairFrozenStage(w, verified, findings) {
   const owner = frozenFindingOwner(findings[0]);
   if (findings.some((finding) => frozenFindingOwner(finding) !== owner)) {
@@ -216,7 +226,7 @@ async function repairFrozenStage(w, verified, findings) {
       state.retryIds = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract, state.entries);
       // #555: each entry starts with only its own verification findings.
       const opened = attributeEntryFindings(findings, new Set(Object.keys(args.acceptanceCriteria || {})), true, contract, state.entries);
-      [state.gateFindings, state.phaseFindings] = [opened.own, opened.phase];
+      [state.gateFindings, state.phaseFindings, state.earlierPhaseFindings] = [opened.own, opened.phase, []];
     }
     finalState = state;
     return await authorAcceptanceEntries(host, prompt, round, state);

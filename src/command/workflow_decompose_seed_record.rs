@@ -25,12 +25,13 @@ pub(crate) fn acceptance_candidate(record: &WorkflowV2CallRecord) -> Option<&str
     .then(|| request.stdin.as_deref().unwrap_or_default())
 }
 
-const ENTRY_SECTIONS: [&str; 6] = [
+const ENTRY_SECTIONS: [&str; 7] = [
     "\nThe host refused this entry's last answered reply.",
     "\nRepair this entry's gate findings open in the latest gate result:",
     "\nThe freeze judge could not use this entry's last check:",
     "\nEarlier gate results raised these findings for this entry;",
     "\nPhase-level findings of the latest gate result name no single entry;",
+    "\nEarlier gate results raised these phase-level findings;",
     "\nA newer published version of this entry replaced your previous draft",
 ];
 
@@ -41,7 +42,8 @@ pub(super) fn authored_criterion(record: &WorkflowV2CallRecord, id: &str) -> Opt
     let rest = &task[start..];
     // #555: every section authorOne writes after the criterion ends it
     // (workflow_decompose_v1_acceptance.js `own`): its own findings, the
-    // judge note, its earlier findings, the phase-level ones, a superseded draft.
+    // judge note, its earlier findings, the phase-level ones (current and
+    // earlier), a superseded draft.
     let end = ENTRY_SECTIONS
         .iter()
         .map(|marker| rest.find(marker))

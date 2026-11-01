@@ -185,9 +185,17 @@ function seedEntries(seed, policy, state) {
   const last = gates[gates.length - 1];
   // #555: each entry starts with only its own findings of the last gate, and
   // an invalid carried entry with its own refusal; a sibling's is not its own.
-  const lastFindings = last ? seedRepairFindings(last, policy) : [];
-  const opened = attributeEntryFindings(lastFindings, ids, last?.published === true && !lastFindings.some(isStaleContractFinding), candidate, heldOmissionIds);
-  [state.gateFindings, state.phaseFindings] = [opened.own, opened.phase];
+  // Earlier gates settle in order as the live loop settles them, so what they
+  // raised and the last gate no longer reports is kept as not to regress. A
+  // pointer into an earlier candidate names an entry this seed cannot resolve.
+  gates.forEach((gate, index) => {
+    const isLast = index === gates.length - 1;
+    const found = seedRepairFindings(gate, policy).filter((finding) => isLast || !SEED_POINTER.test(String(finding.text || "")));
+    const opened = attributeEntryFindings(found, ids, gate.published === true && !found.some(isStaleContractFinding),
+      isLast ? candidate : null, isLast ? heldOmissionIds : new Set());
+    settleGateFindings(state, opened.own);
+    settlePhaseFindings(state, opened.phase);
+  });
   state.refusals = new Map(Object.entries(invalid).map(([id, texts]) => [id, [].concat(texts).map(String)]));
   const feedback = [
     ...(last ? seedRepairFindings(last, policy).map((finding) => String(finding.text)) : []),

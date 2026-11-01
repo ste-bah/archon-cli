@@ -181,6 +181,53 @@ async function aStaleFreezeIsNoAuthorsFinding() {
   assert.doesNotMatch(c, /contract changed after this freeze|Phase-level|beta-defect/);
 }
 
+// #555 review r1: a phase-level finding a later gate no longer reports stays
+// in every entry's prompt as one not to regress, and is current again when a
+// gate reports it again.
+const PHASE_NOW = /Phase-level findings of the latest gate result name no single entry[^\n]*:\n((?:- [^\n]*\n?)*)/;
+const PHASE_EARLIER = /Earlier gate results raised these phase-level findings; the latest gate result no longer reports them\. Do not regress them:\n((?:- [^\n]*\n?)*)/;
+const whole = 'candidate artifact was refused: the contract as a whole proves nothing';
+async function aClearedPhaseLevelFindingStaysAsOneNotToRegress() {
+  const out = await run([gate(finding('acceptance', whole)), gate(finding('A', "check 'A': alpha-defect")),
+    gate(finding('acceptance', whole), finding('A', "check 'A': alpha-defect")), clean]);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'A', 'B', 'C', 'A', 'A', 'B', 'C']);
+  const second = out.prompt('A', 2), third = out.prompt('A', 3), fourth = out.prompt('A', 4);
+  assert.match(PHASE_NOW.exec(second)?.[1] || '', /contract as a whole/, 'gate 1: current phase-level');
+  assert.doesNotMatch(third, PHASE_NOW, 'gate 2 no longer reports it');
+  assert.match(PHASE_EARLIER.exec(third)?.[1] || '', /contract as a whole/, 'gate 2: kept as one not to regress');
+  assert.match(PHASE_NOW.exec(fourth)?.[1] || '', /contract as a whole/, 'gate 3: reopened, current again');
+  assert.doesNotMatch(fourth, PHASE_EARLIER, 'a reopened finding is not history too');
+}
+
+async function aSeededLoopKeepsEarlierPhaseLevelFindings() {
+  const entry = id => ({id, criterion:id.toLowerCase(), check:{kind:'command', command:`t ${id}`, cwd:'project_root'},
+    gap_permitted:false, covers:[], judgment:{verdict:'accepted', counterexample:'', reason:'', host_call_id:''}});
+  const candidate = JSON.stringify({entries:['A', 'B', 'C'].map(entry), supplementary:[]});
+  const {ctx} = context({transition_index:0, author_ordinals:{acceptance:25}, pause_ordinals:{acceptance:2},
+    subjects:{acceptance:{kind:'entries', candidate, replies:[], invalid:{}, carried:3, gates:[
+      {call_id:'g0', published:false, findings:[finding('acceptance', whole)]},
+      {call_id:'g', published:false, findings:[finding('A', "check 'A' was refuted: alpha-defect")]}]}}});
+  const {seen, w} = host([clean]);
+  await ctx.authorCandidate(w, policy(ctx));
+  assert.deepEqual(seen.authored, ['A']);
+  const a = seen.prompts[0].task;
+  assert.match(a, /open in the latest gate result:\n- check 'A' was refuted: alpha-defect/);
+  assert.match(PHASE_EARLIER.exec(a)?.[1] || '', /contract as a whole/, "an earlier gate's phase-level finding is not to regress");
+  assert.doesNotMatch(a, PHASE_NOW);
+}
+
+// The rung-3 text of an entry asks for its own findings: an entry gets no
+// group list, so it is never told to work through groups.
+async function anEntryRungThreeTextNamesItsOwnFindings() {
+  const out = await run([1, 2, 3, 4].map(n => gate(finding('A', `check 'A': defect-${n}`))).concat([clean]));
+  const r3 = out.prompts.map(p => p.task).filter(task => /Repair operation r3/.test(task));
+  assert.ok(r3.length > 0, 'the loop reaches rung 3');
+  for (const task of r3) {
+    assert.doesNotMatch(task, /smaller groups/, 'no group instruction without a group');
+    assert.match(task, /repairs every finding listed below for this entry/);
+  }
+}
+
 const tests = [
   ['an entry prompt carries no sibling finding', anEntryPromptCarriesNoSiblingFinding],
   ['a supplementary entry gets only its own finding', aSupplementaryEntryGetsOnlyItsOwnFinding],
@@ -190,6 +237,9 @@ const tests = [
   ['a frozen-stage repair starts each entry with its own finding', aFrozenStageRepairStartsEachEntryWithItsOwnFinding],
   ['a seeded loop starts each entry with its own finding', aSeededLoopStartsEachEntryWithItsOwnFinding],
   ['a stale freeze is no author\'s finding', aStaleFreezeIsNoAuthorsFinding],
+  ['a cleared phase-level finding stays as one not to regress', aClearedPhaseLevelFindingStaysAsOneNotToRegress],
+  ['a seeded loop keeps earlier phase-level findings', aSeededLoopKeepsEarlierPhaseLevelFindings],
+  ['an entry rung-3 text names its own findings', anEntryRungThreeTextNamesItsOwnFindings],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {

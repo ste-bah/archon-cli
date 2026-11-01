@@ -122,6 +122,7 @@ fn acceptance_reply_seed_criterion_ends_at_the_entry_finding_sections_555() {
         "The freeze judge could not use this entry's last check:\n- no verdict",
         "Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:\n- old",
         "Phase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- whole",
+        "Earlier gate results raised these phase-level findings; the latest gate result no longer reports them. Do not regress them:\n- whole",
         "A newer published version of this entry replaced your previous draft before it was published. Your previous draft was:\n{}",
     ] {
         let mut record = reply(

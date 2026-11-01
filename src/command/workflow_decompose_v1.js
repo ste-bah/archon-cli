@@ -251,6 +251,7 @@ async function authorCandidate(w, policy) {
     const addedBefore = authorState.added || 0;
     const rungInstruction = repairRung === 1 ? ""
       : repairRung === 2 ? "\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding."
+      : repairRung === 3 && policy.author ? "\nReturn a complete replacement of this entry that repairs every finding listed below for this entry and keeps every earlier one listed for it satisfied."
       : repairRung === 3 ? "\nReturn a complete replacement. Work through the findings in smaller groups while preserving every finding from this and earlier attempts."
       : policy.author ? "\nReturn a complete replacement of this entry that repairs only the findings listed below for this entry."
       : "\nThis subject is deferred while independent subjects settle. Return a complete replacement when re-entered with the latest findings.";
@@ -423,7 +424,7 @@ async function authorCandidate(w, policy) {
       const repair = routed.retryFindings;
       const latest = attributeEntryFindings(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
       settleGateFindings(authorState, latest.own);
-      authorState.phaseFindings = latest.phase;
+      settlePhaseFindings(authorState, latest.phase);
       authorState.judgeNotes = null;
       const stale = repair.find(finding => finding?.deterministic_defect?.code === "stale_acceptance_contract");
       if (stale) {
