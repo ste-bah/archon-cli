@@ -345,28 +345,30 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
             finding.remediation_scope == archon_workflow::RemediationScope::Operational
         })
     {
-        return Err(
-            crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
-                reason,
-                &resume.progress,
-            )
-            .with_fault_class(
-                if prepared.findings.iter().all(|finding| {
-                    matches!(
-                        finding
-                            .deterministic_defect
-                            .as_ref()
-                            .map(|defect| defect.code.as_str()),
-                        Some("host_transient" | "host_site_lacks")
-                    )
-                }) {
-                    crate::command::workflow_host_fault::Class::Transient
-                } else {
-                    crate::command::workflow_host_fault::Class::Permanent
-                },
-            )
-            .into(),
+        let mut stalled = crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+            reason,
+            &resume.progress,
+        )
+        .with_fault_class(
+            if prepared.findings.iter().all(|finding| {
+                matches!(
+                    finding
+                        .deterministic_defect
+                        .as_ref()
+                        .map(|defect| defect.code.as_str()),
+                    Some("host_transient" | "host_site_lacks")
+                )
+            }) {
+                crate::command::workflow_host_fault::Class::Transient
+            } else {
+                crate::command::workflow_host_fault::Class::Permanent
+            },
         );
+        // Issue 554: each check left unproven keeps its own finding in the
+        // outcome, so the author loop can send one that repeats on its
+        // unchanged text to its author instead of stalling on it.
+        stalled.add_known_findings(prepared.findings.clone());
+        return Err(stalled.into());
     }
     prepared.live_contract_digest = live_contract_digest;
     prepared.result.live_contract_digest = prepared.live_contract_digest.clone();

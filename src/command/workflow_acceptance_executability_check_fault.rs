@@ -12,7 +12,10 @@
 //! rule of `workflow_acceptance_executability_silent` (#356): the first time
 //! it is unproven and resumable, and the same unchanged check failing so
 //! again after a resume goes to its author. Everything else stays the
-//! host's.
+//! host's. Issue 554: a mutation run that gave no verdict for a reason the
+//! host cannot tell apart from the check's own run (no exit status, an input
+//! with no recorded state, an input left unrestored) follows that strike
+//! rule too, and one its shell stopped at a syntax error is its author's.
 
 use archon_workflow::acceptance_scratch::faults::{CheckFault, classify};
 
@@ -70,17 +73,45 @@ pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
 /// Whose a mutation run's failure to give a verdict is: its operational
 /// error, else a signal its wrapper saw. The live-root guard is the host's:
 /// the host chose where the check ran.
-pub(super) fn of_mutation(result: &CheckResult, markers: &mutation::Markers) -> Fault {
+///
+/// Issue 554: a run that recorded no exit status because its shell stopped
+/// at a syntax error is its author's at once: the error the shell gives the
+/// check's own text `command` when it rejects it, else the syntax error the
+/// run reported. Any other run without a verdict (`reason`: no exit status,
+/// an input with no recorded state, an input left unrestored) may be the
+/// host's as well as the check's, so it follows the strike rule: the same
+/// unchanged check failing so again goes to its author.
+pub(super) fn of_mutation(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    command: &str,
+    reason: &str,
+) -> Fault {
     if result.operational_error.is_some() {
         return of_result(Some(result));
     }
     if markers.guarded(result) {
         return Fault::Host;
     }
-    match markers.observed_signal(result) {
-        Some(signal) => Fault::Ambiguous(format!("the check wrapper observed signal {signal}")),
-        None => Fault::Host,
+    if let Some(signal) = markers.observed_signal(result) {
+        return Fault::Ambiguous(format!("the check wrapper observed signal {signal}"));
     }
+    if markers.status(result).is_none() {
+        let stderr = String::from_utf8_lossy(result.verdict_stderr());
+        let syntax = archon_workflow::acceptance_check_shell::shell_parse_error(command).or_else(|| {
+            archon_workflow::acceptance_check_shell::own_syntax_error(command, &stderr).map(|line| {
+                format!("{line}; its line number counts the lines the host's mutation wrapper runs before the check's text")
+            })
+        });
+        if let Some(error) = syntax {
+            return Fault::Check {
+                trigger: "the shell that ran it stopped at a shell syntax error, so the check never recorded its exit status",
+                remedy: "fix exactly that shell syntax so the whole check parses (`sh -n` accepts it), and keep every assertion and every call into the deliverable",
+                error,
+            };
+        }
+    }
+    Fault::Ambiguous(reason.to_string())
 }
 
 /// Settle check `id` of `contract`, whose run `at` (where it ran, for the

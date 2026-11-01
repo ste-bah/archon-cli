@@ -153,6 +153,8 @@ fn run_js(driver: &str) -> String {
         "frozenBodyReusable",
         "changedDependencySubjects",
         "acceptanceRepairIds",
+        "unprovenAuthored",
+        "acceptanceEntryKey",
     ] {
         script.push_str(&decl(name));
         script.push('\n');

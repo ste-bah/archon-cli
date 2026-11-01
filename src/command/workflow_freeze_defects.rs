@@ -105,6 +105,10 @@ mod shape_tests;
 mod entry_validator_tests;
 
 #[cfg(test)]
+#[path = "workflow_freeze_unproven_route_tests.rs"]
+mod unproven_route_tests;
+
+#[cfg(test)]
 #[path = "workflow_freeze_entry_live_root_tests.rs"]
 mod entry_live_root_tests;
 

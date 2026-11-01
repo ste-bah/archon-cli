@@ -56,7 +56,9 @@ impl HostProbe {
     /// root by its absolute path: run in a copy, it would still read or
     /// change the live tree, so it is never run. A check carrying a host
     /// policy defect is never run either
-    /// ([`check_fault::policy_refused`]).
+    /// ([`check_fault::policy_refused`]). Issue 554: nor is a check whose
+    /// text the shell that runs it rejects in parse-only mode; that is its
+    /// author's, with the shell's own error, whatever a run would exit with.
     fn live_root_findings(
         &self,
         contract: &AcceptanceContract,
@@ -71,10 +73,16 @@ impl HostProbe {
                     .chain(&contract.supplementary)
                     .find(|entry| entry.id == reference.acceptance_id)?;
                 let (_, text) = executed_text(entry)?;
-                let named = live_root::named_root(text, &roots)?;
+                if let Some(named) = live_root::named_root(text, &roots) {
+                    return Some((
+                        entry.id.clone(),
+                        live_root::live_root_finding(&entry.id, named),
+                    ));
+                }
+                let error = archon_workflow::acceptance_check_shell::shell_parse_error(text)?;
                 Some((
                     entry.id.clone(),
-                    live_root::live_root_finding(&entry.id, named),
+                    archon_workflow::acceptance_check_shell::parse_finding(&entry.id, &error),
                 ))
             })
             .collect()

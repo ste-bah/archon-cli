@@ -179,9 +179,16 @@ async function anUnprovenCheckBesideAnAuthoredFindingStopsNothing() {
   assert.deepEqual(out.authored, ['A', 'B', 'C', 'B'], 'only the authored finding is re-authored');
   assert.equal(out.stdins.length, 2, 'the next freeze probes the unproven check again');
 }
-async function anUnprovenCheckAloneStopsThePhase() {
-  const out = await run([() => ({postcondition:{satisfied:false}, gateEnvelope:{policy_findings:[unproven]}})]);
-  assert.match(out.error || '', /^terminalStop: acceptance stopped: check 'A': operational/);
+// #554: an unproven check alone no longer stops the phase (it used to be a
+// terminal stop): the same candidate is frozen again, and the repeat on the
+// unchanged entry goes to that entry's author.
+async function anUnprovenCheckAloneIsFrozenAgainThenGoesToItsAuthor() {
+  const alone = () => ({postcondition:{satisfied:false}, gateEnvelope:{policy_findings:[unproven]}});
+  const out = await run([alone, alone, clean]);
+  assert.equal(out.error, undefined, 'never a terminal stop');
+  assert.equal(out.stdins[1], out.stdins[0], 'the first is frozen again with the same candidate');
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'A'], 'the repeat goes to its own author only');
+  assert.match(out.prompts.at(-1), /two freezes of its unchanged text/);
 }
 
 // #552: an authored judge failure that still reaches the loop names its
@@ -291,7 +298,7 @@ const tests = [
   ['a saved authored judge failure without subjects keeps its text routing', aSavedAuthoredJudgeFailureWithoutSubjectsKeepsItsTextRouting],
   ['an entry prompt lists only its latest gate findings as current', anEntryPromptListsOnlyItsLatestGateFindingsAsCurrent],
   ['an unproven check beside an authored finding stops nothing', anUnprovenCheckBesideAnAuthoredFindingStopsNothing],
-  ['an unproven check alone stops the phase', anUnprovenCheckAloneStopsThePhase],
+  ['an unproven check alone is frozen again, then goes to its author', anUnprovenCheckAloneIsFrozenAgainThenGoesToItsAuthor],
   ['a stale freeze keeps the round\'s unpublished repair', staleContractKeepsTheRoundsUnpublishedRepair],
   ['a published change since the draft base wins and shows the draft', stalePublishedChangeWinsAndShowsTheDraft],
   ['a stale freeze rebuilds from the current contract', staleContractRebuildsFromTheCurrentContract],

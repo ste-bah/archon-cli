@@ -366,6 +366,23 @@ async function authorCandidate(w, policy) {
     });
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
+    // #554: a check the host could not prove, on an entry this loop
+    // authored, goes to its author once the next freeze reports it again on
+    // the entry's unchanged text; until then the host probes it again.
+    const unproven = routed.operationalKind === "authored_judge_reply"
+      ? { repeated: new Set(), subjects: new Set() }
+      : unprovenAuthored(authorState, outcome, routed);
+    if (routed.operational && unproven.repeated.size > 0) {
+      routed.operational = null;
+      for (const finding of unproven.repeated) {
+        const text = String(finding.text || "unnamed policy finding");
+        routed.all.push(text);
+        routed.allFindings.push(finding);
+        routed.fatal.push(text);
+        routed.fatalFindings.push(finding);
+        routed.fatalOperational[routed.fatal.length - 1] = true;
+      }
+    }
     if (routed.operational) {
       if (routed.operationalKind === "authored_judge_reply") {
         // The judge could not use this candidate. Feed its reason to the
@@ -406,8 +423,8 @@ async function authorCandidate(w, policy) {
       carried = authored.content;
       continue;
     }
-    const ownedFatal = routed.fatalFindings.filter((finding) => {
-      if (finding.remediation_scope === "operational") return false;
+    const ownedFound = routed.fatalFindings.filter((finding) => {
+      if (finding.remediation_scope === "operational") return unproven.repeated.has(finding);
       const source = typeof finding.source_path === "string" ? finding.source_path.replace(/\\/g, "/") : "";
       if (policy.target && authoredSourceMatches(source, policy.target.fileName)) return true;
       return policy.phase === "acceptance" && (source === `${String(args.taskRoot || "").replace(/\\/g, "/")}/acceptance-contract.json` || source === "acceptance-contract.json")
@@ -415,8 +432,11 @@ async function authorCandidate(w, policy) {
         && (Object.prototype.hasOwnProperty.call(args.acceptanceCriteria || {}, finding.subject)
           || authorState.entries.has(finding.subject));
     });
+    const ownedFatal = ownedFound.map((finding) => unproven.repeated.has(finding)
+      ? { ...finding, text: `the host could not prove this check on two freezes of its unchanged text, so a host retry does not help: change the check so that the host can run it to its own verdict. The host reported: ${finding.text}` }
+      : finding);
     if (ownedFatal.length > 0) {
-      const owned = new Set(ownedFatal);
+      const owned = new Set(ownedFound);
       const ownedText = ownedFatal.map((finding) => String(finding.text || "unnamed policy finding"));
       routed.fatal = routed.fatal.filter((_, index) => !owned.has(routed.fatalFindings[index]));
       routed.fatalOperational = routed.fatalOperational.filter((_, index) => !owned.has(routed.fatalFindings[index]));
@@ -465,11 +485,23 @@ async function authorCandidate(w, policy) {
     // (an operational finding) beside findings the author can repair stops
     // nothing: it blocks publication, the author repairs its own, and the
     // next freeze probes the unproven check again.
-    const fatal = routed.retry.length > 0
-      ? routed.fatal.filter((text, index) => !routed.fatalOperational[index])
-      : routed.fatal;
+    // #554: nor does a check the host could not prove on an entry this
+    // loop authored end the phase: the same candidate is frozen again, and
+    // the check goes to its author if that freeze reports it again.
+    const pending = routed.fatalFindings.filter((finding) => finding.remediation_scope === "operational"
+      && unproven.subjects.has(finding.subject));
+    const fatal = routed.fatal.filter((text, index) => !(routed.retry.length > 0 && routed.fatalOperational[index])
+      && !pending.includes(routed.fatalFindings[index]));
     if (fatal.length > 0) {
       await stopFixed(`${policy.phase} stopped: ${fatal.join(" | ")}`);
+    }
+    if (routed.retry.length === 0 && pending.length > 0) {
+      if (!measuredReplies) progress.answered += 1;
+      const texts = pending.map((finding) => String(finding.text || "unnamed policy finding"));
+      recordOperational(progress, call, texts.join(" | "), advanced, round, policy.capability);
+      lastFindings = texts;
+      carried = authored.content;
+      continue;
     }
     if (routed.retry.length === 0) {
       requireCommitted(outcome, policy.phase);

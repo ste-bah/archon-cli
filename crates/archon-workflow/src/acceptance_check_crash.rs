@@ -56,9 +56,13 @@
 //!   `NAME` is a shell function the check itself defines and line N of the
 //!   check calls — a missing product binary or system tool is not the check's
 //!   own helper.
+//!
+//! Exit code 0 is a pass unless the check's own shell reported a syntax
+//! error (Issue 554, `acceptance_check_shell`): a `trap ... EXIT` gives a
+//! script that stopped at a parse error the trap's status, so that exit
+//! status is not its criterion's verdict.
 
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -104,15 +108,18 @@ pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass 
     if let Some(classification) = &result.classification {
         return classification.crash.clone();
     }
-    match result.exit_code {
-        Some(0) => return CheckRunClass::Passed,
-        None => return CheckRunClass::Failed,
-        Some(_) => {}
-    }
+    let Some(code) = result.exit_code else {
+        return CheckRunClass::Failed;
+    };
     // Issue 544: the raw capture when it is kept, never redacted evidence.
     let stderr = String::from_utf8_lossy(result.verdict_stderr());
     let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-    let code = result.exit_code.unwrap_or_default();
+    if code == 0 {
+        // Issue 554: exit 0 after the check's own shell reported a syntax
+        // error (a `trap ... EXIT` sets that status) is no verdict.
+        return crate::acceptance_check_shell::exit_zero_syntax_defect(command, &lines)
+            .map_or(CheckRunClass::Passed, CheckRunClass::ScriptDefect);
+    }
     python_defect(command, code, &lines)
         .or_else(|| shell_defect(command, code, &lines))
         .map_or(CheckRunClass::Failed, CheckRunClass::ScriptDefect)
@@ -147,7 +154,10 @@ impl CheckResult {
             defect.signal = "see the fenced stderr below".into();
         }
         self.classification = Some(CheckClassification {
-            passed: self.operational_error.is_none() && self.exit_code == Some(0) && !zero_work,
+            passed: self.operational_error.is_none()
+                && self.exit_code == Some(0)
+                && !zero_work
+                && !matches!(crash, CheckRunClass::ScriptDefect(_)),
             zero_work,
             crash,
             failure_signature: None,
@@ -404,24 +414,7 @@ fn own_callable_called(program: &str, source: &str, qualified: &str) -> bool {
 
 /// Whether the executing shell's parse-only mode rejects `command`.
 fn shell_rejects(command: &str) -> bool {
-    let mut shell = archon_shell::spawn::command(archon_shell::resolve_posix_shell());
-    let child =
-        archon_shell::spawn::replace_environment(&mut shell, std::iter::empty::<(&str, &str)>())
-            .args(["-n", "-s"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-    let Ok(mut child) = child else {
-        return false;
-    };
-    let written = child
-        .stdin
-        .take()
-        .is_some_and(|mut stdin| stdin.write_all(command.as_bytes()).is_ok());
-    child
-        .wait()
-        .is_ok_and(|status| written && !status.success())
+    crate::acceptance_check_shell::shell_parse_error(command).is_some()
 }
 
 fn shell_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefect> {

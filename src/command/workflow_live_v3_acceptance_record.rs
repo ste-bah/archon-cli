@@ -23,7 +23,8 @@ pub(super) fn check_record(
         && result.reports_zero_work();
     let status = if result.operational_error.is_some() {
         AcceptanceCheckStatus::Error
-    } else if result.exit_code == Some(0) && !zero_work {
+    } else if result.exit_code == Some(0) && !zero_work && !result.reports_shell_syntax_error() {
+        // Issue 554: exit 0 after its own shell's syntax error is no pass.
         AcceptanceCheckStatus::Passed
     } else {
         AcceptanceCheckStatus::Failed

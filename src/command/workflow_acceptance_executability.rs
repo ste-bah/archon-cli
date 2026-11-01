@@ -457,6 +457,9 @@ pub(crate) mod probe_tests;
 #[path = "workflow_acceptance_executability_probe_tests_b.rs"]
 mod probe_tests_b;
 #[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_shell_parse_tests.rs"]
+mod shell_parse_tests;
+#[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_tests.rs"]
 pub(crate) mod tests;
 #[cfg(all(test, unix))]

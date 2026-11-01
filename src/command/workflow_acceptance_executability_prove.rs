@@ -318,7 +318,9 @@ pub(super) async fn prove(
                 let unproven = format!(
                     "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail; mutation observation: {observation}"
                 );
-                let fault = super::check_fault::of_mutation(&result.result, &markers);
+                let text = executed_text(entry).map_or("", |(_, text)| text);
+                let fault =
+                    super::check_fault::of_mutation(&result.result, &markers, text, &reason);
                 let at = format!(
                     "on the pre-implementation tree at {short} with the data it names moved aside"
                 );
