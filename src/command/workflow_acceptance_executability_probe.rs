@@ -79,15 +79,7 @@ impl HostProbe {
                         live_root::live_root_finding(&entry.id, named),
                     ));
                 }
-                let cwd = match &entry.check {
-                    archon_workflow::task_set_contract::AcceptanceCheck::Command {
-                        cwd: archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
-                        ..
-                    } => &self.repository,
-                    _ => &self.project,
-                };
-                let error =
-                    archon_workflow::acceptance_check_shell::sourced_parse_error(text, cwd, None)?;
+                let error = archon_workflow::acceptance_check_shell::shell_parse_error(text)?;
                 Some((
                     entry.id.clone(),
                     archon_workflow::acceptance_check_shell::parse_finding(&entry.id, &error),

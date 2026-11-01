@@ -69,7 +69,8 @@ impl VerifyCommandReport {
         // Issue 554: a command its shell cannot parse never asserted anything.
         if let Some(error) = &self.parse_error {
             return format!(
-                "verify_command does not parse in the shell that runs it (`-n`), so it was not run: {error}"
+                "verify_command does not parse in the shell that runs it (`-n`), so it was not run. The rule: {}. The shell reported: {error}",
+                crate::acceptance_check_shell::PARSE_RULE
             );
         }
         if self.exit_code == Some(0) && command_is_discovery_only(&self.command) {
@@ -158,18 +159,15 @@ pub(crate) fn run_verify_command_capture(
         .with_remedy("Supply an operator-owned CheckPolicy (with the needed names in forwarded) to run_verify_command_with_policy or evaluate_with_policy; those APIs consume the explicit policy, not a project config file");
     // Issue 554: the shell that runs it parses it first (`-n`); under bash's
     // POSIX mode a parse error after `trap ... EXIT` exits with the trap's 0.
-    // A command that changes how later lines parse (an alias, `shopt`), by
-    // itself or through a file it sources, is left to its run: parse-only
-    // mode would not apply that change. Each file it sources by a literal
-    // relative path is parsed too.
-    if !crate::acceptance_check_shell::parse_lifted(command, root)
-        && let Ok(parsed) = environment
-            .command(shell_program())
-            .arg("-n")
-            .arg("-c")
-            .arg(command)
-            .current_dir(root)
-            .output()
+    // The rule is unconditional (`acceptance_check_shell::PARSE_RULE`), and
+    // it reads only the command, never a file it sources.
+    if let Ok(parsed) = environment
+        .command(shell_program())
+        .arg("-n")
+        .arg("-c")
+        .arg(command)
+        .current_dir(root)
+        .output()
         && !parsed.status.success()
     {
         let stderr = String::from_utf8_lossy(&parsed.stderr).trim().to_string();
@@ -184,18 +182,6 @@ pub(crate) fn run_verify_command_capture(
             }),
             stderr,
             environment_note: None,
-        }));
-    }
-    if let Some(error) =
-        crate::acceptance_check_shell::sourced_file_error(command, root, Some(&shell_program()))
-    {
-        return Ok(Some(VerifyCommandReport {
-            command: command.to_string(),
-            exit_code: None,
-            stdout: String::new(),
-            stderr: error.clone(),
-            environment_note: None,
-            parse_error: Some(error),
         }));
     }
     let output = environment

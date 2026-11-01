@@ -116,10 +116,12 @@ async fn a_mutation_run_whose_text_parses_is_struck_whatever_its_stderr_says_554
     assert!(unproven.contains_key("AC-X-001"), "{unproven:?}");
 }
 
-/// Codex review cases at the probe: a negative test of a child shell and a
-/// text that defines aliases are never refused for their syntax.
+/// Codex review cases at the probe: a negative test of a child shell is
+/// never refused for its syntax; an alias-built block breaks the parse
+/// rule and goes to its author with the rule stated. (Was
+/// `a_child_shell_negative_test_and_an_alias_block_are_never_syntax_findings_554`.)
 #[tokio::test]
-async fn a_child_shell_negative_test_and_an_alias_block_are_never_syntax_findings_554() {
+async fn a_child_shell_negative_test_passes_the_parse_rule_and_an_alias_block_breaks_it_554() {
     let trees = trees(&[
         (
             "AC-X-001",
@@ -134,14 +136,21 @@ async fn a_child_shell_negative_test_and_an_alias_block_are_never_syntax_finding
     ]);
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
-    for (id, finding) in &findings {
-        assert!(
-            !finding.contains("parse-only")
+    assert!(
+        findings
+            .get("AC-X-001")
+            .is_none_or(|finding| !finding.contains("parse-only")
                 && !finding.contains("syntax error")
-                && !finding.contains("crashed in its own"),
-            "{id}: {finding}"
-        );
-    }
+                && !finding.contains("crashed in its own")),
+        "{findings:?}"
+    );
+    let alias = findings
+        .get("AC-X-002")
+        .unwrap_or_else(|| panic!("{findings:?}"));
+    assert!(
+        alias.contains("parse-only") && alias.contains("alias"),
+        "{alias}"
+    );
 }
 
 /// The strike rule: no exit status and no syntax error may be the host's
@@ -173,34 +182,24 @@ async fn a_mutation_run_with_no_exit_status_is_struck_then_goes_to_its_author_55
     );
 }
 
-/// Security review: a file a check sources by a literal relative path is
-/// parsed before the run; one the shell rejects is its author's, named.
+/// Codex r3 / security review: the preflight reads no file but the check
+/// text; a check sourcing a broken file is judged by its run alone. (Was
+/// `a_check_sourcing_a_file_its_shell_cannot_parse_goes_to_its_author_554`.)
 #[tokio::test]
-async fn a_check_sourcing_a_file_its_shell_cannot_parse_goes_to_its_author_554() {
-    let trees = trees(&[
-        (
-            "AC-X-001",
-            ". ./lib/broken.sh\nf\n",
-            TrustedCwd::ProjectRoot,
-        ),
-        ("AC-X-002", ". ./lib/sound.sh\nf\n", TrustedCwd::ProjectRoot),
-    ]);
+async fn a_check_sourcing_a_broken_file_is_judged_by_its_run_alone_554() {
+    let trees = trees(&[(
+        "AC-X-001",
+        ". ./lib/broken.sh\nf\n",
+        TrustedCwd::ProjectRoot,
+    )]);
     let lib = trees.set.project.path().join("lib");
     std::fs::create_dir_all(&lib).unwrap();
     std::fs::write(lib.join("broken.sh"), "f() {\n  true || {\n  fi\n}\n").unwrap();
-    std::fs::write(lib.join("sound.sh"), "f() { test -f data/state.txt; }\n").unwrap();
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
-    let finding = findings
-        .get("AC-X-001")
-        .unwrap_or_else(|| panic!("{findings:?}"));
-    assert!(
-        finding.contains("lib/broken.sh") && finding.contains("parse-only"),
-        "{finding}"
-    );
     assert!(
         findings
-            .get("AC-X-002")
+            .get("AC-X-001")
             .is_none_or(|finding| !finding.contains("parse-only")),
         "{findings:?}"
     );

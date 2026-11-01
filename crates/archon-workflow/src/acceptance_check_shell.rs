@@ -6,155 +6,26 @@
 //! under bash's POSIX mode a parse error after `trap ... EXIT` ends the
 //! script with the trap's status, which is 0. So the host asks the same
 //! shell to parse the text (`-n`) before it runs it
-//! ([`shell_parse_error`]). That parse is the one gate: stderr cannot say
-//! which process printed a syntax error (a child shell a negative test runs
-//! prints the same text), so no rule reads a syntax error from a run's
-//! output as the check's own.
+//! ([`shell_parse_error`]).
+//!
+//! The check contract rule: a check (and a stage `verify_command`) must
+//! parse under the executing shell's `-n`. That parse is unconditional and
+//! the one syntax gate. Parse-only mode runs no command, so syntax built
+//! from an alias the text defines is rejected: such a block must be
+//! written out. Stderr cannot say which process printed a syntax error (a
+//! child shell a negative test runs prints the same text), so no rule
+//! reads one from a run's output as the check's own; and the parse reads
+//! only the text, never a file it sources, which its run alone judges.
 
 use std::io::Write;
-#[path = "acceptance_check_shell_lex.rs"]
-mod lex;
-
-/// `set -o` options that change what runs, never how a line parses.
-const RUN_ONLY_OPTIONS: &[&str] = &[
-    "allexport",
-    "braceexpand",
-    "errexit",
-    "errtrace",
-    "functrace",
-    "hashall",
-    "histexpand",
-    "history",
-    "ignoreeof",
-    "monitor",
-    "noclobber",
-    "noexec",
-    "noglob",
-    "notify",
-    "nounset",
-    "onecmd",
-    "physical",
-    "pipefail",
-    "privileged",
-    "verbose",
-    "xtrace",
-];
-
-/// Whether `command` runs a command that may change how its later lines
-/// parse: `alias`, `shopt`, or a `set -o` option other than the ones that
-/// only change what runs, in any quoted or escaped spelling, also through
-/// `command` or `builtin`. A mention in a comment, a quoted string, a
-/// here-document body or a command substitution runs none, so it is no
-/// reason to lift the preflight: the gate fails closed.
-pub fn changes_parsing(command: &str) -> bool {
-    lex::simple_commands(command).iter().any(|words| {
-        let words: Vec<&str> = (words.iter().map(String::as_str))
-            .skip_while(|word| matches!(*word, "command" | "builtin"))
-            .collect();
-        match words.first() {
-            Some(&("alias" | "shopt")) => true,
-            Some(&"set") => set_changes_parsing(&words[1..]),
-            _ => false,
-        }
-    })
-}
-
-/// Whether `set` arguments name an `-o`/`+o` option that may change parsing.
-fn set_changes_parsing(arguments: &[&str]) -> bool {
-    let mut arguments = arguments.iter();
-    while let Some(flags) = arguments.next() {
-        if (flags.starts_with('-') || flags.starts_with('+')) && flags[1..].contains('o') {
-            match arguments.next() {
-                Some(name) if RUN_ONLY_OPTIONS.contains(name) => {}
-                Some(_) => return true,
-                None => {}
-            }
-        }
-    }
-    false
-}
-
-/// The files `command` sources by a literal relative path (`. path`,
-/// `source path`), resolved under `cwd`; a path built at run time is left
-/// to the run.
-fn sourced_files(command: &str, cwd: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
-    (lex::simple_commands(command).into_iter())
-        .filter(|words| matches!(words.first().map(String::as_str), Some("." | "source")))
-        .filter_map(|words| words.into_iter().nth(1))
-        .filter(|path| {
-            !path.is_empty()
-                && !path.contains(['$', '*', '?', '[', '~'])
-                && !std::path::Path::new(path).is_absolute()
-        })
-        .map(|path| {
-            let resolved = cwd.join(&path);
-            (path, resolved)
-        })
-        .filter(|(_, resolved)| resolved.is_file())
-        .collect()
-}
-
-/// Whether the preflight is lifted for `command` run under `cwd`: the text,
-/// or a file it sources by a literal relative path, changes how later
-/// lines parse ([`changes_parsing`]).
-pub fn parse_lifted(command: &str, cwd: &std::path::Path) -> bool {
-    changes_parsing(command)
-        || (sourced_texts(command, cwd).iter()).any(|(_, text)| changes_parsing(text))
-}
-
-fn sourced_texts(command: &str, cwd: &std::path::Path) -> Vec<(String, String)> {
-    (sourced_files(command, cwd).into_iter())
-        .filter_map(|(path, resolved)| Some((path, std::fs::read_to_string(resolved).ok()?)))
-        .collect()
-}
-
-/// The parse-only error of `shell` (by default the checks' shell) for a
-/// file `command` sources by a literal relative path under `cwd`, naming
-/// that file; a file that itself changes how later lines parse is left to
-/// the run.
-pub fn sourced_file_error(
-    command: &str,
-    cwd: &std::path::Path,
-    shell: Option<&std::ffi::OsStr>,
-) -> Option<String> {
-    let shell = shell.unwrap_or(archon_shell::resolve_posix_shell().as_os_str());
-    sourced_texts(command, cwd).iter().find_map(|(path, text)| {
-        let error = (!changes_parsing(text)).then(|| parse_with(shell, text))??;
-        Some(format!(
-            "the file `{path}` it sources does not parse: {error}"
-        ))
-    })
-}
-
-/// Issue 554: the preflight error for check text `command` run under `cwd`
-/// by the checks' shell: the shell's error for the text itself, else for a
-/// file it sources by a literal relative path; `None` when they parse or
-/// the preflight is lifted ([`parse_lifted`]) for the text.
-pub fn sourced_parse_error(
-    command: &str,
-    cwd: &std::path::Path,
-    shell: Option<&std::ffi::OsStr>,
-) -> Option<String> {
-    let checks = archon_shell::resolve_posix_shell().as_os_str();
-    if !parse_lifted(command, cwd)
-        && let Some(error) = parse_with(shell.unwrap_or(checks), command)
-    {
-        return Some(error);
-    }
-    sourced_file_error(command, cwd, shell)
-}
-
 /// The diagnostic of the executing shell's parse-only mode (`-n`) for
 /// `command`, as that shell printed it; `None` when it parses the text. The
 /// shell is the one every check runs under, with no environment: parsing
 /// runs no command, so no search path or variable takes part. When that
 /// shell cannot be started this is `None` too: the run itself then fails to
-/// start, and that failure says so. A text that changes how later lines
-/// parse ([`changes_parsing`]) is never judged here: its run decides.
+/// start, and that failure says so. Only the text is read: no file it
+/// sources, which its run alone judges.
 pub fn shell_parse_error(command: &str) -> Option<String> {
-    if changes_parsing(command) {
-        return None;
-    }
     parse_with(archon_shell::resolve_posix_shell().as_os_str(), command)
 }
 
@@ -193,11 +64,14 @@ fn parse_with(shell: &std::ffi::OsStr, command: &str) -> Option<String> {
     })
 }
 
+/// The check contract rule a rejected text breaks, stated for its author.
+pub const PARSE_RULE: &str = "a check must parse under the parse-only mode (`-n`) of the shell that runs it; `-n` runs no command, so it does not apply an alias the text defines: syntax built from an alias must be written out";
+
 /// The author's finding for check `id`, whose text the shell that runs it
 /// rejects with `error` before it runs.
 pub fn parse_finding(id: &str, error: &str) -> String {
     format!(
-        "check '{id}': the shell that runs checks ({}) rejects its text in parse-only mode (`-n`), so the host never ran it: no command of it would reach an assertion, and its exit status would not be its criterion's verdict. The shell reported:\n{error}\nFix exactly that shell syntax so the whole text parses; keep every assertion and every call into the deliverable, and never replace a call to the deliverable with a stand-in",
+        "check '{id}': the shell that runs checks ({}) rejects its text in parse-only mode (`-n`), so the host never ran it: no command of it would reach an assertion, and its exit status would not be its criterion's verdict. The rule: {PARSE_RULE}. The shell reported:\n{error}\nFix exactly that shell syntax so the whole text parses; keep every assertion and every call into the deliverable, and never replace a call to the deliverable with a stand-in",
         archon_shell::resolve_posix_shell().display()
     )
 }
