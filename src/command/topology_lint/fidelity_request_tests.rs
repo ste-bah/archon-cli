@@ -135,10 +135,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Windows CPU fix re-pin only: native byte counting and incremental JSON sizing preserve bytes.
     // Issue 551: repair prompts list the latest open findings as current; earlier ones only as do-not-regress history.
     // Issue 552: entry prompts list only their findings open in the latest gate result; a judge failure reaches only the entries it names, each with its own known finding.
+    // Issue 554: an operational finding on an authored entry never stops the phase; it is re-frozen, then routed to its author; skeletonPolicy and unprovenAuthored moved into the frozen module.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "6ce20affcda891b16cf7fef6d8e7db2809acfe12245030c0db9ae68b74b915d1"
+        "d8c9ae4745322f0210fc0dce65ca55a6101e05be59ea580db7e7329eb804f0b8"
     );
 }
