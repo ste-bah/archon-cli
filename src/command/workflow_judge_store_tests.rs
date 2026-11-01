@@ -435,3 +435,6 @@ async fn orphan_completion_marker_is_not_progress() {
     assert!(store.judge(&client, subset, &expected).await.is_err());
     assert_eq!(resumed.total(), 0, "a marker needs saved verdicts");
 }
+
+#[path = "workflow_judge_store_undecided_tests.rs"]
+mod undecided_tests;

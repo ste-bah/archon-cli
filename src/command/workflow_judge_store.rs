@@ -16,6 +16,16 @@ use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeProgress};
 
 const SCHEMA: u32 = 1;
 
+/// The outcome of a check the judge could not decide (#552), with the check
+/// as asked, stamped as a saved verdict is.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedUndecided {
+    schema: u32,
+    key: String,
+    message: String,
+    asked: AcceptanceContract,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Saved {
     schema: u32,
@@ -119,24 +129,60 @@ impl JudgeStore {
     }
 
     /// The saved outcome of a check the judge could not decide (#552): what
-    /// its replies gave, under the same key as a verdict.
-    fn load_undecided(&self, key: &str) -> Option<String> {
-        let saved: serde_json::Value =
+    /// its replies gave, under the same key as a verdict, and only while its
+    /// stamps hold as a saved verdict's must (the raw named-file content
+    /// too, which the prompt may redact).
+    fn load_undecided(
+        &self,
+        key: &str,
+        subset: &AcceptanceContract,
+        identity: Option<&serde_json::Value>,
+    ) -> Option<String> {
+        let saved: SavedUndecided =
             serde_json::from_slice(&std::fs::read(self.undecided_path(key)).ok()?).ok()?;
-        (saved["schema"] == SCHEMA && saved["key"] == key)
-            .then(|| saved["message"].as_str().map(str::to_string))
-            .flatten()
+        let ids = |contract: &AcceptanceContract| {
+            (contract.acceptance.iter())
+                .chain(&contract.supplementary)
+                .map(|entry| entry.id.clone())
+                .collect::<Vec<_>>()
+        };
+        (saved.schema == SCHEMA
+            && saved.key == key
+            && ids(&saved.asked) == ids(subset)
+            && stamps_match(&saved.asked, identity?, &self.roots))
+        .then_some(saved.message)
     }
 
-    fn save_undecided(&self, key: &str, message: &str) {
-        let bytes =
-            serde_json::json!({"schema": SCHEMA, "key": key, "message": message}).to_string();
+    /// Save that outcome with `subset` stamped as a verdict is.
+    fn save_undecided(
+        &self,
+        client: &dyn WorkflowLlmClient,
+        key: &str,
+        mut subset: AcceptanceContract,
+        message: &str,
+    ) {
+        for entry in (subset.acceptance.iter_mut()).chain(&mut subset.supplementary) {
+            entry.judgment.sampling = None;
+            crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_content_digest(
+                entry,
+                &client.resolve_model_alias("sonnet"),
+                client.provider_id().as_deref(),
+                &self.roots,
+            );
+        }
+        let saved = SavedUndecided {
+            schema: SCHEMA,
+            key: key.to_string(),
+            message: message.to_string(),
+            asked: subset,
+        };
         let path = self.undecided_path(key);
         let staging = self
             .dir
             .join(format!(".{key}.undecided.{}.tmp", std::process::id()));
         let written = std::fs::create_dir_all(&self.dir).is_ok()
-            && std::fs::write(&staging, bytes).is_ok()
+            && serde_json::to_vec(&saved)
+                .is_ok_and(|bytes| std::fs::write(&staging, bytes).is_ok())
             && std::fs::rename(&staging, &path).is_ok();
         if !written {
             let _ = std::fs::remove_file(&staging);
@@ -248,7 +294,7 @@ impl JudgeStore {
         }
         // #552: an identical check the judge could not decide is not asked
         // again; its saved outcome sends it back to its author.
-        if let Some(message) = self.load_undecided(&key) {
+        if let Some(message) = self.load_undecided(&key, &subset, identity.as_ref()) {
             eprintln!(
                 "acceptance judge: reused the saved outcome of an identical check the judge could not decide ({key}); no provider call made"
             );
@@ -260,6 +306,7 @@ impl JudgeStore {
             incomplete.undecided = expected.iter().cloned().collect();
             return Err(incomplete.into());
         }
+        let asked = subset.clone();
         let judged = match super::judge::judge_contract_subset_resumable_with_roots(
             client,
             subset,
@@ -274,7 +321,7 @@ impl JudgeStore {
                     && incomplete.kind == super::judge::JudgeIncompleteKind::AuthoredReply
                     && incomplete.decided.is_empty()
                 {
-                    self.save_undecided(&key, &incomplete.message);
+                    self.save_undecided(client, &key, asked, &incomplete.message);
                 }
                 return Err(error);
             }
