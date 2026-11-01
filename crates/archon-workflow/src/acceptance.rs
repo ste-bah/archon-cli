@@ -158,9 +158,11 @@ pub(crate) fn run_verify_command_capture(
         .with_remedy("Supply an operator-owned CheckPolicy (with the needed names in forwarded) to run_verify_command_with_policy or evaluate_with_policy; those APIs consume the explicit policy, not a project config file");
     // Issue 554: the shell that runs it parses it first (`-n`); under bash's
     // POSIX mode a parse error after `trap ... EXIT` exits with the trap's 0.
-    // A command that changes how later lines parse (an alias, `shopt`) is
-    // left to its run: parse-only mode would not apply that change.
-    if !crate::acceptance_check_shell::changes_parsing(command)
+    // A command that changes how later lines parse (an alias, `shopt`), by
+    // itself or through a file it sources, is left to its run: parse-only
+    // mode would not apply that change. Each file it sources by a literal
+    // relative path is parsed too.
+    if !crate::acceptance_check_shell::parse_lifted(command, root)
         && let Ok(parsed) = environment
             .command(shell_program())
             .arg("-n")
@@ -182,6 +184,18 @@ pub(crate) fn run_verify_command_capture(
             }),
             stderr,
             environment_note: None,
+        }));
+    }
+    if let Some(error) =
+        crate::acceptance_check_shell::sourced_file_error(command, root, Some(&shell_program()))
+    {
+        return Ok(Some(VerifyCommandReport {
+            command: command.to_string(),
+            exit_code: None,
+            stdout: String::new(),
+            stderr: error.clone(),
+            environment_note: None,
+            parse_error: Some(error),
         }));
     }
     let output = environment

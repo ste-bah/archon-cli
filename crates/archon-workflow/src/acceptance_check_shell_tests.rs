@@ -138,3 +138,63 @@ fn a_verify_command_with_a_nested_shell_error_or_an_alias_block_is_accepted_554(
         );
     }
 }
+
+/// Codex r2 / security review: only a real `alias` command, in any quoted
+/// or escaped spelling, lifts the preflight; a mention in a comment, a
+/// string or a here-doc body never does, so such a text fails closed.
+#[test]
+fn only_a_real_alias_command_lifts_the_preflight_554() {
+    // P2-a: an escaped spelling still defines the alias, and the text runs.
+    let escaped = "\\alias begin='if true; then'\nbegin\ntest 1 -eq 1\nfi\n";
+    assert_eq!(run(escaped).exit_code, Some(0));
+    assert_eq!(shell_parse_error(escaped), None, "{escaped}");
+    for spelling in ["'alias'", "\"alias\"", "command alias", "builtin alias"] {
+        let text = format!("{spelling} begin='if true; then'\nbegin\ntest 1 -eq 1\nfi\n");
+        assert!(changes_parsing(&text), "{text}");
+    }
+    // P2-b: a comment naming `alias` is no alias command.
+    let commented = format!("# check alias behavior\n{TRAP_THEN_PARSE_ERROR}");
+    // An `alias` inside an echo string, and inside a here-doc body.
+    let quoted = format!("echo 'run alias begin first'\n{TRAP_THEN_PARSE_ERROR}");
+    let heredoc = format!("cat <<'EOF'\nalias begin='if true; then'\nEOF\n{TRAP_THEN_PARSE_ERROR}");
+    for text in [&commented, &quoted, &heredoc] {
+        assert!(!changes_parsing(text), "{text}");
+        assert!(shell_parse_error(text).is_some(), "fails open: {text}");
+    }
+}
+
+/// Security review: a file the check sources by a literal relative path is
+/// parsed by the same shell before the run.
+#[test]
+fn a_sourced_file_is_parsed_before_the_run_554() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("lib")).unwrap();
+    std::fs::write(
+        root.path().join("lib/broken.sh"),
+        "f() {\n  true || {\n  fi\n}\n",
+    )
+    .unwrap();
+    std::fs::write(root.path().join("lib/sound.sh"), "f() { true; }\n").unwrap();
+    let broken = sourced_parse_error(". ./lib/broken.sh\nf\n", root.path(), None)
+        .expect("a sourced file the shell rejects is no pass");
+    assert!(
+        broken.contains("lib/broken.sh") && broken.contains("yntax error"),
+        "{broken}"
+    );
+    assert_eq!(
+        sourced_parse_error("source lib/sound.sh\nf\n", root.path(), None),
+        None
+    );
+    // A path the host cannot resolve literally is left to the run.
+    assert_eq!(
+        sourced_parse_error(". \"$dir/x.sh\"\n", root.path(), None),
+        None
+    );
+    let verify = crate::acceptance::run_verify_command(root.path(), Some(". ./lib/broken.sh; f"))
+        .expect_err("verify_command sourcing a broken file");
+    assert!(verify.contains("lib/broken.sh"), "{verify}");
+    assert_eq!(
+        crate::acceptance::run_verify_command(root.path(), Some(". ./lib/sound.sh; f")),
+        Ok(())
+    );
+}

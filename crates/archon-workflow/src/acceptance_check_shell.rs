@@ -12,21 +12,8 @@
 //! output as the check's own.
 
 use std::io::Write;
-use std::sync::LazyLock;
-
-use regex::Regex;
-
-/// Builtins that change how the shell parses the lines after them: an
-/// alias definition or a `shopt` option (such as `extglob`). Parse-only
-/// mode runs neither, so it may reject a text that runs fine.
-static PARSE_CHANGING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)(?:^|[\s;&|(){}`])(?:alias|shopt)(?:\s|;|$)").expect("static pattern")
-});
-
-/// A `set -o NAME` / `set +o NAME` option.
-static SET_OPTION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)(?:^|[\s;&|(){}`])set\s+[-+]o\s+([A-Za-z_-]+)").expect("static pattern")
-});
+#[path = "acceptance_check_shell_lex.rs"]
+mod lex;
 
 /// `set -o` options that change what runs, never how a line parses.
 const RUN_ONLY_OPTIONS: &[&str] = &[
@@ -53,16 +40,108 @@ const RUN_ONLY_OPTIONS: &[&str] = &[
     "xtrace",
 ];
 
-/// Whether `command` uses a builtin that may change how its later lines
+/// Whether `command` runs a command that may change how its later lines
 /// parse: `alias`, `shopt`, or a `set -o` option other than the ones that
-/// only change what runs.
+/// only change what runs, in any quoted or escaped spelling, also through
+/// `command` or `builtin`. A mention in a comment, a quoted string, a
+/// here-document body or a command substitution runs none, so it is no
+/// reason to lift the preflight: the gate fails closed.
 pub fn changes_parsing(command: &str) -> bool {
-    PARSE_CHANGING.is_match(command)
-        || SET_OPTION.captures_iter(command).any(|found| {
-            found
-                .get(1)
-                .is_some_and(|name| !RUN_ONLY_OPTIONS.contains(&name.as_str()))
+    lex::simple_commands(command).iter().any(|words| {
+        let words: Vec<&str> = (words.iter().map(String::as_str))
+            .skip_while(|word| matches!(*word, "command" | "builtin"))
+            .collect();
+        match words.first() {
+            Some(&("alias" | "shopt")) => true,
+            Some(&"set") => set_changes_parsing(&words[1..]),
+            _ => false,
+        }
+    })
+}
+
+/// Whether `set` arguments name an `-o`/`+o` option that may change parsing.
+fn set_changes_parsing(arguments: &[&str]) -> bool {
+    let mut arguments = arguments.iter();
+    while let Some(flags) = arguments.next() {
+        if (flags.starts_with('-') || flags.starts_with('+')) && flags[1..].contains('o') {
+            match arguments.next() {
+                Some(name) if RUN_ONLY_OPTIONS.contains(name) => {}
+                Some(_) => return true,
+                None => {}
+            }
+        }
+    }
+    false
+}
+
+/// The files `command` sources by a literal relative path (`. path`,
+/// `source path`), resolved under `cwd`; a path built at run time is left
+/// to the run.
+fn sourced_files(command: &str, cwd: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    (lex::simple_commands(command).into_iter())
+        .filter(|words| matches!(words.first().map(String::as_str), Some("." | "source")))
+        .filter_map(|words| words.into_iter().nth(1))
+        .filter(|path| {
+            !path.is_empty()
+                && !path.contains(['$', '*', '?', '[', '~'])
+                && !std::path::Path::new(path).is_absolute()
         })
+        .map(|path| {
+            let resolved = cwd.join(&path);
+            (path, resolved)
+        })
+        .filter(|(_, resolved)| resolved.is_file())
+        .collect()
+}
+
+/// Whether the preflight is lifted for `command` run under `cwd`: the text,
+/// or a file it sources by a literal relative path, changes how later
+/// lines parse ([`changes_parsing`]).
+pub fn parse_lifted(command: &str, cwd: &std::path::Path) -> bool {
+    changes_parsing(command)
+        || (sourced_texts(command, cwd).iter()).any(|(_, text)| changes_parsing(text))
+}
+
+fn sourced_texts(command: &str, cwd: &std::path::Path) -> Vec<(String, String)> {
+    (sourced_files(command, cwd).into_iter())
+        .filter_map(|(path, resolved)| Some((path, std::fs::read_to_string(resolved).ok()?)))
+        .collect()
+}
+
+/// The parse-only error of `shell` (by default the checks' shell) for a
+/// file `command` sources by a literal relative path under `cwd`, naming
+/// that file; a file that itself changes how later lines parse is left to
+/// the run.
+pub fn sourced_file_error(
+    command: &str,
+    cwd: &std::path::Path,
+    shell: Option<&std::ffi::OsStr>,
+) -> Option<String> {
+    let shell = shell.unwrap_or(archon_shell::resolve_posix_shell().as_os_str());
+    sourced_texts(command, cwd).iter().find_map(|(path, text)| {
+        let error = (!changes_parsing(text)).then(|| parse_with(shell, text))??;
+        Some(format!(
+            "the file `{path}` it sources does not parse: {error}"
+        ))
+    })
+}
+
+/// Issue 554: the preflight error for check text `command` run under `cwd`
+/// by the checks' shell: the shell's error for the text itself, else for a
+/// file it sources by a literal relative path; `None` when they parse or
+/// the preflight is lifted ([`parse_lifted`]) for the text.
+pub fn sourced_parse_error(
+    command: &str,
+    cwd: &std::path::Path,
+    shell: Option<&std::ffi::OsStr>,
+) -> Option<String> {
+    let checks = archon_shell::resolve_posix_shell().as_os_str();
+    if !parse_lifted(command, cwd)
+        && let Some(error) = parse_with(shell.unwrap_or(checks), command)
+    {
+        return Some(error);
+    }
+    sourced_file_error(command, cwd, shell)
 }
 
 /// The diagnostic of the executing shell's parse-only mode (`-n`) for
@@ -76,7 +155,12 @@ pub fn shell_parse_error(command: &str) -> Option<String> {
     if changes_parsing(command) {
         return None;
     }
-    let mut shell = archon_shell::spawn::command(archon_shell::resolve_posix_shell());
+    parse_with(archon_shell::resolve_posix_shell().as_os_str(), command)
+}
+
+/// `shell`'s parse-only diagnostic for `command` read on its stdin.
+fn parse_with(shell: &std::ffi::OsStr, command: &str) -> Option<String> {
+    let mut shell = archon_shell::spawn::command(shell);
     let mut child =
         archon_shell::spawn::replace_environment(&mut shell, std::iter::empty::<(&str, &str)>())
             .args(["-n", "-s"])

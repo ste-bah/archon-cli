@@ -172,3 +172,36 @@ async fn a_mutation_run_with_no_exit_status_is_struck_then_goes_to_its_author_55
         "{finding}"
     );
 }
+
+/// Security review: a file a check sources by a literal relative path is
+/// parsed before the run; one the shell rejects is its author's, named.
+#[tokio::test]
+async fn a_check_sourcing_a_file_its_shell_cannot_parse_goes_to_its_author_554() {
+    let trees = trees(&[
+        (
+            "AC-X-001",
+            ". ./lib/broken.sh\nf\n",
+            TrustedCwd::ProjectRoot,
+        ),
+        ("AC-X-002", ". ./lib/sound.sh\nf\n", TrustedCwd::ProjectRoot),
+    ]);
+    let lib = trees.set.project.path().join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("broken.sh"), "f() {\n  true || {\n  fi\n}\n").unwrap();
+    std::fs::write(lib.join("sound.sh"), "f() { test -f data/state.txt; }\n").unwrap();
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    let finding = findings
+        .get("AC-X-001")
+        .unwrap_or_else(|| panic!("{findings:?}"));
+    assert!(
+        finding.contains("lib/broken.sh") && finding.contains("parse-only"),
+        "{finding}"
+    );
+    assert!(
+        findings
+            .get("AC-X-002")
+            .is_none_or(|finding| !finding.contains("parse-only")),
+        "{findings:?}"
+    );
+}
