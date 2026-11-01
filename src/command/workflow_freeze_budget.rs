@@ -172,6 +172,8 @@ pub(crate) struct FreezeIncomplete {
     progress: String,
     authored_judge_reply: bool,
     fault_class: crate::command::workflow_host_fault::Class,
+    /// The checks a stalled step left without a verdict, when it names them.
+    subjects: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -212,6 +214,7 @@ impl FreezeIncomplete {
             },
             progress: progress.line(),
             authored_judge_reply: false,
+            subjects: Vec::new(),
             fault_class: crate::command::workflow_host_fault::Class::Transient,
         }
     }
@@ -223,6 +226,7 @@ impl FreezeIncomplete {
             cause: IncompleteCause::Stalled(reason.into()),
             progress: progress.line(),
             authored_judge_reply: false,
+            subjects: Vec::new(),
             fault_class: crate::command::workflow_host_fault::Class::Permanent,
         }
     }
@@ -235,6 +239,7 @@ impl FreezeIncomplete {
             cause: IncompleteCause::Unsaved(reason.into()),
             progress: FreezeProgress::default().line(),
             authored_judge_reply: false,
+            subjects: Vec::new(),
             fault_class: crate::command::workflow_host_fault::Class::Permanent,
         }
     }
@@ -281,6 +286,22 @@ impl FreezeIncomplete {
 
     pub(crate) fn is_authored_judge_reply(&self) -> bool {
         self.authored_judge_reply
+    }
+
+    /// Name the checks a stalled step left without a verdict (#552).
+    pub(crate) fn with_subjects(mut self, subjects: Vec<String>) -> Self {
+        self.subjects = subjects;
+        self
+    }
+
+    /// The checks this freeze left without a verdict, as data: the ones it
+    /// names, else the deferred checks of its budget.
+    pub(crate) fn subjects(&self) -> &[String] {
+        if self.subjects.is_empty() {
+            self.deferred()
+        } else {
+            &self.subjects
+        }
     }
 
     /// The checks still awaiting a verdict; none when the cause names none.

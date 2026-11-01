@@ -384,6 +384,7 @@ fn exit_incomplete_resumable(
         serde_json::to_string(&archon_workflow::GateOperationalError {
             kind: incomplete.fault_class().kind().into(),
             text: incomplete.report(),
+            subjects: Vec::new(),
         })
         .expect("fault serialization")
     );

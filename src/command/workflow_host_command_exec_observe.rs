@@ -112,6 +112,7 @@ impl FixedHostCommandExecutor {
                 gate.operational_error = Some(archon_workflow::GateOperationalError {
                     kind: "permanent_host_fault".into(),
                     text: text.clone(),
+                    subjects: Vec::new(),
                 });
                 outcome.postcondition = Some(archon_workflow::CommandPostconditionEvaluation {
                     satisfied: false,

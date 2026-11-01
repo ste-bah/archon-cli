@@ -93,23 +93,25 @@ async fn judge_error_leaves_no_partial_freeze() {
     assert!(!acceptance_pin_path(temp.path(), &tasks).exists());
 }
 
+/// #552 replaces `malformed_judgment_leaves_no_partial_freeze`: a check the
+/// judge cannot decide is its author's finding, so the freeze completes with
+/// it unaccepted instead of failing; nothing is published either way.
 #[tokio::test]
-async fn malformed_judgment_leaves_no_partial_freeze() {
+async fn malformed_judgment_leaves_no_partial_freeze_552() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, original) = seed(&temp);
-    assert!(
-        prepare_acceptance_freeze(
-            temp.path(),
-            &tasks,
-            &prd,
-            archon_core::config::GateMode::Observe,
-            Arc::new(JudgeClient {
-                result: Ok("not json".into()),
-            }),
-        )
-        .await
-        .is_err()
-    );
+    let prepared = prepare_acceptance_freeze(
+        temp.path(),
+        &tasks,
+        &prd,
+        archon_core::config::GateMode::Observe,
+        Arc::new(JudgeClient {
+            result: Ok("not json".into()),
+        }),
+    )
+    .await
+    .expect("the undecided check is its author's finding");
+    assert!(prepared.non_accepted.contains("AC-X-001"));
     assert_eq!(
         std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
         original

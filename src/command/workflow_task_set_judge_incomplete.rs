@@ -48,6 +48,9 @@ pub(crate) struct JudgeIncomplete {
     /// The entries the judge did decide in this call before it could not
     /// complete; every other entry it was asked about is still undecided.
     pub(crate) decided: Vec<archon_workflow::task_set_contract::AcceptanceCriterion>,
+    /// The ids of the checks this judge was asked about and left without a
+    /// verdict (#552): data for routing, never read back from `message`.
+    pub(crate) undecided: Vec<String>,
 }
 
 impl JudgeIncomplete {
@@ -62,6 +65,7 @@ impl JudgeIncomplete {
             fault_class: crate::command::workflow_host_fault::Class::Permanent,
             message: message.into(),
             decided: Vec::new(),
+            undecided: Vec::new(),
         }
     }
 

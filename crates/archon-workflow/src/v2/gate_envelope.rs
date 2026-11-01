@@ -33,6 +33,11 @@ pub struct GatePolicyFinding {
 pub struct GateOperationalError {
     pub kind: String,
     pub text: String,
+    /// The subjects the failure left without an outcome, when the producer
+    /// knows them (for example the checks an incomplete judge left without
+    /// a verdict). Routing reads them here, never from `text`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subjects: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

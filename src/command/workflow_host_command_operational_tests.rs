@@ -144,6 +144,7 @@ impl HostCommandProcessAdapter for ScriptedProcess {
                 outcome.stdout = serde_json::to_vec(&archon_workflow::GateOperationalError {
                     kind: "transient_host_fault".into(),
                     text: "the observation window elapsed".into(),
+                    subjects: Vec::new(),
                 })
                 .unwrap();
                 outcome.stdout_bytes = outcome.stdout.len() as u64;
@@ -155,6 +156,7 @@ impl HostCommandProcessAdapter for ScriptedProcess {
                 outcome.stdout = serde_json::to_vec(&archon_workflow::GateOperationalError {
                     kind: "transient_host_fault".into(),
                     text: "the host observation was interrupted".into(),
+                    subjects: Vec::new(),
                 })
                 .unwrap();
                 outcome.stdout_bytes = outcome.stdout.len() as u64;

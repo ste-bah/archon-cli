@@ -210,7 +210,8 @@ fn resumable(
                     incomplete.to_string(),
                     &resume.progress,
                 )
-                .with_fault_class(incomplete.fault_class);
+                .with_fault_class(incomplete.fault_class)
+                .with_subjects(incomplete.undecided.clone());
             if incomplete.is_authored_reply() {
                 freeze_incomplete.authored_judge_reply().into()
             } else {

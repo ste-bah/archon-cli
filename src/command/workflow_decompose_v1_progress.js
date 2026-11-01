@@ -471,3 +471,23 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
   // The fresh window is also the episode's floor; its per-entry bests stay.
   progress.repair.stalled = 0;
 }
+
+// Issue 551: an entry's current gate findings are the ones open in the
+// latest gate result (`latest`, by entry id). An earlier finding it no longer
+// reports moves to that entry's do-not-regress list; one that reopens is
+// current again.
+function settleGateFindings(state, latest) {
+  const earlier = state.earlierGateFindings || new Map();
+  for (const [id, prior] of state.gateFindings || new Map()) {
+    const kept = earlier.get(id) || [];
+    for (const text of prior) if (!(latest.get(id) || []).includes(text) && !kept.includes(text)) kept.push(text);
+    if (kept.length > 0) earlier.set(id, kept);
+  }
+  for (const [id, open] of latest) {
+    const kept = (earlier.get(id) || []).filter(text => !open.includes(text));
+    if (kept.length > 0) earlier.set(id, kept);
+    else earlier.delete(id);
+  }
+  state.earlierGateFindings = earlier;
+  state.gateFindings = latest;
+}

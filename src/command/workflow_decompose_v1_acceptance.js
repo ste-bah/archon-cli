@@ -138,7 +138,9 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   // entry and is not this entry's repair.
   const refused = state.refusals && state.refusals.get(id);
   const own = (refused ? `\nThe host refused this entry's last answered reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "")
-    + (state.gateFindings?.has(id) ? `\nRepair this entry's accumulated gate findings:\n- ${state.gateFindings.get(id).join("\n- ")}` : "")
+    + (state.gateFindings?.has(id) ? `\nRepair this entry's gate findings open in the latest gate result:\n- ${state.gateFindings.get(id).join("\n- ")}` : "")
+    + (state.judgeNotes?.has(id) ? `\nThe freeze judge could not use this entry's last check:\n- ${state.judgeNotes.get(id)}` : "")
+    + (state.earlierGateFindings?.has(id) ? `\nEarlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:\n- ${state.earlierGateFindings.get(id).join("\n- ")}` : "")
     + supersededDraftText(state, id);
   // Issue 288: the catalogue and the completed entries are bounded records
   // that name host-written files (workflow_decompose_v1_context.js). A file
@@ -372,7 +374,9 @@ function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntri
     if (defect?.code === "uncovered_requirement" && heldOmissions.has(defect.subject)) continue;
     if (supFinding.test(String(finding.text || ""))
       || (defect?.code === "uncovered_requirement" && /^SUP-REQ-[A-Za-z0-9-]+$/.test(defect.subject || ""))) continue;
-    if (published && known.has(finding.subject)) {
+    // #552: a finding names its entry as data; an unpublished set (a check
+    // refuted or not judged) is routed by it too. The text is the fallback.
+    if (known.has(finding.subject)) {
       retry.add(finding.subject);
       continue;
     }

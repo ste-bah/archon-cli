@@ -233,6 +233,8 @@ async function authorCandidate(w, policy) {
   // stay in `history`, shown as ones not to regress, never as current.
   let openFindings = [];
   let judgeFeedback = [];
+  // #552: the latest round's freeze judged nothing (an unusable judge reply).
+  let judgedNothing = false;
   let repairRung = Number.isInteger(policy.initialRung) ? policy.initialRung : 1;
   let repairCycle = 1;
   const progress = newProgress(feedback);
@@ -266,9 +268,10 @@ async function authorCandidate(w, policy) {
         // a sibling's finding into another entry's fresh-context prompt.
         // Other authors keep their open findings and the history that marks
         // repeats and earlier findings (Issue 551).
+        // A round that judged nothing keeps the history (#552).
         if (policy.author) {
           feedback = judgeFeedback.slice();
-          history.length = 0;
+          if (!judgedNothing) history.length = 0;
         }
       }
       await repairEvent(w, policy.phase, repairRung, repairCycle, call, progress.calls);
@@ -367,16 +370,26 @@ async function authorCandidate(w, policy) {
       if (routed.operationalKind === "authored_judge_reply") {
         // The judge could not use this candidate. Feed its reason to the
         // author so the next call creates a replacement.
+        // #552: the host names the checks the judge left undecided as data.
+        // The text match is kept only for an envelope saved before that.
         if (policy.author) {
-          const named = /still have no [^(]*\(([^)]*)\)/.exec(routed.operational);
-          const namedIds = new Set(named ? named[1].split(",").map(id => id.trim()) : []);
+          const subjects = outcome.gateEnvelope.operational_error.subjects;
+          const listed = Array.isArray(subjects) && subjects.length > 0 ? subjects.map(String) : null;
+          const named = listed ? null : /still have no [^(]*\(([^)]*)\)/.exec(routed.operational);
+          const namedIds = new Set(listed || (named ? named[1].split(",").map(id => id.trim()) : []));
           const retryIds = (authorState.order || []).filter(id => namedIds.has(id));
           authorState.retryIds = retryIds.length > 0 ? new Set(retryIds) : null;
+          // #552: the open findings of the last gate that judged stay current;
+          // the note goes only to the entries it names.
+          const note = `freeze judge reply unusable: ${routed.operational}`;
+          authorState.judgeNotes = new Map([...(authorState.retryIds || authorState.order || [])].map(id => [id, note]));
+        } else {
+          feedback = [`freeze judge reply unusable: ${routed.operational}`];
+          judgeFeedback = feedback.slice();
         }
+        judgedNothing = true;
         recordAnswered(progress, call, "authored_judge_reply", advanced, !measuredReplies, round);
-        feedback = [`freeze judge reply unusable: ${routed.operational}`];
-        judgeFeedback = feedback.slice();
-        lastFindings = feedback.slice();
+        lastFindings = [`freeze judge reply unusable: ${routed.operational}`];
         continue;
       }
       // The gate never judged the candidate; only the round that made it can
@@ -408,16 +421,18 @@ async function authorCandidate(w, policy) {
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = routed.retryFindings;
-      if (!authorState.gateFindings) authorState.gateFindings = new Map();
+      const latest = new Map();
       for (const finding of repair) {
         const selected = ids.has(finding.subject) ? new Set([finding.subject])
           : acceptanceRepairIds([finding], ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
         for (const id of selected || authorState.entries.keys()) {
-          const prior = authorState.gateFindings.get(id) || [];
-          if (!prior.includes(finding.text)) prior.push(finding.text);
-          authorState.gateFindings.set(id, prior);
+          const open = latest.get(id) || [];
+          if (!open.includes(finding.text)) open.push(finding.text);
+          latest.set(id, open);
         }
       }
+      settleGateFindings(authorState, latest);
+      authorState.judgeNotes = null;
       const stale = repair.find(finding => finding?.deterministic_defect?.code === "stale_acceptance_contract");
       if (stale) {
         // The contract changed after this freeze was prepared: rebuild the
@@ -458,6 +473,7 @@ async function authorCandidate(w, policy) {
     attempt += 1;
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
+    judgedNothing = false;
     if (policy.author) judgeFeedback = feedback.slice();
     lastFindings = routed.retry.slice();
     openFindings = routed.retry.slice();

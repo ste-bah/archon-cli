@@ -36,6 +36,7 @@ impl HostCommandProcessAdapter for RecoveringProcess {
             let stdout = serde_json::to_vec(&archon_workflow::GateOperationalError {
                 kind: "transient_host_fault".into(),
                 text: "the host observation was deferred".into(),
+                subjects: Vec::new(),
             })
             .unwrap();
             return Ok(SupervisedProcessOutput {

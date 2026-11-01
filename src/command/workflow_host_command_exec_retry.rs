@@ -320,6 +320,7 @@ impl FixedHostCommandExecutor {
                     .kind()
                     .into(),
                 text: String::from_utf8_lossy(&observed.output.stderr).into_owned(),
+                subjects: Vec::new(),
             });
         }
         Ok(observed)

@@ -97,6 +97,7 @@ pub(super) fn input_invalid_result(subject: &str, cause: &str) -> HostCommandRes
             operational_error: Some(archon_workflow::GateOperationalError {
                 kind: "input_invalid".into(),
                 text: format!("{subject}: {cause}"),
+                subjects: Vec::new(),
             }),
         }),
         publication_receipt: None,

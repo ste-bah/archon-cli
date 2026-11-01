@@ -17,12 +17,17 @@ pub(crate) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
         .and_then(|incomplete| incomplete.evaluation.clone())
         .unwrap_or_else(|| GateEvaluation::new("", Vec::new()))
         .with_host_error(error);
-    if crate::command::workflow_freeze_budget::FreezeIncomplete::caused(error).is_some_and(
-        crate::command::workflow_freeze_budget::FreezeIncomplete::is_authored_judge_reply,
-    ) {
-        evaluation.with_operational_error_kind("authored_judge_reply")
-    } else {
-        evaluation
+    match crate::command::workflow_freeze_budget::FreezeIncomplete::caused(error) {
+        // #552: the checks it left without a verdict travel as data.
+        Some(incomplete) => {
+            let evaluation = evaluation.with_operational_subjects(incomplete.subjects().to_vec());
+            if incomplete.is_authored_judge_reply() {
+                evaluation.with_operational_error_kind("authored_judge_reply")
+            } else {
+                evaluation
+            }
+        }
+        None => evaluation,
     }
 }
 
@@ -44,6 +49,39 @@ mod tests {
             archon_workflow::RemediationScope::Body
         );
         assert!(envelope.operational_error.is_none());
+    }
+
+    /// #552: the checks an authored incomplete freeze judge left without a
+    /// verdict travel as data in the envelope, never only in its message.
+    #[test]
+    fn authored_incomplete_freeze_judge_names_its_checks_in_the_gate_envelope_552() {
+        let progress = crate::command::workflow_freeze_budget::FreezeProgress::default();
+        let stalled = crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+            "malformed judge reply",
+            &progress,
+        )
+        .with_subjects(vec!["AC-X-002".into()])
+        .authored_judge_reply();
+        let budget = crate::command::workflow_freeze_budget::FreezeBudget::unlimited();
+        let awaiting = crate::command::workflow_freeze_budget::FreezeIncomplete::awaiting_judge(
+            &budget,
+            &progress,
+            vec!["AC-X-003".into(), "AC-X-004".into()],
+            "malformed judge reply",
+        )
+        .authored_judge_reply();
+        for (error, ids) in [
+            (stalled, vec!["AC-X-002"]),
+            (awaiting, vec!["AC-X-003", "AC-X-004"]),
+        ] {
+            let error = gate_error_evaluation(&Error::new(error))
+                .into_envelope()
+                .unwrap()
+                .operational_error
+                .unwrap();
+            assert_eq!(error.kind, "authored_judge_reply");
+            assert_eq!(error.subjects, ids);
+        }
     }
 
     #[test]

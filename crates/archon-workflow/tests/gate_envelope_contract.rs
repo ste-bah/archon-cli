@@ -29,6 +29,7 @@ fn gate_envelope_round_trips_every_closed_remediation_scope() {
         operational_error: Some(GateOperationalError {
             kind: "test_operational".into(),
             text: "exact operational failure".into(),
+            subjects: Vec::new(),
         }),
     };
 

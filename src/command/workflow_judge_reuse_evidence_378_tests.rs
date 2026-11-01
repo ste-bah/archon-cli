@@ -43,8 +43,12 @@ async fn evidence_378_supplementary_only_subset_is_judged_and_merged() {
     );
 }
 
+/// #552 replaces `evidence_378_missing_supplementary_decision_remains_refused`:
+/// the check whose decision the judge keeps omitting is still never accepted,
+/// now as its author's finding (naming the omission) instead of a failed
+/// freeze. The batch and missing-id assertions are kept.
 #[tokio::test]
-async fn evidence_378_missing_supplementary_decision_remains_refused() {
+async fn evidence_378_missing_supplementary_decision_remains_refused_552() {
     let (temp, tasks, prd, mut contract, _) = frozen().await;
     supplementary_only_candidate(&mut contract);
     let judge = Arc::new(RecordingJudge {
@@ -65,7 +69,7 @@ async fn evidence_378_missing_supplementary_decision_remains_refused() {
             .map(|entry| entry.id.as_str())
             .collect::<Vec<_>>()
     );
-    let error = prepare_acceptance_freeze_from_candidate(
+    let prepared = prepare_acceptance_freeze_from_candidate(
         temp.path(),
         &tasks,
         &prd,
@@ -74,14 +78,17 @@ async fn evidence_378_missing_supplementary_decision_remains_refused() {
         judge.clone(),
     )
     .await
-    .expect_err("a reply omitting the supplementary judgment is refused");
-    let after = format!("error={error:#}");
+    .expect("a reply omitting the supplementary judgment goes back to its author");
+    let after = format!(
+        "findings={:?}",
+        (prepared.findings.iter())
+            .map(|f| &f.text)
+            .collect::<Vec<_>>()
+    );
     println!("EVIDENCE #378 missing-supplementary-decision BEFORE: {before} AFTER: {after}");
 
-    assert!(
-        format!("{error:#}").contains("missing=[\"SUP-REQ-X-001\"]"),
-        "{error:#}"
-    );
+    assert!(prepared.non_accepted.contains("SUP-REQ-X-001"), "{after}");
+    assert!(after.contains("missing=[\\\"SUP-REQ-X-001\\\"]"), "{after}");
     // #385: the same rejection class on every reply is no progress, so the
     // judge is asked once and then re-asked for the whole no-progress window
     // before the batch ends incomplete; each ask names only the new check.

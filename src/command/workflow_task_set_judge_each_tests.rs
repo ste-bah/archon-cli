@@ -20,6 +20,7 @@ struct Recording {
     in_flight: AtomicUsize,
     most_in_flight: AtomicUsize,
     unusable_for: Option<&'static str>,
+    provider_fault_for: Option<&'static str>,
 }
 
 #[async_trait::async_trait]
@@ -39,6 +40,12 @@ impl WorkflowLlmClient for Recording {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         self.in_flight.fetch_sub(1, Ordering::SeqCst);
         let checks = checks_of(&prompt);
+        if (self.provider_fault_for).is_some_and(|id| checks.iter().any(|check| check["id"] == id))
+        {
+            return Err(archon_workflow::WorkflowError::port(std::io::Error::other(
+                "the provider closed the connection",
+            )));
+        }
         let content = if self
             .unusable_for
             .is_some_and(|id| checks.iter().any(|check| check["id"] == id))
@@ -261,22 +268,82 @@ async fn parallel_calls_return_one_decision_per_id_549() {
     }
 }
 
+/// #552 replaces `one_unusable_reply_holds_only_its_own_check_549`: a check
+/// the judge could not decide in its no-progress window, for a fault in its
+/// own replies, now goes back to its author as that check's note; the other
+/// checks keep their verdicts and the call completes. The decided-set
+/// assertion is kept.
 #[tokio::test]
-async fn one_unusable_reply_holds_only_its_own_check_549() {
+async fn one_unusable_reply_holds_only_its_own_check_and_goes_to_its_author_552() {
     let (_root, roots, contract) = project(&[("a", 8), ("b", 8), ("c", 8)]);
     let client = Recording {
         unusable_for: Some("AC-X-002"),
         ..Recording::default()
     };
-    let error = judge_entries_with_roots(&client, contract, "sonnet", &roots)
+    let judged = judge_entries_with_roots(&client, contract, "sonnet", &roots)
         .await
-        .expect_err("one call gave no usable verdict");
-    let incomplete = JudgeIncomplete::caused(&error).expect("an incomplete judge");
-    assert!(incomplete.is_authored_reply(), "{error:#}");
-    let decided = (incomplete.decided.iter())
+        .expect("no host stop and no pause: the check goes back to its author");
+    let decided = (judged.acceptance.iter())
+        .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
         .map(|entry| entry.id.as_str())
         .collect::<BTreeSet<_>>();
     assert_eq!(decided, BTreeSet::from(["AC-X-001", "AC-X-003"]));
+    let undecided = &judged.acceptance[1];
+    let note = not_judged(undecided).expect("the undecided check is not judged, not refuted");
+    assert!(
+        note.starts_with("the judge returned no usable verdict for check 'AC-X-002': "),
+        "{note}"
+    );
+    assert!(note.contains(" replies; "), "the reply count: {note}");
+    assert!(note.contains("the last: "), "the last error: {note}");
+    assert!(
+        note.ends_with("make the check smaller or split it so that one verdict decides it"),
+        "{note}"
+    );
+    assert!(!note.contains("refuted"), "{note}");
+    assert_eq!(author_note(undecided), note);
+}
+
+#[tokio::test]
+async fn a_single_undecided_check_goes_to_its_author_552() {
+    let (_root, roots, contract) = project(&[("a", 8)]);
+    let client = Recording {
+        unusable_for: Some("AC-X-001"),
+        ..Recording::default()
+    };
+    let judged = judge_entries_with_roots(&client, contract, "sonnet", &roots)
+        .await
+        .expect("the only check goes back to its author, never a host stop");
+    assert!(not_judged(&judged.acceptance[0]).is_some());
+}
+
+/// #552: a provider or host fault keeps its operational path (retried in
+/// place); its error names the checks left without a verdict.
+#[tokio::test]
+async fn a_provider_fault_stays_operational_and_names_its_check_552() {
+    let (_root, roots, contract) = project(&[("a", 8), ("b", 8), ("c", 8)]);
+    let client = Recording {
+        unusable_for: Some("AC-X-001"),
+        provider_fault_for: Some("AC-X-003"),
+        ..Recording::default()
+    };
+    let error = judge_entries_with_roots(&client, contract, "sonnet", &roots)
+        .await
+        .expect_err("a provider fault is operational");
+    let incomplete = JudgeIncomplete::caused(&error).expect("an incomplete judge");
+    assert!(!incomplete.is_authored_reply(), "{error:#}");
+    assert_eq!(incomplete.undecided, vec!["AC-X-003".to_string()]);
+    let decided = (incomplete.decided.iter())
+        .map(|entry| entry.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(decided, BTreeSet::from(["AC-X-001", "AC-X-002"]));
+    let first = (incomplete.decided.iter())
+        .find(|entry| entry.id == "AC-X-001")
+        .unwrap();
+    assert!(
+        not_judged(first).is_some(),
+        "the authored failure still goes to its author"
+    );
 }
 
 #[path = "workflow_task_set_judge_each_freeze_tests.rs"]

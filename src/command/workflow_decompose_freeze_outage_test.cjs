@@ -184,7 +184,94 @@ async function anUnprovenCheckAloneStopsThePhase() {
   assert.match(out.error || '', /^terminalStop: acceptance stopped: check 'A': operational/);
 }
 
+// #552: an authored judge failure that still reaches the loop names its
+// checks as data; only those entries are re-authored, never every entry.
+const judgeFailure = (subjects, text) => () => ({gateEnvelope:{operational_error:{
+  kind:'authored_judge_reply', text, ...(subjects ? {subjects} : {})}}});
+async function anAuthoredJudgeFailureReauthorsOnlyItsNamedEntries() {
+  const out = await run([judgeFailure(['B'], "check 'B': 4 replies; no usable verdict"), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'B'], 'only the named entry is re-authored');
+}
+// An envelope saved before the field existed keeps the old text routing.
+async function aSavedAuthoredJudgeFailureWithoutSubjectsKeepsItsTextRouting() {
+  const text = 'freeze incomplete: 1 check(s) still have no judge verdict (C). Retry the freeze';
+  const out = await run([judgeFailure(null, text), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'C']);
+}
+
+// #551: an entry's prompt lists as current only its findings open in the
+// latest gate result; earlier ones are listed as ones not to regress, and a
+// finding that reopens is current again.
+const finding = (id, text) => () => ({postcondition:{satisfied:false}, gateEnvelope:{policy_findings:[
+  {text:`check '${id}': ${text}`, subject:id, remediation_scope:'candidate_artifact'}]}});
+const currentOf = prompt => (/open in the latest gate result:\n((?:- [^\n]*\n?)*)/.exec(prompt) || [, ''])[1];
+const earlierOf = prompt => (/Do not regress them:\n((?:- [^\n]*\n?)*)/.exec(prompt) || [, ''])[1];
+async function anEntryPromptListsOnlyItsLatestGateFindingsAsCurrent() {
+  const out = await run([finding('A', 'names a path its site lacks'), finding('A', 'already holds before implementation'),
+    finding('A', 'names a path its site lacks'), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'A', 'A', 'A']);
+  const [first, second, third] = out.prompts.slice(3);
+  assert.match(currentOf(first), /names a path its site lacks/);
+  assert.equal(earlierOf(first), '');
+  assert.match(currentOf(second), /already holds before implementation/);
+  assert.doesNotMatch(currentOf(second), /names a path its site lacks/, 'a resolved finding is not current');
+  assert.match(earlierOf(second), /names a path its site lacks/, 'a resolved finding is not to regress');
+  assert.match(currentOf(third), /names a path its site lacks/, 'a reopened finding is current again');
+  assert.doesNotMatch(currentOf(third), /already holds/);
+  assert.match(earlierOf(third), /already holds before implementation/);
+  assert.doesNotMatch(earlierOf(third), /names a path its site lacks/);
+}
+
+// #552 item 6: a round whose freeze judged nothing keeps the open findings
+// of the last gate that did judge as current, and the history of earlier
+// ones; its note goes to the entry it names.
+async function aRoundThatJudgedNothingKeepsTheLastJudgedFindings() {
+  const out = await run([finding('A', 'requirement R1 is covered by no check'),
+    judgeFailure(['B'], "check 'B': 4 replies; no usable verdict"), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'A', 'B']);
+  const after = out.prompts[4];
+  assert.match(after, /authoritative findings:\n- check 'A': requirement R1 is covered by no check/,
+    'the last judged gate\'s open finding stays current');
+  assert.match(after, /check 'B': 4 replies; no usable verdict/, 'the named entry gets the note');
+}
+async function aRungResetAfterARoundThatJudgedNothingKeepsTheHistory() {
+  const out = await run([finding('A', 'first finding'), finding('A', 'second finding'),
+    finding('A', 'third finding'), judgeFailure(['A'], "check 'A': 4 replies; no usable verdict"), clean]);
+  assert.equal(out.error, undefined);
+  const after = out.prompts.at(-1);
+  assert.match(after, /authoritative findings:\n- check 'A': third finding/, 'the last judged findings are restored');
+  assert.match(after, /Earlier attempts in this phase raised[^]*second finding/, 'the history is kept');
+  assert.match(after, /check 'A': 4 replies; no usable verdict/);
+}
+
+// #552 item 7: a check the host did not judge (#549: its files are too large;
+// #552: the judge could not decide it) is never published, and its finding
+// routes by its structured subject to that entry only.
+const unpublished = (id, text) => () => ({postcondition:{satisfied:false}, gateEnvelope:{policy_findings:[
+  {text, subject:id, remediation_scope:'candidate_artifact',
+    source_path:'tasks/acceptance-contract.json'}]}});
+async function aNotJudgedFindingReauthorsOnlyItsEntry() {
+  for (const text of [
+    "check 'B' names 300000 bytes of source (big 300000 bytes), more than the judge can read (262144 bytes); name only the files whose content decides the criterion",
+    "the judge returned no usable verdict for check 'B': 4 replies; the last: no JSON; make the check smaller or split it so that one verdict decides it",
+  ]) {
+    const out = await run([unpublished('B', text), clean]);
+    assert.equal(out.error, undefined);
+    assert.deepEqual(out.authored, ['A', 'B', 'C', 'B'], `only the named entry is re-authored: ${text}`);
+  }
+}
+
 const tests = [
+  ['a not-judged finding re-authors only its entry', aNotJudgedFindingReauthorsOnlyItsEntry],
+  ['a round that judged nothing keeps the last judged findings', aRoundThatJudgedNothingKeepsTheLastJudgedFindings],
+  ['a rung reset after a round that judged nothing keeps the history', aRungResetAfterARoundThatJudgedNothingKeepsTheHistory],
+  ['an authored judge failure re-authors only its named entries', anAuthoredJudgeFailureReauthorsOnlyItsNamedEntries],
+  ['a saved authored judge failure without subjects keeps its text routing', aSavedAuthoredJudgeFailureWithoutSubjectsKeepsItsTextRouting],
+  ['an entry prompt lists only its latest gate findings as current', anEntryPromptListsOnlyItsLatestGateFindingsAsCurrent],
   ['an unproven check beside an authored finding stops nothing', anUnprovenCheckBesideAnAuthoredFindingStopsNothing],
   ['an unproven check alone stops the phase', anUnprovenCheckAloneStopsThePhase],
   ['a stale freeze keeps the round\'s unpublished repair', staleContractKeepsTheRoundsUnpublishedRepair],

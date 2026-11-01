@@ -51,7 +51,8 @@ pub(super) fn report_authored_judge_incomplete(
         Vec::new(),
     )
     .with_operational_error(incomplete.report())
-    .with_operational_error_kind("authored_judge_reply");
+    .with_operational_error_kind("authored_judge_reply")
+    .with_operational_subjects(incomplete.subjects().to_vec());
     write_staged_manifest(cwd, staged, command_id, evaluation, Vec::new())
 }
 

@@ -14,13 +14,19 @@
 //! judge, and is never refuted on content the judge did not see. The author
 //! chose those files, so the check goes back to its author with what it
 //! names and the limit, like any other finding: no host stop, no pause.
+//!
+//! A check the judge could not decide in its no-progress window, for a
+//! fault in its own replies (#552), goes back to its author the same way:
+//! the other checks keep their verdicts and the call completes. A provider
+//! or host fault stays operational and is retried in place.
 
 use super::incomplete::JudgeIncompleteKind;
 use super::*;
 use futures_util::StreamExt;
 
 /// The call id of a check the host did not judge. Its verdict is `refuted`
-/// only so that it is never published; it is no refutation.
+/// only so that it is never published; it is no refutation. A check the
+/// judge could not decide (#552) carries it too.
 pub(crate) const NOT_JUDGED_CALL: &str = "acceptance-judge-not-judged:";
 
 /// `roots` with the repository commit resolved when it is not given.
@@ -82,6 +88,22 @@ fn mark_not_judged(entry: &mut AcceptanceCriterion, roots: &JudgeRoots) {
     entry.judgment.sampling = None;
 }
 
+/// Record `entry` as not judged: the judge gave no usable verdict for it in
+/// its no-progress window, for a fault in its own replies (#552), with
+/// `message` naming the reply count and the last error. The reason is the
+/// note its author gets.
+fn mark_undecided(entry: &mut AcceptanceCriterion, message: &str) {
+    entry.judgment.verdict = JudgeDecision::Refuted;
+    entry.judgment.counterexample =
+        "none: the judge gave no usable verdict about this check".to_string();
+    entry.judgment.reason = format!(
+        "the judge returned no usable verdict for check '{}': {message}; make the check smaller or split it so that one verdict decides it",
+        entry.id
+    );
+    entry.judgment.host_call_id = format!("{NOT_JUDGED_CALL}{}", entry.id);
+    entry.judgment.sampling = None;
+}
+
 /// The author note of `entry`, when the host did not judge it.
 pub(crate) fn not_judged(entry: &AcceptanceCriterion) -> Option<&str> {
     (entry.judgment.verdict == JudgeDecision::Refuted
@@ -137,7 +159,10 @@ fn single(contract: &AcceptanceContract, id: &str) -> AcceptanceContract {
 /// call is made for it. When a call cannot complete, the result is one
 /// [`JudgeIncomplete`] that carries every entry decided by any call; a host
 /// or provider fault outranks a judge-authored one, so no check is sent to
-/// its author for a fault that was not the judge's reply.
+/// its author for a fault that was not the judge's reply. A call that ends
+/// with no usable verdict in the judge's own replies marks its check not
+/// judged (#552) and is no failure; the result names every check a failed
+/// call left without a verdict.
 pub(crate) async fn judge_each<F, Fut>(
     contract: AcceptanceContract,
     roots: &JudgeRoots,
@@ -197,6 +222,18 @@ where
                         },
                     );
                     let (kind, class) = (incomplete.kind, incomplete.fault_class);
+                    // #552: its own replies gave no verdict for this check;
+                    // its author makes it decidable, nothing stops.
+                    if kind == JudgeIncompleteKind::AuthoredReply
+                        && let Some(entry) = (judged.acceptance.iter_mut())
+                            .chain(&mut judged.supplementary)
+                            .find(|entry| entry.id == id)
+                            .filter(|_| !incomplete.decided.iter().any(|done| done.id == id))
+                    {
+                        mark_undecided(entry, &incomplete.message);
+                        decided.push(entry.clone());
+                        continue;
+                    }
                     failures.push((id, kind, class, incomplete.message.clone(), error));
                 }
                 None => return Err(error),
@@ -221,6 +258,7 @@ where
     let mut incomplete = JudgeIncomplete::new(kind, message);
     incomplete.fault_class = fault_class;
     incomplete.decided = decided;
+    incomplete.undecided = failures.into_iter().map(|(id, ..)| id).collect();
     Err(incomplete.into())
 }
 

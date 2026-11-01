@@ -63,6 +63,7 @@ impl FixedHostCommandExecutor {
                         .unwrap_or_else(|| archon_workflow::GateOperationalError {
                             kind: fault::Class::Permanent.kind().into(),
                             text: if outcome.stderr.is_empty() { format!("host command {} exited {:?} without a gate envelope", request.command_id, outcome.exit_code) } else { outcome.stderr.clone() },
+                            subjects: Vec::new(),
                         });
                     outcome.gate_envelope = Some(GateEnvelopeV1 { schema_version: archon_workflow::GATE_ENVELOPE_SCHEMA_VERSION, report: serde_json::Value::Null, policy_findings: Vec::new(), operational_error: Some(error) });
                 }
@@ -73,7 +74,7 @@ impl FixedHostCommandExecutor {
                 if !permanent.is_empty() {
                     let reasons = permanent.join("; ");
                     let text = envelope.operational_error.as_ref().map_or_else(|| reasons.clone(), |error| format!("{}; {reasons}", error.text));
-                    envelope.operational_error = Some(archon_workflow::GateOperationalError { kind: fault::Class::Permanent.kind().into(), text });
+                    envelope.operational_error = Some(archon_workflow::GateOperationalError { kind: fault::Class::Permanent.kind().into(), text, subjects: Vec::new() });
                     return Ok(outcome);
                 }
                 if let Some(error) = &mut envelope.operational_error {
@@ -108,6 +109,7 @@ fn permanent_outcome(text: String) -> HostCommandResult {
             operational_error: Some(archon_workflow::GateOperationalError {
                 kind: fault::Class::Permanent.kind().into(),
                 text,
+                subjects: Vec::new(),
             }),
         },
         "host capability requires repair",

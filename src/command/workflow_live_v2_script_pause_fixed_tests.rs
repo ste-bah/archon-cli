@@ -134,6 +134,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
         .then(|| archon_workflow::GateOperationalError {
             kind: "operational".into(),
             text: "judge response was truncated".into(),
+            subjects: Vec::new(),
         });
         let findings = if operational.is_some() {
             Vec::new()

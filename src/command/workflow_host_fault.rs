@@ -250,6 +250,7 @@ pub(crate) fn envelope(error: &anyhow::Error) -> GateOperationalError {
     GateOperationalError {
         kind: classify(error).kind().into(),
         text: diagnostic(error),
+        subjects: Vec::new(),
     }
 }
 

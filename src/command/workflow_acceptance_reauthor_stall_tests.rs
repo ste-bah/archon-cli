@@ -245,8 +245,12 @@ async fn an_unaccepted_authored_check_stays_pending_while_accepted_siblings_publ
     assert_eq!(set.contract().acceptance[0], before.acceptance[0]);
 }
 
+/// #552 replaces `malformed_judge_replies_keep_each_authored_check_pending_for_retry`:
+/// a check the judge cannot decide in its no-progress window goes back to its
+/// author with the judge's note (make it smaller or split it), so each attempt
+/// re-authors it; the not-published and per-check pending assertions are kept.
 #[tokio::test]
-async fn malformed_judge_replies_keep_each_authored_check_pending_for_retry() {
+async fn malformed_judge_replies_send_each_check_back_to_its_author_552() {
     let set = frozen_set(&[
         ("AC-F-001", "test -f missing-a", false),
         ("AC-F-002", "test -f missing-b", false),
@@ -275,15 +279,18 @@ async fn malformed_judge_replies_keep_each_authored_check_pending_for_retry() {
         named
     );
     assert!(
-        result
-            .unproven
-            .values()
-            .all(|finding| finding.contains("judge returned no usable authored verdict"))
+        result.unproven.values().all(|finding| {
+            finding.contains("the judge returned no usable verdict for check")
+                && finding
+                    .ends_with("make the check smaller or split it so that one verdict decides it")
+        }),
+        "{:?}",
+        result.unproven
     );
     assert_eq!(
         client.authored(),
-        2,
-        "the unusable judge reply retries each same candidate without spending another author attempt"
+        2 * REAUTHOR_ATTEMPTS,
+        "each attempt re-authors each check with the judge's note"
     );
 }
 
