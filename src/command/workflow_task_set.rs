@@ -278,7 +278,14 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         &judge_roots,
     )
     .await
-    .map_err(|error| resumable(error, resume))?;
+    .map_err(|error| {
+        // #552: the checks this judge already marked not judged go to their
+        // own authors with the outcome.
+        let known = (judge::JudgeIncomplete::caused(&error))
+            .map(|incomplete| incomplete.decided.clone())
+            .unwrap_or_default();
+        findings::with_known_findings(resumable(error, resume), tasks_root, &known)
+    })?;
 
     // A4: a check that crashes, or passes before any implementation, is
     // never published; it goes back to its author.
@@ -290,7 +297,10 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         resume,
         resource_limits,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        findings::with_known_findings(error, tasks_root, passability::entries(&contract))
+    })?;
     let host_unproven_reason = probed.host_unproven_reason.clone();
     // Issue 328: the lock records the tree the checks were proven on.
     let baseline_commit = (probed.baseline.as_ref()).map(|runs| runs.commit.clone());
@@ -307,7 +317,13 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         resume,
     )
     .await
-    .map_err(|error| resumable(error, resume))?;
+    .map_err(|error| {
+        findings::with_known_findings(
+            resumable(error, resume),
+            tasks_root,
+            passability::entries(&contract),
+        )
+    })?;
     let mut prepared = findings::finish_acceptance(
         project_root,
         tasks_root,

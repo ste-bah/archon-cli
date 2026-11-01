@@ -490,3 +490,5 @@ fn passability_instruction_identifies_the_evidence_tree_instead_of_assuming_base
 
 #[path = "workflow_acceptance_passability_heal_tests.rs"]
 mod heal_tests;
+#[path = "workflow_task_set_known_findings_tests.rs"]
+mod known_findings_tests;

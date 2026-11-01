@@ -265,7 +265,25 @@ async function aNotJudgedFindingReauthorsOnlyItsEntry() {
   }
 }
 
+// #552 review: a later stage of the freeze ended incomplete (B's passability
+// judge), but C was already known not judged: both re-author, each with its
+// own note, never another check's text.
+async function aKnownFindingTravelsWithAnIncompleteFreeze() {
+  const out = await run([() => ({gateEnvelope:{
+    operational_error:{kind:'authored_judge_reply', subjects:['B', 'C'],
+      text:"freeze incomplete: 1 check(s) still have no judge verdict on its pre-implementation output (B)"},
+    policy_findings:[{subject:'C', remediation_scope:'candidate_artifact',
+      text:"the judge returned no usable verdict for check 'C': 4 replies; make the check smaller or split it"}]}}), clean]);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(out.authored, ['A', 'B', 'C', 'B', 'C']);
+  const [b, c] = out.prompts.slice(3);
+  assert.match(b, /could not use this entry's last check:\n- freeze judge reply unusable: [^\n]*\(B\)/);
+  assert.match(c, /could not use this entry's last check:\n- the judge returned no usable verdict for check 'C'/);
+  assert.doesNotMatch(c, /could not use this entry's last check:\n- freeze judge reply unusable/, 'C never gets B\'s note');
+}
+
 const tests = [
+  ['a known finding travels with an incomplete freeze', aKnownFindingTravelsWithAnIncompleteFreeze],
   ['a not-judged finding re-authors only its entry', aNotJudgedFindingReauthorsOnlyItsEntry],
   ['a round that judged nothing keeps the last judged findings', aRoundThatJudgedNothingKeepsTheLastJudgedFindings],
   ['a rung reset after a round that judged nothing keeps the history', aRungResetAfterARoundThatJudgedNothingKeepsTheHistory],

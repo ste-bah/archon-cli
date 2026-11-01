@@ -53,7 +53,7 @@ pub(crate) fn named_files_for_reauthor_cached(
 mod each;
 #[cfg(test)]
 pub(crate) use each::not_judged;
-pub(crate) use each::{author_note, judge_each, not_judged_findings};
+pub(crate) use each::{author_note, judge_each, not_judged_findings, not_judged_findings_of};
 #[path = "workflow_task_set_judge_rounds.rs"]
 mod rounds;
 use rounds::judge_prompted_with_roots;
@@ -65,11 +65,11 @@ mod prompt_builder_tests;
 
 #[path = "workflow_task_set_judge_incomplete.rs"]
 mod incomplete;
-pub(crate) use incomplete::JudgeIncomplete;
 use incomplete::judge_error_class;
 /// An incomplete judge from the real producers, for tests of its routing.
 #[cfg(test)]
 pub(crate) use incomplete::tests::produced as produced_incomplete;
+pub(crate) use incomplete::{JudgeIncomplete, JudgeIncompleteKind};
 
 /// The tier alias the whole-set freeze judge is asked for. The client's
 /// provider configuration resolves it to the model that judges

@@ -131,8 +131,18 @@ pub(crate) fn not_judged_findings(
     contract_path: &Path,
     contract: &AcceptanceContract,
 ) -> Vec<GateFinding> {
-    (contract.acceptance.iter())
-        .chain(&contract.supplementary)
+    not_judged_findings_of(
+        contract_path,
+        (contract.acceptance.iter()).chain(&contract.supplementary),
+    )
+}
+
+/// The author finding for each of `entries` the host did not judge.
+pub(crate) fn not_judged_findings_of<'a>(
+    contract_path: &Path,
+    entries: impl IntoIterator<Item = &'a AcceptanceCriterion>,
+) -> Vec<GateFinding> {
+    (entries.into_iter())
         .filter_map(|entry| {
             Some(GateFinding::new(
                 GateId::FreezeAcceptance,

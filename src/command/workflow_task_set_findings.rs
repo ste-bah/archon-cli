@@ -255,6 +255,26 @@ impl PreparedAcceptanceFreeze {
 mod prepare;
 pub(crate) use prepare::{capture_live_contract_digest, prepare_from_judged};
 
+/// #552: a later step of this freeze could not complete. The checks it
+/// already knew it could not judge (`entries`) keep their own findings in
+/// that outcome, which names them, so each reaches its own author in the same
+/// round instead of only the checks the step left without a verdict.
+pub(super) fn with_known_findings<'a>(
+    mut error: anyhow::Error,
+    tasks_root: &Path,
+    entries: impl IntoIterator<Item = &'a archon_workflow::task_set_contract::AcceptanceCriterion>,
+) -> anyhow::Error {
+    if let Some(incomplete) =
+        error.downcast_mut::<crate::command::workflow_freeze_budget::FreezeIncomplete>()
+    {
+        incomplete.add_known_findings(judge::not_judged_findings_of(
+            &tasks_root.join(ACCEPTANCE_CONTRACT_FILE),
+            entries,
+        ));
+    }
+    error
+}
+
 /// Prepare a whole-set freeze, returning every check the judge did not accept
 /// to its author — with the judge's reason and counterexample — bounded, before
 /// anything can publish. A check still not accepted fails the freeze.

@@ -20,7 +20,10 @@ pub(crate) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
     match crate::command::workflow_freeze_budget::FreezeIncomplete::caused(error) {
         // #552: the checks it left without a verdict travel as data.
         Some(incomplete) => {
-            let evaluation = evaluation.with_operational_subjects(incomplete.subjects().to_vec());
+            let mut evaluation =
+                evaluation.with_operational_subjects(incomplete.subjects().to_vec());
+            // Each check already known not judged keeps its own finding.
+            (evaluation.findings).extend(incomplete.known_findings().iter().cloned());
             if incomplete.is_authored_judge_reply() {
                 evaluation.with_operational_error_kind("authored_judge_reply")
             } else {

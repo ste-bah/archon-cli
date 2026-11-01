@@ -114,6 +114,39 @@ impl JudgeStore {
         .then_some(saved.judged)
     }
 
+    fn undecided_path(&self, key: &str) -> PathBuf {
+        self.dir.join(format!("{key}.undecided.json"))
+    }
+
+    /// The saved outcome of a check the judge could not decide (#552): what
+    /// its replies gave, under the same key as a verdict.
+    fn load_undecided(&self, key: &str) -> Option<String> {
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(self.undecided_path(key)).ok()?).ok()?;
+        (saved["schema"] == SCHEMA && saved["key"] == key)
+            .then(|| saved["message"].as_str().map(str::to_string))
+            .flatten()
+    }
+
+    fn save_undecided(&self, key: &str, message: &str) {
+        let bytes =
+            serde_json::json!({"schema": SCHEMA, "key": key, "message": message}).to_string();
+        let path = self.undecided_path(key);
+        let staging = self
+            .dir
+            .join(format!(".{key}.undecided.{}.tmp", std::process::id()));
+        let written = std::fs::create_dir_all(&self.dir).is_ok()
+            && std::fs::write(&staging, bytes).is_ok()
+            && std::fs::rename(&staging, &path).is_ok();
+        if !written {
+            let _ = std::fs::remove_file(&staging);
+            eprintln!(
+                "the judge's outcome could not be saved under {}; a retry judges again",
+                self.dir.display()
+            );
+        }
+    }
+
     fn save(&self, key: &str, judged: &AcceptanceContract) -> bool {
         let saved = Saved {
             schema: SCHEMA,
@@ -213,13 +246,39 @@ impl JudgeStore {
             self.progress.reused(true);
             return Ok(judged);
         }
-        let judged = super::judge::judge_contract_subset_resumable_with_roots(
+        // #552: an identical check the judge could not decide is not asked
+        // again; its saved outcome sends it back to its author.
+        if let Some(message) = self.load_undecided(&key) {
+            eprintln!(
+                "acceptance judge: reused the saved outcome of an identical check the judge could not decide ({key}); no provider call made"
+            );
+            self.progress.reused(true);
+            let mut incomplete = super::judge::JudgeIncomplete::new(
+                super::judge::JudgeIncompleteKind::AuthoredReply,
+                message,
+            );
+            incomplete.undecided = expected.iter().cloned().collect();
+            return Err(incomplete.into());
+        }
+        let judged = match super::judge::judge_contract_subset_resumable_with_roots(
             client,
             subset,
             Some(&partial),
             &self.roots,
         )
-        .await?;
+        .await
+        {
+            Ok(judged) => judged,
+            Err(error) => {
+                if let Some(incomplete) = super::judge::JudgeIncomplete::caused(&error)
+                    && incomplete.kind == super::judge::JudgeIncompleteKind::AuthoredReply
+                    && incomplete.decided.is_empty()
+                {
+                    self.save_undecided(&key, &incomplete.message);
+                }
+                return Err(error);
+            }
+        };
         if self.save(&key, &judged) {
             partial.completed();
             self.progress.saved(true);

@@ -381,8 +381,14 @@ async function authorCandidate(w, policy) {
           authorState.retryIds = retryIds.length > 0 ? new Set(retryIds) : null;
           // #552: the open findings of the last gate that judged stay current;
           // the note goes only to the entries it names.
+          // A check the host already knew it could not judge has its own
+          // finding in the envelope: that is its note, never another's.
           const note = `freeze judge reply unusable: ${routed.operational}`;
-          authorState.judgeNotes = new Map([...(authorState.retryIds || authorState.order || [])].map(id => [id, note]));
+          const own = new Map();
+          for (const finding of outcome.gateEnvelope.policy_findings || []) {
+            own.set(finding.subject, [own.get(finding.subject), String(finding.text || "")].filter(Boolean).join("\n- "));
+          }
+          authorState.judgeNotes = new Map([...(authorState.retryIds || authorState.order || [])].map(id => [id, own.get(id) || note]));
         } else {
           feedback = [`freeze judge reply unusable: ${routed.operational}`];
           judgeFeedback = feedback.slice();
