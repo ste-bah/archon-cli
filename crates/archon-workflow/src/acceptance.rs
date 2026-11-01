@@ -61,7 +61,6 @@ impl VerifyCommandReport {
     pub(crate) fn success(&self) -> bool {
         self.exit_code == Some(0)
             && self.parse_error.is_none()
-            && crate::acceptance_check_shell::command_syntax_error(&self.stderr).is_none()
             && !command_is_discovery_only(&self.command)
             && !output_reports_zero_work(&self.stdout, &self.stderr)
     }
@@ -71,13 +70,6 @@ impl VerifyCommandReport {
         if let Some(error) = &self.parse_error {
             return format!(
                 "verify_command does not parse in the shell that runs it (`-n`), so it was not run: {error}"
-            );
-        }
-        if self.exit_code == Some(0)
-            && let Some(line) = crate::acceptance_check_shell::command_syntax_error(&self.stderr)
-        {
-            return format!(
-                "verify_command exited 0 after its own shell reported a syntax error ({line}), so its exit status is not a verdict"
             );
         }
         if self.exit_code == Some(0) && command_is_discovery_only(&self.command) {
@@ -166,13 +158,16 @@ pub(crate) fn run_verify_command_capture(
         .with_remedy("Supply an operator-owned CheckPolicy (with the needed names in forwarded) to run_verify_command_with_policy or evaluate_with_policy; those APIs consume the explicit policy, not a project config file");
     // Issue 554: the shell that runs it parses it first (`-n`); under bash's
     // POSIX mode a parse error after `trap ... EXIT` exits with the trap's 0.
-    if let Ok(parsed) = environment
-        .command(shell_program())
-        .arg("-n")
-        .arg("-c")
-        .arg(command)
-        .current_dir(root)
-        .output()
+    // A command that changes how later lines parse (an alias, `shopt`) is
+    // left to its run: parse-only mode would not apply that change.
+    if !crate::acceptance_check_shell::changes_parsing(command)
+        && let Ok(parsed) = environment
+            .command(shell_program())
+            .arg("-n")
+            .arg("-c")
+            .arg(command)
+            .current_dir(root)
+            .output()
         && !parsed.status.success()
     {
         let stderr = String::from_utf8_lossy(&parsed.stderr).trim().to_string();

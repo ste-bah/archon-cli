@@ -56,11 +56,6 @@
 //!   `NAME` is a shell function the check itself defines and line N of the
 //!   check calls — a missing product binary or system tool is not the check's
 //!   own helper.
-//!
-//! Exit code 0 is a pass unless the check's own shell reported a syntax
-//! error (Issue 554, `acceptance_check_shell`): a `trap ... EXIT` gives a
-//! script that stopped at a parse error the trap's status, so that exit
-//! status is not its criterion's verdict.
 
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -108,18 +103,15 @@ pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass 
     if let Some(classification) = &result.classification {
         return classification.crash.clone();
     }
-    let Some(code) = result.exit_code else {
-        return CheckRunClass::Failed;
-    };
+    match result.exit_code {
+        Some(0) => return CheckRunClass::Passed,
+        None => return CheckRunClass::Failed,
+        Some(_) => {}
+    }
     // Issue 544: the raw capture when it is kept, never redacted evidence.
     let stderr = String::from_utf8_lossy(result.verdict_stderr());
     let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-    if code == 0 {
-        // Issue 554: exit 0 after the check's own shell reported a syntax
-        // error (a `trap ... EXIT` sets that status) is no verdict.
-        return crate::acceptance_check_shell::exit_zero_syntax_defect(command, &lines)
-            .map_or(CheckRunClass::Passed, CheckRunClass::ScriptDefect);
-    }
+    let code = result.exit_code.unwrap_or_default();
     python_defect(command, code, &lines)
         .or_else(|| shell_defect(command, code, &lines))
         .map_or(CheckRunClass::Failed, CheckRunClass::ScriptDefect)
@@ -154,10 +146,7 @@ impl CheckResult {
             defect.signal = "see the fenced stderr below".into();
         }
         self.classification = Some(CheckClassification {
-            passed: self.operational_error.is_none()
-                && self.exit_code == Some(0)
-                && !zero_work
-                && !matches!(crash, CheckRunClass::ScriptDefect(_)),
+            passed: self.operational_error.is_none() && self.exit_code == Some(0) && !zero_work,
             zero_work,
             crash,
             failure_signature: None,

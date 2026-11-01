@@ -96,8 +96,11 @@ async fn a_mutation_run_that_cannot_parse_its_check_text_is_the_authors_at_once_
     assert!(!unproven.contains_key("AC-X-001"), "{unproven:?}");
 }
 
+/// Codex review: whose a mutation run with no exit status is depends on
+/// the parse of the check's own text, never on its stderr. A text that
+/// parses, whose run printed a shell syntax error, follows the strike rule.
 #[tokio::test]
-async fn a_mutation_run_stopped_by_a_shell_syntax_error_is_the_authors_at_once_554() {
+async fn a_mutation_run_whose_text_parses_is_struck_whatever_its_stderr_says_554() {
     let trees = trees(&[(
         "AC-X-001",
         "test -f data/state.txt",
@@ -106,11 +109,39 @@ async fn a_mutation_run_stopped_by_a_shell_syntax_error_is_the_authors_at_once_5
     let markers = mutation::Markers::new();
     let run = unfinished_run("AC-X-001", &markers, WRAPPER_SYNTAX);
     let (findings, unproven) = prove_once(&trees, &markers, run).await;
-    let finding = findings
-        .get("AC-X-001")
-        .unwrap_or_else(|| panic!("no author finding: {findings:?}; unproven={unproven:?}"));
-    assert!(finding.contains("line 24: syntax error"), "{finding}");
-    assert!(finding.contains("mutation wrapper"), "{finding}");
+    assert!(
+        findings.is_empty(),
+        "the first may be the host's: {findings:?}"
+    );
+    assert!(unproven.contains_key("AC-X-001"), "{unproven:?}");
+}
+
+/// Codex review cases at the probe: a negative test of a child shell and a
+/// text that defines aliases are never refused for their syntax.
+#[tokio::test]
+async fn a_child_shell_negative_test_and_an_alias_block_are_never_syntax_findings_554() {
+    let trees = trees(&[
+        (
+            "AC-X-001",
+            "printf 'if then\\n' | sh -s; test $? -eq 2",
+            TrustedCwd::ProjectRoot,
+        ),
+        (
+            "AC-X-002",
+            "alias begin='if true; then'\nbegin\ntest -f data/state.txt\nfi\n",
+            TrustedCwd::ProjectRoot,
+        ),
+    ]);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    for (id, finding) in &findings {
+        assert!(
+            !finding.contains("parse-only")
+                && !finding.contains("syntax error")
+                && !finding.contains("crashed in its own"),
+            "{id}: {finding}"
+        );
+    }
 }
 
 /// The strike rule: no exit status and no syntax error may be the host's

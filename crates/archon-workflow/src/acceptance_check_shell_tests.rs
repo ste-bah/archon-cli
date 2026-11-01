@@ -3,6 +3,8 @@
 
 use super::*;
 use crate::acceptance_check_crash::{CheckRunClass, classify_check_run};
+use crate::acceptance_scratch::CheckResult;
+use std::io::Write;
 
 /// The R11 shape: `trap ... EXIT` runs first, then a `{ ... fi` block that
 /// no POSIX shell parses. Under bash's POSIX mode this exits 0.
@@ -70,93 +72,42 @@ fn the_executing_shell_rejects_a_trap_then_parse_error_text_with_its_line_554() 
     );
 }
 
-/// End to end: the R11 text run as a site runs it is never a pass, whatever
-/// exit status this platform's shell gives it.
+/// A negative test of malformed input: a child shell rejects it on stdin,
+/// and the check asserts exactly that. Its stderr carries the child's
+/// syntax error, which no rule may read as the check's own.
+const CHILD_REJECTS_INPUT: &str = "printf 'if then\\n' | sh -s; test $? -eq 2\n";
+
+/// Parse-only mode never runs an alias definition, so it rejects a text
+/// that runs fine.
+const ALIAS_BLOCK: &str = "alias begin='if true; then'\nbegin\ntest 1 -eq 1\nfi\n";
+
+/// Codex review cases: a valid check whose stderr holds a child shell's
+/// syntax error is a pass, and a text that defines aliases is never
+/// rejected by parse-only mode.
 #[cfg(unix)]
 #[test]
-fn a_trap_then_parse_error_check_run_is_never_a_pass_554() {
-    let mut ran = run(TRAP_THEN_PARSE_ERROR);
-    let class = classify_check_run(TRAP_THEN_PARSE_ERROR, &ran);
-    assert!(
-        matches!(class, CheckRunClass::ScriptDefect(_)),
-        "exit {:?}: {class:?}",
-        ran.exit_code
-    );
-    ran.classify_raw(TRAP_THEN_PARSE_ERROR);
-    let classification = ran.classification.as_ref().unwrap();
-    assert!(!classification.passed, "{classification:?}");
-}
-
-#[test]
-fn exit_zero_with_the_checks_own_shell_syntax_error_is_a_script_defect_554() {
-    let cases: &[(&str, &str)] = &[
-        // The recorded R11 baseline: exit 0 from the trap.
-        (
-            TRAP_THEN_PARSE_ERROR,
-            "/bin/sh: line 7: syntax error near unexpected token `fi'\n",
-        ),
-        // Text the check evaluated itself (bash, dash).
-        (
-            "eval \"$plan\"\necho done\n",
-            "/bin/sh: eval: line 2: syntax error near unexpected token `then'\n/bin/sh: eval: line 2: `if then'\n",
-        ),
-        (
-            "eval \"$plan\"\n",
-            "sh: 1: eval: Syntax error: \"then\" unexpected\n",
-        ),
-        // A file the check sources by that path.
-        (
-            ". ./lib/helpers.sh\nhelper_ok\n",
-            "./lib/helpers.sh: line 3: syntax error near unexpected token `fi'\n",
-        ),
-    ];
-    for (command, stderr) in cases {
-        let ran = result(Some(0), stderr);
-        assert!(
-            matches!(
-                classify_check_run(command, &ran),
-                CheckRunClass::ScriptDefect(_)
-            ),
-            "passed: {stderr}"
-        );
-        let mut classified = ran.clone();
-        classified.classify_raw(command);
-        assert!(
-            !classified.classification.as_ref().unwrap().passed,
-            "{stderr}"
-        );
-        assert!(classified.reports_shell_syntax_error(), "{stderr}");
-    }
-}
-
-#[test]
-fn exit_zero_with_a_syntax_error_the_check_did_not_cause_stays_a_pass_554() {
-    let cases: &[(&str, &str)] = &[
-        // A product script run by path, not sourced.
-        (
-            "sh ./scripts/verify.sh || true\n",
-            "./scripts/verify.sh: line 3: syntax error near unexpected token `then'\n",
-        ),
-        // A nested `sh -c` the check expects to fail.
-        (
-            "! sh -c 'if then'\n",
-            "sh: -c: line 0: syntax error near unexpected token `then'\n",
-        ),
-        // Not a shell's line at all.
-        (
-            "./tool lint bad.yml\n",
-            "bad.yml:3: syntax error in mapping\n",
-        ),
-    ];
-    for (command, stderr) in cases {
-        let ran = result(Some(0), stderr);
+fn a_child_shells_syntax_error_and_an_alias_block_are_still_passes_554() {
+    for command in [CHILD_REJECTS_INPUT, ALIAS_BLOCK] {
+        let mut ran = run(command);
+        assert_eq!(ran.exit_code, Some(0), "{command}: {ran:?}");
         assert_eq!(
             classify_check_run(command, &ran),
             CheckRunClass::Passed,
-            "{stderr}"
+            "{command}"
         );
-        assert!(!ran.reports_shell_syntax_error(), "{stderr}");
+        ran.classify_raw(command);
+        assert!(ran.classification.as_ref().unwrap().passed, "{command}");
     }
+    assert_eq!(shell_parse_error(ALIAS_BLOCK), None);
+    assert_eq!(
+        shell_parse_error("shopt -s extglob\ncase x in @(x|y)) true;; esac\n"),
+        None
+    );
+    assert_eq!(shell_parse_error(CHILD_REJECTS_INPUT), None);
+    assert!(changes_parsing("set -o posix\n") && !changes_parsing("set -o pipefail\nalias_x=1\n"));
+    assert!(shell_parse_error(&format!("set -o pipefail\n{TRAP_THEN_PARSE_ERROR}")).is_some());
+    // The R11 text still fails the preflight: that is its one gate.
+    assert!(shell_parse_error(TRAP_THEN_PARSE_ERROR).is_some());
 }
 
 /// Issue 554, stage `verify_command` (`sh -c`): a text its shell rejects is
@@ -173,25 +124,17 @@ fn a_verify_command_its_shell_cannot_parse_is_rejected_with_the_shell_error_554(
     );
 }
 
+/// Codex review cases for `verify_command`: a negative test of a nested
+/// shell and an alias block are accepted.
+#[cfg(unix)]
 #[test]
-fn a_verify_command_that_exits_0_after_its_own_shell_syntax_error_is_no_pass_554() {
-    let report = |stderr: &str| crate::acceptance::VerifyCommandReport {
-        command: "./verify".into(),
-        exit_code: Some(0),
-        stdout: String::new(),
-        stderr: stderr.into(),
-        environment_note: None,
-        parse_error: None,
-    };
-    for stderr in [
-        "sh: -c: line 6: syntax error near unexpected token `fi'\n",
-        "/usr/bin/sh: eval: line 0: syntax error near unexpected token `then'\n",
-        "sh: 1: Syntax error: \"fi\" unexpected\n",
-    ] {
-        let found = report(stderr);
-        assert!(!found.success(), "{stderr}");
-        assert!(found.failure_reason().contains("syntax error"), "{stderr}");
+fn a_verify_command_with_a_nested_shell_error_or_an_alias_block_is_accepted_554() {
+    let root = tempfile::tempdir().unwrap();
+    for command in ["! sh -c 'if then'", ALIAS_BLOCK] {
+        assert_eq!(
+            crate::acceptance::run_verify_command(root.path(), Some(command)),
+            Ok(()),
+            "{command}"
+        );
     }
-    assert!(report("./tool: line 3: syntax error in its own input\n").success());
-    assert!(report("").success());
 }

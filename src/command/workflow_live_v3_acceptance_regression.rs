@@ -80,23 +80,20 @@ impl CheckObserver for ScratchObserver<'_> {
                 .map(|check| {
                     // Batch J2: a failure carries its signature, so the
                     // search can tell the tip's failure from another kind.
-                    // Issue 554: exit 0 after its own shell's syntax
-                    // error is no hold.
-                    let verdict =
-                        if check.exit_code == Some(0) && !check.reports_shell_syntax_error() {
-                            Verdict::Held(true)
-                        } else {
-                            // Issue 544: the fingerprint the capture computed
-                            // from the raw streams (secrets as indexed
-                            // placeholders); stored text only for older results.
-                            Verdict::Failed(typed_signature(&check).unwrap_or_else(|| {
-                                failure_signature(
-                                    check.exit_code,
-                                    &String::from_utf8_lossy(check.verdict_stderr()),
-                                    &String::from_utf8_lossy(check.verdict_stdout()),
-                                )
-                            }))
-                        };
+                    let verdict = if check.exit_code == Some(0) {
+                        Verdict::Held(true)
+                    } else {
+                        // Issue 544: the fingerprint the capture computed
+                        // from the raw streams (secrets as indexed
+                        // placeholders); stored text only for older results.
+                        Verdict::Failed(typed_signature(&check).unwrap_or_else(|| {
+                            failure_signature(
+                                check.exit_code,
+                                &String::from_utf8_lossy(check.verdict_stderr()),
+                                &String::from_utf8_lossy(check.verdict_stdout()),
+                            )
+                        }))
+                    };
                     (check.acceptance_id, verdict)
                 })
                 .collect(),

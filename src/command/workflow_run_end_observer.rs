@@ -202,14 +202,6 @@ impl FixedRunEndAcceptanceObserver {
                         "native acceptance command exited nonzero",
                     ));
                     pending_shadow_events.insert(criterion.id.clone());
-                } else if check.reports_shell_syntax_error() {
-                    // Issue 554: exit 0 after its own shell's syntax error is no pass.
-                    findings += 1;
-                    pending_records.push(OwnedObserverRecord::shadow(
-                        &criterion.id,
-                        "native acceptance command exited 0 after its own shell reported a syntax error",
-                    ));
-                    pending_shadow_events.insert(criterion.id.clone());
                 } else {
                     passed_floor_ids.insert(criterion.id.clone());
                 }

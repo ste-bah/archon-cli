@@ -15,7 +15,8 @@
 //! host's. Issue 554: a mutation run that gave no verdict for a reason the
 //! host cannot tell apart from the check's own run (no exit status, an input
 //! with no recorded state, an input left unrestored) follows that strike
-//! rule too, and one its shell stopped at a syntax error is its author's.
+//! rule too, and one whose own text the shell rejects in parse-only mode
+//! is its author's.
 
 use archon_workflow::acceptance_scratch::faults::{CheckFault, classify};
 
@@ -74,10 +75,9 @@ pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
 /// error, else a signal its wrapper saw. The live-root guard is the host's:
 /// the host chose where the check ran.
 ///
-/// Issue 554: a run that recorded no exit status because its shell stopped
-/// at a syntax error is its author's at once: the error the shell gives the
-/// check's own text `command` when it rejects it, else the syntax error the
-/// run reported. Any other run without a verdict (`reason`: no exit status,
+/// Issue 554: a run that recorded no exit status whose own text `command`
+/// the shell that runs it rejects in parse-only mode is its author's at
+/// once, with the shell's error. Any other run without a verdict (`reason`: no exit status,
 /// an input with no recorded state, an input left unrestored) may be the
 /// host's as well as the check's, so it follows the strike rule: the same
 /// unchanged check failing so again goes to its author.
@@ -96,20 +96,16 @@ pub(super) fn of_mutation(
     if let Some(signal) = markers.observed_signal(result) {
         return Fault::Ambiguous(format!("the check wrapper observed signal {signal}"));
     }
-    if markers.status(result).is_none() {
-        let stderr = String::from_utf8_lossy(result.verdict_stderr());
-        let syntax = archon_workflow::acceptance_check_shell::shell_parse_error(command).or_else(|| {
-            archon_workflow::acceptance_check_shell::own_syntax_error(command, &stderr).map(|line| {
-                format!("{line}; its line number counts the lines the host's mutation wrapper runs before the check's text")
-            })
-        });
-        if let Some(error) = syntax {
-            return Fault::Check {
-                trigger: "the shell that ran it stopped at a shell syntax error, so the check never recorded its exit status",
-                remedy: "fix exactly that shell syntax so the whole check parses (`sh -n` accepts it), and keep every assertion and every call into the deliverable",
-                error,
-            };
-        }
+    // Decided by the check's own text alone: a run's stderr cannot say which
+    // process printed a syntax error.
+    if markers.status(result).is_none()
+        && let Some(error) = archon_workflow::acceptance_check_shell::shell_parse_error(command)
+    {
+        return Fault::Check {
+            trigger: "the shell that runs it rejects its text in parse-only mode, so the check never recorded its exit status",
+            remedy: "fix exactly that shell syntax so the whole check parses (`sh -n` accepts it), and keep every assertion and every call into the deliverable",
+            error,
+        };
     }
     Fault::Ambiguous(reason.to_string())
 }

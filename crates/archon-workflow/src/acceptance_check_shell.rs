@@ -6,50 +6,63 @@
 //! under bash's POSIX mode a parse error after `trap ... EXIT` ends the
 //! script with the trap's status, which is 0. So the host asks the same
 //! shell to parse the text (`-n`) before it runs it
-//! ([`shell_parse_error`]), and a run whose own shell reported a syntax
-//! error is never a pass ([`exit_zero_syntax_defect`]).
+//! ([`shell_parse_error`]). That parse is the one gate: stderr cannot say
+//! which process printed a syntax error (a child shell a negative test runs
+//! prints the same text), so no rule reads a syntax error from a run's
+//! output as the check's own.
 
 use std::io::Write;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::acceptance_check_crash::ScriptDefect;
-use crate::acceptance_scratch::CheckResult;
-
-/// The shell's own syntax-error line for a script it reads from stdin
-/// (`sh: line N:`, dash's `sh: N:`), or for text that script evaluated
-/// (`sh: eval: line N:`, dash's `sh: N: eval:`). A nested `sh -c` names
-/// `-c` and a script run by path names that path: neither matches.
-static OWN_SYNTAX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"^(?:/[^\s:]*/)?(?:sh|bash|dash|ksh): (?:eval: )?(?:line )?\d+: (?:eval: )?(?:syntax error|Syntax error)",
-    )
-    .expect("static pattern")
+/// Builtins that change how the shell parses the lines after them: an
+/// alias definition or a `shopt` option (such as `extglob`). Parse-only
+/// mode runs neither, so it may reject a text that runs fine.
+static PARSE_CHANGING: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)(?:^|[\s;&|(){}`])(?:alias|shopt)(?:\s|;|$)").expect("static pattern")
 });
 
-/// A syntax error bash reports for a file by its path (`path: line N:`).
-static FILE_SYNTAX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^([^\s:][^:]*): line \d+: syntax error").expect("static pattern")
+/// A `set -o NAME` / `set +o NAME` option.
+static SET_OPTION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)(?:^|[\s;&|(){}`])set\s+[-+]o\s+([A-Za-z_-]+)").expect("static pattern")
 });
 
-/// The syntax-error line of the shell running a `-c` command, or of text it
-/// evaluated (`sh: -c: line N:`, `sh: eval: line N:`, dash's `sh: N:`), as a
-/// Windows `sh.exe` by path prints it too.
-static COMMAND_SYNTAX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"^(?:.*[/\\])?(?:sh|bash|dash|ksh)(?:\.exe)?: (?:-c: )?(?:eval: )?(?:line )?\d+: (?:eval: )?(?:syntax error|Syntax error)",
-    )
-    .expect("static pattern")
-});
+/// `set -o` options that change what runs, never how a line parses.
+const RUN_ONLY_OPTIONS: &[&str] = &[
+    "allexport",
+    "braceexpand",
+    "errexit",
+    "errtrace",
+    "functrace",
+    "hashall",
+    "histexpand",
+    "history",
+    "ignoreeof",
+    "monitor",
+    "noclobber",
+    "noexec",
+    "noglob",
+    "notify",
+    "nounset",
+    "onecmd",
+    "physical",
+    "pipefail",
+    "privileged",
+    "verbose",
+    "xtrace",
+];
 
-/// Issue 554: the first line of `stderr` in which the shell running a `-c`
-/// command (a stage `verify_command`) reported a syntax error of its own.
-pub(crate) fn command_syntax_error(stderr: &str) -> Option<&str> {
-    stderr
-        .lines()
-        .map(str::trim)
-        .find(|line| COMMAND_SYNTAX.is_match(line))
+/// Whether `command` uses a builtin that may change how its later lines
+/// parse: `alias`, `shopt`, or a `set -o` option other than the ones that
+/// only change what runs.
+pub fn changes_parsing(command: &str) -> bool {
+    PARSE_CHANGING.is_match(command)
+        || SET_OPTION.captures_iter(command).any(|found| {
+            found
+                .get(1)
+                .is_some_and(|name| !RUN_ONLY_OPTIONS.contains(&name.as_str()))
+        })
 }
 
 /// The diagnostic of the executing shell's parse-only mode (`-n`) for
@@ -57,8 +70,12 @@ pub(crate) fn command_syntax_error(stderr: &str) -> Option<&str> {
 /// shell is the one every check runs under, with no environment: parsing
 /// runs no command, so no search path or variable takes part. When that
 /// shell cannot be started this is `None` too: the run itself then fails to
-/// start, and that failure says so.
+/// start, and that failure says so. A text that changes how later lines
+/// parse ([`changes_parsing`]) is never judged here: its run decides.
 pub fn shell_parse_error(command: &str) -> Option<String> {
+    if changes_parsing(command) {
+        return None;
+    }
     let mut shell = archon_shell::spawn::command(archon_shell::resolve_posix_shell());
     let mut child =
         archon_shell::spawn::replace_environment(&mut shell, std::iter::empty::<(&str, &str)>())
@@ -92,46 +109,6 @@ pub fn shell_parse_error(command: &str) -> Option<String> {
     })
 }
 
-/// The first line of `stderr` that is a syntax error of the check's own
-/// shell, or of a file the check text `command` sources by that path
-/// (`. path`, `source path`).
-pub fn own_syntax_error<'a>(command: &str, stderr: &'a str) -> Option<&'a str> {
-    stderr.lines().map(str::trim).find(|line| {
-        OWN_SYNTAX.is_match(line)
-            || FILE_SYNTAX
-                .captures(line)
-                .and_then(|found| found.get(1))
-                .is_some_and(|path| sources(command, path.as_str()))
-    })
-}
-
-/// Whether `command` sources `path` by that exact spelling.
-fn sources(command: &str, path: &str) -> bool {
-    Regex::new(&format!(
-        r#"(?m)(?:^|[\s;&|(])(?:\.|source)\s+['"]?{}['"]?(?:\s|;|&|\||\)|$)"#,
-        regex::escape(path)
-    ))
-    .is_ok_and(|pattern| pattern.is_match(command))
-}
-
-/// Issue 554: a run that exited 0 although its own shell reported a syntax
-/// error: its exit status is not its criterion's verdict, so it is the
-/// check's own defect, never a pass. `lines` are its stderr's non-empty
-/// lines.
-pub(crate) fn exit_zero_syntax_defect(command: &str, lines: &[&str]) -> Option<ScriptDefect> {
-    let signal = own_syntax_error(command, &lines.join("\n"))?.to_string();
-    let rule = if shell_parse_error(command).is_some() {
-        "syntax error in the check's shell script, after which it still exited 0"
-    } else {
-        "a shell syntax error in text the check ran or sourced, after which it still exited 0"
-    };
-    Some(ScriptDefect {
-        interpreter: "shell".into(),
-        rule: rule.into(),
-        signal,
-    })
-}
-
 /// The author's finding for check `id`, whose text the shell that runs it
 /// rejects with `error` before it runs.
 pub fn parse_finding(id: &str, error: &str) -> String {
@@ -141,25 +118,7 @@ pub fn parse_finding(id: &str, error: &str) -> String {
     )
 }
 
-impl CheckResult {
-    /// Issue 554: whether this run exited 0 although its own shell reported
-    /// a syntax error, so its exit status is no pass: the capture's own
-    /// classification of the raw streams when it has one, else the streams
-    /// a verdict reads.
-    pub fn reports_shell_syntax_error(&self) -> bool {
-        if self.exit_code != Some(0) {
-            return false;
-        }
-        match &self.classification {
-            Some(classification) => matches!(
-                classification.crash,
-                crate::acceptance_check_crash::CheckRunClass::ScriptDefect(_)
-            ),
-            None => own_syntax_error("", &String::from_utf8_lossy(self.verdict_stderr())).is_some(),
-        }
-    }
-}
-
-#[cfg(test)]
+// Every case runs a real POSIX shell.
+#[cfg(all(test, unix))]
 #[path = "acceptance_check_shell_tests.rs"]
 mod tests;
