@@ -25,22 +25,35 @@ pub(crate) fn acceptance_candidate(record: &WorkflowV2CallRecord) -> Option<&str
     .then(|| request.stdin.as_deref().unwrap_or_default())
 }
 
+const ENTRY_SECTIONS: [&str; 6] = [
+    "\nThe host refused this entry's last answered reply.",
+    "\nRepair this entry's gate findings open in the latest gate result:",
+    "\nThe freeze judge could not use this entry's last check:",
+    "\nEarlier gate results raised these findings for this entry;",
+    "\nPhase-level findings of the latest gate result name no single entry;",
+    "\nA newer published version of this entry replaced your previous draft",
+];
+
 pub(super) fn authored_criterion(record: &WorkflowV2CallRecord, id: &str) -> Option<String> {
     let task = record.call.options.task.as_deref()?;
     let marker = format!("Author ONLY entry {id}: ");
     let start = task.rfind(&marker)? + marker.len();
     let rest = &task[start..];
-    let end = [
-        rest.find("\nThe host refused this entry's last answered reply."),
-        rest.find("\nAll criterion IDs and text (for consistency):"),
-        id.starts_with("SUP-")
-            .then(|| rest.find("\nIts covers is exactly [\""))
-            .flatten(),
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-    .unwrap_or(rest.len());
+    // #555: every section authorOne writes after the criterion ends it
+    // (workflow_decompose_v1_acceptance.js `own`): its own findings, the
+    // judge note, its earlier findings, the phase-level ones, a superseded draft.
+    let end = ENTRY_SECTIONS
+        .iter()
+        .map(|marker| rest.find(marker))
+        .chain([
+            rest.find("\nAll criterion IDs and text (for consistency):"),
+            id.starts_with("SUP-")
+                .then(|| rest.find("\nIts covers is exactly [\""))
+                .flatten(),
+        ])
+        .flatten()
+        .min()
+        .unwrap_or(rest.len());
     let authored = rest[..end].trim_end();
     let criterion = if id.starts_with("SUP-") {
         let prefix = authored.find("): ")? + 3;

@@ -245,7 +245,7 @@ function currentAuthorFindings(prompt) {
   const start = prompt.indexOf(marker);
   if (start < 0) return [];
   return prompt.slice(start + marker.length)
-    .split("\nEarlier attempts in this phase already triggered the following.")[0]
+    .split("\nEarlier attempts in this phase raised the following")[0]
     .split("\n- ");
 }
 

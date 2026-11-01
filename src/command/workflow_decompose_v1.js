@@ -205,6 +205,9 @@ async function authorCandidate(w, policy) {
   let repairCycle = 1;
   const progress = newProgress(feedback);
   const authorState = { entries: new Map(), retryIds: null, retryPreparation: true };
+  // #555: findings the loop opens with that name no entry are phase-level;
+  // a frozen stage's repair attributes its own to each entry (repairFrozenStage).
+  if (policy.author) authorState.phaseFindings = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
   // Issue 360: after an upgrade, start from the latest durable candidate (workflow_decompose_v1_seed.js).
   const seeded = args.phaseSeed && !seedWouldReplaceLiveFeedback(policy)
     ? seedAuthorLoop(policy, authorState)
@@ -249,17 +252,22 @@ async function authorCandidate(w, policy) {
     const rungInstruction = repairRung === 1 ? ""
       : repairRung === 2 ? "\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding."
       : repairRung === 3 ? "\nReturn a complete replacement. Work through the findings in smaller groups while preserving every finding from this and earlier attempts."
+      : policy.author ? "\nReturn a complete replacement of this entry that repairs only the findings listed below for this entry."
       : "\nThis subject is deferred while independent subjects settle. Return a complete replacement when re-entered with the latest findings.";
     const midpoint = Math.ceil(feedback.length / 2);
     const groupFeedback = repairRung === 3 && feedback.length > 1
       ? (nextCall % 2 === 1 ? feedback.slice(0, midpoint) : feedback.slice(midpoint))
       : feedback;
-    const promptFeedback = [...new Set(policy.author ? [...(policy.initialFeedback || []), ...feedback]
-      : [...feedback, ...openFindings, ...(policy.initialFeedback || [])])];
+    // #555: the part of an entry prompt every entry shares names no finding:
+    // each entry reads only its own, and the phase-level ones, in its own
+    // section (authorOne). The round's findings, its history and its groups
+    // belong to every subject at once, so they stay out of it.
+    const promptFeedback = policy.author ? [] : [...new Set([...feedback, ...openFindings, ...(policy.initialFeedback || [])])];
+    const group = repairRung === 3 && !policy.author ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : "";
     let authored;
     try {
       const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}${repairRung === 3 ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : ""}`, attempt + 1, promptFeedback, history);
+      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
         // Context writes are not journaled. Reserve no ordinal until the
@@ -413,17 +421,9 @@ async function authorCandidate(w, policy) {
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = routed.retryFindings;
-      const latest = new Map();
-      for (const finding of repair) {
-        const selected = ids.has(finding.subject) ? new Set([finding.subject])
-          : acceptanceRepairIds([finding], ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
-        for (const id of selected || authorState.entries.keys()) {
-          const open = latest.get(id) || [];
-          if (!open.includes(finding.text)) open.push(finding.text);
-          latest.set(id, open);
-        }
-      }
-      settleGateFindings(authorState, latest);
+      const latest = attributeEntryFindings(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+      settleGateFindings(authorState, latest.own);
+      authorState.phaseFindings = latest.phase;
       authorState.judgeNotes = null;
       const stale = repair.find(finding => finding?.deterministic_defect?.code === "stale_acceptance_contract");
       if (stale) {

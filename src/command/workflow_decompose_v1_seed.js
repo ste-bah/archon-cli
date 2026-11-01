@@ -183,6 +183,12 @@ function seedEntries(seed, policy, state) {
   for (const id of Array.isArray(seed.refuted_ids) ? seed.refuted_ids : []) sentBack.push(id);
   state.retryIds = new Set([...sentBack.filter((id) => !repaired.has(id)), ...Object.keys(invalid), ...unreadable, ...staleCriteria]);
   const last = gates[gates.length - 1];
+  // #555: each entry starts with only its own findings of the last gate, and
+  // an invalid carried entry with its own refusal; a sibling's is not its own.
+  const lastFindings = last ? seedRepairFindings(last, policy) : [];
+  const opened = attributeEntryFindings(lastFindings, ids, last?.published === true && !lastFindings.some(isStaleContractFinding), candidate, heldOmissionIds);
+  [state.gateFindings, state.phaseFindings] = [opened.own, opened.phase];
+  state.refusals = new Map(Object.entries(invalid).map(([id, texts]) => [id, [].concat(texts).map(String)]));
   const feedback = [
     ...(last ? seedRepairFindings(last, policy).map((finding) => String(finding.text)) : []),
     ...Object.values(invalid).flat().map(String)

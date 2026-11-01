@@ -136,10 +136,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 551: repair prompts list the latest open findings as current; earlier ones only as do-not-regress history.
     // Issue 552: entry prompts list only their findings open in the latest gate result; a judge failure reaches only the entries it names, each with its own known finding.
     // Issue 554: an operational finding on an authored entry never stops the phase; it is re-frozen, then routed to its author; skeletonPolicy and unprovenAuthored moved into the frozen module.
+    // Issue 555: an entry prompt carries only its own findings and phase-level ones (labelled); the shared part names none.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "d8c9ae4745322f0210fc0dce65ca55a6101e05be59ea580db7e7329eb804f0b8"
+        "586dcc7fc2ff1c0aa1110f3129a204ad69cfa097cd1b4777f55840d183a27814"
     );
 }

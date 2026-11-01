@@ -141,6 +141,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     + (state.gateFindings?.has(id) ? `\nRepair this entry's gate findings open in the latest gate result:\n- ${state.gateFindings.get(id).join("\n- ")}` : "")
     + (state.judgeNotes?.has(id) ? `\nThe freeze judge could not use this entry's last check:\n- ${state.judgeNotes.get(id)}` : "")
     + (state.earlierGateFindings?.has(id) ? `\nEarlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:\n- ${state.earlierGateFindings.get(id).join("\n- ")}` : "")
+    + (state.phaseFindings?.length > 0 ? `\nPhase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- ${state.phaseFindings.join("\n- ")}` : "")
     + supersededDraftText(state, id);
   // Issue 288: the catalogue and the completed entries are bounded records
   // that name host-written files (workflow_decompose_v1_context.js). A file

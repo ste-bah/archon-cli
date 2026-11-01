@@ -181,8 +181,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "6f4a0f94a231cf4dbf3f1c4a71221fd2f18c0f9b7057db00b49fe051e78c2888",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: the phase seed's reader of an entry prompt's criterion (workflow_decompose_seed_record.rs) ends it at the entry's finding sections; no verdict reads it.
+        sources_digest: "a1660b1aebc7701ee01c3619602bd3a3020a599f88c97b8f98c3f983ca2418ae",
         build_bound: false,
     },
     CapabilityLogic {
@@ -228,8 +228,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "6f4a0f94a231cf4dbf3f1c4a71221fd2f18c0f9b7057db00b49fe051e78c2888",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: the phase seed's reader of an entry prompt's criterion (workflow_decompose_seed_record.rs) ends it at the entry's finding sections; no verdict reads it.
+        sources_digest: "a1660b1aebc7701ee01c3619602bd3a3020a599f88c97b8f98c3f983ca2418ae",
         build_bound: false,
     },
     CapabilityLogic {
@@ -303,8 +303,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "92423d4ae1d08f2660e61ed83865cfd87ca3ed40bffa85f66ece74bb78b8d0c9",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: the phase seed's reader of an entry prompt's criterion (workflow_decompose_seed_record.rs) ends it at the entry's finding sections; no verdict reads it.
+        sources_digest: "a77fc9d97bf62bad49e0172a544ba812ec127d2f65a62519c7db332e09ea841a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -364,8 +364,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "92423d4ae1d08f2660e61ed83865cfd87ca3ed40bffa85f66ece74bb78b8d0c9",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: the phase seed's reader of an entry prompt's criterion (workflow_decompose_seed_record.rs) ends it at the entry's finding sections; no verdict reads it.
+        sources_digest: "a77fc9d97bf62bad49e0172a544ba812ec127d2f65a62519c7db332e09ea841a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -450,8 +450,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "51b0c0a24107c84971477db12991fe9588b9d421c720171427dcda26ea4d6577",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: the phase seed's reader of an entry prompt's criterion (workflow_decompose_seed_record.rs) ends it at the entry's finding sections; no verdict reads it.
+        sources_digest: "50d735703f1a971f4001521582657a0971f066e1734c44b452412009ed82b0ce",
         build_bound: true,
     },
     CapabilityLogic {
@@ -493,8 +493,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed.
-        sources_digest: "51b0c0a24107c84971477db12991fe9588b9d421c720171427dcda26ea4d6577",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: the phase seed's reader of an entry prompt's criterion (workflow_decompose_seed_record.rs) ends it at the entry's finding sections; no verdict reads it.
+        sources_digest: "50d735703f1a971f4001521582657a0971f066e1734c44b452412009ed82b0ce",
         build_bound: true,
     },
 ];

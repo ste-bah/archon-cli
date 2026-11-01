@@ -102,10 +102,14 @@ async function frozenOperationalWindowRetriesWithHostRemedy() {
   assert.match(s.pauses[0].evidence.recovery, /retries/);
   assert.doesNotMatch(JSON.stringify(s.pauses), /restore|resume/i);
 }
-async function contextWriteFailuresUseOperationalWindow() {
+// #555: an entry prompt no longer carries the phase's earlier findings, so
+// the acceptance case needs its context file from the entry's own section:
+// a criterion catalogue past its share.
+async function contextWriteFailuresUseOperationalWindow_555() {
   for (const acceptance of [true, false]) {
     const s = setup({ __archonAuthorContext: () => { throw new Error('component storage: disk full; retry write'); } });
     s.policy.initialFeedback = ['repair assertion ' + 'x'.repeat(30000)];
+    if (acceptance) s.ctx.args.acceptanceCriteria['AC-X-001'] = 'criterion ' + 'x'.repeat(30000);
     if (!acceptance) delete s.policy.author;
     s.w.pause = async (_id, evidence) => {
       s.pauses.push(evidence);
@@ -296,7 +300,7 @@ async function acceptanceContextRecoveryReplaysEveryEntryAndRung() {
   for (const test of [ownedSourceDispatchesAuthorWithinTheAttemptWindow, inputSourceStopsWithExactRemedy,
     mixedRoutingPreservesTheUnownedFaultRemedy, freshContextKeepsAttributedGateFindings, malformedCallsNeverRepeatAcrossThreeCycles,
     mixedUnprovenChecksRepairAuthoredEntries, frozenOperationalWindowRetriesWithHostRemedy,
-    contextWriteFailuresUseOperationalWindow, setGateBodyRepairsCarryTheOuterRung, midLadderReplayKeepsIdsPromptsAndRung,
+    contextWriteFailuresUseOperationalWindow_555, setGateBodyRepairsCarryTheOuterRung, midLadderReplayKeepsIdsPromptsAndRung,
     inputBasenameCollisionStopsBeforeBodyRepair, bodyContextRecoveryReplaysRecordedIdsAndPromptBytes,
     bodyContextRecoveryReplaysRungCheckpointIds, acceptanceContextRecoveryReplaysEveryEntryAndRung]) {
     try { await test(); console.log(`PASS ${test.name}`); }

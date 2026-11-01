@@ -234,24 +234,32 @@ async function anEntryPromptListsOnlyItsLatestGateFindingsAsCurrent() {
 
 // #552 item 6: a round whose freeze judged nothing keeps the open findings
 // of the last gate that did judge as current, and the history of earlier
-// ones; its note goes to the entry it names.
-async function aRoundThatJudgedNothingKeepsTheLastJudgedFindings() {
+// ones; its note goes to the entry it names. #555: they are the entry's own,
+// in its own section, never a shared repair list.
+async function aRoundThatJudgedNothingKeepsTheLastJudgedFindings_555() {
   const out = await run([finding('A', 'requirement R1 is covered by no check'),
     judgeFailure(['B'], "check 'B': 4 replies; no usable verdict"), clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C', 'A', 'B']);
   const after = out.prompts[4];
-  assert.match(after, /authoritative findings:\n- check 'A': requirement R1 is covered by no check/,
-    'the last judged gate\'s open finding stays current');
+  assert.doesNotMatch(after, /requirement R1 is covered by no check/, "B never reads A's open finding");
   assert.match(after, /check 'B': 4 replies; no usable verdict/, 'the named entry gets the note');
+  // The open finding stays current for its own entry when that is re-authored.
+  const own = await run([finding('A', 'requirement R1 is covered by no check'),
+    judgeFailure(['A'], "check 'A': 4 replies; no usable verdict"), clean]);
+  assert.equal(own.error, undefined);
+  assert.deepEqual(own.authored, ['A', 'B', 'C', 'A', 'A']);
+  assert.match(own.prompts[4], /open in the latest gate result:\n- check 'A': requirement R1 is covered by no check/,
+    'the last judged gate\'s open finding stays current');
+  assert.match(own.prompts[4], /check 'A': 4 replies; no usable verdict/, 'the named entry gets the note');
 }
-async function aRungResetAfterARoundThatJudgedNothingKeepsTheHistory() {
+async function aRungResetAfterARoundThatJudgedNothingKeepsTheHistory_555() {
   const out = await run([finding('A', 'first finding'), finding('A', 'second finding'),
     finding('A', 'third finding'), judgeFailure(['A'], "check 'A': 4 replies; no usable verdict"), clean]);
   assert.equal(out.error, undefined);
   const after = out.prompts.at(-1);
-  assert.match(after, /authoritative findings:\n- check 'A': third finding/, 'the last judged findings are restored');
-  assert.match(after, /Earlier attempts in this phase raised[^]*second finding/, 'the history is kept');
+  assert.match(after, /open in the latest gate result:\n- check 'A': third finding/, 'the last judged findings are restored');
+  assert.match(after, /Do not regress them:\n(?:- [^\n]*\n)*- check 'A': second finding/, 'the history is kept');
   assert.match(after, /check 'A': 4 replies; no usable verdict/);
 }
 
@@ -292,8 +300,8 @@ async function aKnownFindingTravelsWithAnIncompleteFreeze() {
 const tests = [
   ['a known finding travels with an incomplete freeze', aKnownFindingTravelsWithAnIncompleteFreeze],
   ['a not-judged finding re-authors only its entry', aNotJudgedFindingReauthorsOnlyItsEntry],
-  ['a round that judged nothing keeps the last judged findings', aRoundThatJudgedNothingKeepsTheLastJudgedFindings],
-  ['a rung reset after a round that judged nothing keeps the history', aRungResetAfterARoundThatJudgedNothingKeepsTheHistory],
+  ['a round that judged nothing keeps the last judged findings (#555)', aRoundThatJudgedNothingKeepsTheLastJudgedFindings_555],
+  ['a rung reset after a round that judged nothing keeps the history (#555)', aRungResetAfterARoundThatJudgedNothingKeepsTheHistory_555],
   ['an authored judge failure re-authors only its named entries', anAuthoredJudgeFailureReauthorsOnlyItsNamedEntries],
   ['a saved authored judge failure without subjects keeps its text routing', aSavedAuthoredJudgeFailureWithoutSubjectsKeepsItsTextRouting],
   ['an entry prompt lists only its latest gate findings as current', anEntryPromptListsOnlyItsLatestGateFindingsAsCurrent],

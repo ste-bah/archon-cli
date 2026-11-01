@@ -113,6 +113,37 @@ fn acceptance_reply_seed_keeps_the_criterion_from_its_author_prompt() {
     );
 }
 
+/// #555: an entry prompt names its own findings (and the phase-level ones)
+/// between its criterion and the catalogue; none of them is criterion text.
+#[test]
+fn acceptance_reply_seed_criterion_ends_at_the_entry_finding_sections_555() {
+    for section in [
+        "Repair this entry's gate findings open in the latest gate result:\n- check 'AC-1': weak",
+        "The freeze judge could not use this entry's last check:\n- no verdict",
+        "Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:\n- old",
+        "Phase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- whole",
+        "A newer published version of this entry replaced your previous draft before it was published. Your previous draft was:\n{}",
+    ] {
+        let mut record = reply(
+            "acceptance-author-AC-1-4",
+            "01:00:00",
+            &entry("AC-1").to_string(),
+        );
+        record.call.options.task = Some(format!(
+            "prompt\nAuthor ONLY entry AC-1: criterion of AC-1\n{section}\nAll criterion IDs and text (for consistency): {{}}\ncatalogue"
+        ));
+        let derived = super::super::derive(&[record], &[], &criteria(&["AC-1"])).unwrap();
+        let SubjectSeed::Entries { replies, .. } = &derived.subjects["acceptance"] else {
+            panic!("expected acceptance seed")
+        };
+        assert_eq!(
+            replies[0].criterion.as_deref(),
+            Some("criterion of AC-1"),
+            "{section}"
+        );
+    }
+}
+
 #[test]
 fn stale_acceptance_candidate_is_carried_without_verdict_or_findings() {
     let candidate = json!({

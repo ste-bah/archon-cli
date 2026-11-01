@@ -160,6 +160,33 @@ function unprovenAuthored(state, outcome, routed) {
   return { repeated, subjects: new Set(seen.keys()) };
 }
 
+// #555: the entries each gate finding is for, read as the gate's routing
+// reads it: its subject when that is a criterion, else acceptanceRepairIds.
+// An omission of a held supplementary check is that held entry's. A finding
+// no rule attributes to one entry is phase-level. An entry's prompt shows
+// its own findings and the phase-level ones, never a sibling's. A stale
+// contract is the loop's to rebuild (refreshFromCurrentContract), no author's.
+function attributeEntryFindings(findings, ids, published, candidate, held) {
+  const own = new Map();
+  const phase = [];
+  for (const finding of findings) {
+    const selected = ids.has(finding.subject) ? new Set([finding.subject])
+      : acceptanceRepairIds([finding], ids, published, candidate, held);
+    const holder = [finding.subject, finding.deterministic_defect?.subject].find((id) => typeof id === "string" && held?.has(id));
+    const owners = selected && selected.size === 0 && holder ? new Set([holder]) : selected;
+    if (owners === null && finding?.deterministic_defect?.code !== "stale_acceptance_contract") {
+      const text = String(finding.text || "unnamed policy finding");
+      if (!phase.includes(text)) phase.push(text);
+    }
+    for (const id of owners || []) {
+      const open = own.get(id) || [];
+      if (!open.includes(finding.text)) open.push(finding.text);
+      own.set(id, open);
+    }
+  }
+  return { own, phase };
+}
+
 async function repairFrozenStage(w, verified, findings) {
   const owner = frozenFindingOwner(findings[0]);
   if (findings.some((finding) => frozenFindingOwner(finding) !== owner)) {
@@ -187,6 +214,9 @@ async function repairFrozenStage(w, verified, findings) {
         if (requirement) owedSupplementary().set(entry.id, { requirement, text: currentRequirementText(requirement) });
       }
       state.retryIds = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract, state.entries);
+      // #555: each entry starts with only its own verification findings.
+      const opened = attributeEntryFindings(findings, new Set(Object.keys(args.acceptanceCriteria || {})), true, contract, state.entries);
+      [state.gateFindings, state.phaseFindings] = [opened.own, opened.phase];
     }
     finalState = state;
     return await authorAcceptanceEntries(host, prompt, round, state);
