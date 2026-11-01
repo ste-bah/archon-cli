@@ -137,40 +137,6 @@ function requireFixedArgs() {
   }
 }
 
-// The skeleton's author policy, whether it authors the skeleton first or
-// re-authors it because the set gate found an obligation no task claims or
-// a claim the PRD does not define (Batch O). `initialFeedback` carries the
-// set gate's exact findings into the first attempt.
-function skeletonPolicy(initialFeedback, initialRung) {
-  return {
-    phase: "skeleton",
-    capability: "freeze-skeleton",
-    retryScopes: new Set(["candidate_artifact", "skeleton"]),
-    initialFeedback,
-    ...(Number.isInteger(initialRung) ? { initialRung } : {}),
-    prompt: () => [
-      "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
-      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
-      groundingRules(),
-      "Stop reading once you can name what your entries assert.",
-      "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
-      "Every obligation id the PRD defines is in the implements of at least one task, and implements names only ids the PRD defines. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
-      "The document must deserialize into this exact shape:",
-      SKELETON_SHAPE,
-      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
-      "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
-      "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.",
-      "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
-      "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
-      "The host overwrites acceptance_digest: send the placeholder shown.",
-      "Generate large or repetitive fixture data with code rather than writing it literally.",
-      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
-      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
-      "Do not run commands or write files."
-    ].join("\n")
-  };
-}
-
 // One body policy, whether the body is authored fresh after the skeleton or
 // re-authored because the set gate named it (Issue-46). `initialFeedback`
 // carries the set gate's exact finding texts into the first attempt.

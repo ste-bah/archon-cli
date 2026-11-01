@@ -235,27 +235,6 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
 
 // Parsed JSON objects have no meaningful property order. Formatting changes
 // cannot turn an unchanged completed entry into progress.
-// #554: the operational findings of a freeze outcome whose subject is an
-// entry this loop authored. `repeated` holds those whose entry is unchanged
-// since the previous freeze reported it unproven: retrying the host did not
-// help, so its author is told. Each is remembered for the next freeze.
-function unprovenAuthored(state, outcome, routed) {
-  const findings = routed.operational
-    ? (Array.isArray(outcome?.gateEnvelope?.policy_findings) ? outcome.gateEnvelope.policy_findings : [])
-    : routed.fatalFindings;
-  const seen = new Map();
-  const repeated = new Set();
-  for (const finding of findings) {
-    if (finding?.remediation_scope !== "operational" || typeof finding.subject !== "string") continue;
-    if (!state.entries || !state.entries.has(finding.subject)) continue;
-    const key = acceptanceEntryKey(state.entries.get(finding.subject));
-    seen.set(finding.subject, key);
-    if (state.unproven?.get(finding.subject) === key) repeated.add(finding);
-  }
-  state.unproven = seen;
-  return { repeated, subjects: new Set(seen.keys()) };
-}
-
 function acceptanceEntryKey(entry) {
   const ordered = (value) => {
     if (Array.isArray(value)) return value.map(ordered);
