@@ -33,6 +33,25 @@ static FILE_SYNTAX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^([^\s:][^:]*): line \d+: syntax error").expect("static pattern")
 });
 
+/// The syntax-error line of the shell running a `-c` command, or of text it
+/// evaluated (`sh: -c: line N:`, `sh: eval: line N:`, dash's `sh: N:`), as a
+/// Windows `sh.exe` by path prints it too.
+static COMMAND_SYNTAX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(?:.*[/\\])?(?:sh|bash|dash|ksh)(?:\.exe)?: (?:-c: )?(?:eval: )?(?:line )?\d+: (?:eval: )?(?:syntax error|Syntax error)",
+    )
+    .expect("static pattern")
+});
+
+/// Issue 554: the first line of `stderr` in which the shell running a `-c`
+/// command (a stage `verify_command`) reported a syntax error of its own.
+pub(crate) fn command_syntax_error(stderr: &str) -> Option<&str> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| COMMAND_SYNTAX.is_match(line))
+}
+
 /// The diagnostic of the executing shell's parse-only mode (`-n`) for
 /// `command`, as that shell printed it; `None` when it parses the text. The
 /// shell is the one every check runs under, with no environment: parsing

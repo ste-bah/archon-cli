@@ -158,3 +158,40 @@ fn exit_zero_with_a_syntax_error_the_check_did_not_cause_stays_a_pass_554() {
         assert!(!ran.reports_shell_syntax_error(), "{stderr}");
     }
 }
+
+/// Issue 554, stage `verify_command` (`sh -c`): a text its shell rejects is
+/// never run and never accepted, whatever exit status a run would give.
+#[cfg(unix)]
+#[test]
+fn a_verify_command_its_shell_cannot_parse_is_rejected_with_the_shell_error_554() {
+    let root = tempfile::tempdir().unwrap();
+    let error = crate::acceptance::run_verify_command(root.path(), Some(TRAP_THEN_PARSE_ERROR))
+        .expect_err("a text the shell rejects is no pass");
+    assert!(
+        error.contains("does not parse") && error.contains("yntax error"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_verify_command_that_exits_0_after_its_own_shell_syntax_error_is_no_pass_554() {
+    let report = |stderr: &str| crate::acceptance::VerifyCommandReport {
+        command: "./verify".into(),
+        exit_code: Some(0),
+        stdout: String::new(),
+        stderr: stderr.into(),
+        environment_note: None,
+        parse_error: None,
+    };
+    for stderr in [
+        "sh: -c: line 6: syntax error near unexpected token `fi'\n",
+        "/usr/bin/sh: eval: line 0: syntax error near unexpected token `then'\n",
+        "sh: 1: Syntax error: \"fi\" unexpected\n",
+    ] {
+        let found = report(stderr);
+        assert!(!found.success(), "{stderr}");
+        assert!(found.failure_reason().contains("syntax error"), "{stderr}");
+    }
+    assert!(report("./tool: line 3: syntax error in its own input\n").success());
+    assert!(report("").success());
+}
