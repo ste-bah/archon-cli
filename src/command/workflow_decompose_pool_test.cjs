@@ -3,7 +3,8 @@
 // clock units, and the clock jumps to the next timer once every microtask has
 // drained. Proves: makespan follows the pool / prefix-window schedule, the
 // in-flight count never exceeds the cap, an acceptance prompt depends on its
-// index alone, and a failure stops new starts but lets started calls settle.
+// index alone, and an outage or a thrown stop stops new starts but lets started
+// calls settle, while a refusal never stops a sibling (Issue 553).
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -138,17 +139,20 @@ async function failureStopsNewStartsAndSettlesSiblings() {
  assert.deepEqual(outcomes[0],outcomes[1],'the next round does not depend on the earlier timing');
 }
 
-// Issue 357 round 4 (F3): a shape refusal of one entry keeps the sibling that
-// passed beside it, whichever finished first. Several failures in one round
-// return the lowest index's failure and retry each of them.
-async function refusalKeepsPassedSiblings() {
+// Issue 357 round 4 (F3) / Issue 553: a shape refusal of one entry keeps the
+// sibling that passed beside it, whichever finished first, and never stops a
+// sibling from starting: every pending entry of the round runs. Several
+// refusals in one round are each returned and retried, and only they are.
+async function refusalNeverStopsSiblings() {
  const criteria={A:'a',B:'b',C:'c',D:'d'};
  const refusal=id=>[{text:`acceptance entry '${id}' was refused: criterion is missing`,
   deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',subject:'entries/0/criterion',location:'shape',stage:'shape'}}];
- for(const [cap,refused,starts,kept,retry] of [
-  [2,['A'],['A','B'],['B'],['A','C','D']],
-  [3,['A','C'],['A','B','C'],['B'],['A','C','D']],
-  [3,['B'],['A','B','C','D'],['A','C','D'],['B']],
+ for(const [cap,refused,kept,retry] of [
+  [2,['A'],['B','C','D'],['A']],
+  [3,['A','C'],['B','D'],['A','C']],
+  [3,['B'],['A','C','D'],['B']],
+  [1,['A'],['B','C','D'],['A']],
+  [2,['A','B','C','D'],[],['A','B','C','D']],
  ]) {
   const prompts=[];
   for(const bTakes of [5,40]) {
@@ -158,9 +162,13 @@ async function refusalKeepsPassedSiblings() {
    const out=await r.run;
    assert.equal(out.status,'failed');
    assert.deepEqual(Array.from(out.refusals,r=>r.entryId),refused,'every refusal of the round is returned, in input order');
-   assert.deepEqual(r.starts.map(s=>s.id),starts,`cap ${cap} starts`);
+   assert.deepEqual(r.starts.map(s=>s.id),['A','B','C','D'],`cap ${cap} refused ${refused}: every pending entry starts`);
+   assert(r.peak()<=cap,'in-flight count never exceeds cap');
+   assert.equal(r.active(),0,'started siblings settled before return');
    assert.deepEqual(Array.from(state.entries.keys()),kept,`cap ${cap} refused ${refused} keeps passed siblings`);
-   assert.deepEqual(Array.from(state.retryIds),retry,`cap ${cap} refused ${refused} retries only the unfinished`);
+   assert.deepEqual(Array.from(state.retryIds),retry,`cap ${cap} refused ${refused} retries only the refused`);
+   assert.deepEqual(Array.from(state.roundPassed),kept,'the round reports every passed entry');
+   assert.equal(state.roundOutage,false,'a refusal is no outage');
    const next=acceptanceRun(2,cap,criteria,state,{durations:{A:20,B:bTakes,C:10,D:5}});
    assert.equal((await next.run).status,'accepted');
    assert.deepEqual(Object.keys(next.prompts).sort(),retry,'a passed sibling is not re-authored');
@@ -168,6 +176,46 @@ async function refusalKeepsPassedSiblings() {
   }
   assert.deepEqual(prompts[0],prompts[1],'retained siblings do not depend on timing');
  }
+}
+
+// Issue 553: an entry's prefix is the entries that SUCCEEDED among settled
+// 0..i-cap; a refused one is left out, never awaited differently. Two seeds
+// finish in different orders and give the same prompts, refusals included,
+// so a resume replays identical requests.
+async function refusedPrefixIsLeftOutInAnyOrder() {
+ const criteria=Object.fromEntries(Array.from({length:9},(_,i)=>[`AC-${i+1}`,`criterion ${i+1}`]));
+ const ids=Object.keys(criteria).sort(); const cap=3; const refused=['AC-1','AC-5'];
+ const refusal=id=>[{text:`acceptance entry '${id}' was refused: criterion is missing`,
+  deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',subject:'entries/0/criterion',location:'shape',stage:'shape'}}];
+ const validator=(serialized)=>JSON.stringify(refused.includes(JSON.parse(serialized).id)?refusal(JSON.parse(serialized).id):[]);
+ const runs=[];
+ for(const seed of [7,1234]) {
+  const state={entries:new Map(),retryIds:null};
+  const r=acceptanceRun(seed,cap,criteria,state,{validator}); const out=await r.run;
+  assert.equal(out.status,'failed');
+  assert.deepEqual(r.starts.map(s=>s.id),ids,'every entry starts, in order');
+  assert(r.peak()<=cap,'in-flight count never exceeds cap');
+  ids.forEach((id,i)=>{
+   const expected=ids.slice(0,Math.max(0,i-cap+1)).filter(prior=>!refused.includes(prior));
+   assert.deepEqual(priorIds(r.prompts[id]),expected,`prior of ${id} omits refused entries`);
+  });
+  assert.deepEqual(Array.from(state.retryIds),refused);
+  runs.push(r);
+ }
+ assert.notDeepEqual(runs[0].ends.map(e=>e.id),runs[1].ends.map(e=>e.id),'the seeds must finish in different orders');
+ const strip=prompts=>Object.fromEntries(Object.entries(prompts).map(([k,v])=>[k,v.replace(/"seed":\d+/g,'').replace(/[0-9a-f]{64}/g,'<sha256>')]));
+ assert.deepEqual(strip(runs[0].prompts),strip(runs[1].prompts),'prompts identical across completion orders');
+}
+
+// Issue 553: a stop thrown after a refusal still stops new starts.
+async function rejectionStillStopsAfterARefusal() {
+ const criteria={A:'a',B:'b',C:'c',D:'d',E:'e'};
+ const validator=(serialized)=>JSON.stringify(JSON.parse(serialized).id==='A'
+  ?[{text:"acceptance entry 'A' was refused: criterion is missing",deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',subject:'entries/0/criterion',location:'shape',stage:'shape'}}]:[]);
+ const r=acceptanceRun(1,2,criteria,null,{durations:{A:5,B:50,C:10,D:5,E:5},throws:'C',validator});
+ await assert.rejects(r.run,/stopped at C/);
+ assert.deepEqual(r.starts.map(s=>s.id),['A','B','C'],'C starts after the refusal of A; nothing starts after C throws');
+ assert.equal(r.active(),0,'no sibling abandoned mid-call');
 }
 
 // A stop raised inside one call (a pause or cancel the host observed) is
@@ -193,5 +241,6 @@ async function rejectionOutranksAFailedReply() {
 }
 
 makespanFollowsTheSchedule().then(slowFirstCallBlocksOnlyCallsBehindIt).then(promptsDependOnIndexAlone)
- .then(failureStopsNewStartsAndSettlesSiblings).then(refusalKeepsPassedSiblings).then(rejectionSettlesSiblingsBeforeRaising).then(rejectionOutranksAFailedReply)
+ .then(failureStopsNewStartsAndSettlesSiblings).then(refusalNeverStopsSiblings).then(refusedPrefixIsLeftOutInAnyOrder)
+ .then(rejectionStillStopsAfterARefusal).then(rejectionSettlesSiblingsBeforeRaising).then(rejectionOutranksAFailedReply)
  .then(()=>console.log('bounded author pool passed')).catch(e=>{console.error(e);process.exitCode=1});

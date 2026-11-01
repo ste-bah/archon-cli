@@ -289,7 +289,7 @@ async fn fixed_acceptance_window_holds_only_calls_behind_a_slow_entry() {
 /// that dispatches after a stop, because the host polls run control before
 /// every dispatch (`workflow_live_v2_script_host_exec.rs`) and refuses such a
 /// call before anything observable happens. The script's own stop rules (no
-/// launch after a failure or a thrown stop, queued launches skipped, started
+/// launch after an outage or a thrown stop, queued launches skipped, started
 /// calls settled, a stop outranking a failed reply) are proved by
 /// `workflow_decompose_pool_test.cjs` and `workflow_decompose_cost_test.cjs`,
 /// which are the authority for them.
