@@ -134,10 +134,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 494: acceptance author prompts carry the named-files block before the reply format.
     // Windows CPU fix re-pin only: native byte counting and incremental JSON sizing preserve bytes.
     // Issue 551: repair prompts list the latest open findings as current; earlier ones only as do-not-regress history.
+    // Issue 552: entry prompts list only their findings open in the latest gate result; a judge failure reaches only the entries it names, each with its own known finding.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "14ce0a0080a87a1d8f5abac5945ed8fc75af60573c756e0fb566d21df12bab93"
+        "6ce20affcda891b16cf7fef6d8e7db2809acfe12245030c0db9ae68b74b915d1"
     );
 }
