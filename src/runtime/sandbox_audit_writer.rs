@@ -339,7 +339,7 @@ mod tests {
         ))
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn worker_panic_reports_exact_unresolved_accounting() {
         let (writer, mut receiver) = SandboxAuditWriter::bounded_for_test(2);
         writer.enqueue(session("panic"));
@@ -366,7 +366,7 @@ mod tests {
         assert!(message.contains("unresolved=1"), "{error:#}");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn persistence_failure_reports_exact_terminal_accounting() {
         let db = crate::command::test_support::registered_learning_test_db(
             "test-sandbox-audit-writer-failure",
@@ -393,7 +393,7 @@ mod tests {
         assert!(message.contains("unresolved=0"), "{error:#}");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn stalled_drain_returns_unresolved_count() {
         let (writer, _receiver) = SandboxAuditWriter::bounded_for_test(1);
         writer.enqueue(session("stalled"));
@@ -408,7 +408,7 @@ mod tests {
         assert!(error.to_string().contains("unresolved=1"), "{error:#}");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn shutdown_persists_accepted_evidence_before_returning() {
         let db = crate::command::test_support::registered_learning_test_db(
             "test-sandbox-audit-writer-shutdown",
@@ -465,3 +465,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "sandbox_audit_writer_scheduling_tests.rs"]
+mod scheduling_tests;
