@@ -34,6 +34,10 @@ fn probe() {
     }
 }
 
+#[expect(
+    clippy::zombie_processes,
+    reason = "the stopped child must outlive this parent so tool cleanup can prove descendant reaping"
+)]
 fn stopped_child() {
     let delayed = std::env::var_os("PROCESS_PROBE_DELAYED_FILE").unwrap();
     let pid_file = std::env::var_os("PROCESS_PROBE_PID_FILE").unwrap();

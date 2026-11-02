@@ -36,8 +36,11 @@ pub fn denied_paths(home: &Path) -> Vec<PathBuf> {
         ".aws",
         ".azure",
         ".local/share/keyrings",
+        #[cfg(target_os = "macos")]
         "Library/Keychains",
+        #[cfg(windows)]
         "AppData/Roaming/Microsoft/Credentials",
+        #[cfg(windows)]
         "AppData/Local/Microsoft/Credentials",
         ".kube",
         ".config/gcloud",
@@ -59,7 +62,9 @@ pub fn denied_paths(home: &Path) -> Vec<PathBuf> {
         ".zlogin",
         ".config/fish/config.fish",
         ".config/powershell",
+        #[cfg(windows)]
         "Documents/PowerShell",
+        #[cfg(windows)]
         "Documents/WindowsPowerShell",
     ]
     .iter()
@@ -88,6 +93,13 @@ pub fn operator_paths() -> Vec<PathBuf> {
 
 /// Add to an existing macOS sandbox profile, after all allow rules.
 pub fn macos_rules(paths: &[PathBuf]) -> String {
+    let grant_root = crate::credential_paths::operator_grant_root();
+    #[cfg(target_os = "macos")]
+    prepare_macos_ancestors(&crate::credential_paths::home(), paths, &grant_root);
+    macos_rules_for(paths, &grant_root)
+}
+
+fn macos_rules_for(paths: &[PathBuf], grant_root: &Path) -> String {
     let mut rules = String::new();
     let mut ancestors = std::collections::HashSet::new();
     for path in paths {
@@ -96,10 +108,54 @@ pub fn macos_rules(paths: &[PathBuf]) -> String {
             deny_macos_writes(&mut rules, &path, &mut ancestors);
         }
     }
-    for path in path_spellings(&crate::credential_paths::operator_grant_root()) {
+    for path in path_spellings(grant_root) {
         deny_macos_writes(&mut rules, &path, &mut ancestors);
     }
     rules
+}
+
+// Materialize only ancestors, never credential files or protected subtrees.
+// Use individual mkdir calls so an absent HOME (or anything above it) is not created.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn prepare_macos_ancestors(home: &Path, paths: &[PathBuf], grant_root: &Path) {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let mut directories = std::collections::BTreeSet::new();
+    for path in paths.iter().map(PathBuf::as_path).chain([grant_root]) {
+        directories.extend(
+            path.ancestors()
+                .skip(1)
+                .filter(|ancestor| !home.starts_with(ancestor))
+                .map(Path::to_path_buf),
+        );
+    }
+    directories.insert(grant_root.to_path_buf());
+    let mut failure = None;
+    for directory in directories {
+        let result = match std::fs::DirBuilder::new().mode(0o700).create(&directory) {
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if directory.is_dir() {
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            }
+            result => result,
+        };
+        let result = result.and_then(|()| {
+            if directory == grant_root {
+                std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(error) = result {
+            failure.get_or_insert((directory, error));
+        }
+    }
+    if let Some((path, error)) = failure {
+        tracing::warn!(path = %path.display(), %error,
+            "could not prepare read-boundary ancestors; full write denials retained");
+    }
 }
 
 fn quoted(path: &Path) -> String {
@@ -117,14 +173,15 @@ fn deny_macos_writes(
     ancestors: &mut std::collections::HashSet<PathBuf>,
 ) {
     rules.push_str(&format!("(deny file-write* (subpath {}))\n", quoted(path)));
+    // The host creates missing ancestors before profile construction; only an
+    // existing directory is safe from rename-into forgery.
     // Unlink covers ancestor removal and rename; the protected subtree keeps
     // its full write denial without preventing initial ancestor creation.
     // Preserve ancestor metadata and prevent symlink redirection while allowing mkdir.
     for ancestor in path.ancestors().skip(1) {
         if ancestors.insert(ancestor.to_path_buf()) {
             rules.push_str(&format!(
-                "(deny file-write-unlink file-write-mode file-write-owner file-write-flags file-write-setugid file-write-xattr (literal {0}))\n\
-                 (deny file-write-create (require-all (literal {0}) (vnode-type SYMLINK)))\n",
+                "(deny file-write* (literal {}))\n",
                 quoted(ancestor)
             ));
         }

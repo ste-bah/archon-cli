@@ -53,6 +53,8 @@ pub(crate) const ENGINE_LOADED: &[&str] = &[
     "logs",
     "lsp-config.json",
     "models",
+    // `bundle_operator_env` reads host grant authority here; no landing may write it.
+    "operator-env-grants",
     "output-styles",
     "pipelines",
     "plugin-artifacts",

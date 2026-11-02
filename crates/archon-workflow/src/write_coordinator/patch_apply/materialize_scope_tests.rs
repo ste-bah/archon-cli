@@ -97,6 +97,7 @@ fn every_archon_directory_the_runtime_names_is_classified() {
     }
     for loaded in [
         "agents",
+        "operator-env-grants",
         "plugins",
         "skills",
         "hooks.toml",
@@ -132,6 +133,7 @@ fn only_a_namespace_no_engine_code_loads_from_is_a_destination() {
         ".archon/agents/verifier.md",
         ".archon/Agents/verifier.md",
         ".archon/plugins/p/plugin.json",
+        ".archon/operator-env-grants/grant",
         ".archon/skills/s/SKILL.md",
         ".archon/workflows/run/state.json",
         ".archon/hooks.toml",
