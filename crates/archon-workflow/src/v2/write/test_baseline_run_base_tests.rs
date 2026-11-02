@@ -11,6 +11,20 @@ use crate::v2::{WorkflowV2AgentAdapter, WorkflowV2CallExecution, WorkflowV2Resul
 use crate::write_coordinator::worktree_isolation::run_git;
 use crate::{WorkflowError, WorkflowResult, WorkflowV2Result};
 
+/// Keep the runner's existing deadline on virtual time while exercising real
+/// shell/worktree I/O. A blocking task inhibits Tokio's automatic advancement;
+/// otherwise an idle runtime could skip straight to the 20s timeout while the
+/// OS child is still starting. Dropping the sender releases the blocking task,
+/// including on assertion failure. Deadline behavior has separate runner tests.
+pub(crate) fn freeze_runner_clock() -> std::sync::mpsc::Sender<()> {
+    tokio::time::pause();
+    let (release, wait) = std::sync::mpsc::channel();
+    tokio::task::spawn_blocking(move || {
+        let _ = wait.recv();
+    });
+    release
+}
+
 /// A host whose runner environment puts a fake `cargo` first on `PATH`.
 pub(crate) struct FakeCargo {
     pub(crate) bin: PathBuf,
@@ -224,6 +238,7 @@ fn the_run_base_is_the_head_the_runs_first_repository_binding_recorded() {
 
 #[tokio::test]
 async fn both_trees_are_run_once_the_base_in_a_removed_worktree_and_cached() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let temp = tempfile::tempdir().unwrap();
     let (repo, base, host, counter) = world(temp.path());
     let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
@@ -276,6 +291,7 @@ async fn both_trees_are_run_once_the_base_in_a_removed_worktree_and_cached() {
 
 #[tokio::test]
 async fn no_verdict_without_a_test_summary_a_readable_base_or_the_judged_head() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let temp = tempfile::tempdir().unwrap();
     let (repo, base, host, counter) = world(temp.path());
     let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));

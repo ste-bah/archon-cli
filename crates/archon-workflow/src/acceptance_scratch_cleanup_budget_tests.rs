@@ -5,7 +5,7 @@
 // refused before a command runs, so the whole target is Unix-only.
 #![cfg(unix)]
 
-#[path = "support/native_fixture.rs"]
+#[path = "../tests/support/native_fixture.rs"]
 mod support;
 
 #[test]
@@ -16,6 +16,7 @@ fn cleanup_budget_child() {
     let mut roots =
         archon_workflow::acceptance_scratch::ScratchRoots::prepare(&policy, &commit).unwrap();
     let owned = roots.root().to_path_buf();
+    let _clock = super::test_clock::delay_next_removal(std::time::Duration::from_secs(6));
     roots
         .cleanup()
         .expect("cleanup must use the host profile budget, not five seconds");
@@ -33,14 +34,16 @@ fn cleanup_uses_profile_budget_for_slow_owned_tree_removal() {
     assert!(real_git.status.success());
     let real_git = String::from_utf8(real_git.stdout).unwrap();
     let wrapper = tools.path().join("git");
-    std::fs::write(&wrapper, format!(
-        "#!/bin/sh\ncase \" $* \" in *' worktree remove '*) /bin/sleep 6;; esac\nexec '{}' \"$@\"\n", real_git.trim()
-    )).unwrap();
+    std::fs::write(
+        &wrapper,
+        format!("#!/bin/sh\nexec '{}' \"$@\"\n", real_git.trim()),
+    )
+    .unwrap();
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "cleanup_budget_child",
+            "acceptance_scratch::control::cleanup_budget_tests::cleanup_budget_child",
             "--ignored",
             "--nocapture",
         ])

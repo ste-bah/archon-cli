@@ -185,6 +185,7 @@ fn data(outcome: &WorkflowV2BranchOutcome) -> Value {
 
 #[tokio::test]
 async fn an_unowned_test_failing_the_same_way_since_the_run_began_refuses_nothing() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let (outcome, runs) = judge(verdict(&[OLD], vec![]), &["src/mine.rs"], &[]).await;
     assert_eq!(outcome.status, WorkflowV2Status::Accepted, "{outcome:?}");
     assert_eq!(runs, 2, "the host ran the verifier's runner on both trees");
@@ -208,6 +209,7 @@ async fn an_unowned_test_failing_the_same_way_since_the_run_began_refuses_nothin
 
 #[tokio::test]
 async fn the_old_code_refused_the_same_verdict() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let mut outcomes = vec![verdict(&[OLD], vec![])];
     enforce_baseline_tests(
         &mut outcomes,
@@ -218,6 +220,7 @@ async fn the_old_code_refused_the_same_verdict() {
 
 #[tokio::test]
 async fn the_same_test_inside_the_rounds_scope_still_refuses() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     for (own, granted) in [
         (&["src/mine.rs", "src/shared_tests.rs"][..], &[][..]),
         (&["src/mine.rs"][..], &["src/shared_tests.rs"][..]),
@@ -230,6 +233,7 @@ async fn the_same_test_inside_the_rounds_scope_still_refuses() {
 
 #[tokio::test]
 async fn a_test_green_at_the_run_base_is_a_new_failure_and_still_refuses() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let w = setup(true);
     commit_files(&w.repo, &["src/new_red"], "a task breaks another test");
     let outcome = judge_in(&w, verdict(&[OLD, NEW], vec![]), &["src/mine.rs"], &[]).await;
@@ -241,6 +245,7 @@ async fn a_test_green_at_the_run_base_is_a_new_failure_and_still_refuses() {
 
 #[tokio::test]
 async fn a_test_failing_differently_than_at_the_run_base_still_refuses() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let w = setup(true);
     commit_files(
         &w.repo,
@@ -254,6 +259,7 @@ async fn a_test_failing_differently_than_at_the_run_base_still_refuses() {
 
 #[tokio::test]
 async fn a_typed_only_claim_the_hosts_run_does_not_bear_out_still_refuses() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     // The verifier names a test the host's judged run never saw fail: it
     // stays red on the report and refuses.
     let (outcome, _) = judge(
@@ -274,6 +280,7 @@ async fn a_typed_only_claim_the_hosts_run_does_not_bear_out_still_refuses() {
 
 #[tokio::test]
 async fn a_bare_pre_existing_claim_on_any_other_command_is_still_rejected() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let w = setup(true);
     let tool = command("mcp__server__get_errors()", true);
     let outcome = judge_in(&w, verdict(&[OLD], vec![tool]), &["src/mine.rs"], &[]).await;
@@ -291,6 +298,7 @@ async fn a_bare_pre_existing_claim_on_any_other_command_is_still_rejected() {
 
 #[tokio::test]
 async fn nothing_is_excused_without_a_recorded_run_base() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let w = setup(false);
     let outcome = judge_in(&w, verdict(&[OLD], vec![]), &["src/mine.rs"], &[]).await;
     assert!(refused(&outcome));
@@ -311,6 +319,7 @@ fn red_test_names_are_grouped_under_their_module_so_none_is_cut() {
 
 #[tokio::test]
 async fn nothing_is_run_when_no_red_test_or_runner_claim_needs_the_host() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let w = setup(true);
     let mut quiet = verdict(&[], vec![]);
     quiet.result.as_mut().unwrap().commands_run[0].pre_existing = false;
@@ -321,6 +330,7 @@ async fn nothing_is_run_when_no_red_test_or_runner_claim_needs_the_host() {
 
 #[tokio::test]
 async fn a_failure_no_test_id_names_leaves_the_runner_claim_unproven() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     // A doc test fails beside OLD: the harness counts two failures, the
     // host can name one, so nothing proves the runner's claim.
     let w = setup(true);
@@ -335,6 +345,7 @@ async fn a_failure_no_test_id_names_leaves_the_runner_claim_unproven() {
 
 #[tokio::test]
 async fn a_test_failing_differently_under_another_command_is_not_excused_by_the_first() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let w = setup(true);
     commit_files(
         &w.repo,
@@ -349,6 +360,7 @@ async fn a_test_failing_differently_under_another_command_is_not_excused_by_the_
 
 #[tokio::test]
 async fn a_failure_named_by_a_command_the_host_does_not_run_is_not_excused() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     // The same id red in a piped run the host never runs: that run may be
     // failing it another way, so the host's own two runs excuse nothing.
     let w = setup(true);

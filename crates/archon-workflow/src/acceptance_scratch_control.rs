@@ -21,6 +21,20 @@ use std::{
     time::{Duration, Instant},
 };
 
+// Only tests can replace the progress clock. Child CPU sampling and reaping
+// continue to use the OS clock; production always reads std::time::Instant.
+#[cfg(test)]
+#[path = "acceptance_scratch_control_clock_tests.rs"]
+pub(super) mod test_clock;
+
+fn now() -> Instant {
+    #[cfg(test)]
+    if let Some(now) = test_clock::now() {
+        return now;
+    }
+    Instant::now()
+}
+
 /// The marker of a no-progress stall of an observation phase or of a git
 /// child: an operational, resumable pause (the host may be at fault).
 pub const OBSERVATION_STALLED: &str = "native observation made no progress";
@@ -38,7 +52,7 @@ impl Control {
     pub fn new(seconds: u64, cancel: Arc<AtomicBool>) -> Self {
         Self {
             window: Duration::from_secs(seconds.clamp(1, 86400)),
-            last: Arc::new(Mutex::new(Instant::now())),
+            last: Arc::new(Mutex::new(now())),
             cancel,
         }
     }
@@ -57,14 +71,14 @@ impl Control {
         Ok(())
     }
     fn progress(&self) {
-        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = now();
         pulse(self.window);
     }
     /// A wait point: no renewal; a stall once the window passes unrenewed.
     pub fn poll(&self, waiting_on: &str) -> WorkflowResult<()> {
         self.cancelled()?;
         let last = *self.last.lock().unwrap_or_else(|e| e.into_inner());
-        if last.elapsed() >= self.window {
+        if now().saturating_duration_since(last) >= self.window {
             return Err(stalled(self.window, waiting_on));
         }
         Ok(())
@@ -185,7 +199,7 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
     let phase = active();
     let watch = Control {
         window: (phase.as_ref()).map_or(Duration::from_secs(DEFAULT_WINDOW_SECS), |c| c.window),
-        last: Arc::new(Mutex::new(Instant::now())),
+        last: Arc::new(Mutex::new(now())),
         cancel: (phase.as_ref()).map_or_else(Default::default, |c| c.cancel.clone()),
     };
     let (mut seen, mut sampled) = (0, Instant::now());
@@ -206,6 +220,8 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
                 phase.progress();
             }
         }
+        #[cfg(test)]
+        test_clock::after_spawn(args);
         if let Err(e) = watch.poll("a git child with no output or CPU activity") {
             break Err(e);
         }
@@ -353,3 +369,7 @@ impl GitTree {
 #[cfg(test)]
 #[path = "acceptance_scratch_control_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "acceptance_scratch_cleanup_budget_tests.rs"]
+mod cleanup_budget_tests;
