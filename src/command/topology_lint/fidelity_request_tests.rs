@@ -139,10 +139,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 555: an entry prompt carries only its own findings and phase-level ones (labelled, earlier ones as do-not-regress); the shared part names none; entry rung 3 names its own findings; earlier-findings sections are bounded with the full list in a context file.
     // Issue 559: the acceptance reply format shows covers; a re-authored entry prompt states its current covers as a JSON array; a reply with no covers key keeps them.
     // Issue 561: the best attempt's failing set becomes the subset baseline; a strict shrink of the previous attempt's set is neutral; new workflow_decompose_v1_failing_set.js.
+    // Issue 559 guard: the entry author reads the current entry with state.entries?.get.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "f4678e0e462b14b61888bb368baf9a3b5f6483d70f66c5e6f3384182101c48dd"
+        "4a0cab3c19ae180e5022c05a1e5dcbdd2ac6d6bbb8b36d9f4f5087965953217d"
     );
 }
