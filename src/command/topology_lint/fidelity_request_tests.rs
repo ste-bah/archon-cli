@@ -138,10 +138,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 554: an operational finding on an authored entry never stops the phase; it is re-frozen, then routed to its author; skeletonPolicy and unprovenAuthored moved into the frozen module.
     // Issue 555: an entry prompt carries only its own findings and phase-level ones (labelled, earlier ones as do-not-regress); the shared part names none; entry rung 3 names its own findings; earlier-findings sections are bounded with the full list in a context file.
     // Issue 559: the acceptance reply format shows covers; a re-authored entry prompt states its current covers as a JSON array; a reply with no covers key keeps them.
+    // Issue 561: the best attempt's failing set becomes the subset baseline; a strict shrink of the previous attempt's set is neutral; new workflow_decompose_v1_failing_set.js.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519"
+        "f4678e0e462b14b61888bb368baf9a3b5f6483d70f66c5e6f3384182101c48dd"
     );
 }
