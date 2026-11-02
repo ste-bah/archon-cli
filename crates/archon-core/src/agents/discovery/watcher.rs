@@ -7,7 +7,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use crate::bounded_watcher::BoundedWatcher;
+use notify::RecursiveMode;
 use tracing::{debug, warn};
 
 use super::local::LocalDiscoverySource;
@@ -17,7 +18,7 @@ const DEBOUNCE_MS: u64 = 100;
 
 /// File system watcher that triggers catalog reloads on file changes.
 pub struct FsWatcher {
-    _watcher: RecommendedWatcher,
+    _watcher: BoundedWatcher,
     _worker: std::thread::JoinHandle<()>,
 }
 
@@ -31,15 +32,17 @@ impl FsWatcher {
     ) -> Result<Self, notify::Error> {
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let mut watcher =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
+        let mut watcher = BoundedWatcher::new(
+            move |res: notify::Result<notify::Event>| match res {
                 Ok(event) => {
                     let _ = tx.send(event);
                 }
                 Err(e) => {
                     warn!("watcher error: {e}");
                 }
-            })?;
+            },
+            notify::Config::default(),
+        )?;
 
         watcher.watch(root, RecursiveMode::Recursive)?;
 

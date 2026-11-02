@@ -15,7 +15,9 @@ fn test_add_watch_paths() {
     std::fs::write(dir.join("test.txt"), "hello").unwrap();
 
     let manager = FileWatchManager::new(100);
-    manager.add_watch_paths(vec![dir.join("test.txt").to_string_lossy().to_string()]);
+    manager
+        .add_watch_paths(vec![dir.join("test.txt").to_string_lossy().to_string()])
+        .expect("register test.txt watch");
     assert_eq!(manager.watched_count(), 1);
 }
 
@@ -30,7 +32,9 @@ fn test_max_paths_enforced() {
     }
 
     let manager = FileWatchManager::new(100);
-    manager.add_watch_paths(paths);
+    manager
+        .add_watch_paths(paths)
+        .expect("register up to 100 watches");
     assert_eq!(manager.watched_count(), 100, "max 100 paths enforced");
 }
 
@@ -41,7 +45,9 @@ fn test_clear_removes_all() {
     std::fs::write(&p, "data").unwrap();
 
     let manager = FileWatchManager::new(100);
-    manager.add_watch_paths(vec![p.to_string_lossy().to_string()]);
+    manager
+        .add_watch_paths(vec![p.to_string_lossy().to_string()])
+        .expect("register watch.txt watch");
     assert_eq!(manager.watched_count(), 1);
 
     manager.clear();
@@ -56,7 +62,9 @@ fn test_duplicate_paths_not_double_counted() {
     let path_str = p.to_string_lossy().to_string();
 
     let manager = FileWatchManager::new(100);
-    manager.add_watch_paths(vec![path_str.clone(), path_str]);
+    manager
+        .add_watch_paths(vec![path_str.clone(), path_str])
+        .expect("register duplicate watch once");
     assert_eq!(
         manager.watched_count(),
         1,
@@ -67,9 +75,29 @@ fn test_duplicate_paths_not_double_counted() {
 #[test]
 fn test_nonexistent_path_skipped() {
     let manager = FileWatchManager::new(100);
-    manager.add_watch_paths(vec!["/nonexistent/path/file.txt".to_string()]);
+    let _ = manager.add_watch_paths(vec!["/nonexistent/path/file.txt".to_string()]);
     // Should not panic, may or may not add (depends on notify implementation)
     // Just verify no panic
+}
+
+#[test]
+fn test_refused_path_does_not_block_later_paths() {
+    let tmp = TempDir::new().unwrap();
+    let p = tmp.path().join("later.txt");
+    std::fs::write(&p, "data").unwrap();
+
+    let manager = FileWatchManager::new(100);
+    manager
+        .add_watch_paths(vec![
+            tmp.path().join("missing.txt").to_string_lossy().to_string(),
+            p.to_string_lossy().to_string(),
+        ])
+        .expect("a refused path is skipped, not fatal");
+    assert_eq!(
+        manager.watched_count(),
+        1,
+        "the existing path after a refused one must be watched"
+    );
 }
 
 #[test]

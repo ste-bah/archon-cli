@@ -9,7 +9,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use notify::event::{EventKind, ModifyKind};
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Event, RecursiveMode};
+
+use crate::bounded_watcher::BoundedWatcher;
 
 use crate::config::{ArchonConfig, ConfigError};
 use crate::config_diff::diff_configs;
@@ -24,7 +26,7 @@ use crate::config_diff::diff_configs;
 /// backend for the current OS (inotify on Linux, FSEvents on macOS, etc.).
 pub struct ConfigWatcher {
     /// Kept alive to maintain the watch; dropped when `ConfigWatcher` is dropped.
-    _watcher: RecommendedWatcher,
+    _watcher: BoundedWatcher,
     /// Receives filesystem events from the watcher.
     rx: mpsc::Receiver<notify::Result<Event>>,
 }
@@ -37,7 +39,7 @@ impl ConfigWatcher {
     pub fn start(paths: &[PathBuf]) -> Result<Self, ConfigError> {
         let (tx, rx) = mpsc::channel();
 
-        let mut watcher = RecommendedWatcher::new(
+        let mut watcher = BoundedWatcher::new(
             tx,
             notify::Config::default().with_poll_interval(Duration::from_secs(2)),
         )

@@ -13,6 +13,7 @@ pub use archon_tools::background_agents::{
     AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, BackgroundAgentRegistry,
     BackgroundAgentRegistryApi, RegistryError, RegistryEvent,
 };
+mod bounded_watcher;
 pub mod cli_flags;
 pub mod commands;
 pub mod config;

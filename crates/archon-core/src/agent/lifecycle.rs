@@ -217,7 +217,9 @@ impl Agent {
 
     /// Add dynamic watch paths from hooks (REQ-HOOK-017).
     pub fn add_watch_paths(&self, paths: Vec<String>) {
-        self.file_watch_manager.add_watch_paths(paths);
+        if let Err(error) = self.file_watch_manager.add_watch_paths(paths) {
+            tracing::warn!(%error, "failed to register hook watch paths");
+        }
     }
 
     /// Clear all dynamic watch paths (called on SessionEnd).
