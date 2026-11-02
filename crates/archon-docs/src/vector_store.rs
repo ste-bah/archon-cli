@@ -447,4 +447,7 @@ mod persisted_hnsw_tests;
 mod tests;
 
 #[cfg(test)]
+mod top_k_tests;
+
+#[cfg(test)]
 mod rocksdb_compatibility_tests;

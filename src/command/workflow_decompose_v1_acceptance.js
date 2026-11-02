@@ -20,7 +20,7 @@ function acceptanceAuthorPrompt() {
     groundingRules(),
     "Use the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.",
     checkPathRule(),
-    "A named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.",
+    "A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.",
     "Reply format: see the end of this task.",
     ENTRY_SHAPES,
     "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",

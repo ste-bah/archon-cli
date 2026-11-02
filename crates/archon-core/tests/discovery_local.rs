@@ -4,6 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
+#[path = "support/watcher_wait.rs"]
+mod watcher_wait;
+use watcher_wait::wait_until;
+
 use archon_core::agents::catalog::DiscoveryCatalog;
 use archon_core::agents::discovery::local::LocalDiscoverySource;
 use archon_core::agents::discovery::watcher::FsWatcher;
@@ -160,8 +164,18 @@ fn watcher_detects_new_file() {
     // Write a new agent file
     write_valid_agent(&dir, "new-agent");
 
-    // Wait for debounce + rescan (250ms should be enough for 100ms debounce)
-    std::thread::sleep(std::time::Duration::from_millis(350));
+    // Wait for debounce + rescan by observing completed rescans.
+    // The process-level test watchdog contains a missing event only as a last resort;
+    // this local deadline now reports the specific missing observation first.
+    wait_until(
+        "new-agent.json was not discovered in the catalog after a watcher rescan",
+        || {
+            catalog.len() >= 2
+                && catalog
+                    .get(&("new-agent".into(), "1.0.0".parse().unwrap()))
+                    .is_some()
+        },
+    );
 
     // Catalog should now have 2 entries
     assert!(

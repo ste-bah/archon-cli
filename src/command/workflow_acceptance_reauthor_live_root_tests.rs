@@ -59,7 +59,7 @@ async fn the_reauthor_prompt_states_where_a_check_runs_and_the_relative_path_rul
         "select the root that contains the existing implementation or test dependency",
         "the check must still fail on its own assertion",
         "The move-aside proof applies only to inputs the host actually moves",
-        "A named deciding input that is absent is behaviour not implemented yet and is judged by the general rules",
+        "A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules",
         "a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content",
     ] {
         assert!(
@@ -67,6 +67,15 @@ async fn the_reauthor_prompt_states_where_a_check_runs_and_the_relative_path_rul
             "missing baseline-pass guidance {fact:?}: {prompt}"
         );
     }
+    // Issue 366: one rule for both authors. The decomposition entry author
+    // states the same absent-path rule as the re-author.
+    let decomposition = include_str!("workflow_decompose_v1_acceptance.js");
+    let rule = "A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.";
+    assert!(prompt.contains(rule), "{prompt}");
+    assert!(
+        decomposition.contains(rule),
+        "decomposition author rule differs"
+    );
 }
 
 /// Issue 366 N3: the live-root reply never reaches the judge. Every check

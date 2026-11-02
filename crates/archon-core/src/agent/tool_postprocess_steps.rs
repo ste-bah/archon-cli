@@ -346,7 +346,9 @@ impl Agent {
             return;
         }
         tracing::info!("Hook returned {} watch paths", watch_paths.len());
-        self.file_watch_manager.add_watch_paths(watch_paths);
+        if let Err(error) = self.file_watch_manager.add_watch_paths(watch_paths) {
+            tracing::warn!(%error, "failed to register hook watch paths");
+        }
     }
 
     async fn fire_worktree_hooks(&mut self, pre: &PreflightResult) {

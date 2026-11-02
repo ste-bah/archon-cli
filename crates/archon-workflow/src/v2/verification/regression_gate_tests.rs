@@ -24,6 +24,7 @@ fn universe(commands: &[&str]) -> WorkflowV2TaskUniverse {
 
 #[tokio::test]
 async fn a_test_failing_only_at_the_tip_blocks_and_one_failing_at_both_is_listed() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let dir = tempfile::tempdir().unwrap();
     let (repo, base, cargo, counter) = world(dir.path());
     commit_files(&repo, &["src/new_red"], "a landing breaks a test");
@@ -76,6 +77,7 @@ async fn a_test_failing_only_at_the_tip_blocks_and_one_failing_at_both_is_listed
 
 #[tokio::test]
 async fn nothing_new_red_blocks_nothing_and_pre_existing_failures_are_listed() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let dir = tempfile::tempdir().unwrap();
     let (repo, base, cargo, _) = world(dir.path());
     let store = WorkflowV2ResultStore::new(dir.path().join("run/v2"));
@@ -100,6 +102,7 @@ async fn nothing_new_red_blocks_nothing_and_pre_existing_failures_are_listed() {
 
 #[tokio::test]
 async fn a_tip_with_no_verdict_blocks_and_an_unrecorded_base_fails_closed() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let dir = tempfile::tempdir().unwrap();
     let (repo, base, cargo, _) = world(dir.path());
     commit_files(&repo, &["src/no_summary"], "a landing breaks the build");
@@ -150,6 +153,7 @@ fn the_declared_commands_are_every_deduplicated_one() {
 
 #[tokio::test]
 async fn a_command_with_no_verdict_at_either_tree_blocks() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let dir = tempfile::tempdir().unwrap();
     let (repo, base, cargo, _) = world(dir.path());
     // Red at the base too: the harness never reports.
@@ -206,6 +210,7 @@ async fn a_command_with_no_verdict_at_either_tree_blocks() {
 /// blocks. Batch O: one the tip no longer reports is gone, and blocks too.
 #[tokio::test]
 async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     use crate::v2::write::test_baseline_run_base::{HostRunVerdict, Tree, cache, tests::head};
     let dir = tempfile::tempdir().unwrap();
     let (repo, base, cargo, counter) = world(dir.path());
@@ -261,6 +266,7 @@ async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
 /// test the base passed as gone; the old check skipped such a tip.
 #[tokio::test]
 async fn every_test_gone_from_a_tip_that_passes_nothing_blocks() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     use crate::v2::write::test_baseline_run_base::{HostRunVerdict, Tree, cache, tests::head};
     let dir = tempfile::tempdir().unwrap();
     let (repo, base, cargo, _) = world(dir.path());
@@ -304,6 +310,7 @@ async fn every_test_gone_from_a_tip_that_passes_nothing_blocks() {
 /// one no task declares, so the residual gate can judge the gap there.
 #[tokio::test]
 async fn a_high_gaps_owed_command_runs_at_the_tip() {
+    let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     use crate::v2::WorkflowV2Status;
     use crate::v2::write::test_baseline_run_base::{Tree, cached, tests::head};
     use crate::{

@@ -39,7 +39,7 @@ fn named_file_judge_rules_cover_asserting_regression_guards() {
         "A duplicated or relocated implementation may be an in-bounds counterexample when the delivered path uses it while the named test checks an old copy;",
         "A guard names its deciding file by its literal path relative to the check's working directory.",
         "Refute a check if an in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file.",
-        "These regression-guard rules apply to a check whose deciding test or implementation exists; a named deciding input marked absent is behaviour not implemented yet and is judged by the general rules; a deciding input marked not_supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.",
+        "These regression-guard rules apply to a check whose deciding test or implementation exists. A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules. A deciding input marked not_supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.",
     ] {
         assert!(prompt.contains(rule), "missing: {rule}\n{prompt}");
     }
@@ -279,7 +279,7 @@ fn untracked_repository_file_is_not_named_to_the_judge() {
     .unwrap();
     assert_eq!(
         prompt_json(&prompt)[0]["named_files"],
-        serde_json::json!([{ "path": "missing/check.test", "status": "absent" }])
+        serde_json::json!([{ "path": "missing/check.test", "status": "absent", "detail": "The host found no file at this path. It may be a pattern or text argument, not a file; this alone is not evidence that behaviour is missing." }])
     );
 }
 

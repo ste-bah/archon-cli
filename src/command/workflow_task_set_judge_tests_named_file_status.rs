@@ -22,7 +22,7 @@ fn named_inputs_report_absence_exclusion_and_shared_budget_status() {
     let missing_prompt = batched_judge_prompt_with_roots(&missing, &roots).unwrap();
     assert_eq!(
         prompt_json(&missing_prompt)[0]["named_files"],
-        serde_json::json!([{ "path": "missing/check.test", "status": "absent" }])
+        serde_json::json!([{ "path": "missing/check.test", "status": "absent", "detail": "The host found no file at this path. It may be a pattern or text argument, not a file; this alone is not evidence that behaviour is missing." }])
     );
 
     let excluded = command_check("operation credentials/input", TrustedCwd::ProjectRoot);
@@ -169,4 +169,67 @@ fn a_named_input_past_the_byte_limit_is_not_supplied_without_partial_content() {
     let files = named_files_with_budget(&small.acceptance[0], &roots, &mut remaining);
     assert_eq!(files[0]["status"], "supplied");
     assert_eq!(files[0]["content"], "small content");
+}
+
+#[test]
+fn a_slash_pattern_is_not_evidence_of_missing_behaviour_in_either_prompt_view() {
+    assert_missing_path_is_uncertain("grep -q 'ABC-1/2 budget' src/x.rs", "ABC-1/2");
+}
+
+#[test]
+fn a_real_missing_file_remains_absent_without_guessing_argument_intent() {
+    assert_missing_path_is_uncertain("test -f src/new_module.rs", "src/new_module.rs");
+}
+
+fn assert_missing_path_is_uncertain(command: &str, missing: &str) {
+    let root = tempfile::tempdir().unwrap();
+    git(root.path(), &["init", "-q"]);
+    git(root.path(), &["config", "user.email", "judge@example.test"]);
+    git(root.path(), &["config", "user.name", "Judge Test"]);
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    std::fs::write(root.path().join("src/x.rs"), "existing assertion").unwrap();
+    git(root.path(), &["add", "."]);
+    git(root.path(), &["commit", "-qm", "initial"]);
+    for cwd in [TrustedCwd::ProjectRoot, TrustedCwd::RepoRoot] {
+        let mut roots = roots_at(root.path());
+        roots.repository = Some(root.path().to_path_buf());
+        let subject = command_check(command, cwd);
+        let prompt = batched_judge_prompt_with_roots(&subject, &roots).unwrap();
+        let checks = prompt_json(&prompt);
+        let judge_files = checks[0]["named_files"].as_array().unwrap();
+        let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+        let author_files = named_files_for_reauthor_cached(
+            &subject.acceptance[0],
+            &each::with_commit(&roots),
+            &[],
+            &mut remaining,
+            &mut ReauthorPrefetchCache::default(),
+        );
+        assert_eq!(judge_files, &author_files);
+        let file = judge_files
+            .iter()
+            .find(|file| file["path"] == missing)
+            .unwrap();
+        assert_eq!(file["status"], "absent");
+        let detail = file["detail"]
+            .as_str()
+            .expect("absence must explain uncertainty");
+        assert!(
+            detail.contains("may be a pattern or text argument"),
+            "{file}"
+        );
+        assert!(
+            detail.contains("not evidence that behaviour is missing"),
+            "{file}"
+        );
+        assert!(prompt.contains("Only when the path is established to name a deciding file"));
+        if command.contains("src/x.rs") {
+            let existing = judge_files
+                .iter()
+                .find(|file| file["path"] == "src/x.rs")
+                .unwrap();
+            assert_eq!(existing["status"], "supplied");
+            assert_eq!(existing["content"], "existing assertion");
+        }
+    }
 }

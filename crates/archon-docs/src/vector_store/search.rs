@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use anyhow::Result;
 
 use super::{
-    DocVectorStore, HnswSearchHit, build_hnsw_index, generation, persisted_hnsw, validate_provider,
+    DocVectorStore, HnswSearchHit, build_hnsw_index, generation, persisted_hnsw,
+    search_hnsw_neighbours, validate_provider,
 };
 
 impl DocVectorStore {
@@ -75,15 +76,13 @@ impl DocVectorStore {
         let chunk_ids: HashMap<_, _> = super::hnsw_ids::chunk_ids_by_hnsw_id(&records);
         let mut hnsw = build_hnsw_index(&records, query.len())?;
         hnsw.set_searching_mode(true);
-        let hits = hnsw.search(query, top_k, ef.max(top_k));
+        let hits = search_hnsw_neighbours(&hnsw, query, top_k, ef);
         Ok(hits
             .into_iter()
-            .filter_map(|hit| {
-                super::chunk_id_for_hnsw_id(&chunk_ids, hit.get_origin_id()).map(|chunk_id| {
-                    HnswSearchHit {
-                        chunk_id: chunk_id.clone(),
-                        distance: hit.get_distance(),
-                    }
+            .filter_map(|(hnsw_id, distance)| {
+                super::chunk_id_for_hnsw_id(&chunk_ids, hnsw_id).map(|chunk_id| HnswSearchHit {
+                    chunk_id: chunk_id.clone(),
+                    distance,
                 })
             })
             .collect())
