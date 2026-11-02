@@ -48,7 +48,7 @@ impl WorkflowReadGuard {
                 let requested_path = state
                     .ranges
                     .get(key)
-                    .map(|(_, _, requested_path)| requested_path.as_str())
+                    .map(|(_, _, requested_path, _)| requested_path.as_str())
                     .unwrap_or_else(|| key.path.to_str().unwrap_or("<path>"));
                 format!(
                     "{} offset={} limit={}",
@@ -91,15 +91,21 @@ impl WorkflowReadGuard {
         );
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !force
-            && let Some((old_hash, call, _)) = state.ranges.get(&key)
+            && let Some((old_hash, call, _, refunded)) = state.ranges.get_mut(&key)
             && *old_hash == hash
         {
             if !fits {
                 return Ok(None);
             }
             let call = *call;
+            let first_repeat = !std::mem::replace(refunded, true);
             let budget_note = if self.read_only() {
-                read_only::refund_inspection(&mut state, &agent_key);
+                // Issue-556: only the first repeat since the range was last
+                // read in full is free; later repeats keep their charge, so a
+                // cycle over any number of ranges reaches the hard ceiling.
+                if first_repeat {
+                    read_only::refund_inspection(&mut state, &agent_key);
+                }
                 ""
             } else {
                 " This still consumes the read-before-write budget."
@@ -131,7 +137,7 @@ impl WorkflowReadGuard {
         }
         state
             .ranges
-            .insert(key, (hash, call, requested_path.to_owned()));
+            .insert(key, (hash, call, requested_path.to_owned(), false));
         Ok(None)
     }
 

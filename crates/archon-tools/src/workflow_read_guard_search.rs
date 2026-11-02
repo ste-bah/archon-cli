@@ -44,12 +44,17 @@ impl WorkflowReadGuard {
         };
         let hash = format!("{:x}", Sha256::digest(output.as_bytes()));
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((old_hash, call)) = state.searches.get(&key)
-            && old_hash == &hash
+        if let Some((old_hash, call, refunded)) = state.searches.get_mut(&key)
+            && *old_hash == hash
         {
             let call = *call;
+            let first_repeat = !std::mem::replace(refunded, true);
             let budget_note = if self.read_only() {
-                read_only::refund_inspection(&mut state, &session);
+                // Issue-556: as for Read, only the first repeat since the
+                // search last returned its full result is free.
+                if first_repeat {
+                    read_only::refund_inspection(&mut state, &session);
+                }
                 ""
             } else {
                 " This still consumes the read-before-write budget."
@@ -63,7 +68,7 @@ impl WorkflowReadGuard {
             .agent_state
             .get(&session)
             .map_or(state.calls, |agent| agent.calls);
-        state.searches.insert(key, (hash, call));
+        state.searches.insert(key, (hash, call, false));
         None
     }
 }
