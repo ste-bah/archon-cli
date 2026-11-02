@@ -139,7 +139,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     + earlierFindingsText("Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:", state.earlierGateFindings?.get(id))
     + (state.phaseFindings?.length > 0 ? `\nPhase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- ${state.phaseFindings.join("\n- ")}` : "")
     + earlierFindingsText("Earlier gate results raised these phase-level findings; the latest gate result no longer reports them. Do not regress them:", state.earlierPhaseFindings)
-    + superseded + currentCoversText(state.entries.get(id));
+    + superseded + currentCoversText(state.entries?.get(id));
   // Issue 288: the catalogue and the completed entries are bounded records
   // that name host-written files (workflow_decompose_v1_context.js). A file
   // the host could not write is an outage of this entry's call, made before
@@ -209,7 +209,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     if (blockRefusal) return malformedAcceptanceFailure(id, blockRefusal, "command-block-refusal");
     if (entry && entry.id === id) {
       setHostOwnedFields(entry, criteria);
-      inheritAcceptanceCovers(entry, state.entries.get(id));
+      inheritAcceptanceCovers(entry, state.entries?.get(id));
       let serialized;
       // QuickJS bounds JSON.stringify by its stack as it bounds JSON.parse: a
       // reply nested past it is no entry, like one that does not parse.
