@@ -218,7 +218,9 @@ async fn a_subcommand_neither_site_nor_host_has_goes_to_its_author() {
     let result = result.expect("the author's replacement publishes");
     assert_eq!(prompts.len(), 2, "{prompts:#?}");
     assert!(
-        prompts[1].contains("program unavailable at the probe site")
+        // Issue 557: the probe path now sends it to the author with its own
+        // text, before the re-author fallback would.
+        prompts[1].contains("Neither the check's site nor the host has that program")
             && prompts[1].contains("nor on the host's"),
         "{}",
         prompts[1]
