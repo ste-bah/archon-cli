@@ -7,11 +7,8 @@ pub fn passed(result: &CheckResult) -> bool {
     if let Some(classification) = &result.classification {
         return result.operational_error.is_none() && classification.passed;
     }
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    result.operational_error.is_none()
-        && result.exit_code == Some(0)
-        && !archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr)
+    // Issue 544: the capture's classification of the raw streams.
+    result.operational_error.is_none() && result.exit_code == Some(0) && !result.reports_zero_work()
 }
 
 /// Author findings, keyed by id, for every check of `refs` that cannot be
@@ -50,7 +47,11 @@ pub async fn cannot_fail_findings(
         }
         if let Some(reason) = run.unrun(id) {
             // What the check's own run caused is its author's (D1).
-            let fault = check_fault::of_result(result.map(|result| &result.result));
+            let fault = if result.is_none() {
+                check_fault::Fault::Availability(run.fault_class)
+            } else {
+                check_fault::of_result(result.map(|result| &result.result))
+            };
             let unproven = format!(
                 "it could not be run on the pre-implementation tree at {short} ({reason}), so it is not proven able to fail"
             );
@@ -164,7 +165,11 @@ pub async fn newly_passing_findings(
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
         if let Some(reason) = run.unrun(id) {
-            let fault = check_fault::of_result(result.map(|result| &result.result));
+            let fault = if result.is_none() {
+                check_fault::Fault::Availability(run.fault_class)
+            } else {
+                check_fault::of_result(result.map(|result| &result.result))
+            };
             let unproven = format!(
                 "the repair could not be run on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
             );

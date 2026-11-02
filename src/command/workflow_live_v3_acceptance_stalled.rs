@@ -146,6 +146,7 @@ pub(super) async fn apply(
             id.clone(),
             CheckEvidence {
                 result: CheckResult {
+                    verdict_streams: Default::default(),
                     acceptance_id: id.clone(),
                     exit_code: check.exit_code,
                     quota_walk_count: 0,
@@ -242,8 +243,12 @@ pub(super) async fn apply(
             [implemented, base].into_iter().all(|result| {
                 result.is_some_and(|result| {
                     result.exit_code.is_some_and(|code| code != 0)
-                        && String::from_utf8_lossy(&result.stdout).trim().is_empty()
-                        && String::from_utf8_lossy(&result.stderr).trim().is_empty()
+                        && String::from_utf8_lossy(result.verdict_stdout())
+                            .trim()
+                            .is_empty()
+                        && String::from_utf8_lossy(result.verdict_stderr())
+                            .trim()
+                            .is_empty()
                 })
             })
         })

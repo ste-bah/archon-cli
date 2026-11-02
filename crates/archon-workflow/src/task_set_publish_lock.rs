@@ -97,7 +97,7 @@ pub fn register_settle(settle: Settle) {
 }
 
 /// Why a holder of a set's publish lock could not go ahead (Issue 338).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum PublishLockError {
     /// A publish of the set left a journal that no settlement could settle:
     /// the evidence and the operator's remedy. Nothing was read or written;
@@ -107,6 +107,12 @@ pub enum PublishLockError {
     /// Anything else: the lock could not be taken, or what it guards could
     /// not be read or written.
     Failed(String),
+    /// The native acquisition cause, before any journal or guarded bytes changed.
+    Io {
+        operation: &'static str,
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 impl PublishLockError {
@@ -114,7 +120,7 @@ impl PublishLockError {
     pub fn unsettled(&self) -> Option<&str> {
         match self {
             Self::Unsettled(evidence) => Some(evidence),
-            Self::Failed(_) => None,
+            Self::Failed(_) | Self::Io { .. } => None,
         }
     }
 }
@@ -123,11 +129,23 @@ impl std::fmt::Display for PublishLockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unsettled(text) | Self::Failed(text) => f.write_str(text),
+            Self::Io {
+                operation,
+                path,
+                source,
+            } => write!(f, "{operation} publish lock {}: {source}", path.display()),
         }
     }
 }
 
-impl std::error::Error for PublishLockError {}
+impl std::error::Error for PublishLockError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 impl From<String> for PublishLockError {
     fn from(error: String) -> Self {
@@ -193,17 +211,17 @@ impl PublishLockFile {
     /// Block until the lock at `path` is free of every other holder, then
     /// hold it exclusive: a holder keeps it only for one publish transaction
     /// or one read. The parent directory must exist.
-    pub fn acquire(path: &Path) -> Result<Self, String> {
+    pub fn acquire(path: &Path) -> Result<Self, PublishLockError> {
         Self::acquire_as(path, LockMode::Exclusive)
     }
 
     /// Block until no writer holds the lock at `path`, then hold it shared
     /// beside any other reader. The parent directory must exist.
-    pub fn acquire_shared(path: &Path) -> Result<Self, String> {
+    pub fn acquire_shared(path: &Path) -> Result<Self, PublishLockError> {
         Self::acquire_as(path, LockMode::Shared)
     }
 
-    fn acquire_as(path: &Path, mode: LockMode) -> Result<Self, String> {
+    fn acquire_as(path: &Path, mode: LockMode) -> Result<Self, PublishLockError> {
         let file = Self::open_unheld(path, || {
             std::fs::OpenOptions::new()
                 .create(true)
@@ -217,22 +235,39 @@ impl PublishLockFile {
     fn open_unheld(
         path: &Path,
         open: impl FnOnce() -> std::io::Result<std::fs::File>,
-    ) -> Result<std::fs::File, String> {
+    ) -> Result<std::fs::File, PublishLockError> {
         if held_here(path) {
-            return Err(format!(
+            return Err(PublishLockError::Failed(format!(
                 "this thread already holds the publish lock {}; a nested acquisition would wait on itself",
                 path.display()
-            ));
+            )));
         }
-        open().map_err(|error| format!("opening publish lock {}: {error}", path.display()))
+        let open = || {
+            #[cfg(test)]
+            tests::opening_fault()?;
+            open()
+        };
+        open().map_err(|source| PublishLockError::Io {
+            operation: "opening",
+            path: path.to_owned(),
+            source,
+        })
     }
 
-    fn lock_opened(file: std::fs::File, path: &Path, mode: LockMode) -> Result<Self, String> {
+    fn lock_opened(
+        file: std::fs::File,
+        path: &Path,
+        mode: LockMode,
+    ) -> Result<Self, PublishLockError> {
         match mode {
             LockMode::Shared => file.lock_shared(),
             LockMode::Exclusive => file.lock(),
         }
-        .map_err(|error| format!("locking publish lock {}: {error}", path.display()))?;
+        .map_err(|source| PublishLockError::Io {
+            operation: "locking",
+            path: path.to_owned(),
+            source,
+        })?;
         let lock = Self {
             file,
             key: key(path),
@@ -319,7 +354,7 @@ impl PublishLockFile {
         Self::acquire_shared_settled(
             pin_path,
             || settle_left(pin_path, Some(tasks_root)),
-            PublishLockError::Failed,
+            |error| error,
             |exhausted| PublishLockError::Unsettled(unsettled_evidence(pin_path, &exhausted)),
         )
         .map(Some)
@@ -328,7 +363,7 @@ impl PublishLockFile {
     /// Hold the publish lock of the set pinned at `pin_path` shared for one
     /// read. `None` when this thread already holds it (the read runs under
     /// its holder) or when no set of this project was ever frozen.
-    pub fn hold_shared(pin_path: &Path) -> Result<Option<Self>, String> {
+    pub fn hold_shared(pin_path: &Path) -> Result<Option<Self>, PublishLockError> {
         let path = lock_path(pin_path);
         if held_here(&path) || !path.parent().is_some_and(Path::is_dir) {
             return Ok(None);
@@ -341,7 +376,7 @@ impl PublishLockFile {
     /// journal is settled. `None` when this thread already holds the lock, or
     /// when no publish has created its file yet; a first publish that creates
     /// it while this read runs is not waited for.
-    pub fn hold_shared_existing(pin_path: &Path) -> Result<Option<Self>, String> {
+    pub fn hold_shared_existing(pin_path: &Path) -> Result<Option<Self>, PublishLockError> {
         let path = lock_path(pin_path);
         if held_here(&path) {
             return Ok(None);
@@ -349,7 +384,11 @@ impl PublishLockFile {
         match std::fs::OpenOptions::new().read(true).open(&path) {
             Ok(file) => Self::lock_opened(file, &path, LockMode::Shared).map(Some),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(format!("opening publish lock {}: {error}", path.display())),
+            Err(source) => Err(PublishLockError::Io {
+                operation: "opening",
+                path,
+                source,
+            }),
         }
     }
 
@@ -364,7 +403,7 @@ impl PublishLockFile {
     pub fn acquire_shared_settled<E>(
         pin_path: &Path,
         mut settle: impl FnMut() -> Result<(), E>,
-        error: impl Fn(String) -> E,
+        error: impl Fn(PublishLockError) -> E,
         exhausted: impl FnOnce(String) -> E,
     ) -> Result<Self, E> {
         let path = lock_path(pin_path);

@@ -282,12 +282,14 @@ impl std::error::Error for CriticUnusable {}
 
 /// `evaluation` with the audit's operational `error`, after any it holds.
 pub(super) fn operational(evaluation: GateEvaluation, error: &anyhow::Error) -> GateEvaluation {
-    let text = format!("obligation fidelity audit failed operationally: {error:#}");
-    match evaluation.operational_error() {
-        Some(existing) => {
-            let text = format!("{existing}; {text}");
-            evaluation.with_operational_error(text)
-        }
+    let existing = evaluation.operational_error().map(str::to_owned);
+    let text = format!(
+        "obligation fidelity audit failed operationally: {}",
+        crate::command::workflow_host_fault::diagnostic(error)
+    );
+    let evaluation = evaluation.with_host_error(error);
+    match existing {
+        Some(existing) => evaluation.with_operational_error(format!("{existing}; {text}")),
         None => tag_unusable_critic_reply(evaluation.with_operational_error(text), error),
     }
 }
@@ -410,7 +412,11 @@ async fn complete_reply(
             .await
         {
             Ok(Ok(outcome)) => outcome,
-            Ok(Err(archon_workflow::WorkflowError::ControlPaused(_))) => return Ok(None),
+            Ok(Err(archon_workflow::WorkflowError::Port(ref source)))
+                if source.is::<archon_llm::transport_idle::TransportIdle>() =>
+            {
+                return Ok(None);
+            }
             Ok(Err(error)) => return Err(anyhow::Error::new(error)),
             Err(_) => return Ok(None),
         };

@@ -204,9 +204,11 @@ fn message_has_tool_result(message: &serde_json::Value) -> bool {
 pub fn classify_stream_error(
     provider: &str,
     error_type: &str,
-    message: &str,
+    message: impl Into<archon_llm::provider::DiagnosticMessage>,
 ) -> archon_llm::provider::LlmError {
-    let message = archon_observability::redaction::redact_text(message);
+    // 86fbab995 redacted the event text first; every classifier saw that.
+    let message =
+        archon_llm::provider::DiagnosticMessage::redacted_at_source(message.into().as_str());
     archon_llm::context_window::classify_context_window_error(
         None,
         Some(error_type),
@@ -222,7 +224,7 @@ pub fn classify_stream_error(
         {
             classified
         } else {
-            archon_llm::provider::LlmError::Http(format!("{error_type}: {message}"))
+            archon_llm::provider::LlmError::Http(message.with_prefix(&format!("{error_type}: ")))
         }
     })
 }

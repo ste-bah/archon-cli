@@ -324,10 +324,14 @@ async fn repeated_mistyped_author_context_path_is_withdrawn_without_window_renew
 /// Expected before running: a correctly named, existing 64-hex context file
 /// is read repeatedly by the same real Read path with its content intact;
 /// the unchanged-result response follows the first returned content, so the
-/// pre-existing repeat-stall policy still withdraws after 17 reads and
-/// preserves the turn-1 window anchor.
+/// pre-existing repeat-stall policy still withdraws after 17 reads, and
+/// preserves the turn-1 window anchor. Issue-556 replaces
+/// `repeated_correct_author_context_path_keeps_content_and_charges_only_initial_information`:
+/// only the first cached repeat is free, so the initial content plus the 15
+/// later repeats are charged (16 of 120); the repeat stall, not the ceiling,
+/// still withdraws inspection.
 #[tokio::test]
-async fn repeated_correct_author_context_path_keeps_its_read_result_before_withdrawal() {
+async fn repeated_correct_author_context_path_keeps_content_and_charges_repeats_after_the_first() {
     let dir = tempfile::tempdir().unwrap();
     let context = dir.path().join("author-context");
     std::fs::create_dir_all(&context).unwrap();
@@ -374,8 +378,9 @@ async fn repeated_correct_author_context_path_keeps_its_read_result_before_withd
     // One explicit final mock read exercises the later unchanged-result text.
     assert_eq!(
         guard.read_only_inspections_for(&runner.tool_context),
-        ROUNDS_TO_STOP as u32 + 1
+        ROUNDS_TO_STOP as u32
     );
+    assert!(!guard.read_only_ceiling_reached_for(&runner.tool_context));
     assert!(guard.inspection_withdrawn_for(&runner.tool_context));
     let after = format!(
         "reads={} ceiling={} withdrawn={} result=unchanged after initial content last_progress={:?}",

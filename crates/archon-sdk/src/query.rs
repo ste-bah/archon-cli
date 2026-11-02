@@ -195,7 +195,10 @@ async fn run_query(
             }
             StreamEvent::MessageStop => break,
             StreamEvent::Error { message, .. } => {
-                return Err(SdkError::Api { status: 0, message });
+                return Err(SdkError::Api {
+                    status: 0,
+                    message: message.to_string(),
+                });
             }
             _ => {}
         }

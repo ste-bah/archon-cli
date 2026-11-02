@@ -81,7 +81,12 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   does not change.
 /// - G3 review, version 2 unchanged: a first cut reply that is not JSON is
 ///   asked again; how a whole reply is obtained changes, not what it means.
-pub const SOURCES_DIGEST: &str = "ac3f9d2a278cc52bd4a4b69fa875a3a52fe1450940f5b1c9e3c33bf58d0a9cad";
+/// - Host availability recovery preserves provider fault types and diagnostics;
+///   questions, reply checks and stored verdict meaning are unchanged.
+// Typed idle recovery preserves the question, reply validation and stored verdict meaning.
+// #497 W3 merge with main and review fixes, version unchanged: the gate evaluation travels with an incomplete lint and host faults keep their typed cause; no question, verdict assertion or acceptance rule changed.
+// #527 re-pin only: the sources-digest env name became a named constant; no verdict meaning changed.
+pub const SOURCES_DIGEST: &str = "88fdc3f6a259b7cc4b4c2a7d0151315f8ec057d5c3268155485b95b4a42708a7";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

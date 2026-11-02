@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::{AnthropicClient, MessageRequest};
+pub use crate::provider_diagnostic::DiagnosticMessage;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
@@ -17,22 +18,22 @@ use crate::types::Usage;
 // Error type
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, serde::Serialize)]
 #[non_exhaustive]
 pub enum LlmError {
     #[error("HTTP error: {0}")]
-    Http(String),
+    Http(DiagnosticMessage),
 
     #[error("authentication error: {0}")]
-    Auth(String),
+    Auth(DiagnosticMessage),
 
     /// `from_provider` is true when the provider named the wait (a
     /// Retry-After header or body field); false when `retry_after_secs` is
     /// this client's default wait because the provider named none.
     #[error("rate limited: retry after {retry_after_secs}s{}", crate::provider_fault::diagnostic_suffix(.message))]
     RateLimited {
-        /// Original provider diagnostic, empty when no diagnostic was supplied.
-        message: String,
+        /// Redacted provider diagnostic, empty when no diagnostic was supplied.
+        message: DiagnosticMessage,
         retry_after_secs: u64,
         from_provider: bool,
         /// Optional provider wait hint for the pipeline's outer retry loop.
@@ -44,14 +45,17 @@ pub enum LlmError {
     /// `invalid_request_error`, `permission_error` or `not_found_error`).
     /// Sending it again cannot help. No HTTP status is known.
     #[error("provider rejected the request ({error_type}): {message}")]
-    Rejected { error_type: String, message: String },
+    Rejected {
+        error_type: DiagnosticMessage,
+        message: DiagnosticMessage,
+    },
 
     /// Provider status and optional Retry-After metadata; this error keeps the
     /// same retry semantics and display text regardless of those fields.
     #[error("server overloaded{}", crate::provider_fault::diagnostic_suffix(.message))]
     Overloaded {
-        /// Original provider diagnostic, independent of retry metadata.
-        message: String,
+        /// Redacted provider diagnostic, independent of retry metadata.
+        message: DiagnosticMessage,
         status: Option<u16>,
         retry_after_secs: Option<u64>,
     },
@@ -59,41 +63,45 @@ pub enum LlmError {
     #[error("server error ({status}): {message}")]
     Server {
         status: u16,
-        message: String,
+        message: DiagnosticMessage,
         /// Provider wait hint consumed by the pipeline outer retry loop only.
         /// RetryProvider and inline retry policy continue to use `status`.
         pipeline_retry_after_secs: Option<u64>,
     },
 
     #[error("serialization error: {0}")]
-    Serialize(String),
+    Serialize(DiagnosticMessage),
 
     #[error("feature not supported: {0}")]
-    Unsupported(String),
+    Unsupported(DiagnosticMessage),
 
     #[error("provider '{name}' not found — available: [{available}]")]
-    ProviderNotFound { name: String, available: String },
+    ProviderNotFound {
+        name: DiagnosticMessage,
+        available: DiagnosticMessage,
+    },
 
     #[error("quota exceeded: {0}")]
-    QuotaExceeded(String),
+    QuotaExceeded(DiagnosticMessage),
 
     #[error("request aborted")]
     Aborted,
 
     #[error("context window exceeded: {provider_message}")]
     ContextWindowExceeded {
-        provider_message: String,
-        provider: Option<String>,
-        model: Option<String>,
+        provider_message: DiagnosticMessage,
+        provider: Option<DiagnosticMessage>,
+        model: Option<DiagnosticMessage>,
     },
 
     #[error("HTTP error: {0}")]
-    Transport(String),
+    Transport(DiagnosticMessage),
 }
 
 // Request-pressure and context-window classification of an error.
 #[path = "provider_error_class.rs"]
 mod error_class;
+pub use error_class::ShownTest;
 
 // ---------------------------------------------------------------------------
 // Feature flags
@@ -461,8 +469,8 @@ impl ProviderRegistry {
             let mut sorted = available;
             sorted.sort_unstable();
             LlmError::ProviderNotFound {
-                name: config_provider.to_string(),
-                available: sorted.join(", "),
+                name: config_provider.to_string().into(),
+                available: sorted.join(", ").into(),
             }
         })
     }

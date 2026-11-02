@@ -82,12 +82,19 @@ fn frozen_verification_authenticated_authored_defects_name_the_owner_and_artifac
     let finding = &found["policy_findings"][0];
     assert_eq!(finding["remediation_scope"], "skeleton", "{found}");
     assert_eq!(finding["subject"], "TASK-X-010", "{found}");
-    assert_eq!(finding["source_path"], path.to_str().unwrap(), "{found}");
+    assert_eq!(
+        finding["source_path"],
+        path.to_string_lossy().replace('\\', "/"),
+        "{found}"
+    );
     let fault = serde_json::json!({"gateEnvelope": found}).to_string();
     let driver = crate::command::workflow_decompose::repair_tests::frozen_routing::script(
         "skeleton", &fault,
     )
-    .replace("/p/tasks", fixture.tasks.to_str().unwrap());
+    .replace(
+        "/p/tasks",
+        &fixture.tasks.to_string_lossy().replace('\\', "/"),
+    );
     let out = crate::command::workflow_decompose::repair_tests::set_gate_skeleton::run(&driver);
     assert!(out.get("error").is_none(), "{out}");
     assert_eq!(
@@ -177,7 +184,7 @@ fn frozen_verification_refuted_acceptance_names_the_check_and_retains_its_contra
     );
     assert_eq!(
         found["policy_findings"][0]["source_path"],
-        path.to_str().unwrap()
+        path.to_string_lossy().replace('\\', "/")
     );
     let retained: serde_json::Value =
         serde_json::from_str(found["report"].as_str().unwrap()).unwrap();

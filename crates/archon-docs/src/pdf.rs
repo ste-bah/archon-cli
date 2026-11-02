@@ -1,3 +1,6 @@
+/// Environment override for the pdfinfo executable path.
+pub const PDFINFO_BIN_ENV: &str = "ARCHON_PDFINFO_BIN";
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -149,7 +152,7 @@ fn pdf_has_text_layer(path: &Path) -> bool {
 }
 
 pub(crate) fn pdf_page_count(path: &Path) -> Option<u32> {
-    let output = spawn::command(command_path("pdfinfo", "ARCHON_PDFINFO_BIN"))
+    let output = spawn::command(command_path("pdfinfo", PDFINFO_BIN_ENV))
         .arg(path)
         .output()
         .ok()?;

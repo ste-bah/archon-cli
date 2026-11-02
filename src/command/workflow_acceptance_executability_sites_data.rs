@@ -11,21 +11,23 @@ pub(super) fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<Strin
         Site::Scratch(binding) => {
             let policy = &binding.policy;
             let project = archon_shell::paths::canonicalize(&policy.project).map_err(|error| {
-                Unrun(format!(
+                let text = format!(
                     "could not canonicalize project root {}: {error}",
                     policy.project.display()
-                ))
+                );
+                Unrun::error(error.into(), text)
             })?;
             let task_root =
                 archon_shell::paths::canonicalize(&policy.task_root).map_err(|error| {
-                    Unrun(format!(
+                    let text = format!(
                         "could not canonicalize task root {}: {error}",
                         policy.task_root.display()
-                    ))
+                    );
+                    Unrun::error(error.into(), text)
                 })?;
-            let task_root_relative = task_root
-                .strip_prefix(&project)
-                .map_err(|_| Unrun("scratch task root is outside the project root".into()))?;
+            let task_root_relative = task_root.strip_prefix(&project).map_err(|_| {
+                Unrun::unknown("scratch task root is outside the project root".into())
+            })?;
             let mut state = policy
                 .project_inputs
                 .iter()

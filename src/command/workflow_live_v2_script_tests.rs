@@ -89,3 +89,6 @@ fn authored_entry(mut entry: serde_json::Value) -> String {
         serde_json::json!({"kind":"command","command":"test -f output","cwd":"project_root"});
     entry.to_string()
 }
+
+#[path = "workflow_live_v2_script_host_heal_tests.rs"]
+mod workflow_live_v2_script_host_heal_tests;

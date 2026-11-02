@@ -4,6 +4,7 @@ use super::*;
 
 fn runs(stderr: &str) -> BaselineRuns {
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-X-001".into(),
         exit_code: Some(1),

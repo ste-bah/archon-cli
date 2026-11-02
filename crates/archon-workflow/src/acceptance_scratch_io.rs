@@ -289,31 +289,11 @@ pub(super) fn readonly(path: &Path) -> WorkflowResult<()> {
     permissions.set_readonly(true);
     std::fs::set_permissions(path, permissions).map_err(|e| WorkflowError::io(path, e))
 }
-pub(super) fn remove_owned_tree(path: &Path) -> WorkflowResult<()> {
-    control::check()?;
-    let meta = match path.symlink_metadata() {
-        Ok(m) => m,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(WorkflowError::io(path, e)),
-    };
-    if meta.is_dir() && !meta.file_type().is_symlink() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                path,
-                std::fs::Permissions::from_mode(meta.permissions().mode() | 0o700),
-            )
-            .map_err(|e| WorkflowError::io(path, e))?;
-        }
-        for item in std::fs::read_dir(path).map_err(|e| WorkflowError::io(path, e))? {
-            remove_owned_tree(&item.map_err(|e| WorkflowError::io(path, e))?.path())?;
-        }
-        std::fs::remove_dir(path).map_err(|e| WorkflowError::io(path, e))
-    } else {
-        std::fs::remove_file(path).map_err(|e| WorkflowError::io(path, e))
-    }
-}
+#[path = "acceptance_scratch_io_remove.rs"]
+mod remove;
+pub(super) use remove::remove_owned_tree;
+#[cfg(test)]
+pub(super) use remove::tests as remove_tests;
 /// Exact byte inventory, including symbolic link targets without following them.
 pub fn inventory(root: &Path) -> WorkflowResult<BTreeMap<String, String>> {
     inventory_with(root, &mut |path, _| {
@@ -375,6 +355,55 @@ pub(super) fn inventory_with(
     Ok(result)
 }
 /// Host setting values replaced in child output, longest first.
+/// Issue 544: `bytes` with each secret value replaced by a stable indexed
+/// placeholder (`<secret#1>`, `<secret#2>`, ...) instead of one shared
+/// marker, so distinct secrets stay distinct and no secret value is kept or
+/// hashed. Indexes follow the secret set's own order, which is the same for
+/// every observation made under the same bindings. (Sentry's message-based
+/// grouping replaces variable values with placeholders before it groups.)
+pub(super) fn placeholders(
+    host_environment: &BTreeMap<String, String>,
+    bytes: &[u8],
+    truncated: bool,
+) -> Vec<u8> {
+    let secrets = archon_observability::secret_values::SecretValues::for_evidence(
+        host_environment.values().map(String::as_str),
+    );
+    let mut output = bytes.to_vec();
+    for (index, value) in secrets.iter().enumerate() {
+        let needle = value.as_bytes();
+        let marker = format!("<secret#{}>", index + 1);
+        let mut clean = Vec::with_capacity(output.len());
+        let mut at = 0;
+        while at < output.len() {
+            if output[at..].starts_with(needle) {
+                clean.extend_from_slice(marker.as_bytes());
+                at += needle.len();
+            } else {
+                clean.push(output[at]);
+                at += 1;
+            }
+        }
+        // A stream the collector cut can end inside a secret: its prefix is
+        // the secret too, by the rule `redact` uses.
+        for n in (1..if truncated {
+            needle.len().min(clean.len() + 1)
+        } else {
+            1
+        })
+            .rev()
+        {
+            if clean.ends_with(&needle[..n]) {
+                clean.truncate(clean.len() - n);
+                clean.extend_from_slice(marker.as_bytes());
+                break;
+            }
+        }
+        output = clean;
+    }
+    output
+}
+
 pub(super) fn redact(
     host_environment: &BTreeMap<String, String>,
     bytes: &[u8],
@@ -422,62 +451,5 @@ pub(super) fn redact(
 mod redaction_tests;
 
 #[cfg(test)]
-#[test]
-fn task_root_copy_omits_freeze_owned_contract_and_lock() {
-    let source = tempfile::tempdir().unwrap();
-    let destination = tempfile::tempdir().unwrap();
-    let contract = crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE;
-    let lock = crate::task_set_contract::ACCEPTANCE_LOCK_FILE;
-    std::fs::write(source.path().join(contract), b"contract").unwrap();
-    std::fs::write(source.path().join(lock), b"lock").unwrap();
-    std::fs::write(source.path().join("input.json"), b"input").unwrap();
-    std::fs::write(
-        source
-            .path()
-            .join(crate::task_set_contract::TASK_SKELETON_FILE),
-        b"skeleton",
-    )
-    .unwrap();
-    std::fs::write(
-        source
-            .path()
-            .join(crate::task_set_contract::TASK_SKELETON_LOCK_FILE),
-        b"skeleton lock",
-    )
-    .unwrap();
-    std::fs::write(source.path().join("TASK-EXAMPLE-001.md"), b"landed body").unwrap();
-    std::fs::write(source.path().join(".decompose.log"), b"pipeline log").unwrap();
-
-    let mut remaining = u64::MAX;
-    copy_task_root(
-        source.path(),
-        destination.path(),
-        Path::new(""),
-        Path::new(""),
-        (&[], None),
-        &mut remaining,
-    )
-    .unwrap();
-
-    assert!(!destination.path().join(contract).exists());
-    assert!(!destination.path().join(lock).exists());
-    assert!(
-        !destination
-            .path()
-            .join(crate::task_set_contract::TASK_SKELETON_FILE)
-            .exists()
-    );
-    assert!(
-        !destination
-            .path()
-            .join(crate::task_set_contract::TASK_SKELETON_LOCK_FILE)
-            .exists()
-    );
-    assert!(!destination.path().join("TASK-EXAMPLE-001.md").exists());
-    assert!(!destination.path().join(".decompose.log").exists());
-    assert!(std::fs::read(destination.path().join("acceptance-contract.json")).is_err());
-    assert_eq!(
-        std::fs::read(destination.path().join("input.json")).unwrap(),
-        b"input"
-    );
-}
+#[path = "acceptance_scratch_io_copy_tests.rs"]
+mod copy_tests;

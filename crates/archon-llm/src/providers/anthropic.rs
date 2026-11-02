@@ -36,7 +36,8 @@ impl From<ApiError> for LlmError {
                 message,
             } => LlmError::Rejected {
                 error_type,
-                message: archon_observability::redaction::redact_text(&message),
+                // 86fbab995 redacted these forwarded texts; classifiers saw that.
+                message: crate::provider::DiagnosticMessage::redacted_at_source(message.as_str()),
             },
             ApiError::RateLimited {
                 retry_after_secs,
@@ -46,7 +47,7 @@ impl From<ApiError> for LlmError {
                 retry_after_secs,
                 from_provider,
                 pipeline_retry_after_secs: from_provider.then_some(retry_after_secs),
-                message: crate::provider_fault::diagnostic_message(&message),
+                message: crate::provider::DiagnosticMessage::redacted_at_source(message.as_str()),
             },
             ApiError::Overloaded {
                 retry_after_secs,
@@ -54,7 +55,7 @@ impl From<ApiError> for LlmError {
             } => LlmError::Overloaded {
                 status: Some(529),
                 retry_after_secs,
-                message: crate::provider_fault::diagnostic_message(&message),
+                message: crate::provider::DiagnosticMessage::redacted_at_source(message.as_str()),
             },
             ApiError::ServerError {
                 status,
@@ -64,7 +65,8 @@ impl From<ApiError> for LlmError {
                 Some(status),
                 None,
                 None,
-                &message,
+                // A server message was redacted when stored at 86fbab995.
+                message.as_str(),
                 Some("anthropic"),
                 None,
             )

@@ -162,14 +162,14 @@ impl LlmProvider for WakeNetworkProvider {
                     retry_after_secs: secs,
                     from_provider: true,
                     pipeline_retry_after_secs: None,
-                    message: String::new(),
+                    message: String::new().into(),
                 });
             }
             WakeOpen::ErrorEvent(error_type) => {
                 let message = format!("{error_type} from the provider");
                 tx.try_send(StreamEvent::Error {
                     error_type: error_type.into(),
-                    message,
+                    message: message.into(),
                 })
                 .expect("room for the error");
             }

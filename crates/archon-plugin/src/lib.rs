@@ -3,6 +3,8 @@
 //! Provides a sandboxed execution environment for `.wasm` plugins using wasmtime,
 //! with capability-based security, host-guest ABI, and resource limits.
 
+pub mod build_environment;
+
 pub mod abi;
 pub mod adapter_tool;
 pub mod api;

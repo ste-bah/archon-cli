@@ -74,6 +74,7 @@ pub(super) struct ReverifyChecks {
     pub(super) task_subjects: Vec<String>,
     pub(super) accepted: bool,
     pub(super) operational_failure: bool,
+    pub(super) transient_only: bool,
 }
 
 struct CheckProgress {
@@ -123,42 +124,6 @@ impl CheckProgress {
 #[cfg(test)]
 #[path = "workflow_decompose_reverify_acceptance_tests.rs"]
 mod tests;
-
-fn frozen_check_plan(contract: &AcceptanceContract) -> Vec<(String, bool, Option<String>)> {
-    contract
-        .acceptance
-        .iter()
-        .chain(&contract.supplementary)
-        .map(|entry| {
-            let accepted = entry.judgment.verdict == JudgeDecision::Accepted;
-            let reason = (!accepted).then(|| {
-                format!(
-                    "freeze does not run this entry because its frozen judgment is {:?}; only Accepted entries are executable",
-                    entry.judgment.verdict
-                )
-            });
-            (entry.id.clone(), accepted, reason)
-        })
-        .collect()
-}
-
-fn not_run_checks(plan: &[(String, bool, Option<String>)]) -> Vec<CheckResult> {
-    plan.iter()
-        .filter(|(_, accepted, _)| !accepted)
-        .map(|(id, _, reason)| CheckResult {
-            check_id: id.clone(),
-            verdict: "not_run".into(),
-            really_ran: false,
-            setup_failure: false,
-            real_failure: false,
-            sibling_paths: Vec::new(),
-            findings: Vec::new(),
-            not_run_reason: reason.clone(),
-            regression_guard: None,
-            remediation_route: None,
-        })
-        .collect()
-}
 
 fn apply_passability_result(
     check: &mut CheckResult,
@@ -244,7 +209,11 @@ fn reverify_incomplete_advice(error: anyhow::Error) -> anyhow::Error {
         "Retry the freeze with the same candidate (resume the run): it continues from the saved results",
         "run `archon workflow reverify <run>` again; saved observations and verdicts are reused",
     );
-    anyhow!(message)
+    crate::command::workflow_host_fault::Fault {
+        class: crate::command::workflow_host_fault::classify(&error),
+        text: message,
+    }
+    .into()
 }
 
 pub(super) async fn reverify_checks(
@@ -262,11 +231,23 @@ pub(super) async fn reverify_checks(
     let contract_path = task_root.join(ACCEPTANCE_CONTRACT_FILE);
     let judged_contract_bytes = std::fs::read(&contract_path)
         .with_context(|| format!("reading {}", contract_path.display()))?;
-    let raw: AcceptanceContract = serde_json::from_slice(&judged_contract_bytes)?;
+    let raw: AcceptanceContract =
+        serde_json::from_slice(&judged_contract_bytes).with_context(|| {
+            format!(
+                "parsing frozen contract {}; restore valid JSON from its authenticated freeze",
+                contract_path.display()
+            )
+        })?;
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project_root, task_root);
     let pin: AcceptancePin = serde_json::from_slice(
         &std::fs::read(&pin_path).with_context(|| format!("reading {}", pin_path.display()))?,
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "parsing acceptance pin {}; restore valid JSON from its authenticated freeze",
+            pin_path.display()
+        )
+    })?;
     let contract = validate_acceptance_bundle(task_root, Some(&pin), &expected)
         .map_err(|error| anyhow!(error))?;
     if contract != raw {
@@ -281,15 +262,36 @@ pub(super) async fn reverify_checks(
         .filter(|(_, accepted, _)| *accepted)
         .map(|(id, _, _)| id.clone())
         .collect::<BTreeSet<_>>();
+    // Issue 495: a published check that breaks the site path rule the first
+    // author and every publication apply is its author's defect. It is not
+    // run; it goes back to its author while the other checks are verified.
+    let site_refusals =
+        crate::command::workflow_task_set::site_path_refusals(&contract, project_root, task_root)?
+            .into_iter()
+            .filter(|(id, _)| accepted_ids.contains(id))
+            .collect::<BTreeMap<_, _>>();
+    let accepted_ids = accepted_ids
+        .into_iter()
+        .filter(|id| !site_refusals.contains_key(id))
+        .collect::<BTreeSet<_>>();
     let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(
         &std::fs::read(task_root.join(TASK_SKELETON_FILE))
             .with_context(|| format!("reading {}", task_root.join(TASK_SKELETON_FILE).display()))?,
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "parsing frozen skeleton {}; restore valid JSON from its authenticated freeze",
+            task_root.join(TASK_SKELETON_FILE).display()
+        )
+    })?;
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
     eprintln!("{}", resume.progress.line());
     for (index, (id, accepted, _)) in check_plan.iter().enumerate() {
         if *accepted {
             progress.start(index + 1, id);
+            if site_refusals.contains_key(id) {
+                progress.finish(index + 1, id, "refused by the site path rule");
+            }
         }
     }
     let probe =
@@ -307,6 +309,9 @@ pub(super) async fn reverify_checks(
             .await
             .map_err(|error| anyhow!("could not prepare frozen acceptance checks: {error}"))?
     };
+    use crate::command::workflow_task_set::executability::ExecutabilityProbe;
+    let causes = probe.take_unproven_causes();
+    let transient_only = super::heal::transient_observations(&accepted_ids, &evidence, &causes);
     let regression_guards = probe.take_regression_guards();
     let mut by_id = evidence
         .into_iter()
@@ -322,6 +327,7 @@ pub(super) async fn reverify_checks(
         !accepted_ids.is_empty() && (commit.is_none() || !missing.is_empty());
     let mut baseline_failures = BTreeMap::new();
     let mut results = not_run_checks(&check_plan);
+    results.extend(site_refused_checks(&site_refusals));
     let check_indexes = check_plan
         .iter()
         .enumerate()
@@ -377,13 +383,13 @@ pub(super) async fn reverify_checks(
             setup_failure: false,
             real_failure: false,
             sibling_paths: siblings,
-            findings: Vec::new(),
+            findings: item.operational_error.clone().into_iter().collect(),
             not_run_reason: None,
             regression_guard: regression_guards.get(id).cloned(),
             remediation_route: None,
         });
         let outcome = if let Some(basis) = regression_guards.get(id) {
-            format!("passed; regression guard: {basis}")
+            guard_outcome(basis)
         } else if probe.reused_check(id) {
             "reused from cache".to_string()
         } else if !really_ran {
@@ -414,20 +420,16 @@ pub(super) async fn reverify_checks(
             build_cache,
         )
         .map_err(|error| anyhow!(error))?;
-        let client = crate::command::workflow::reverify_acceptance_client(
-            config,
-            env_vars,
-            project_root,
-            "workflow-reverify-acceptance",
-            &scope,
-        )
-        .await?;
+        let client = judge_client::build(config, env_vars, project_root, &scope).await?;
+        let site_environment = probe.site_environment();
         let runs = crate::command::workflow_task_set::executability::BaselineRuns {
             reuse: probe.take_reuse_audit(),
             commit: commit.ok_or_else(|| anyhow!("check-copy has no commit to judge"))?,
             failures: baseline_failures,
-            environment: BTreeMap::new(),
-            forwarded: Vec::new(),
+            // Issue 544: the judge's evidence is redacted with what the
+            // site really bound into each check.
+            environment: site_environment.0,
+            forwarded: site_environment.1,
         };
         let mut judged = contract.clone();
         let findings = crate::command::workflow_task_set::passability::judge_baseline_failures(
@@ -468,5 +470,13 @@ pub(super) async fn reverify_checks(
         task_subjects,
         accepted,
         operational_failure,
+        transient_only,
     })
 }
+
+#[path = "workflow_decompose_reverify_judge_client.rs"]
+pub(super) mod judge_client;
+
+#[path = "workflow_decompose_reverify_acceptance_plan.rs"]
+mod plan;
+use plan::{frozen_check_plan, guard_outcome, not_run_checks, site_refused_checks};

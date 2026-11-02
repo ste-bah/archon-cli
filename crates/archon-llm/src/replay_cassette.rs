@@ -112,10 +112,13 @@ impl Cassette {
             return Ok(recorded.clone().into());
         }
         if self.events.is_empty() {
-            return Err(LlmError::Serialize(format!(
-                "cassette {} holds neither a response nor any events",
-                self.digest
-            )));
+            return Err(LlmError::Serialize(
+                format!(
+                    "cassette {} holds neither a response nor any events",
+                    self.digest
+                )
+                .into(),
+            ));
         }
         crate::completion_accumulator::collect_completion_response(self.replay_events()).await
     }

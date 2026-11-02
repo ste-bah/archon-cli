@@ -25,22 +25,38 @@ pub(crate) fn acceptance_candidate(record: &WorkflowV2CallRecord) -> Option<&str
     .then(|| request.stdin.as_deref().unwrap_or_default())
 }
 
+const ENTRY_SECTIONS: [&str; 8] = [
+    "\nThe host refused this entry's last answered reply.",
+    "\nRepair this entry's gate findings open in the latest gate result:",
+    "\nThe freeze judge could not use this entry's last check:",
+    "\nEarlier gate results raised these findings for this entry;",
+    "\nPhase-level findings of the latest gate result name no single entry;",
+    "\nEarlier gate results raised these phase-level findings;",
+    "\nThis entry currently covers [",
+    "\nA newer published version of this entry replaced your previous draft",
+];
+
 pub(super) fn authored_criterion(record: &WorkflowV2CallRecord, id: &str) -> Option<String> {
     let task = record.call.options.task.as_deref()?;
     let marker = format!("Author ONLY entry {id}: ");
     let start = task.rfind(&marker)? + marker.len();
     let rest = &task[start..];
-    let end = [
-        rest.find("\nThe host refused this entry's last answered reply."),
-        rest.find("\nAll criterion IDs and text (for consistency):"),
-        id.starts_with("SUP-")
-            .then(|| rest.find("\nIts covers is exactly [\""))
-            .flatten(),
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-    .unwrap_or(rest.len());
+    // #555: every section authorOne writes after the criterion ends it
+    // (workflow_decompose_v1_acceptance.js `own`): its own findings, the
+    // judge note, its earlier findings, the phase-level ones (current and
+    // earlier), a superseded draft.
+    let end = ENTRY_SECTIONS
+        .iter()
+        .map(|marker| rest.find(marker))
+        .chain([
+            rest.find("\nAll criterion IDs and text (for consistency):"),
+            id.starts_with("SUP-")
+                .then(|| rest.find("\nIts covers is exactly [\""))
+                .flatten(),
+        ])
+        .flatten()
+        .min()
+        .unwrap_or(rest.len());
     let authored = rest[..end].trim_end();
     let criterion = if id.starts_with("SUP-") {
         let prefix = authored.find("): ")? + 3;
@@ -138,3 +154,50 @@ pub(crate) fn candidate_entries(stdin: &str, gate: &str) -> Result<Vec<(String, 
 #[cfg(test)]
 #[path = "workflow_decompose_seed_record_tests.rs"]
 mod tests;
+
+// Resolve omissions only from this call's recorded prompt, as the live author
+// saw its current entry. Old prompts without this line retain their old meaning.
+pub(super) fn inherit_reply_covers(replies: &mut [super::Reply<'_>]) -> Result<()> {
+    for reply in replies {
+        if reply.entry.get("covers").is_some() {
+            continue;
+        }
+        let Some(task) = reply.record.call.options.task.as_deref() else {
+            continue;
+        };
+        // The live line ends the entry's own sections; nothing after it (the
+        // catalogue, completed entries, named files, reply format) starts a
+        // line with it, so the last match is the live line when it exists.
+        let Some(covers) = task.lines().rev().find_map(|line| {
+            let rest = line.strip_prefix("This entry currently covers ")?;
+            let mut values = serde_json::Deserializer::from_str(rest).into_iter::<Vec<String>>();
+            let covers = values.next()?.ok()?;
+            rest[values.byte_offset()..]
+                .starts_with('.')
+                .then_some(covers)
+        }) else {
+            continue;
+        };
+        reply.entry["covers"] = serde_json::to_value(covers)?;
+        reply.text = serde_json::to_string(&reply.entry)?;
+    }
+    Ok(())
+}
+
+pub(super) fn comparison_entries(
+    entries: &[(String, Value, bool)],
+    host: &super::HostOwned<'_>,
+) -> std::collections::BTreeMap<String, Value> {
+    entries
+        .iter()
+        .map(|(id, entry, _)| (id.clone(), comparison_entry(host.stamp(entry.clone(), id))))
+        .collect()
+}
+
+// Empty coverage is omitted by the published contract's serializer.
+pub(super) fn comparison_entry(mut entry: Value) -> Value {
+    if entry.get("covers").is_none() {
+        entry["covers"] = serde_json::json!([]);
+    }
+    entry
+}

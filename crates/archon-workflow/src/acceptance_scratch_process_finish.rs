@@ -39,6 +39,21 @@ pub(super) fn finish(
         super::mutation::mark_plan_unsafe(&mut result, plan, moved);
     }
     result.classify_raw(&String::from_utf8_lossy(command.bytes()));
+    // Issue 544: every text-dependent fact a later reader needs is computed
+    // here from the raw capture; then every stream is masked whole.
+    if result.exit_code != Some(0)
+        && let Some(classification) = &mut result.classification
+        && classification.failure_signature.is_none()
+    {
+        classification.failure_signature =
+            Some(crate::v2::acceptance_regression::failure_signature(
+                result.exit_code,
+                &String::from_utf8_lossy(&site.placeholder(&result.stderr, pipes.1.1)),
+                &String::from_utf8_lossy(&site.placeholder(&result.stdout, pipes.0.1)),
+            ));
+    }
+    let protocol = site.mutation_plan.map(|plan| plan.nonce.as_str());
+    result.keep_verdict_streams(protocol);
     result.stdout = site.redact(&result.stdout, pipes.0.1);
     result.stderr = site.redact(&result.stderr, pipes.1.1);
     Ok(result)

@@ -36,6 +36,15 @@ pub(super) fn finish_acceptance(
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let mut findings =
         acceptance_findings(project_root, prd_path, prd_text, &contract_path, contract)?;
+    // #549: a check the host did not judge (its own named files exceed the
+    // judged-source limit of one check) goes back to its author with what it
+    // names and the limit, never as a refutation of content nobody saw.
+    let not_judged = judge::not_judged_findings(&contract_path, contract);
+    findings.retain(|finding| {
+        !(not_judged.iter().any(|own| own.subject == finding.subject)
+            && (finding.text).starts_with(&format!("check '{}' was refuted", finding.subject)))
+    });
+    findings.extend(not_judged);
     // Issue 275: a check refuted because it cannot pass as written has its
     // own finding, carrying its pre-implementation output; the generic
     // refutation would only tell its author to make it fail.
@@ -245,6 +254,26 @@ impl PreparedAcceptanceFreeze {
 #[path = "workflow_task_set_findings_prepare.rs"]
 mod prepare;
 pub(crate) use prepare::{capture_live_contract_digest, prepare_from_judged};
+
+/// #552: a later step of this freeze could not complete. The checks it
+/// already knew it could not judge (`entries`) keep their own findings in
+/// that outcome, which names them, so each reaches its own author in the same
+/// round instead of only the checks the step left without a verdict.
+pub(super) fn with_known_findings<'a>(
+    mut error: anyhow::Error,
+    tasks_root: &Path,
+    entries: impl IntoIterator<Item = &'a archon_workflow::task_set_contract::AcceptanceCriterion>,
+) -> anyhow::Error {
+    if let Some(incomplete) =
+        error.downcast_mut::<crate::command::workflow_freeze_budget::FreezeIncomplete>()
+    {
+        incomplete.add_known_findings(judge::not_judged_findings_of(
+            &tasks_root.join(ACCEPTANCE_CONTRACT_FILE),
+            entries,
+        ));
+    }
+    error
+}
 
 /// Prepare a whole-set freeze, returning every check the judge did not accept
 /// to its author — with the judge's reason and counterexample — bounded, before

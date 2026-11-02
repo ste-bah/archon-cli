@@ -19,48 +19,10 @@ use result_helpers::{faulted, operational, redacted};
 mod execute;
 pub use execute::execute_check_at;
 
-/// The caller supplies an integrity-validated pinned contract and chain digest.
-/// Authorization is repeated here before creating scratch or spawning children.
-pub async fn observe_commands(
-    policy: &ScratchPolicy,
-    commit: &str,
-    contract: &AcceptanceContract,
-    chain_digest: &str,
-    refs: &[FrozenCommandRef],
-    evidence: &Path,
-    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
-) -> WorkflowResult<ObservationResult> {
-    observe_commands_cancellable(
-        policy,
-        commit,
-        contract,
-        chain_digest,
-        refs,
-        evidence,
-        ObserveControl::for_resource_limits(Arc::new(AtomicBool::new(false)), resource_limits),
-    )
-    .await
-}
-pub async fn observe_commands_cancellable(
-    policy: &ScratchPolicy,
-    commit: &str,
-    contract: &AcceptanceContract,
-    chain_digest: &str,
-    refs: &[FrozenCommandRef],
-    evidence: &Path,
-    control: ObserveControl,
-) -> WorkflowResult<ObservationResult> {
-    observe_commands_hooked(
-        policy,
-        commit,
-        contract,
-        chain_digest,
-        refs,
-        evidence,
-        control,
-    )
-    .await
-}
+#[cfg(test)]
+#[path = "acceptance_scratch_setup_fault_tests.rs"]
+pub(super) mod setup_fault_tests;
+
 /// [`observe_commands_cancellable`] under the caller's observation control.
 pub async fn observe_commands_hooked(
     policy: &ScratchPolicy,
@@ -123,7 +85,20 @@ pub async fn observe_commands_hooked(
         after: BTreeMap::new(),
     };
     let mut roots = None;
-    let mut redaction_environment = BTreeMap::new();
+    // Issue 544: the full capture redaction from the start, so a setup
+    // error is redacted as fully as a check's output.
+    let mut redaction_environment = crate::acceptance_check_environment::forwarded_values(
+        &crate::acceptance_check_environment::host_environment(),
+        &policy.environment_allowlist,
+    )
+    .map(|forwarded| {
+        crate::acceptance_check_environment::redaction_values(
+            &forwarded,
+            &policy.environment,
+            &crate::acceptance_check_environment::host_environment(),
+        )
+    })
+    .unwrap_or_default();
     let mut dirty = false;
     let mut fresh = true;
     let mut dirty_owner: Option<usize> = None;
@@ -173,7 +148,7 @@ pub async fn observe_commands_hooked(
         roots =
             Some(phase().run(|| ScratchRoots::prepare_inner_with_checks(policy, commit, &checks))?);
         let prepared = roots.as_ref().expect("prepared");
-        redaction_environment = prepared.host_environment.clone();
+        redaction_environment = prepared.redaction_environment.clone();
         result.copied_project_manifest = phase().run(|| inventory(prepared.project()))?;
         let mut baseline = phase().run(|| identity::capture(prepared, policy))?;
         result.source_manifest_digest = content_digest(&serde_json::to_vec(
@@ -371,9 +346,16 @@ pub async fn observe_commands_hooked(
         Ok::<_, WorkflowError>(())
     }
     .await;
-    if let Err(e) = execution {
+    if let Err(e) = &execution {
         result.operational_errors.push(e.to_string());
     }
+    // Before any check ran, a failed setup is safe to retry only after both
+    // cleanup and the live-root audit confirm the observation left no residue.
+    // Invalid execution inputs (including an absent forwarded variable) are
+    // operational outcomes of the selected checks, not a failed observation.
+    let setup_error = execution.err().filter(|error| {
+        result.checks.is_empty() && !matches!(error, WorkflowError::SpecInvalid(_))
+    });
     let cleanup = match roots.as_mut() {
         Some(roots) => roots.cleanup(),
         None => Ok(()), // prepare performs its own cleanup before returning an error.
@@ -456,9 +438,33 @@ pub async fn observe_commands_hooked(
     for check in &mut result.checks {
         *check = result_helpers::redacted_environment(&redaction_environment, check);
     }
+    // Issue 544: the result also records the policy's bindings and each
+    // check's environment; their secrets are masked like its output.
+    let redact_text = |text: &str| {
+        String::from_utf8_lossy(&io::redact(&redaction_environment, text.as_bytes(), false))
+            .into_owned()
+    };
+    for value in result.policy.environment.values_mut() {
+        *value = redact_text(value);
+    }
+    for item in &mut result.check_evidence {
+        item.before_identity.redact_environment(&redact_text);
+        if let Some(after) = &mut item.after_identity {
+            after.redact_environment(&redact_text);
+        }
+    }
     std::fs::create_dir_all(evidence).map_err(|e| WorkflowError::io(evidence, e))?;
     let path = evidence.join("observation.json");
     std::fs::write(&path, serde_json::to_vec_pretty(&result)?)
         .map_err(|e| WorkflowError::io(&path, e))?;
+    if result.teardown_verified && result.live_roots_unchanged {
+        if let Some(error) = setup_error {
+            return Err(error);
+        }
+    }
     Ok(result)
 }
+
+#[path = "acceptance_scratch_observe_transaction.rs"]
+mod transaction;
+pub use transaction::{observe_commands, observe_commands_cancellable};

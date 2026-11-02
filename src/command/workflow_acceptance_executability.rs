@@ -88,14 +88,45 @@ pub(crate) enum UnprovenCause {
     /// The host's: its site, its environment or its run. A strike makes
     /// the same failure its author's after a resume (Issue 328, #356).
     Host,
+    /// Validation, corruption, or an unclassified host diagnostic.
+    PermanentHost,
     /// An inconclusive host probe: retried without a strike or author finding.
     TransientHost,
     /// The check's site lacks a program (or a tool's subcommand) the host
     /// has, or the host could not tell: a defect of the site the host
     /// built, so no strike ever makes it the author's (F6).
+    /// Issue 548: no host repair makes the site provide it, so it goes to
+    /// its author at once, in the same budget, with no strike saved.
     SiteLacks,
     /// The check runs a program neither its site nor the host provides.
+    /// Issue 557: no host action makes it available, so it goes to its
+    /// author at once on the probe path too, with no strike saved.
     ProgramAbsent,
+}
+
+impl UnprovenCause {
+    pub(crate) fn from_class(class: crate::command::workflow_host_fault::Class) -> Self {
+        match class {
+            crate::command::workflow_host_fault::Class::Transient => Self::Host,
+            _ => Self::PermanentHost,
+        }
+    }
+    pub(crate) fn class(self) -> crate::command::workflow_host_fault::Class {
+        match self {
+            Self::Host | Self::TransientHost | Self::SiteLacks => {
+                crate::command::workflow_host_fault::Class::Transient
+            }
+            _ => crate::command::workflow_host_fault::Class::Permanent,
+        }
+    }
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::Host | Self::TransientHost => "host_transient",
+            Self::SiteLacks => "host_site_lacks",
+            Self::ProgramAbsent => "host_program_absent",
+            Self::PermanentHost => "host_permanent",
+        }
+    }
 }
 
 /// Runs accepted checks once and reports which crashed in their own code.
@@ -135,7 +166,7 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
     /// [`Self::take_unproven`], with why each could not be proven.
     fn take_unproven_causes(&self) -> BTreeMap<String, (String, UnprovenCause)> {
         (self.take_unproven().into_iter())
-            .map(|(id, why)| (id, (why, UnprovenCause::Host)))
+            .map(|(id, why)| (id, (why, UnprovenCause::PermanentHost)))
             .collect()
     }
 
@@ -195,7 +226,7 @@ enum Site {
     /// project's data: a freeze with no scratch policy.
     Hermetic,
     /// A configured policy that could not be captured: nothing runs.
-    Unavailable(String),
+    Unavailable(crate::command::workflow_host_probe_fault::Unrun),
 }
 
 /// The host's probe, at the acceptance stage's own execution site.
@@ -355,11 +386,11 @@ pub(crate) fn crash_findings_at<'a>(
                 .chain(&contract.supplementary)
                 .find(|entry| entry.id == result.acceptance_id)?;
             let (_, text) = executed_text(entry)?;
-            let stdout = String::from_utf8_lossy(&result.stdout);
-            let stderr = String::from_utf8_lossy(&result.stderr);
+            // Issue 544: the capture's typed fact; the finding text below
+            // shows only redacted output.
             if result.operational_error.is_none()
                 && result.exit_code == Some(0)
-                && archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr)
+                && result.reports_zero_work()
             {
                 let output = program_output(&result.stdout, &redactor, FINDING_TAIL_BYTES);
                 return Some((entry.id.clone(), format!(
@@ -427,6 +458,9 @@ pub(crate) mod probe_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_probe_tests_b.rs"]
 mod probe_tests_b;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_shell_parse_tests.rs"]
+mod shell_parse_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_tests.rs"]
 pub(crate) mod tests;

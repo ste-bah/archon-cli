@@ -122,6 +122,9 @@ impl archon_tools::audit_landing::LandingHost for Bridge {
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
+    fn retained_completion(&self) -> Option<Value> {
+        self.0.retained_completion().ok().flatten()
+    }
 }
 pub(super) async fn scope<T>(
     records: Option<Arc<RecordLanding>>,

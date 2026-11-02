@@ -39,6 +39,7 @@ pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
     include_str!("workflow_decompose_v1_set_gate.js"),
     include_str!("workflow_decompose_v1_frozen.js"),
     include_str!("workflow_decompose_v1_progress.js"),
+    include_str!("workflow_decompose_v1_failing_set.js"),
     "\n",
     include_str!("workflow_decompose_v1_seed.js"),
     "\n",
@@ -487,12 +488,11 @@ pub(crate) use claim::create_claimed_run;
 use claim::{read_fixed_state, read_run_json};
 
 #[cfg(test)]
-#[path = "workflow_decompose_repair_tests.rs"]
-pub(crate) mod repair_tests;
-
-#[cfg(test)]
 #[path = "workflow_decompose_progress_tests.rs"]
 pub(crate) mod progress_tests;
+#[cfg(test)]
+#[path = "workflow_decompose_repair_tests.rs"]
+pub(crate) mod repair_tests;
 
 #[path = "workflow_decompose_runtime_arguments.rs"]
 mod runtime_arguments;

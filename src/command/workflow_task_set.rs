@@ -46,6 +46,49 @@ pub(crate) mod passability;
 mod preflight;
 use judge::{gate_stamp, predecessor_findings};
 
+/// Issue 495: the site path rule the first author and every publication
+/// apply, held to a contract already published. Each refused check id maps
+/// to the rule's own finding text.
+pub(crate) fn site_path_refusals(
+    contract: &AcceptanceContract,
+    project_root: &Path,
+    tasks_root: &Path,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut refusals = std::collections::BTreeMap::<String, String>::new();
+    for finding in preflight::rooted_policy_findings(contract, project_root, tasks_root)? {
+        if !finding
+            .identity
+            .as_ref()
+            .is_some_and(|identity| identity.code == "unavailable_site_path")
+        {
+            continue;
+        }
+        let id = finding
+            .field
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        refusals
+            .entry(id)
+            .and_modify(|text| {
+                text.push_str("; ");
+                text.push_str(&finding.message);
+            })
+            .or_insert(finding.message);
+    }
+    Ok(refusals)
+}
+
+pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
+    let canonical = tasks_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| tasks_root.to_path_buf());
+    let key = content_digest(canonical.to_string_lossy().as_bytes());
+    archon_workflow::task_set_lineage::pin_store_dir(project_root).join(format!("{key}.json"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FreezeAcceptanceResult {
     pub(crate) acceptance_digest: String,
@@ -104,34 +147,6 @@ pub(crate) use crate::command::workflow_task_set_candidate::CandidateRejected;
 pub(crate) use enforce::{freeze_acceptance, freeze_skeleton};
 pub(crate) use prd::{script_arguments_with_prd_requirement_texts, validate_prd_input};
 
-pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
-    let canonical = tasks_root
-        .canonicalize()
-        .map(archon_shell::paths::plain)
-        .unwrap_or_else(|_| tasks_root.to_path_buf());
-    let key = content_digest(canonical.to_string_lossy().as_bytes());
-    archon_workflow::task_set_lineage::pin_store_dir(project_root).join(format!("{key}.json"))
-}
-
-#[cfg(test)]
-pub(crate) async fn prepare_acceptance_freeze(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    mode: GateMode,
-    client: Arc<dyn WorkflowLlmClient>,
-) -> Result<PreparedAcceptanceFreeze> {
-    prepare_acceptance_freeze_with_limits(
-        project_root,
-        tasks_root,
-        prd_path,
-        mode,
-        client,
-        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
-    )
-    .await
-}
-
 pub(crate) async fn prepare_acceptance_freeze_with_limits(
     project_root: &Path,
     tasks_root: &Path,
@@ -151,28 +166,6 @@ pub(crate) async fn prepare_acceptance_freeze_with_limits(
         candidate,
         client,
         resource_limits,
-    )
-    .await
-}
-
-/// The unstaged freeze of a candidate: unlimited, nothing saved.
-#[cfg(test)]
-pub(crate) async fn prepare_acceptance_freeze_from_candidate(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    mode: GateMode,
-    candidate: Vec<u8>,
-    client: Arc<dyn WorkflowLlmClient>,
-) -> Result<PreparedAcceptanceFreeze> {
-    prepare_acceptance_freeze_from_candidate_with_limits(
-        project_root,
-        tasks_root,
-        prd_path,
-        mode,
-        candidate,
-        client,
-        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
 }
@@ -216,7 +209,9 @@ fn resumable(
                 crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
                     incomplete.to_string(),
                     &resume.progress,
-                );
+                )
+                .with_fault_class(incomplete.fault_class)
+                .with_subjects(incomplete.undecided.clone());
             if incomplete.is_authored_reply() {
                 freeze_incomplete.authored_judge_reply().into()
             } else {
@@ -225,29 +220,6 @@ fn resumable(
         }
         _ => error,
     }
-}
-
-#[cfg(test)]
-pub(crate) async fn prepare_acceptance_freeze_resumable(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    mode: GateMode,
-    candidate: Vec<u8>,
-    client: Arc<dyn WorkflowLlmClient>,
-    resume: &crate::command::workflow_freeze_budget::FreezeResume,
-) -> Result<PreparedAcceptanceFreeze> {
-    prepare_acceptance_freeze_resumable_with_limits(
-        project_root,
-        tasks_root,
-        prd_path,
-        mode,
-        candidate,
-        client,
-        resume,
-        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
-    )
-    .await
 }
 
 pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
@@ -282,8 +254,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         &original,
     )?;
 
-    let repository_root =
-        live_root::freeze_repository(project_root, tasks_root, None).map_err(anyhow::Error::msg)?;
+    let repository_root = live_root::freeze_repository_typed(project_root, tasks_root, None)?;
     let judge_roots = judge::JudgeRoots {
         project: Some(project_root.to_path_buf()),
         repository: Some(repository_root.clone()),
@@ -307,7 +278,14 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         &judge_roots,
     )
     .await
-    .map_err(|error| resumable(error, resume))?;
+    .map_err(|error| {
+        // #552: the checks this judge already marked not judged go to their
+        // own authors with the outcome.
+        let known = (judge::JudgeIncomplete::caused(&error))
+            .map(|incomplete| incomplete.decided.clone())
+            .unwrap_or_default();
+        findings::with_known_findings(resumable(error, resume), tasks_root, &known)
+    })?;
 
     // A4: a check that crashes, or passes before any implementation, is
     // never published; it goes back to its author.
@@ -319,7 +297,10 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         resume,
         resource_limits,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        findings::with_known_findings(error, tasks_root, passability::entries(&contract))
+    })?;
     let host_unproven_reason = probed.host_unproven_reason.clone();
     // Issue 328: the lock records the tree the checks were proven on.
     let baseline_commit = (probed.baseline.as_ref()).map(|runs| runs.commit.clone());
@@ -336,7 +317,13 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         resume,
     )
     .await
-    .map_err(|error| resumable(error, resume))?;
+    .map_err(|error| {
+        findings::with_known_findings(
+            resumable(error, resume),
+            tasks_root,
+            passability::entries(&contract),
+        )
+    })?;
     let mut prepared = findings::finish_acceptance(
         project_root,
         tasks_root,
@@ -358,13 +345,30 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
             finding.remediation_scope == archon_workflow::RemediationScope::Operational
         })
     {
-        return Err(
-            crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
-                reason,
-                &resume.progress,
-            )
-            .into(),
+        let mut stalled = crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+            reason,
+            &resume.progress,
+        )
+        .with_fault_class(
+            if prepared.findings.iter().all(|finding| {
+                matches!(
+                    finding
+                        .deterministic_defect
+                        .as_ref()
+                        .map(|defect| defect.code.as_str()),
+                    Some("host_transient" | "host_site_lacks")
+                )
+            }) {
+                crate::command::workflow_host_fault::Class::Transient
+            } else {
+                crate::command::workflow_host_fault::Class::Permanent
+            },
         );
+        // Issue 554: each check left unproven keeps its own finding in the
+        // outcome, so the author loop can send one that repeats on its
+        // unchanged text to its author instead of stalling on it.
+        stalled.add_known_findings(prepared.findings.clone());
+        return Err(stalled.into());
     }
     prepared.live_contract_digest = live_contract_digest;
     prepared.result.live_contract_digest = prepared.live_contract_digest.clone();
@@ -417,13 +421,6 @@ fn freeze_mode(mode: GateMode) -> Result<FreezeGateMode> {
         GateMode::Observe => Ok(FreezeGateMode::Observe),
         GateMode::Enforce => Ok(FreezeGateMode::Enforce),
     }
-}
-
-fn project_relative(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 #[path = "workflow_task_set_check_sources.rs"]
@@ -479,3 +476,15 @@ pub(crate) use publish::{crash_publish, stick_next_commit};
 #[cfg(test)]
 #[path = "workflow_task_set_read_race_tests.rs"]
 mod read_race_tests;
+
+#[path = "workflow_task_set_site_paths.rs"]
+mod site_paths;
+use site_paths::project_relative;
+#[cfg(test)]
+#[path = "workflow_task_set_test_wrappers.rs"]
+mod test_wrappers;
+#[cfg(test)]
+pub(crate) use test_wrappers::{
+    prepare_acceptance_freeze, prepare_acceptance_freeze_from_candidate,
+    prepare_acceptance_freeze_resumable,
+};

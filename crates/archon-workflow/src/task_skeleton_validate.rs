@@ -70,6 +70,7 @@ pub fn validate_skeleton(skeleton: &TaskSkeleton, expected_digest: &str) -> Skel
     Err(TaskSkeletonError {
         message: defect_message(&defects),
         defects,
+        io_cause: None,
         io_kind: None,
     })
 }

@@ -58,7 +58,6 @@
 //!   own helper.
 
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -109,7 +108,8 @@ pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass 
         None => return CheckRunClass::Failed,
         Some(_) => {}
     }
-    let stderr = String::from_utf8_lossy(&result.stderr);
+    // Issue 544: the raw capture when it is kept, never redacted evidence.
+    let stderr = String::from_utf8_lossy(result.verdict_stderr());
     let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
     let code = result.exit_code.unwrap_or_default();
     python_defect(command, code, &lines)
@@ -123,6 +123,11 @@ pub struct CheckClassification {
     pub passed: bool,
     pub zero_work: bool,
     pub crash: CheckRunClass,
+    /// Issue 544: the failure's regression fingerprint, computed from the
+    /// raw capture with each secret as an indexed placeholder, so stored
+    /// results compare as the raw ones would without holding a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_signature: Option<String>,
 }
 
 impl CheckResult {
@@ -132,8 +137,8 @@ impl CheckResult {
             return;
         }
         let zero_work = crate::acceptance::output_reports_zero_work(
-            &String::from_utf8_lossy(&self.stdout),
-            &String::from_utf8_lossy(&self.stderr),
+            &String::from_utf8_lossy(self.verdict_stdout()),
+            &String::from_utf8_lossy(self.verdict_stderr()),
         );
         let mut crash = classify_check_run(command, self);
         if let CheckRunClass::ScriptDefect(defect) = &mut crash {
@@ -144,6 +149,7 @@ impl CheckResult {
             passed: self.operational_error.is_none() && self.exit_code == Some(0) && !zero_work,
             zero_work,
             crash,
+            failure_signature: None,
         });
     }
 }
@@ -397,24 +403,7 @@ fn own_callable_called(program: &str, source: &str, qualified: &str) -> bool {
 
 /// Whether the executing shell's parse-only mode rejects `command`.
 fn shell_rejects(command: &str) -> bool {
-    let mut shell = archon_shell::spawn::command(archon_shell::resolve_posix_shell());
-    let child =
-        archon_shell::spawn::replace_environment(&mut shell, std::iter::empty::<(&str, &str)>())
-            .args(["-n", "-s"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-    let Ok(mut child) = child else {
-        return false;
-    };
-    let written = child
-        .stdin
-        .take()
-        .is_some_and(|mut stdin| stdin.write_all(command.as_bytes()).is_ok());
-    child
-        .wait()
-        .is_ok_and(|status| written && !status.success())
+    crate::acceptance_check_shell::shell_parse_error(command).is_some()
 }
 
 fn shell_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefect> {

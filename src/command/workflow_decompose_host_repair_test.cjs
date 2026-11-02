@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js',
   'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js',
-  'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const clean = () => ({ publicationReceipt: { call_id: 'published' }, postcondition: { satisfied: true }, gateEnvelope: { policy_findings: [] } });
 const finding = (scope, source_path, text = 'repair deciding assertion') => ({
@@ -21,7 +21,7 @@ function setup(extra = {}) {
   const w = {
     agent: async (id, options) => {
       calls.push({ id, task: options.task });
-      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id: 'AC-X-001' }) };
+      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id: 'AC-X-001', covers: [] }) };
     },
     checkpoint: async (id, options) => { events.push({ id, ...options }); return {}; },
     pause: async (id, evidence) => { pauses.push({ id, evidence }); return { resumed: true }; }
@@ -36,7 +36,7 @@ async function ownedSourceDispatchesAuthorWithinTheAttemptWindow() {
   s.w.agent = async (id, options) => {
     s.calls.push({id,task:options.task});
     const entry = /Author ONLY entry ([^:]+):/.exec(options.task)[1];
-    return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:entry})};
+    return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:entry,covers:[]})};
   };
   s.w.hostCommand = async () => ++gates < 8 ? { gateEnvelope: { policy_findings: [
     finding('unknown', '/subjects/acceptance-contract.json') ] } } : clean();
@@ -75,7 +75,7 @@ async function malformedCallsNeverRepeatAcrossThreeCycles() {
   const s = setup();
   s.w.agent = async (id, options) => {
     s.calls.push({ id, task: options.task });
-    return { status: 'accepted', stopReason: 'end_turn', content: s.calls.length <= 33 ? 'unusable' : '{"id":"AC-X-001"}' };
+    return { status: 'accepted', stopReason: 'end_turn', content: s.calls.length <= 33 ? 'unusable' : '{"id":"AC-X-001","covers":[]}' };
   };
   s.w.hostCommand = async () => clean();
   await s.ctx.authorCandidate(s.w, s.policy);
@@ -102,10 +102,14 @@ async function frozenOperationalWindowRetriesWithHostRemedy() {
   assert.match(s.pauses[0].evidence.recovery, /retries/);
   assert.doesNotMatch(JSON.stringify(s.pauses), /restore|resume/i);
 }
-async function contextWriteFailuresUseOperationalWindow() {
+// #555: an entry prompt no longer carries the phase's earlier findings, so
+// the acceptance case needs its context file from the entry's own section:
+// a criterion catalogue past its share.
+async function contextWriteFailuresUseOperationalWindow_555() {
   for (const acceptance of [true, false]) {
     const s = setup({ __archonAuthorContext: () => { throw new Error('component storage: disk full; retry write'); } });
     s.policy.initialFeedback = ['repair assertion ' + 'x'.repeat(30000)];
+    if (acceptance) s.ctx.args.acceptanceCriteria['AC-X-001'] = 'criterion ' + 'x'.repeat(30000);
     if (!acceptance) delete s.policy.author;
     s.w.pause = async (_id, evidence) => {
       s.pauses.push(evidence);
@@ -266,7 +270,7 @@ async function acceptanceContextRecoveryReplaysEveryEntryAndRung() {
       const task = options.task.includes('Author ONLY entry') ? options.task
         : [...binding.files.values()].find(text => text.includes('Author ONLY entry') &&
           options.task.includes(require('node:crypto').createHash('sha256').update(text).digest('hex')));
-      return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:/Author ONLY entry ([^:]+):/.exec(task)[1]})};
+      return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:/Author ONLY entry ([^:]+):/.exec(task)[1],covers:[]})};
     });
     recorded.w.hostCommand = capture('host', () => ++gates <= 8
       ? {gateEnvelope:{policy_findings:[finding('candidate_artifact')]}} : clean());
@@ -296,7 +300,7 @@ async function acceptanceContextRecoveryReplaysEveryEntryAndRung() {
   for (const test of [ownedSourceDispatchesAuthorWithinTheAttemptWindow, inputSourceStopsWithExactRemedy,
     mixedRoutingPreservesTheUnownedFaultRemedy, freshContextKeepsAttributedGateFindings, malformedCallsNeverRepeatAcrossThreeCycles,
     mixedUnprovenChecksRepairAuthoredEntries, frozenOperationalWindowRetriesWithHostRemedy,
-    contextWriteFailuresUseOperationalWindow, setGateBodyRepairsCarryTheOuterRung, midLadderReplayKeepsIdsPromptsAndRung,
+    contextWriteFailuresUseOperationalWindow_555, setGateBodyRepairsCarryTheOuterRung, midLadderReplayKeepsIdsPromptsAndRung,
     inputBasenameCollisionStopsBeforeBodyRepair, bodyContextRecoveryReplaysRecordedIdsAndPromptBytes,
     bodyContextRecoveryReplaysRungCheckpointIds, acceptanceContextRecoveryReplaysEveryEntryAndRung]) {
     try { await test(); console.log(`PASS ${test.name}`); }

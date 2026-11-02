@@ -10,9 +10,7 @@ use std::collections::BTreeMap;
 use archon_core::agents::harness::HOST_READ_ONLY_TOOLS;
 #[cfg(test)]
 use archon_workflow::task_set_contract::AcceptanceCheck;
-use archon_workflow::task_set_contract::{
-    AcceptanceCriterion, JudgeDecision, refuted_check_message,
-};
+use archon_workflow::task_set_contract::{AcceptanceCriterion, JudgeDecision};
 
 use super::executability::ExecutabilityProbe;
 use super::*;
@@ -82,6 +80,7 @@ pub(crate) struct ReauthorGate<'a> {
 pub(crate) struct ReauthorProgress {
     pub(crate) contract: AcceptanceContract,
     pub(crate) unproven: BTreeMap<String, String>,
+    pub(crate) host_faults: BTreeMap<String, crate::command::workflow_host_fault::Class>,
     /// Checks still waiting on another authored reply or judge attempt.
     pub(crate) authored_pending: BTreeMap<String, String>,
     pub(crate) attempts: usize,
@@ -181,7 +180,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                 "check '{id}' was named for re-authoring; replace it with a check that fails whenever the criterion is false"
             )
         } else {
-            refuted_check_message(id, &frozen.judgment.reason, &frozen.judgment.counterexample)
+            judge::author_note(frozen)
         };
         feedback.insert(id.clone(), vec![first]);
     }
@@ -189,6 +188,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     let mut pending = ids.clone();
     let mut reused = BTreeMap::new();
     let mut unproven_checks = BTreeMap::new();
+    let mut host_faults = BTreeMap::new();
     let mut judge_retry_candidates = passability_pending::JudgeRetryCandidates::default();
     let refused = author::refused_forms(scope, gate.probe);
     let keyed_judge = client.resolve_model_alias(judge_model); // the model that judges
@@ -299,6 +299,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                     &mut judge_retry_candidates,
                     &mut feedback,
                     (&mut pending, &mut reused, &mut unproven_checks),
+                    &mut host_faults,
                 )?),
             };
             if let Some(judged) = judged {
@@ -308,11 +309,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                         let id = candidate.id.clone();
                         *entry_mut(&mut working, &id).expect("named id") = candidate;
                     } else if let Some(notes) = feedback.get_mut(&candidate.id) {
-                        notes.push(refuted_check_message(
-                            &candidate.id,
-                            &candidate.judgment.reason,
-                            &candidate.judgment.counterexample,
-                        ));
+                        notes.push(judge::author_note(&candidate));
                     }
                 }
             }
@@ -328,8 +325,16 @@ pub(crate) async fn reauthor_partial_with_cache(
                 .collect();
             // F6: only a program neither the site nor the host has is the
             // author's; a site lacking what the host has stays the host's.
+            // Issue 548 replaces that second half: no host repair ever makes
+            // a site provide a program it lacks, so that check is its
+            // author's too, in the same budget and with no strike: no retry
+            // can prove it.
             for (id, (reason, cause)) in unproven {
-                if cause == super::executability::UnprovenCause::ProgramAbsent {
+                if matches!(
+                    cause,
+                    super::executability::UnprovenCause::ProgramAbsent
+                        | super::executability::UnprovenCause::SiteLacks
+                ) {
                     crashed.insert(
                         id.clone(),
                         format!("the check invokes a program unavailable at the probe site ({reason}); choose a check using what the site provides"),
@@ -340,6 +345,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                     entry(contract, &id).expect("named id").clone();
                 pending.remove(&id);
                 reused.remove(&id);
+                host_faults.insert(id.clone(), cause.class());
                 unproven_checks.insert(id, reason);
             }
             // Issue 275: a replacement that failed on the baseline must also
@@ -381,6 +387,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                                 } else {
                                     pending.remove(&id);
                                     reused.remove(&id);
+                                    host_faults.insert(id.clone(), held.fault_class);
                                     unproven_checks.insert(id, held.finding.clone());
                                 }
                             }
@@ -445,6 +452,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     Ok(ReauthorProgress {
         contract: working,
         unproven: unproven_checks,
+        host_faults,
         authored_pending,
         attempts: attempt,
     })

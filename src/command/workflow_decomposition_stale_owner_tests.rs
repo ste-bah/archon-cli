@@ -370,7 +370,7 @@ fn left_group(store: &WorkflowStore, run_id: &str) -> serde_json::Value {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn fixed_resume_refuses_while_a_dead_owners_host_command_group_runs() {
+async fn fixed_resume_settles_a_dead_owners_host_command_group_without_an_operator() {
     let project = fixture_project();
     let (store, run_id) = launch_left_running(project.path()).await;
     let signals = tempfile::tempdir().unwrap();
@@ -384,18 +384,29 @@ async fn fixed_resume_refuses_while_a_dead_owners_host_command_group_runs() {
     let group = left_group(&store, &run_id);
     let pgid = u32::try_from(group["pgid"].as_u64().unwrap()).unwrap();
     // Kills this test's own group however the test ends.
-    struct GroupGuard(u32);
+    struct GroupGuard(u32, u64);
     impl Drop for GroupGuard {
         fn drop(&mut self) {
-            // SAFETY: signals only the group this test created.
-            unsafe { libc::kill(-(self.0 as libc::pid_t), libc::SIGKILL) };
+            if archon_shell::process_tree::identity_of(self.0)
+                .ok()
+                .flatten()
+                == Some(self.1)
+            {
+                // SAFETY: signals only the group this test created.
+                unsafe { libc::kill(-(self.0 as libc::pid_t), libc::SIGKILL) };
+            }
         }
     }
-    let group_guard = GroupGuard(pgid);
+    let group_guard = GroupGuard(pgid, group["leader_start"].as_u64().unwrap());
 
     // Only the parent dies: the lease is free, but its group still runs.
     holder.kill();
-    let (factory, error) = resume(project.path()).await;
+    let error = crate::command::workflow_host_command_groups::require_no_running_groups_read_only(
+        &store.run_dir(&run_id),
+        &run_id,
+    )
+    .unwrap_err()
+    .to_string();
     assert!(
         error.contains(&format!(
             "host command 'test-host-command' (process group {pgid}"
@@ -403,7 +414,6 @@ async fn fixed_resume_refuses_while_a_dead_owners_host_command_group_runs() {
         "{error}"
     );
     assert!(error.contains("still running"), "{error}");
-    assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
     assert_eq!(
         store.load_state(&run_id).unwrap().status,
         RunStatus::Running
@@ -411,6 +421,17 @@ async fn fixed_resume_refuses_while_a_dead_owners_host_command_group_runs() {
     assert!(recovery_events(&store, &run_id).is_empty());
 
     // The group ends: recovery proceeds and records the ended group.
+    let (factory, error) =
+        tokio::time::timeout(std::time::Duration::from_secs(30), resume(project.path()))
+            .await
+            .expect("recorded-child recovery must finish");
+    assert!(error.contains("barrier observed"), "{error}");
+    assert_eq!(factory.builds.load(Ordering::SeqCst), 1);
+    assert!(
+        archon_shell::process_tree::identity_of(pgid)
+            .unwrap()
+            .is_none()
+    );
     drop(group_guard);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while crate::command::workflow_host_command_groups::group_running(pgid) != Some(false) {
@@ -420,9 +441,6 @@ async fn fixed_resume_refuses_while_a_dead_owners_host_command_group_runs() {
         );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let (factory, error) = resume(project.path()).await;
-    assert!(error.contains("barrier observed"), "{error}");
-    assert_eq!(factory.builds.load(Ordering::SeqCst), 1);
     let events = recovery_events(&store, &run_id);
     assert_eq!(events.len(), 1, "{events:?}");
     let ended = &events[0]["detail"]["ended_host_command_groups"];

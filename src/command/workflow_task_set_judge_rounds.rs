@@ -1,6 +1,34 @@
 use super::incomplete::JudgeIncompleteKind;
 use super::*;
 
+/// Added to a fresh ask after a reply cut off without a usable document
+/// (#552). The judge samples at temperature 0, so the same prompt again
+/// would repeat the same reply; the whole task is kept.
+const JSON_ONLY_REASK: &str = "\n\nYour previous reply to this request was cut off before it gave a usable JSON document. Reply with the JSON document only, with no reasoning or other text before or after it.";
+
+/// The checks of `contract` this judge call left without a verdict (#552).
+fn undecided(contract: &AcceptanceContract, decided: &BTreeSet<String>) -> Vec<String> {
+    (contract.acceptance.iter().chain(&contract.supplementary))
+        .filter(|entry| !decided.contains(&entry.id))
+        .map(|entry| entry.id.clone())
+        .collect()
+}
+
+/// `error`, when it is an incomplete judge that names no check, naming the
+/// checks of `contract` not in `decided`.
+fn naming_undecided(
+    mut error: anyhow::Error,
+    contract: &AcceptanceContract,
+    decided: &BTreeSet<String>,
+) -> anyhow::Error {
+    if let Some(incomplete) = error.downcast_mut::<JudgeIncomplete>()
+        && incomplete.undecided.is_empty()
+    {
+        incomplete.undecided = undecided(contract, decided);
+    }
+    error
+}
+
 /// Copy every entry `answered` judged into `contract`, matched by id.
 pub(super) fn merge_judged_entries(
     contract: &mut AcceptanceContract,
@@ -27,6 +55,51 @@ pub(super) async fn judge_prompted_with_roots(
     partial: Option<&PartialReply<'_>>,
     roots: &super::JudgeRoots,
 ) -> Result<AcceptanceContract> {
+    judge_rounds(
+        client,
+        contract,
+        prompt,
+        model,
+        validate,
+        partial,
+        roots,
+        |_| false,
+    )
+    .await
+}
+
+/// A known refutation is ready for its author before the next provider call.
+/// An incomplete result carries exactly the decided entries; all others remain pending.
+pub(crate) async fn judge_refutations(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    prompt: impl Fn(&AcceptanceContract) -> Result<String>,
+    model: &str,
+    refutes: impl Fn(&AcceptanceContract) -> bool,
+) -> Result<AcceptanceContract> {
+    judge_rounds(
+        client,
+        contract,
+        prompt,
+        model,
+        require_judged_prose,
+        None,
+        &super::JudgeRoots::default(),
+        refutes,
+    )
+    .await
+}
+
+async fn judge_rounds(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    prompt: impl Fn(&AcceptanceContract) -> Result<String>,
+    model: &str,
+    validate: impl Fn(&AcceptanceContract) -> Result<()>,
+    partial: Option<&PartialReply<'_>>,
+    roots: &super::JudgeRoots,
+    refutes: impl Fn(&AcceptanceContract) -> bool,
+) -> Result<AcceptanceContract> {
     let task = prompt(&contract)?;
     let mut messages = vec![serde_json::json!({"role":"user","content":task})];
     let mut judged_contract = contract;
@@ -42,7 +115,10 @@ pub(super) async fn judge_prompted_with_roots(
     let mut decided = BTreeSet::new();
     loop {
         attempts += 1;
-        let content = match complete_reply(client, &messages, model, partial).await? {
+        let reply = complete_reply(client, &messages, model, partial)
+            .await
+            .map_err(|error| naming_undecided(error, &judged_contract, &decided))?;
+        let content = match reply {
             Ok(content) => content,
             Err((unusable, kind)) => {
                 last = unusable.clone();
@@ -60,7 +136,14 @@ pub(super) async fn judge_prompted_with_roots(
                 // complete reply to quote (for example, a truncation before
                 // JSON starts). Ask afresh; parsed rejections below preserve
                 // the actual assistant reply and exact validation error.
-                messages = vec![serde_json::json!({"role":"user","content":current_task})];
+                // A reply cut off before a usable document is asked with a
+                // JSON-only instruction, so the ask differs (#552).
+                let ask = if kind == JudgeIncompleteKind::AuthoredReply {
+                    format!("{current_task}{JSON_ONLY_REASK}")
+                } else {
+                    current_task.clone()
+                };
+                messages = vec![serde_json::json!({"role":"user","content":ask})];
                 continue;
             }
         };
@@ -118,6 +201,20 @@ pub(super) async fn judge_prompted_with_roots(
                     }
                     return Ok(judged_contract);
                 }
+                if refutes(&answered) {
+                    let mut incomplete = JudgeIncomplete::new(
+                        JudgeIncompleteKind::AuthoredReply,
+                        "known refutations require repair; remaining checks are undecided",
+                    );
+                    incomplete.undecided = undecided(&judged_contract, &decided);
+                    incomplete.decided = judged_contract
+                        .acceptance
+                        .into_iter()
+                        .chain(judged_contract.supplementary)
+                        .filter(|entry| decided.contains(&entry.id))
+                        .collect();
+                    return Err(incomplete.into());
+                }
                 pending_contract = subset_with_ids(&judged_contract, &missing);
                 current_task = prompt(&pending_contract)?;
                 messages = vec![serde_json::json!({"role":"user","content":current_task})];
@@ -168,6 +265,7 @@ pub(super) async fn judge_prompted_with_roots(
             "{attempts} replies; the last {JUDGE_NO_PROGRESS_WINDOW} gave no new first-error class or usable verdict; the last: {last}"
         ),
     );
+    incomplete.undecided = undecided(&judged_contract, &decided);
     incomplete.decided = (judged_contract.acceptance.into_iter())
         .chain(judged_contract.supplementary)
         .filter(|entry| decided.contains(&entry.id))

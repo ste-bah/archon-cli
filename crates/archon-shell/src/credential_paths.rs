@@ -3,6 +3,11 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
+/// Environment override for the Archon credentials file path.
+pub const CREDENTIALS_FILE_ENV: &str = "ARCHON_CREDENTIALS_FILE";
+/// Environment override for the Codex CLI authentication file path.
+pub const CODEX_AUTH_FILE_ENV: &str = "ARCHON_CODEX_AUTH_FILE";
+
 static REGISTERED: OnceLock<RwLock<BTreeSet<PathBuf>>> = OnceLock::new();
 
 /// Host credential readers/writers register custom locations before exposing
@@ -83,7 +88,7 @@ pub fn default_provider_store_in(home: &Path) -> PathBuf {
 // the credential file at all. The `#[cfg(test)]` hook above only ever
 // helped in-process unit tests.
 pub fn provider_store() -> PathBuf {
-    override_path("ARCHON_CREDENTIALS_FILE").unwrap_or_else(default_provider_store)
+    override_path(CREDENTIALS_FILE_ENV).unwrap_or_else(default_provider_store)
 }
 
 // Explicit override, for the same reason as `ARCHON_CREDENTIALS_FILE`:
@@ -92,7 +97,7 @@ pub fn provider_store() -> PathBuf {
 // Worse than a red test -- it meant the auth-status tests read whatever
 // Codex credentials the developer actually had installed.
 pub fn codex_cli_store() -> PathBuf {
-    override_path("ARCHON_CODEX_AUTH_FILE").unwrap_or_else(|| home().join(".codex/auth.json"))
+    override_path(CODEX_AUTH_FILE_ENV).unwrap_or_else(|| home().join(".codex/auth.json"))
 }
 
 fn override_path(name: &str) -> Option<PathBuf> {

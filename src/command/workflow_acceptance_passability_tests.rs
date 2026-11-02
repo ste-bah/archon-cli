@@ -411,6 +411,7 @@ async fn reauthor_decisions_are_written_to_the_audit_directory() {
     let mut contract = crate::command::workflow_task_set::judge::continuation_tests::contract();
     contract.acceptance[0].judgment.verdict = JudgeDecision::Accepted;
     let failed = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-X-001".into(),
         environment_note: None,
@@ -486,3 +487,8 @@ fn passability_instruction_identifies_the_evidence_tree_instead_of_assuming_base
     );
     assert!(super::passability::INSTRUCTION.contains("evidence tree"));
 }
+
+#[path = "workflow_acceptance_passability_heal_tests.rs"]
+mod heal_tests;
+#[path = "workflow_task_set_known_findings_tests.rs"]
+mod known_findings_tests;

@@ -253,20 +253,29 @@ async fn progress(number: &str) {
     )
     .await;
     clean(&ran, &["87654321"]);
-    assert!(matches!(ran.result, Err(WorkflowError::ControlPaused(_))));
-    assert_eq!(calls, 2);
-    assert_eq!(status, RunStatus::Paused);
+    let result = ran.result.unwrap();
+    assert_eq!(
+        result
+            .gate_envelope
+            .unwrap()
+            .operational_error
+            .unwrap()
+            .kind,
+        "permanent_host_fault"
+    );
+    assert_eq!(calls, 1, "an unframed status cannot silently retry forever");
+    assert_eq!(status, RunStatus::Running);
 }
 #[tokio::test]
-async fn exact_progress_scalar_crosses_executor_boundary() {
+async fn unknown_progress_exact_scalar_keeps_credential_boundary_and_stops_once() {
     progress("87654321").await;
 }
 #[tokio::test]
-async fn prefixed_progress_scalar_crosses_executor_boundary() {
+async fn unknown_progress_prefixed_scalar_keeps_credential_boundary_and_stops_once() {
     progress("187654321").await;
 }
 #[tokio::test]
-async fn suffixed_progress_scalar_crosses_executor_boundary() {
+async fn unknown_progress_suffixed_scalar_keeps_credential_boundary_and_stops_once() {
     progress("876543210").await;
 }
 async fn query(url: &str, encoded: &str, decoded: &str) {

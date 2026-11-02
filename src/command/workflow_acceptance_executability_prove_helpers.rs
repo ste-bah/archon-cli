@@ -1,4 +1,24 @@
 use super::*;
+use crate::command::workflow_task_set::passability::evidence::Redactor;
+
+impl HostProbe {
+    /// The environment this probe's site gives every check, and the host
+    /// variable names it forwards (Issue 544: the reverify judge's evidence
+    /// is redacted with them).
+    pub(crate) fn site_environment(&self) -> (BTreeMap<String, String>, Vec<String>) {
+        super::super::sites::site_environment(self)
+    }
+
+    /// Issue 544: one redactor for every value the host binds into a
+    /// check's environment: the site policy's own values, the host values
+    /// it forwards, the host's credentials, and every URL password among
+    /// them. All mutation evidence passes through it before any line is
+    /// left out or any excerpt is cut.
+    pub(in crate::command::workflow_task_set::executability) fn output_redactor(&self) -> Redactor {
+        let (environment, forwarded) = self.site_environment();
+        Redactor::for_environment(environment.into_iter().chain(self.host.clone()), &forwarded)
+    }
+}
 
 pub(in crate::command::workflow_task_set::executability) enum MutationFinding {
     HostUnproven(String),
@@ -21,8 +41,10 @@ pub(in crate::command::workflow_task_set::executability) fn mutation_host_or_aut
         return Some(MutationFinding::HostUnproven(reason));
     }
     if let Some(reason) = setup_failure {
+        // Issue 495: state only what the run showed. The caller names any
+        // environment repair the host really made in `reason`.
         return Some(MutationFinding::AuthorFinding(format!(
-            "{passed_there}; the check stopped at a setup failure after the host repaired its environment: {reason}; choose a path available in the selected root and make the check fail on its own assertion"
+            "{passed_there}; with the data it names moved aside, the check stopped at a setup failure: {reason}; choose a path available in the selected root and make the check fail on its own assertion"
         )));
     }
     // Restoration can establish that a moved path was present again, but
@@ -187,4 +209,114 @@ pub(in crate::command::workflow_task_set::executability) fn describe_status(
         }
         None => "signal/exit status unavailable (wrapper interrupted before recording it)".into(),
     }
+}
+
+/// Issue 495: a setup-failure reason that names the environment repairs the
+/// host really made before the run, and none when it made none.
+pub(in crate::command::workflow_task_set::executability) fn setup_reason_with_repairs(
+    reason: String,
+    repairs: &[String],
+) -> String {
+    if repairs.is_empty() {
+        return reason;
+    }
+    format!(
+        "{reason} (the host had repaired its environment before this run: {})",
+        repairs.join("; then ")
+    )
+}
+
+/// Issue 492: what the run with inputs moved aside showed, for every
+/// verdict reached from it: the state of each input, the inputs moved, the
+/// exit status, and the check's own output. Mutation protocol lines are
+/// left out of the output (their facts are the states); the output is
+/// redacted before its excerpt is cut.
+pub(in crate::command::workflow_task_set::executability) fn mutation_observation(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    inputs: &[String],
+    redactor: &Redactor,
+) -> String {
+    // Credentials are masked in the whole stream before any line is left
+    // out, so a value spanning lines is masked whole.
+    let own = |bytes: &[u8]| -> Vec<u8> {
+        redactor
+            .redact(&String::from_utf8_lossy(bytes))
+            .lines()
+            .filter(|line| {
+                !(line.starts_with("archon-mutation-") && line.contains(markers.nonce()))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes()
+    };
+    let mut check_only = result.clone();
+    check_only.stdout = own(&result.stdout);
+    check_only.stderr = own(&result.stderr);
+    format!(
+        "inputs={:?}; moved={:?}; mutated_exit_code={:?}; status/signal: {}; output_excerpt={:?}",
+        markers.move_states(result, inputs),
+        markers.moved(result, inputs),
+        result.exit_code,
+        describe_status(markers.status(result)),
+        super::output_evidence_with(&check_only, redactor)
+    )
+}
+
+/// `finding` with the observation it was reached from.
+pub(in crate::command::workflow_task_set::executability) fn observed(
+    finding: String,
+    observation: &str,
+) -> String {
+    format!("{finding}; mutation observation: {observation}")
+}
+
+/// The last non-empty line of the check's own stderr (mutation protocol
+/// lines left out), quoted verbatim; `(none)` when empty. The whole stderr
+/// is redacted first, then the line is picked: a credential that spans
+/// lines is masked whole, never cut so that its tail survives.
+pub(in crate::command::workflow_task_set::executability) fn last_stderr_line(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    redactor: &Redactor,
+) -> String {
+    let stderr = archon_observability::redaction::redact_secret_values(
+        &redactor.redact(&String::from_utf8_lossy(&result.stderr)),
+    );
+    stderr
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter(|line| !(line.starts_with("archon-mutation-") && line.contains(markers.nonce())))
+        .last()
+        .map_or_else(|| "(none)".to_string(), |line| format!("{line:?}"))
+}
+
+/// Issue 328: whether a mutated run crashed in the check's own code, judged
+/// on `view`'s streams (the raw capture, or a stored copy) against the
+/// check's original command: the executor classified the generated mutation
+/// wrapper, whose shell text is not the author's inline program, so the
+/// classification is dropped and the stderr, with the host's mutation
+/// protocol lines left out, is classified again.
+pub(in crate::command::workflow_task_set::executability) fn mutation_crashed(
+    contract: &AcceptanceContract,
+    view: &CheckResult,
+    markers: &mutation::Markers,
+) -> bool {
+    let mut view = view.clone();
+    view.classification = None;
+    let protocol = [
+        markers.moved_prefix(),
+        markers.move_state_prefix(),
+        markers.generated_prefix(),
+        markers.recreated_prefix(),
+        format!("archon-mutation-check-recreated-{}: ", markers.nonce()),
+        format!("archon-mutation-guard-{}:", markers.nonce()),
+    ];
+    view.stderr = String::from_utf8_lossy(&view.stderr)
+        .lines()
+        .filter(|line| !protocol.iter().any(|prefix| line.starts_with(prefix)))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into_bytes();
+    !super::super::crash_findings(contract, [&view]).is_empty()
 }

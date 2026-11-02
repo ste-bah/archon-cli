@@ -55,7 +55,7 @@ async fn fetch_imds_credentials() -> Result<Option<(AwsCredentials, DateTime<Utc
     let http = crate::transport_http::client_builder()
         .timeout(IMDS_TIMEOUT)
         .build()
-        .map_err(|e| LlmError::Auth(format!("failed to build IMDS client: {e}")))?;
+        .map_err(|e| LlmError::Auth(format!("failed to build IMDS client: {e}").into()))?;
 
     // 1. IMDSv2 session token. Any failure here means "not on EC2" far more
     //    often than "EC2 is broken", so treat it as absence.
@@ -99,15 +99,15 @@ async fn fetch_imds_credentials() -> Result<Option<(AwsCredentials, DateTime<Utc
         .send()
         .await
         .map_err(|e| {
-            LlmError::Auth(format!("IMDS credential fetch failed for role {role}: {e}"))
+            LlmError::Auth(format!("IMDS credential fetch failed for role {role}: {e}").into())
         })?;
 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(LlmError::Auth(format!(
-            "IMDS returned {status} for role {role}"
-        )));
+        return Err(LlmError::Auth(
+            format!("IMDS returned {status} for role {role}").into(),
+        ));
     }
 
     parse_credential_response(&body, &role).map(Some)
@@ -119,7 +119,7 @@ fn parse_credential_response(
     role: &str,
 ) -> Result<(AwsCredentials, DateTime<Utc>), LlmError> {
     let json: serde_json::Value = serde_json::from_str(body)
-        .map_err(|e| LlmError::Auth(format!("malformed IMDS credential response: {e}")))?;
+        .map_err(|e| LlmError::Auth(format!("malformed IMDS credential response: {e}").into()))?;
     let field = |name: &str| {
         json.get(name)
             .and_then(|v| v.as_str())
@@ -131,9 +131,9 @@ fn parse_credential_response(
     let secret_access_key = field("SecretAccessKey");
     let session_token = field("Token");
     if access_key_id.is_empty() || secret_access_key.is_empty() || session_token.is_empty() {
-        return Err(LlmError::Auth(format!(
-            "IMDS credential response for role {role} was missing required fields"
-        )));
+        return Err(LlmError::Auth(
+            format!("IMDS credential response for role {role} was missing required fields").into(),
+        ));
     }
 
     // Without a parsable expiry, treat the credentials as already stale so we

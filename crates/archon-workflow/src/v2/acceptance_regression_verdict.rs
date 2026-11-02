@@ -48,15 +48,32 @@ fn comparable(signature: &str) -> String {
             masked.push_str("<path>");
             continue;
         }
-        for c in word.chars() {
+        // Issue 544: a secret's indexed placeholder (`<secret#2>`) names
+        // which secret it was: kept whole, so distinct secrets stay apart.
+        let mut rest = word;
+        while !rest.is_empty() {
+            if let Some(token) = secret_placeholder(rest) {
+                masked.push_str(token);
+                rest = &rest[token.len()..];
+                continue;
+            }
+            let c = rest.chars().next().expect("non-empty");
             if !c.is_ascii_digit() {
                 masked.push(c);
             } else if !masked.ends_with('#') {
                 masked.push('#');
             }
+            rest = &rest[c.len_utf8()..];
         }
     }
     format!("{exit} {}", masked.chars().take(160).collect::<String>())
+}
+
+/// The `<secret#N>` placeholder `text` starts with, if any.
+fn secret_placeholder(text: &str) -> Option<&str> {
+    let digits = text.strip_prefix("<secret#")?;
+    let count = digits.bytes().take_while(u8::is_ascii_digit).count();
+    (count > 0 && digits[count..].starts_with('>')).then(|| &text[.."<secret#".len() + count + 1])
 }
 
 /// What a failing check's output says, as the checks sharing a probe are

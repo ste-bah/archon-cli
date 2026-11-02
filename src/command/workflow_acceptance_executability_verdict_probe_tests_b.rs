@@ -115,15 +115,41 @@ async fn a_build_step_broken_outside_the_checks_files_is_still_unproven() {
 
 /// (d) Unproven once, the check is retried; unproven again on the same base,
 /// it is its author's finding -- never a block for good. A re-authored text
-/// starts afresh.
+/// starts afresh. Issue 557 (replaces
+/// `a_check_unproven_again_on_the_same_base_goes_to_its_author`): a tool
+/// neither the site nor the host has is its author's on the first freeze
+/// (no host action makes it available), so the strike rule is shown with a
+/// host cause, a build broken outside the check's own files.
 #[tokio::test]
-async fn a_check_unproven_again_on_the_same_base_goes_to_its_author() {
-    let trees = trees(&[("AC-D", "archon-issue-328-absent-tool --verify x", REPO)]);
+async fn issue557_a_host_unproven_check_unproven_again_on_the_same_base_goes_to_its_author() {
+    let absent = trees(&[("AC-D", "archon-issue-328-absent-tool --verify x", REPO)]);
     let copies = tempfile::tempdir().unwrap();
-    let freeze = || {
-        HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
-            .with_copy_parent(copies.path().to_path_buf())
-    };
+    let probe = HostProbe::for_task_set(absent.set.project.path(), &absent.set.tasks)
+        .with_copy_parent(copies.path().to_path_buf());
+    let findings = probe
+        .script_defects(&absent.contract(), &absent.ids())
+        .await;
+    assert!(probe.take_unproven().is_empty(), "never the host's");
+    let finding = findings.get("AC-D").expect("its author's at once");
+    assert!(
+        finding.contains("cannot be proven on the base commit")
+            && finding.contains("fail by its own assertion")
+            && finding.contains("archon-issue-328-absent-tool"),
+        "{finding}"
+    );
+    absent.assert_live_untouched(copies.path());
+    let trees = trees(&[("AC-D", BUILDS_THEN_ASSERTS, REPO)]);
+    std::fs::create_dir_all(trees.repo.join("src")).unwrap();
+    let base = commit(
+        &trees.repo,
+        &[
+            ("src/lib.rs", "mod parser;\n"),
+            ("src/parser.rs", "pub fn f() -> u32 { \"x\" }\n"),
+        ],
+        "base",
+    );
+    let copies = tempfile::tempdir().unwrap();
+    let freeze = || round_at(&trees, &base, copies.path());
     let first = freeze();
     let findings = first.script_defects(&trees.contract(), &trees.ids()).await;
     assert!(findings.is_empty(), "{findings:?}");
@@ -135,7 +161,7 @@ async fn a_check_unproven_again_on_the_same_base_goes_to_its_author() {
     assert!(
         finding.contains("cannot be proven on the base commit")
             && finding.contains("fail by its own assertion")
-            && finding.contains("archon-issue-328-absent-tool"),
+            && finding.contains("did not build"),
         "{finding}"
     );
     let mut rewritten = trees.contract();

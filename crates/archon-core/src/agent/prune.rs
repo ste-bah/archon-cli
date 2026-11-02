@@ -208,7 +208,7 @@ fn plan_repeated_reads(
     calls: &ToolCalls,
     out: &mut HashMap<String, (String, &'static str)>,
 ) {
-    let mut reads: HashMap<(String, usize, usize), Vec<(usize, String)>> = HashMap::new();
+    let mut reads: HashMap<(String, usize, Option<usize>), Vec<(usize, String)>> = HashMap::new();
     let mut writes: HashMap<String, Vec<usize>> = HashMap::new();
     for (id, (ordinal, name, input)) in &calls.by_id {
         let Some(path) = path_argument(input) else {
@@ -217,7 +217,10 @@ fn plan_repeated_reads(
         if name == "Read" || name == "NotebookRead" {
             let value: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
             let offset = value.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let limit = value.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+            let limit = value
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
             reads
                 .entry((path, offset, limit))
                 .or_default()

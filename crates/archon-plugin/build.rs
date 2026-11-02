@@ -34,12 +34,18 @@
 
 use std::path::{Path, PathBuf};
 
+#[path = "src/build_environment.rs"]
+mod build_environment;
+
 fn main() {
     // Declared so `#[cfg(archon_can_symlink)]` is a known name rather than an
     // `unexpected_cfgs` warning on modern rustc.
     println!("cargo:rustc-check-cfg=cfg(archon_can_symlink)");
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=ARCHON_RECHECK_SYMLINK_PRIVILEGE");
+    println!(
+        "cargo:rerun-if-env-changed={}",
+        build_environment::RECHECK_SYMLINK_PRIVILEGE_ENV
+    );
 
     if host_can_create_symlinks() {
         println!("cargo:rustc-cfg=archon_can_symlink");

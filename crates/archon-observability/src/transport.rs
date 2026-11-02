@@ -1,4 +1,7 @@
 //! Run-owned transport diagnostics, explicitly inherited across named tasks.
+/// Environment override for the minimum free space required for transport evidence.
+pub const MIN_FREE_BYTES_ENV: &str = "ARCHON_TRANSPORT_EVIDENCE_MIN_FREE_BYTES";
+
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -116,7 +119,7 @@ impl EvidenceScope {
 }
 
 fn min_free_bytes() -> u64 {
-    std::env::var("ARCHON_TRANSPORT_EVIDENCE_MIN_FREE_BYTES")
+    std::env::var(MIN_FREE_BYTES_ENV)
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_MIN_FREE_BYTES)

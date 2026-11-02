@@ -164,7 +164,20 @@ impl HostProbe {
 
     /// Record that the host could not prove `id`.
     pub(super) fn unproven(&self, id: &str, why: String) {
-        self.unproven_as(id, why, UnprovenCause::Host);
+        self.unproven_as(id, why, UnprovenCause::PermanentHost);
+    }
+
+    pub(super) fn unproven_error(&self, id: &str, error: anyhow::Error, context: String) {
+        let cause =
+            UnprovenCause::from_class(crate::command::workflow_host_fault::classify(&error));
+        self.unproven_as(
+            id,
+            format!(
+                "{context}: {}",
+                crate::command::workflow_host_fault::diagnostic(&error)
+            ),
+            cause,
+        );
     }
 
     /// Record that the host could not prove `id`, for `cause`.

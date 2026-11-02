@@ -125,7 +125,7 @@ pub use finalization::{
 };
 pub use gate_envelope::{
     GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
-    RemediationScope,
+    GateStage, RemediationScope,
 };
 pub use host_api::{
     AgentResultMode, WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod,
@@ -204,12 +204,16 @@ mod write_read_set_tests;
 
 pub mod record_landing;
 #[cfg(test)]
+#[path = "record_landing_final_reply_tests.rs"]
+mod record_landing_final_reply_tests;
+#[cfg(test)]
 #[path = "record_landing_issue39_tests.rs"]
 mod record_landing_issue39_tests;
 #[cfg(test)]
 #[path = "record_landing_kind_scope_tests.rs"]
 mod record_landing_kind_scope_tests;
 mod record_landing_merge;
+mod record_landing_reply;
 mod record_landing_schema;
 #[cfg(test)]
 #[path = "record_landing_tests.rs"]

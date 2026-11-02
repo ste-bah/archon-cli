@@ -86,8 +86,8 @@ pub(super) fn hold_check_source_changes(
         Ok(Some(loaded)) => loaded,
         Ok(None) => return Ok(hold),
         Err(PublishLockError::Unsettled(why)) => return Err(WorkflowError::ControlPaused(why)),
-        Err(PublishLockError::Failed(error)) => {
-            hold.unavailable = Some(error);
+        Err(error) => {
+            hold.unavailable = Some(error.to_string());
             return Ok(hold);
         }
     };

@@ -80,6 +80,13 @@ async fn a_false_verdict_on_the_candidate_is_a_body_finding_naming_obligation_an
         "the claiming task is the subject"
     );
     assert_eq!(finding.gate_id, GateId::WorkflowLintTaskFile);
+    // #562: the critic's stage and the obligation it decided, so a body whose
+    // critic findings fall from five to one is measured as shrinking.
+    assert_eq!(
+        finding.gate_stage,
+        Some(crate::command::workflow_gate::GateStage::Critic)
+    );
+    assert_eq!(finding.judged_item.as_deref(), Some("AC-WS-001"));
     assert!(
         finding
             .source_path

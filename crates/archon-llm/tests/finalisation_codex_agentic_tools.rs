@@ -253,7 +253,7 @@ impl LlmProvider for CaptureProvider {
         let (tx, rx) = mpsc::channel(self.events.len().max(1));
         for event in &self.events {
             tx.try_send(event.clone())
-                .map_err(|err| LlmError::Http(err.to_string()))?;
+                .map_err(|err| LlmError::Http(err.to_string().into()))?;
         }
         Ok(rx)
     }

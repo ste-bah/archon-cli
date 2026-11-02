@@ -6,7 +6,7 @@ fn anthropic_rejection_types_are_fail_fast_and_redacted_for_http_errors() {
     let body = format!(
         r#"{{"type":"error","error":{{"type":"invalid_request_error","message":"bad key {secret}"}}}}"#
     );
-    let before = crate::provider::LlmError::Http(format!("HTTP 400: {body}"));
+    let before = crate::provider::LlmError::Http(format!("HTTP 400: {body}").into());
     let before_decision = crate::retry::classify(&before);
     let llm_error = crate::provider::LlmError::from(classify_error(400, &body, None));
     println!(

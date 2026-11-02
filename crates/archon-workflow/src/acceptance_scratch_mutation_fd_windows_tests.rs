@@ -48,3 +48,19 @@ fn missing_parent_for_site_entry_is_absent() {
 
     assert!(!site_entry_exists(&root, Path::new("missing/entry.txt")).unwrap());
 }
+
+/// Issue 543: the captured root handle has no delete sharing, so the site
+/// root cannot be removed while it is held; teardown must release it first.
+#[test]
+fn a_held_site_root_blocks_removal_until_it_is_released() {
+    let temp = tempfile::tempdir().unwrap();
+    let root_path = temp.path().join("site");
+    std::fs::create_dir(&root_path).unwrap();
+    let root = SiteRoot::capture(&root_path).unwrap();
+
+    let held = std::fs::remove_dir(&root_path).unwrap_err();
+    assert_eq!(held.raw_os_error(), Some(32), "{held:?}");
+    drop(root);
+    std::fs::remove_dir(&root_path).unwrap();
+    assert!(!root_path.exists());
+}

@@ -229,7 +229,7 @@ async fn streaming_error_redacts_after_content_and_leaves_retries_to_the_runner(
             },
             StreamEvent::Error {
                 error_type: "overloaded_error".into(),
-                message: format!("api_key={secret}"),
+                message: format!("api_key={secret}").into(),
             },
         ],
     });
@@ -283,7 +283,7 @@ async fn rejected_stream_error_fails_fast_with_redacted_text() {
         calls: AtomicUsize::new(0),
         events: vec![StreamEvent::Error {
             error_type: "authentication_error".into(),
-            message: format!("api_key={fake_key}"),
+            message: format!("api_key={fake_key}").into(),
         }],
     });
     let provider = RetryProvider::new(inner.clone(), RetryPolicy::default());

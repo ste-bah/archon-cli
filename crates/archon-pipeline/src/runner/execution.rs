@@ -280,18 +280,11 @@ pub(super) fn relative_to_bundle(bundle_dir: &Path, path: &Path) -> String {
 }
 
 pub(super) fn is_context_window_error(error: &anyhow::Error) -> bool {
+    // The display text as 86fbab995 saw it, provider faults included.
     error
         .downcast_ref::<archon_llm::provider::LlmError>()
         .is_some_and(|err| err.is_context_window_exceeded())
-        || archon_llm::context_window::classify_context_window_error(
-            None,
-            None,
-            None,
-            &error.to_string(),
-            Some("pipeline"),
-            None,
-        )
-        .is_some()
+        || display_classified(error, archon_llm::provider::ShownTest::ContextWindow)
 }
 
 pub(super) fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool {
@@ -312,24 +305,20 @@ pub(super) fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool
         );
     }
 
-    let message = error.to_string().to_ascii_lowercase();
-    [
-        "http error",
-        "error decoding response body",
-        "connection reset",
-        "connection closed",
-        "connection refused",
-        "timed out",
-        "timeout",
-        "temporarily unavailable",
-        "500",
-        "502",
-        "503",
-        "504",
-    ]
-    .iter()
-    .any(|marker| message.contains(marker))
-        || has_pipeline_overload_error_code(&message)
+    display_classified(error, archon_llm::provider::ShownTest::PipelineTransient)
+}
+
+/// A text rule over this error's Display, as 86fbab995 saw that text: a
+/// provider fault inside a wrapper reads with that commit's Display.
+fn display_classified(error: &anyhow::Error, test: archon_llm::provider::ShownTest) -> bool {
+    let display = error.to_string();
+    error
+        .chain()
+        .find_map(|cause| archon_llm::provider::LlmError::carried_by(cause))
+        .map_or_else(
+            || test.matches(&display),
+            |fault| fault.shown_is(&display, test),
+        )
 }
 
 const PIPELINE_OVERLOAD_BACKOFF_CAP: Duration = Duration::from_secs(300); // Keep provider overload waits within five minutes.
@@ -407,25 +396,7 @@ fn is_pipeline_overload_error(error: &anyhow::Error) -> bool {
                 }
             );
     }
-    let message = error.to_string().to_ascii_lowercase();
-    has_pipeline_overload_error_code(&message)
-}
-
-fn has_pipeline_overload_error_code(message: &str) -> bool {
-    [
-        "overloaded_error",
-        "server_is_overloaded",
-        "rate_limit_error",
-    ]
-    .iter()
-    .any(|code| {
-        message.match_indices(code).any(|(index, _)| {
-            let before = message[..index].chars().next_back();
-            let after = message[index + code.len()..].chars().next();
-            before.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
-                && after.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
-        })
-    })
+    display_classified(error, archon_llm::provider::ShownTest::PipelineOverload)
 }
 
 pub(super) fn quality_gate_failure(agent: &AgentInfo, score: f64, attempt: usize) -> String {

@@ -265,7 +265,7 @@ impl BedrockProvider {
         );
 
         let body_bytes =
-            serde_json::to_vec(&body).map_err(|e| LlmError::Serialize(e.to_string()))?;
+            serde_json::to_vec(&body).map_err(|e| LlmError::Serialize(e.to_string().into()))?;
 
         // The one place a missing or misplaced `cachePoint` is visible. Bedrock
         // discards a checkpoint under the model's minimum without an error, so
@@ -280,8 +280,8 @@ impl BedrockProvider {
             );
         }
 
-        let url_parsed =
-            Url::parse(&url).map_err(|e| LlmError::Serialize(format!("invalid URL: {e}")))?;
+        let url_parsed = Url::parse(&url)
+            .map_err(|e| LlmError::Serialize(format!("invalid URL: {e}").into()))?;
         let host = url_parsed.host_str().unwrap_or("").to_string();
         let path = url_parsed.path().to_string();
 

@@ -95,17 +95,42 @@ pub struct AgenticToolCall {
 
 #[derive(Debug, Clone)]
 pub enum AgenticTurnEvent {
-    MessageStarted { provider_id: String, model: String },
-    TextDelta { text: String },
-    ReasoningDelta { text: String },
-    ToolCallStarted { id: String, name: String },
-    ToolCallArgumentDelta { id: String, delta: String },
-    ToolCallCompleted { call: AgenticToolCall },
-    UsageUpdated { usage: Usage },
-    ReasoningEncrypted { blob: String },
-    ProviderWarning { message: String },
-    ProviderError { message: String },
-    TurnCompleted { stop_reason: Option<String> },
+    MessageStarted {
+        provider_id: String,
+        model: String,
+    },
+    TextDelta {
+        text: String,
+    },
+    ReasoningDelta {
+        text: String,
+    },
+    ToolCallStarted {
+        id: String,
+        name: String,
+    },
+    ToolCallArgumentDelta {
+        id: String,
+        delta: String,
+    },
+    ToolCallCompleted {
+        call: AgenticToolCall,
+    },
+    UsageUpdated {
+        usage: Usage,
+    },
+    ReasoningEncrypted {
+        blob: String,
+    },
+    ProviderWarning {
+        message: String,
+    },
+    ProviderError {
+        message: crate::provider::DiagnosticMessage,
+    },
+    TurnCompleted {
+        stop_reason: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]

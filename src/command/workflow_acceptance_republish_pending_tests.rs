@@ -227,6 +227,7 @@ fn hold_back_keeps_a_candidate_an_enforced_gate_refuses_out_of_the_publish() {
     let mut progress = crate::command::workflow_task_set::reauthor::ReauthorProgress {
         contract,
         unproven: BTreeMap::new(),
+        host_faults: BTreeMap::new(),
         authored_pending: BTreeMap::new(),
         attempts: 1,
     };

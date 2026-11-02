@@ -341,6 +341,8 @@ fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
             subject: "acceptance".into(),
             source_path: None,
             remediation_scope: archon_workflow::RemediationScope::CandidateArtifact,
+            gate_stage: None,
+            judged_item: None,
         },
         archon_workflow::GatePolicyFinding {
             deterministic_defect: None,
@@ -348,6 +350,8 @@ fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
             subject: "acceptance".into(),
             source_path: None,
             remediation_scope: archon_workflow::RemediationScope::CandidateArtifact,
+            gate_stage: None,
+            judged_item: None,
         },
     ];
     host.result.data = serde_json::to_value(outcome).unwrap();

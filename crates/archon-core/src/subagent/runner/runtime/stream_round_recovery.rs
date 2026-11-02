@@ -261,8 +261,8 @@ pub(super) async fn handle_stream_error(
     large_retry_body_bytes: usize,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
     request: &LlmRequest,
-    error_type: String,
-    message: String,
+    error_type: archon_llm::provider::DiagnosticMessage,
+    message: archon_llm::provider::DiagnosticMessage,
 ) -> anyhow::Result<bool> {
     let err = crate::agent::autocompact::classify_stream_error(
         runner.provider.name(),
@@ -379,7 +379,7 @@ pub(super) async fn handle_stream_error(
         // resend decision for a rate limit that does not qualify for recovery.
         return Ok(false);
     }
-    runner.emit_activity_stream("error", message, None, true);
+    runner.emit_activity_stream("error", message.to_string(), None, true);
     Err(anyhow::Error::new(err))
 }
 

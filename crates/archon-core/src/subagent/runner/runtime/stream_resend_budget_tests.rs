@@ -85,7 +85,7 @@ async fn the_stop_names_the_last_provider_error_bounded_and_redacted() {
     let server = || {
         anyhow::Error::new(LlmError::Server {
             status: 500,
-            message: body.clone(),
+            message: body.clone().into(),
             pipeline_retry_after_secs: None,
         })
     };
@@ -119,7 +119,7 @@ async fn a_rate_limit_is_waited_inside_the_window_and_paused_past_it() {
             retry_after_secs: secs,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         })
     };
     let mut budget = ResendBudget::new(Duration::from_secs(600));
@@ -249,7 +249,7 @@ async fn a_default_rate_limit_wait_is_not_called_the_providers() {
         retry_after_secs: 60,
         from_provider: false,
         pipeline_retry_after_secs: None,
-        message: String::new(),
+        message: String::new().into(),
     });
     let stop = budget
         .open_failed(limited, "first open could not open")

@@ -148,13 +148,26 @@ impl Journal {
         std::fs::rename(&temp, &paths.journal)
             .with_context(|| format!("recording publish journal {}", paths.journal.display()))?;
         crash_point(&format!("journal-replaced-{:?}", self.state));
-        #[cfg(test)]
-        if std::env::var("ARCHON_TEST_COMMIT_FLUSH_ERROR").is_ok()
-            && self.state == JournalState::Committed
-        {
-            return Err(anyhow!("injected commit directory flush failure"));
-        }
-        sync_parent(&paths.journal)?;
+        let flushed = (|| -> Result<()> {
+            #[cfg(test)]
+            if self.state == JournalState::Committed {
+                crate::command::workflow_host_fault_test_hooks::fire(
+                    crate::command::workflow_host_fault_test_hooks::Point::CommitSync,
+                    &paths.journal,
+                )?;
+                if std::env::var("ARCHON_TEST_COMMIT_FLUSH_ERROR").is_ok() {
+                    return Err(anyhow!("injected commit directory flush failure"));
+                }
+            }
+            sync_parent(&paths.journal)
+        })();
+        flushed.map_err(|error| {
+            if self.state == JournalState::Committed {
+                error.context(crate::command::workflow_host_command_committed::CommitRecorded)
+            } else {
+                error
+            }
+        })?;
         crash_point(&format!("journal-flushed-{:?}", self.state));
         Ok(())
     }
@@ -461,16 +474,9 @@ pub(crate) fn sync_parent(path: &Path) -> Result<()> {
     }
 }
 
-/// Flush each distinct parent directory of `paths` once.
-pub(crate) fn sync_parents<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<()> {
-    let mut seen = std::collections::BTreeSet::new();
-    for path in paths {
-        if seen.insert(path.parent().map(Path::to_path_buf)) {
-            sync_parent(path)?;
-        }
-    }
-    Ok(())
-}
+#[path = "workflow_task_set_publish_sync_parents.rs"]
+mod sync_parents_impl;
+pub(crate) use sync_parents_impl::sync_parents;
 
 pub(super) fn sibling_transaction_path(target: &Path, transaction: &str, role: &str) -> PathBuf {
     let name = target

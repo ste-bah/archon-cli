@@ -61,6 +61,7 @@ pub(crate) struct LintIncomplete {
     reused: u64,
     stopped: Vec<String>,
     progress: String,
+    pub(crate) evaluation: Option<crate::command::workflow_gate::GateEvaluation>,
 }
 
 impl LintIncomplete {
@@ -71,6 +72,7 @@ impl LintIncomplete {
             reused: progress.reused_count(),
             stopped,
             progress: progress.line(),
+            evaluation: None,
         }
     }
 
@@ -95,7 +97,7 @@ impl std::fmt::Display for LintIncomplete {
         };
         write!(
             f,
-            "{LINT_INCOMPLETE_RESUMABLE}: a critic call made no provider progress ({host}); {} obligation verdict(s) were saved by this attempt and {} reused from earlier ones; {} batch(es) stalled without a verdict ({}). Retry the set gate with the same task set (resume the run): it continues from the saved verdicts",
+            "{LINT_INCOMPLETE_RESUMABLE}: a critic call made no provider progress ({host}); {} obligation verdict(s) were saved by this attempt and {} reused from earlier ones; {} batch(es) stalled without a verdict ({}). The host retries the set gate with the same task set and continues from the saved verdicts",
             self.saved,
             self.reused,
             self.stopped.len(),
@@ -109,6 +111,7 @@ impl std::error::Error for LintIncomplete {}
 /// The staged gate's ending for `error`, when it is an incomplete audit:
 /// the stderr text and the exit status the host reads as incomplete,
 /// resumable. `None` for every other error.
+#[cfg(test)]
 pub(crate) fn resumable_exit(error: &anyhow::Error) -> Option<(String, i32)> {
     LintIncomplete::caused(error).map(|incomplete| {
         (

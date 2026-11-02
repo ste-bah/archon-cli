@@ -16,6 +16,10 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 #[path = "workflow_task_set_judge_named_files.rs"]
 mod named_files;
 #[cfg(test)]
+pub(crate) use named_files::budget_tests::{
+    body_read_observer, body_reads, set_body_read_observer,
+};
+#[cfg(test)]
 use named_files::named_files;
 pub(super) use named_files::named_files_content_digest;
 #[cfg(test)]
@@ -31,34 +35,29 @@ pub(crate) struct ReauthorPrefetchCache(named_files::PrefetchSourceCache);
 
 pub(crate) fn named_files_for_reauthor_cached(
     criterion: &AcceptanceCriterion,
-    project: &Path,
-    repository: &Path,
-    task_root: &Path,
-    repository_commit: Option<String>,
+    roots: &JudgeRoots,
     extra_inputs: &[String],
+    remaining: &mut usize,
     cache: &mut ReauthorPrefetchCache,
 ) -> Vec<serde_json::Value> {
-    let roots = JudgeRoots {
-        project: Some(project.to_path_buf()),
-        repository: Some(repository.to_path_buf()),
-        task_root: Some(task_root.to_path_buf()),
-        repository_commit,
-    };
-    // The author prompt enters the subagent request history, where the normal
-    // context-window fit keeps the request within its configured budget.
-    let mut remaining = usize::MAX;
     named_files::named_files_for_inputs_with_budget_cached(
         criterion,
-        &roots,
-        &mut remaining,
+        roots,
+        remaining,
         extra_inputs,
         &mut cache.0,
     )
 }
 
+#[path = "workflow_task_set_judge_each.rs"]
+mod each;
+pub(crate) use each::{
+    author_note, judge_each, not_judged, not_judged_findings, not_judged_findings_of,
+};
 #[path = "workflow_task_set_judge_rounds.rs"]
 mod rounds;
 use rounds::judge_prompted_with_roots;
+pub(crate) use rounds::judge_refutations;
 
 #[cfg(test)]
 #[path = "workflow_task_set_judge_prompt_builder_tests.rs"]
@@ -66,11 +65,11 @@ mod prompt_builder_tests;
 
 #[path = "workflow_task_set_judge_incomplete.rs"]
 mod incomplete;
-pub(crate) use incomplete::JudgeIncomplete;
 use incomplete::judge_error_class;
 /// An incomplete judge from the real producers, for tests of its routing.
 #[cfg(test)]
 pub(crate) use incomplete::tests::produced as produced_incomplete;
+pub(crate) use incomplete::{JudgeIncomplete, JudgeIncompleteKind};
 
 /// The tier alias the whole-set freeze judge is asked for. The client's
 /// provider configuration resolves it to the model that judges
@@ -94,7 +93,7 @@ struct JudgeResponse {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct JudgeRoots {
+pub(crate) struct JudgeRoots {
     pub project: Option<PathBuf>,
     pub repository: Option<PathBuf>,
     pub task_root: Option<PathBuf>,
@@ -110,26 +109,7 @@ pub(super) fn batched_judge_prompt_with_roots(
     contract: &AcceptanceContract,
     roots: &JudgeRoots,
 ) -> Result<String> {
-    let mut resolved_roots = roots.clone();
-    if resolved_roots.repository_commit.is_none() {
-        if let Some(repository) = resolved_roots
-            .repository
-            .as_deref()
-            .and_then(|path| path.canonicalize().ok())
-        {
-            let output = archon_shell::spawn::command("git")
-                .arg("-C")
-                .arg(repository)
-                .args(["rev-parse", "HEAD"])
-                .output();
-            resolved_roots.repository_commit = output.ok().and_then(|output| {
-                output
-                    .status
-                    .success()
-                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-            });
-        }
-    }
+    let resolved_roots = each::with_commit(roots);
     let mut named_file_bytes_remaining =
         archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
     let checks = contract
@@ -396,17 +376,21 @@ pub(super) async fn judge_contract_subset_resumable_with_roots(
     .await
 }
 
-/// Judge a subset of a contract's checks — the ones being re-authored — in
-/// one batch. The subset is not a contract on its own (it may hold no
-/// acceptance entry at all), so only each judged entry's recorded fields are
-/// required, exactly as the full-contract structure check requires them.
+/// Judge a subset of a contract's checks — the ones being re-authored — one
+/// call per check (#549). The subset is not a contract on its own (it may
+/// hold no acceptance entry at all), so only each judged entry's recorded
+/// fields are required, exactly as the full-contract structure check
+/// requires them. A check the host did not judge carries its author note.
 pub(super) async fn judge_entries_with_roots(
     client: &dyn WorkflowLlmClient,
     subset: AcceptanceContract,
     model: &str,
     roots: &JudgeRoots,
 ) -> Result<AcceptanceContract> {
-    judge_batch(client, subset, model, require_judged_prose, None, roots).await
+    judge_each(subset, roots, |one| {
+        judge_batch(client, one, model, require_judged_prose, None, roots)
+    })
+    .await
 }
 
 /// Every judged entry of `attempt` carries its counterexample and reason.
@@ -451,6 +435,7 @@ async fn judge_batch(
 /// apply its decisions to them: a truncated reply is continued (and saved in
 /// `partial` when given), a reply with no usable verdict is re-asked, and a
 /// judge that cannot complete is [`JudgeIncomplete`].
+#[cfg(test)]
 pub(crate) async fn judge_prompted(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,

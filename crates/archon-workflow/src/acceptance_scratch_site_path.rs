@@ -156,6 +156,16 @@ fn root_name(cwd: crate::task_set_contract::TrustedCwd) -> &'static str {
     }
 }
 
+/// The site's own top-level directories, as the site makes them: with a
+/// build cache the build target lives in the cache, not under the site.
+pub fn site_internal_directories(build_cache: bool) -> Vec<&'static str> {
+    SITE_INTERNAL_DIRECTORIES
+        .iter()
+        .copied()
+        .filter(|name| is_site_internal_directory(name, build_cache))
+        .collect()
+}
+
 pub(crate) fn is_site_internal_directory(name: &str, build_cache: bool) -> bool {
     SITE_INTERNAL_DIRECTORIES
         .iter()

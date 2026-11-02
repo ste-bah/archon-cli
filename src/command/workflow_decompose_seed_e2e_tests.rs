@@ -170,6 +170,8 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
             subject: subject.into(),
             source_path: None,
             remediation_scope: scope,
+            gate_stage: None,
+            judged_item: None,
         };
         let findings: Vec<_> = match request.command_id.as_str() {
             "freeze-acceptance" => {
@@ -200,6 +202,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
         .then(|| archon_workflow::GateOperationalError {
             kind: "operational".into(),
             text: "judge unavailable".into(),
+            subjects: Vec::new(),
         });
         let findings = if operational.is_some() {
             Vec::new()

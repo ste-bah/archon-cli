@@ -256,7 +256,7 @@ fn runtime_or_safety_text(text: &str) -> bool {
         || text.contains("process failed")
         || text.contains("timed out")
         || text.contains("cancelled")
-        || text.contains("rate limit")
+        || archon_llm::provider_fault::rate_limit_text_matches(&text)
         || text.contains("outside declared")
         || text.contains("ownership violation")
         || text.contains("read-only mutation")

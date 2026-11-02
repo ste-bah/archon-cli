@@ -146,21 +146,21 @@ pub(crate) fn extra_known_env_vars() -> Vec<&'static str> {
         ])
         .chain([
             // Linked features and build metadata use the same warning registry.
-            "ARCHON_BUILD_FINGERPRINT",
-            "ARCHON_BUILD_SHA",
-            "ARCHON_CODEX_AUTH_FILE",
-            "ARCHON_CREDENTIALS_FILE",
-            "ARCHON_DOCS_BATCH_MAX",
-            "ARCHON_DOCS_BATCH_MIN",
-            "ARCHON_FIDELITY_SOURCES_DIGEST",
-            "ARCHON_MARKER_CPU_TIMEOUT_SECS",
-            "ARCHON_MARKER_GPU_TIMEOUT_SECS",
-            "ARCHON_PDFINFO_BIN",
-            "ARCHON_RECHECK_SYMLINK_PRIVILEGE",
-            "ARCHON_TRANSPORT_EVIDENCE_MIN_FREE_BYTES",
-            "ARCHON_TUI_KEYBOARD_ENHANCEMENT",
-            "ARCHON_TUI_LOG_KEYS",
-            "ARCHON_WORKFLOW_SCOPE_DISCOVERY",
+            crate::command::workflow_host_command_logic::BUILD_FINGERPRINT_ENV,
+            archon_world_model::schema::BUILD_SHA_ENV,
+            archon_llm::tokens_codex::CODEX_AUTH_FILE_ENV,
+            archon_llm::tokens::CREDENTIALS_FILE_ENV,
+            archon_docs::BATCH_MAX_ENV,
+            archon_docs::BATCH_MIN_ENV,
+            crate::command::topology_lint::fidelity_store::SOURCES_DIGEST_ENV,
+            archon_docs::marker_source::CPU_TIMEOUT_SECS_ENV,
+            archon_docs::marker_source::GPU_TIMEOUT_SECS_ENV,
+            archon_docs::pdf::PDFINFO_BIN_ENV,
+            archon_plugin::build_environment::RECHECK_SYMLINK_PRIVILEGE_ENV,
+            archon_observability::transport::MIN_FREE_BYTES_ENV,
+            archon_tui::terminal::keyboard::ENHANCEMENT_ENV,
+            archon_tui::keylog::LOG_KEYS_ENV,
+            archon_workflow::v2::write::SCOPE_DISCOVERY_ENV,
         ])
         .chain(
             crate::command::workflow_test_seams::known_env_vars()

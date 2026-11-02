@@ -200,6 +200,7 @@ async fn a_live_direct_probe_keeps_the_live_tree_setup_path_rule() {
         .unwrap();
     assert_ne!(output.status.code(), Some(0));
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-420-023".into(),
         exit_code: output.status.code(),
@@ -239,6 +240,7 @@ async fn on_the_live_tree_a_sibling_repository_path_stays_a_held_failure() {
     assert_eq!(output.status.code(), Some(101));
     assert!(String::from_utf8_lossy(&output.stderr).contains("does not exist"));
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-420-010".into(),
         exit_code: output.status.code(),

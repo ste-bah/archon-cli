@@ -72,12 +72,11 @@ impl LlmProvider for CodexAppServerProvider {
             if let Err(error) =
                 run_app_server_turn(config, request, tx.clone(), timeout_ms, model_cache).await
             {
-                let _ = tx
-                    .send(StreamEvent::Error {
-                        error_type: "codex_app_server_error".into(),
-                        message: error.to_string(),
-                    })
-                    .await;
+                let mut event = archon_llm::provider_fault::error_event(error);
+                if let StreamEvent::Error { error_type, .. } = &mut event {
+                    *error_type = "codex_app_server_error".into();
+                }
+                let _ = tx.send(event).await;
             }
         });
         Ok(rx)
@@ -167,7 +166,7 @@ async fn run_app_server_turn(
     crate::runtime::codex_app_server_models::refresh_model_cache(&client, timeout_ms, &model_cache)
         .await;
     let cwd = std::env::current_dir()
-        .map_err(|e| LlmError::Http(e.to_string()))?
+        .map_err(|e| LlmError::Http(e.to_string().into()))?
         .display()
         .to_string();
     let thread = client

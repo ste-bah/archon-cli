@@ -176,7 +176,7 @@ async fn parse_token_response(
             crate::transport_http::response_error(response, |status, message| {
                 crate::provider::LlmError::Server {
                     status,
-                    message,
+                    message: message.into(),
                     pipeline_retry_after_secs: None,
                 }
             })
@@ -189,7 +189,7 @@ async fn parse_token_response(
         } else {
             AuthError::Provider(crate::provider::LlmError::Server {
                 status: status.as_u16(),
-                message: format!("failed to read token response: {e}"),
+                message: format!("failed to read token response: {e}").into(),
                 pipeline_retry_after_secs: None,
             })
         }

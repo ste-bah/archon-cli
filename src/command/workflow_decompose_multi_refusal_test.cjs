@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const fields = ['check/command', 'check/cwd', 'check/kind', 'gap_permitted', 'covers/0'];
 const shape = (id, field) => ({text:`acceptance entry '${id}' was refused: ${field} invalid`,
@@ -38,7 +38,7 @@ async function run(seq, cap) {
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
         const version = (versions.get(id) || 0) + 1; versions.set(id, version);
         prompts.push({id, version, task:options.task});
-        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, version, criterion:''})};
+        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, version, criterion:'', covers:[]})};
       },
       hostCommand: async () => {
         if (++gates > 1) return clean();

@@ -99,56 +99,10 @@ pub(crate) fn reset_after_secs(
 }
 
 pub(crate) fn reset_hint_from_text(
-    message: &str,
+    message: impl Into<archon_llm::provider::DiagnosticMessage>,
     observed_at: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
-    rfc3339_hint(message).or_else(|| relative_duration_hint(message, observed_at))
-}
-
-fn rfc3339_hint(message: &str) -> Option<DateTime<Utc>> {
-    message
-        .split_ascii_whitespace()
-        .map(|token| {
-            token
-                .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | ';' | ')' | '(' | '[' | ']'))
-        })
-        .find_map(|token| {
-            DateTime::parse_from_rfc3339(token)
-                .ok()
-                .map(|dt| dt.with_timezone(&Utc))
-        })
-}
-
-fn relative_duration_hint(message: &str, observed_at: DateTime<Utc>) -> Option<DateTime<Utc>> {
-    let tokens: Vec<String> = message
-        .to_ascii_lowercase()
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-
-    for pair in tokens.windows(2) {
-        let Ok(amount) = pair[0].parse::<i64>() else {
-            continue;
-        };
-        let Some(seconds) = unit_seconds(&pair[1]).map(|unit| amount.saturating_mul(unit)) else {
-            continue;
-        };
-        if seconds > 0 {
-            return Some(observed_at + Duration::seconds(seconds));
-        }
-    }
-    None
-}
-
-fn unit_seconds(unit: &str) -> Option<i64> {
-    match unit {
-        "second" | "seconds" | "sec" | "secs" => Some(1),
-        "minute" | "minutes" | "min" | "mins" => Some(60),
-        "hour" | "hours" | "hr" | "hrs" => Some(60 * 60),
-        "day" | "days" => Some(24 * 60 * 60),
-        _ => None,
-    }
+    message.into().reset_hint_at(observed_at)
 }
 
 fn message_hash(message: &str) -> String {
@@ -174,7 +128,7 @@ mod tests {
                 retry_after_secs: 90,
                 from_provider: true,
                 pipeline_retry_after_secs: None,
-                message: String::new(),
+                message: String::new().into(),
             },
         );
 
@@ -199,7 +153,7 @@ mod tests {
             Some(&db),
             "openai-codex",
             Some("gpt-5.4"),
-            &LlmError::QuotaExceeded(message.to_string()),
+            &LlmError::QuotaExceeded(message.to_string().into()),
         );
 
         let windows = archon_learning::provider_rate_limits::list_provider_rate_limit_windows(

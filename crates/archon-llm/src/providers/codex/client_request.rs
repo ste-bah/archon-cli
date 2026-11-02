@@ -177,7 +177,7 @@ impl CodexProvider {
                 return Err(error);
             }
             if is_quota_exceeded(&body_text) {
-                return Err(LlmError::QuotaExceeded(body_text));
+                return Err(LlmError::QuotaExceeded(body_text.into()));
             }
             if is_retryable(status, &body_text)
                 && attempt < MAX_RETRIES

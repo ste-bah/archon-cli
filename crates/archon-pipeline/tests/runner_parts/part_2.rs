@@ -1,4 +1,3 @@
-
 #[tokio::test]
 async fn test_runner_uses_agent_execution_path_when_available() {
     let facade = StubFacade::new();
@@ -213,7 +212,7 @@ async fn test_parallel_wave_retries_529_with_overload_policy_and_succeeds() {
         LlmError::Overloaded {
             status: Some(529),
             retry_after_secs: Some(17),
-            message: String::new(),
+            message: String::new().into(),
         },
     );
     let started = tokio::time::Instant::now();
@@ -250,7 +249,7 @@ async fn test_parallel_wave_retries_ordinary_transient_error_and_exhausts_budget
         LlmError::Overloaded {
             status: Some(529),
             retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         },
     );
     assert!(

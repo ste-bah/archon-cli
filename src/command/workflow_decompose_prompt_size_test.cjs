@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const dir = process.env.ARCHON_DECOMPOSE_SCRIPT_DIR || __dirname;
-const FILES = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'];
+const FILES = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'];
 const source = FILES.map((f) => fs.readFileSync(`${dir}/${f}`, 'utf8')).join('\n');
 
 function context(args, binding) {
@@ -270,7 +270,7 @@ async function inactivityCutWithProgressKeepsTheWindow() {
     agent: async (_id, options) => {
       const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
       if (id === 'AC-002' && cuts < 4) { cuts += 1; return { status: 'failed', summary: CUT }; }
-      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id, check: { kind: 'command', command: 'true' } }) };
+      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id, covers: [], check: { kind: 'command', command: 'true' } }) };
     },
     pause: async (id, evidence) => { pauses.push({ id, evidence, cuts }); return { resumed: true }; },
     hostCommand: async (cap) => ({ publicationReceipt: { call_id: cap }, postcondition: { satisfied: true }, gateEnvelope: { policy_findings: [] } }),
@@ -282,8 +282,36 @@ async function inactivityCutWithProgressKeepsTheWindow() {
   assert.equal(pauses[0].evidence.reason, 'operational_no_progress');
 }
 
+async function emptyNamedFilesStayWithinTheDispatchBudget() {
+  const id = 'AC-X-001';
+  const criteria = { [id]: 'criterion' };
+  const ctx = context({ acceptanceCriteria: criteria });
+  ctx.__archonNamedFiles = () => '[]';
+  const prompts = [];
+  const w = {
+    agent: async (_id, options) => { prompts.push(options.task); return { status: 'failed', summary: 'answered' }; },
+    pause: async (_id, evidence) => { throw new Error(`oversized:${evidence.prompt_bytes}`); },
+  };
+  const call = (prompt) => ctx.authorOne(w, prompt, 0, id, criteria[id], [], criteria, { entries: new Map(), order: [id] });
+  await call('');
+  const baseBytes = Buffer.byteLength(prompts.pop()) - Buffer.byteLength('[]');
+  const limit = vm.runInContext('AUTHOR_PROMPT_LIMIT', ctx);
+  const failures = [];
+  for (const spare of [0, 1, 2, 3]) {
+    const prompt = 'x'.repeat(limit - baseBytes - spare);
+    try {
+      await call(prompt);
+      const bytes = Buffer.byteLength(prompts.pop());
+      assert(bytes <= limit, `spare=${spare}: ${bytes} exceeds ${limit}`);
+    } catch (error) {
+      failures.push(`spare=${spare}: ${error.message}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+}
+
 (async () => {
-  for (const test of [priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsStayWholeAndOversizedPromptsPause, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
+  for (const test of [emptyNamedFilesStayWithinTheDispatchBudget, priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsStayWholeAndOversizedPromptsPause, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
     try { await test(); } catch (error) { console.error(`${test.name}: ${error.message}`); process.exitCode = 1; }
   }
 })();

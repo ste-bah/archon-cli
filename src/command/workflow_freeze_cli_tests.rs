@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn both_json_staged_paths_report_operational_failure_through_the_envelope() {
+fn staged_client_construction_and_both_freezes_report_operational_faults() {
     let whole = include_str!("workflow_freeze_cli.rs");
     let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
     for command in ["freeze-acceptance", "freeze-skeleton"] {
@@ -19,8 +19,8 @@ fn both_json_staged_paths_report_operational_failure_through_the_envelope() {
     }
     assert_eq!(
         source.matches("return report_operational_failure(").count(),
-        2,
-        "both staged paths report operationally rather than exiting non-zero"
+        3,
+        "client construction and both staged paths report operationally rather than exiting non-zero"
     );
 }
 
@@ -320,19 +320,24 @@ fn workflow_host_command_shape_and_json_refusals_carry_their_own_stage() {
 }
 
 /// F3 through the real staged stage: a judge whose every reply is unusable
-/// JSON it authored ends the staged freeze through the gate envelope (kind
-/// `authored_judge_reply`), so the script retries it in its ordinary
-/// no-progress window; it never exits resumable without an envelope. The
-/// stage runs in a child process, so that an exit is observed, not suffered.
+/// JSON it authored ends the staged freeze through the gate envelope, so the
+/// script retries it in its ordinary no-progress window; it never exits
+/// resumable without an envelope. The stage runs in a child process, so that
+/// an exit is observed, not suffered.
+///
+/// #552 replaces `an_authored_judge_incomplete_staged_freeze_writes_its_envelope_and_returns`:
+/// the undecided check is now its author's candidate finding in that
+/// envelope, not an operational `authored_judge_reply`; the envelope, exit
+/// and judge-error assertions are kept.
 #[cfg(unix)]
 #[tokio::test]
-async fn an_authored_judge_incomplete_staged_freeze_writes_its_envelope_and_returns() {
+async fn an_undecided_judge_staged_freeze_writes_its_finding_and_returns_552() {
     const CHILD: &str = "ARCHON_TEST_STAGED_FREEZE_DIR";
     let Some(dir) = std::env::var_os(CHILD).map(PathBuf::from) else {
         let temp = tempfile::tempdir().unwrap();
         let name = concat!(
             module_path!(),
-            "::an_authored_judge_incomplete_staged_freeze_writes_its_envelope_and_returns"
+            "::an_undecided_judge_staged_freeze_writes_its_finding_and_returns_552"
         );
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", name.split_once("::").unwrap().1, "--nocapture"])
@@ -348,8 +353,16 @@ async fn an_authored_judge_incomplete_staged_freeze_writes_its_envelope_and_retu
         );
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(envelope).unwrap()).unwrap();
-        assert_eq!(value["operational_error"]["kind"], "authored_judge_reply");
-        let text = value["operational_error"]["text"].as_str().unwrap();
+        assert!(value["operational_error"].is_null(), "{value}");
+        let findings = value["policy_findings"].as_array().unwrap();
+        let undecided = (findings.iter())
+            .find(|finding| {
+                (finding["text"].as_str().unwrap_or(""))
+                    .starts_with("the judge returned no usable verdict for check")
+            })
+            .unwrap_or_else(|| panic!("the author receives a finding: {value}"));
+        assert_eq!(undecided["remediation_scope"], "candidate_artifact");
+        let text = undecided["text"].as_str().unwrap();
         assert!(text.contains("malformed batched JSON"), "{text}");
         return;
     };

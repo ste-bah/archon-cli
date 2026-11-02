@@ -52,3 +52,26 @@ async fn a_truncated_first_reply_that_contradicts_json_is_asked_afresh() {
         "a fresh ask, not a continuation"
     );
 }
+
+/// #552: the judge samples at temperature 0, so asking the same prompt again
+/// after a reply cut off before its document repeats the same failure. The
+/// fresh ask keeps the whole task and adds an instruction to reply with the
+/// JSON document only.
+#[tokio::test]
+async fn a_fresh_ask_after_a_reply_cut_off_before_json_differs_from_the_first_ask_552() {
+    let client = Scripted::new(vec![
+        Ok((r#"{"decisions": ]"#, Some("max_tokens"))),
+        Ok((ACCEPTED, Some("end_turn"))),
+    ]);
+
+    judge_contract(&client, contract(), &expected())
+        .await
+        .expect("the fresh reply is complete");
+
+    let calls = client.calls();
+    let first = calls[0][0]["content"].as_str().unwrap();
+    let again = calls[1][0]["content"].as_str().unwrap();
+    assert_ne!(again, first, "a fresh ask must not repeat the first ask");
+    assert!(again.starts_with(first), "the whole task is kept: {again}");
+    assert!(again.contains("JSON document only"), "{again}");
+}

@@ -105,7 +105,11 @@ async fn inserting_and_reordering_entries_keeps_unchanged_verdicts_reused() {
 }
 
 #[tokio::test]
-async fn changed_and_deleted_named_inputs_miss_the_saved_verdict() {
+/// #549 replaces `changed_and_deleted_named_inputs_miss_the_saved_verdict`:
+/// the changed input here is above the judged-source limit of one check, so
+/// the missed verdict is now recorded as not judged instead of asking the
+/// judge; every other assertion is kept.
+async fn changed_and_deleted_named_inputs_miss_the_saved_verdict_549() {
     let (temp, tasks, mut contract, client, roots) = seeded_named_entry().await;
     let oversized = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES + 1;
     std::fs::write(temp.path().join("input"), "a".repeat(oversized)).unwrap();
@@ -148,11 +152,11 @@ async fn changed_and_deleted_named_inputs_miss_the_saved_verdict() {
     )
     .unwrap();
     assert_ne!(old_key, changed_key, "changed content must change the key");
-    run_judge(&temp, &tasks, contract.clone(), &client, &roots).await;
-    assert_eq!(
-        *client.batches.lock().unwrap(),
-        vec![vec!["AC-X-001".to_string()]],
-        "changed content must be judged again"
+    let changed = run_judge(&temp, &tasks, contract.clone(), &client, &roots).await;
+    assert!(
+        client.batches.lock().unwrap().is_empty()
+            && super::super::judge::not_judged(&changed.acceptance[0]).is_some(),
+        "changed content must not reuse the saved verdict; above the limit it is not judged"
     );
 
     client.batches.lock().unwrap().clear();
@@ -175,7 +179,11 @@ async fn changed_and_deleted_named_inputs_miss_the_saved_verdict() {
 }
 
 #[tokio::test]
-async fn oversized_named_input_key_is_independent_of_other_entries() {
+/// #549 replaces `oversized_named_input_key_is_independent_of_other_entries`:
+/// an entry whose own named file exceeds the judged-source limit of one
+/// check is no longer sent to the judge (it was refuted for content it was
+/// not shown); every key assertion is kept.
+async fn oversized_named_input_key_is_independent_and_the_entry_is_not_judged_549() {
     let (temp, tasks, mut contract, client, roots) = seeded_named_entry().await;
     let size = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES + 1;
     std::fs::write(temp.path().join("oversized-a"), "o".repeat(size)).unwrap();
@@ -199,11 +207,12 @@ async fn oversized_named_input_key_is_independent_of_other_entries() {
         &contract.acceptance[1],
         &roots,
     );
-    run_judge(&temp, &tasks, contract.clone(), &client, &roots).await;
-    assert_eq!(
-        *client.batches.lock().unwrap(),
-        vec![vec!["AC-X-003".to_string()]]
+    let first = run_judge(&temp, &tasks, contract.clone(), &client, &roots).await;
+    assert!(
+        client.batches.lock().unwrap().is_empty(),
+        "an entry whose own named file exceeds the limit is not judged"
     );
+    assert!(super::super::judge::not_judged(&first.acceptance[0]).is_some());
 
     client.batches.lock().unwrap().clear();
     name_input(&mut contract.acceptance[0], "oversized-b");
@@ -219,9 +228,8 @@ async fn oversized_named_input_key_is_independent_of_other_entries() {
         "a different oversized earlier input cannot change this key"
     );
     run_judge(&temp, &tasks, contract.clone(), &client, &roots).await;
-    assert_eq!(
-        *client.batches.lock().unwrap(),
-        vec![vec!["AC-X-003".to_string()]],
+    assert!(
+        client.batches.lock().unwrap().is_empty(),
         "the unchanged entry stays reused across rounds with different earlier inputs"
     );
     std::fs::write(temp.path().join("oversized-a"), "z".repeat(size)).unwrap();

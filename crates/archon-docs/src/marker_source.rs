@@ -26,6 +26,11 @@
 //! `--allow-non-loopback`; that opt-in permits exposure but does not weaken or change the frozen
 //! startup catalogue.
 
+/// Environment override for the Marker CPU timeout in seconds.
+pub const CPU_TIMEOUT_SECS_ENV: &str = "ARCHON_MARKER_CPU_TIMEOUT_SECS";
+/// Environment override for the Marker GPU timeout in seconds.
+pub const GPU_TIMEOUT_SECS_ENV: &str = "ARCHON_MARKER_GPU_TIMEOUT_SECS";
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -240,9 +245,9 @@ enum SidecarError {
 /// the last rung, so an elapse there hard-fails the chunk, exactly as a true hang would).
 fn marker_timeout(device: Option<&str>) -> std::time::Duration {
     let (var, default_secs) = if device == Some("cpu") {
-        ("ARCHON_MARKER_CPU_TIMEOUT_SECS", 3600u64)
+        (CPU_TIMEOUT_SECS_ENV, 3600u64)
     } else {
-        ("ARCHON_MARKER_GPU_TIMEOUT_SECS", 900u64)
+        (GPU_TIMEOUT_SECS_ENV, 900u64)
     };
     let secs = std::env::var(var)
         .ok()

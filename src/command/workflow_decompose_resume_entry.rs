@@ -51,6 +51,29 @@ pub(crate) async fn resume_fixed_decomposition_with_factory(
 
 /// A resume whose cancellation was requested before provider construction
 /// ends here, cancelling the run unless it already reached a terminal status.
+/// Admission may begin paused; only a new control decision interrupts recovery.
+pub(super) fn recovery_control(
+    store: &WorkflowStore,
+    admitted: &archon_workflow::WorkflowRun,
+    cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<()> {
+    cancel_if_requested(store, &admitted.id, cancellation_requested)?;
+    let current = store.load_state(&admitted.id)?;
+    if current.generation != admitted.generation || current.status != admitted.status {
+        let text = format!(
+            "run {} changed control during recorded-child recovery",
+            admitted.id
+        );
+        return Err(if current.status == archon_workflow::RunStatus::Paused {
+            archon_workflow::WorkflowError::ControlPaused(text)
+        } else {
+            archon_workflow::WorkflowError::ControlCancelled(text)
+        }
+        .into());
+    }
+    Ok(())
+}
+
 pub(super) fn cancel_if_requested(
     store: &WorkflowStore,
     run_id: &str,

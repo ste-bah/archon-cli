@@ -99,3 +99,66 @@ async fn an_exhausted_loop_of_refusals_is_the_judges_own() {
     );
     assert!(incomplete.is_authored_reply(), "{error:#}");
 }
+
+#[tokio::test]
+async fn host_command_judge_obstructed_continuation_cache_is_permanent_with_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let obstructed = temp.path().join("continuations");
+    std::fs::write(&obstructed, b"obstruction").unwrap();
+    let progress = crate::command::workflow_freeze_budget::FreezeProgress::default();
+    let partial = super::super::PartialReply::new(&obstructed, "batch", &progress);
+    let client = Scripted::new(vec![Ok((HEAD, Some("max_tokens")))]);
+    let error = super::super::judge_prompted(
+        &client,
+        contract(),
+        |_| Ok("checks".into()),
+        "reviewer",
+        |_| Ok(()),
+        Some(&partial),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        incomplete(&error).fault_class,
+        crate::command::workflow_host_fault::Class::Permanent
+    );
+    assert!(
+        error
+            .to_string()
+            .contains(&obstructed.display().to_string()),
+        "{error:#}"
+    );
+    assert!(error.to_string().contains("remedy:"), "{error:#}");
+    assert_eq!(client.calls().len(), 1);
+}
+
+/// #552: an incomplete judge names, as data, the checks it left without a
+/// verdict, and a freeze that ends on it carries them to its gate envelope,
+/// so the author loop never reads them back from the message.
+#[tokio::test]
+async fn an_incomplete_judge_names_its_undecided_checks_to_the_envelope_552() {
+    for (replies, authored) in [
+        (repeated(Ok(("no json", Some("end_turn")))), true),
+        (vec![Err("upstream unavailable")], false),
+    ] {
+        let error = produced(replies).await;
+        assert_eq!(incomplete(&error).undecided, vec!["AC-X-001".to_string()]);
+        let resume =
+            crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+        let freeze = crate::command::workflow_task_set::resumable(error, &resume);
+        let stopped = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&freeze)
+            .expect("an incomplete freeze");
+        assert_eq!(stopped.subjects(), ["AC-X-001".to_string()]);
+        assert_eq!(stopped.is_authored_judge_reply(), authored);
+        let envelope =
+            crate::command::workflow::workflow_staged_cli::task_set_error::gate_error_evaluation(
+                &freeze,
+            )
+            .into_envelope()
+            .unwrap();
+        assert_eq!(
+            envelope.operational_error.unwrap().subjects,
+            vec!["AC-X-001".to_string()]
+        );
+    }
+}

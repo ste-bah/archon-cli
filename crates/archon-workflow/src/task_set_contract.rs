@@ -158,6 +158,7 @@ pub struct ResidualGapRecord {
 pub struct TaskSetContractError {
     pub message: String,
     pub defects: Vec<crate::defect::ValidationDefect>,
+    pub io_cause: Option<(std::io::ErrorKind, Option<i32>)>,
     /// A failed read judged no content; retain its type for verification retry.
     pub io_kind: Option<std::io::ErrorKind>,
 }
@@ -200,6 +201,7 @@ pub fn validate_acceptance_contract(
     Err(TaskSetContractError {
         message: crate::defect::defect_message(&defects),
         defects,
+        io_cause: None,
         io_kind: None,
     })
 }
@@ -233,7 +235,7 @@ pub fn validate_acceptance_bundle(
     }
     if let Some(pin) = expected_pin {
         let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|error| {
-            let mut failure = contract_error(format!(
+            let mut failure = contract_io(&error, format!(
                 "task_root {} could not be canonicalized: {error}; restore it or re-run `workflow freeze-acceptance`",
                 tasks_root.display()
             ));
@@ -351,11 +353,7 @@ pub fn empty_gate_findings_digest() -> String {
 }
 
 fn read_required(path: &Path) -> ContractResult<Vec<u8>> {
-    std::fs::read(path).map_err(|source| {
-        let mut error = contract_error(format!("required task-set artifact {} could not be read: {source}; restore it or run the named freeze command", path.display()));
-        error.io_kind = Some(source.kind());
-        error
-    })
+    std::fs::read(path).map_err(|error| contract_io(&error, format!("required task-set artifact {} could not be read: {error}; restore it or run the named freeze command", path.display())))
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> ContractResult<T> {
@@ -406,12 +404,24 @@ fn contract_error(message: impl Into<String>) -> TaskSetContractError {
     TaskSetContractError {
         message: message.into(),
         defects: Vec::new(),
+        io_cause: None,
         io_kind: None,
     }
 }
 
+fn contract_io(error: &std::io::Error, message: String) -> TaskSetContractError {
+    let mut fault = contract_error(message);
+    fault.io_cause = Some((error.kind(), error.raw_os_error()));
+    fault.io_kind = Some(error.kind());
+    fault
+}
+
 impl From<TaskSetContractError> for WorkflowError {
     fn from(error: TaskSetContractError) -> Self {
-        WorkflowError::SpecInvalid(error.message)
+        if error.io_cause.is_some() {
+            WorkflowError::port(error)
+        } else {
+            WorkflowError::SpecInvalid(error.message)
+        }
     }
 }

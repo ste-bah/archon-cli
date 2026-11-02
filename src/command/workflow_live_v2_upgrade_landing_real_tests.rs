@@ -77,6 +77,8 @@ impl crate::command::workflow_host_command_exec::HostCommandProcessAdapter for R
                     subject: "TASK-X-010".into(),
                     source_path: None,
                     remediation_scope: RemediationScope::Body,
+                    gate_stage: None,
+                    judged_item: None,
                 }]
             })
             .unwrap_or_default();

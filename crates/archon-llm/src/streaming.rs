@@ -50,8 +50,8 @@ pub enum StreamEvent {
     MessageStop,
     Ping,
     Error {
-        error_type: String,
-        message: String,
+        error_type: crate::provider::DiagnosticMessage,
+        message: crate::provider::DiagnosticMessage,
     },
     ReasoningEncrypted {
         blob: String,
@@ -261,8 +261,9 @@ fn parse_error(data: &str) -> Result<StreamEvent, StreamError> {
         .map_err(|e| StreamError::ParseError(format!("error event: {e}")))?;
 
     Ok(StreamEvent::Error {
-        error_type: outer.error.error_type,
-        message: archon_observability::redaction::redact_text(&outer.error.message),
+        error_type: outer.error.error_type.into(),
+        // 86fbab995 redacted the event text at parse time.
+        message: crate::provider::DiagnosticMessage::redacted_at_source(&outer.error.message),
     })
 }
 

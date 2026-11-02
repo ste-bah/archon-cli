@@ -1,6 +1,16 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+// env! requires a literal, so derive the name and compiled value together.
+macro_rules! build_environment {
+    ($name:literal) => {
+        /// Compile-time environment name containing the build commit.
+        pub const BUILD_SHA_ENV: &str = $name;
+        const BUILD_SHA: &str = env!($name);
+    };
+}
+build_environment!("ARCHON_BUILD_SHA");
+
 /// Identifier for the archon build currently running, as `<version>+<commit>`.
 ///
 /// The commit is what actually identifies behaviour: `CARGO_PKG_VERSION` moves
@@ -8,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// label and a corpus spanning it could not be segmented. Falls back to
 /// `<version>+unknown` when built outside a git checkout.
 pub fn build_stamp() -> String {
-    format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("ARCHON_BUILD_SHA"))
+    format!("{}+{}", env!("CARGO_PKG_VERSION"), BUILD_SHA)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

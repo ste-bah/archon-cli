@@ -131,10 +131,20 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // H1: an operational (host-unproven) finding beside an authored finding stops nothing; alone it still stops the phase.
     // Issue 495: check-path guidance reflects the copied repository sibling alias.
     // Issues 529/530: a shrinking failing-subject set is progress; a max_tokens retry names its size.
+    // Issue 494: acceptance author prompts carry the named-files block before the reply format.
+    // Windows CPU fix re-pin only: native byte counting and incremental JSON sizing preserve bytes.
+    // Issue 551: repair prompts list the latest open findings as current; earlier ones only as do-not-regress history.
+    // Issue 552: entry prompts list only their findings open in the latest gate result; a judge failure reaches only the entries it names, each with its own known finding.
+    // Issue 554: an operational finding on an authored entry never stops the phase; it is re-frozen, then routed to its author; skeletonPolicy and unprovenAuthored moved into the frozen module.
+    // Issue 555: an entry prompt carries only its own findings and phase-level ones (labelled, earlier ones as do-not-regress); the shared part names none; entry rung 3 names its own findings; earlier-findings sections are bounded with the full list in a context file.
+    // Issue 559: the acceptance reply format shows covers; a re-authored entry prompt states its current covers as a JSON array; a reply with no covers key keeps them.
+    // Issue 561: the best attempt's failing set becomes the subset baseline; a strict shrink of the previous attempt's set is neutral; new workflow_decompose_v1_failing_set.js.
+    // Issue 559 guard: the entry author reads the current entry with state.entries?.get.
+    // Issue 562: fewer open findings and a subject's advance to a later gate stage are progress; gate findings carry their stage.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "0eea1f26f0df90fa988f35a067d40865ea528e8788d6eab3b6d1c035c584eec7"
+        "8302ce1657402eb50c3ab1818094da06d0a75dc8b6477c058d30dc3c4634f700"
     );
 }

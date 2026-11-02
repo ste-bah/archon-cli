@@ -37,7 +37,7 @@ pub(crate) async fn open(
     let result = match (result, provider_fault::pending_response()) {
         (Ok(_), Some((status, _))) if status >= 400 => Err(provider_fault::opening_timeout()),
         (Err(LlmError::Http(message)), Some((status, hint)))
-            if status >= 400 && provider_fault::status_field(&message).is_none() =>
+            if status >= 400 && message.leading_status().is_none() =>
         {
             // A failed error-body read must not erase the status or header
             // already received. Keep existing typed request rejections intact.

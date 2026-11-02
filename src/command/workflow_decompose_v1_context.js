@@ -29,12 +29,11 @@ const CUT_MARK = " [cut]";
 const AUTHOR_PROMPT_LIMIT = 262144;
 
 function utf8Bytes(text) {
-  let bytes = 0;
-  for (const char of String(text)) {
-    const code = char.codePointAt(0);
-    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-  }
-  return bytes;
+  const value = String(text);
+  // Each UTF-16 unit costs 1/2/3 bytes; a valid pair costs 4, not 6.
+  return value.length + value.replace(/[^\u0080-\uffff]/g, "").length
+    + value.replace(/[^\u0800-\uffff]/g, "").length
+    - 2 * (value.match(/[\ud800-\udbff][\udc00-\udfff]/g) || []).length;
 }
 
 // `text` cut to at most `max` UTF-8 bytes, CUT_MARK included, at a character
@@ -173,7 +172,7 @@ function earlierFindings(history, feedback) {
   const entries = Array.isArray(history) ? history.slice() : [];
   // The attempt the current findings came from is not an earlier attempt.
   const newest = entries[entries.length - 1];
-  if (newest && newest.attempt !== 0 && JSON.stringify((newest.findings || []).map(historyKey)) === JSON.stringify([...(feedback || [])].map(historyKey))) entries.pop();
+  if (newest && newest.attempt !== 0 && (newest.findings || []).every((text) => current.has(historyKey(text)))) entries.pop();
   for (const entry of entries) {
     for (const text of entry.findings || []) {
       const key = historyKey(text);
@@ -211,7 +210,7 @@ function authorPrompt(base, attempt, feedback, history) {
     : `${found.count === 1 ? `attempt ${found.last}` : `attempts ${found.first}-${found.last}, ${found.count} times`}: ${found.text}`));
   const lines = fitLines(full.map((line) => clipBytes(line, HISTORY_RECORD_BYTES)), HISTORY_SHARE);
   if (lines.length > 0) {
-    prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
+    prompt += `\nEarlier attempts in this phase raised the following; a finding not in the list above is no longer reported, so it is not one to fix now. Do not regress them: keep every one satisfied at once; repairing a finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
   }
   const hidden = records.slice(lines.length);
   if (hidden.length > 0) {
@@ -239,6 +238,40 @@ async function requireDispatchable(w, subject, task) {
       remedy: "resuming alone pauses again: reduce the current findings this call must repair (split the input that produces them), or raise AUTHOR_PROMPT_LIMIT in the fixed decomposition script (a code change), then resume"
     });
   }
+}
+
+function currentAuthorFindings(prompt) {
+  const marker = "Repair these exact authoritative findings:\n- ";
+  const start = prompt.indexOf(marker);
+  if (start < 0) return [];
+  return prompt.slice(start + marker.length)
+    .split("\nEarlier attempts in this phase raised the following")[0]
+    .split("\n- ");
+}
+
+// The supplied files sit before `tail` (the reply format), which stays the
+// final task section; the room for them leaves the tail's bytes free.
+function namedFilesContext(task, entry, notes, tail = "") {
+  const base = `${task}\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: `;
+  if (utf8Bytes(base) + utf8Bytes("[]") + utf8Bytes(tail) > AUTHOR_PROMPT_LIMIT) return `${task}${tail}`;
+  const room = Math.max(0, AUTHOR_PROMPT_LIMIT - utf8Bytes(base) - utf8Bytes(tail));
+  const supplied = typeof __archonNamedFiles === "function"
+    ? JSON.parse(__archonNamedFiles(JSON.stringify(entry), JSON.stringify(notes), room)) : [];
+  const files = [];
+  let used = 2; // The array brackets; each later element also needs a comma.
+  for (const file of supplied) {
+    const comma = files.length > 0 ? 1 : 0;
+    let shown = JSON.stringify(file);
+    let size = utf8Bytes(shown);
+    if (used + comma + size > room) {
+      shown = JSON.stringify({path:file.path, status:"not_supplied"});
+      size = utf8Bytes(shown);
+    }
+    if (used + comma + size > room) break;
+    files.push(shown);
+    used += comma + size;
+  }
+  return `${base}[${files.join(",")}]${tail}`;
 }
 
 // Checkpoints use the same journal and watch path as the host's log primitive.

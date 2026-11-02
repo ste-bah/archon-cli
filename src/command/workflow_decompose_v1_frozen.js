@@ -105,6 +105,115 @@ function acceptanceStagePolicy(findings = []) {
   };
 }
 
+// The skeleton's author policy, whether it authors the skeleton first or
+// re-authors it because the set gate found an obligation no task claims or
+// a claim the PRD does not define (Batch O). `initialFeedback` carries the
+// set gate's exact findings into the first attempt.
+function skeletonPolicy(initialFeedback, initialRung) {
+  return {
+    phase: "skeleton",
+    capability: "freeze-skeleton",
+    retryScopes: new Set(["candidate_artifact", "skeleton"]),
+    initialFeedback,
+    ...(Number.isInteger(initialRung) ? { initialRung } : {}),
+    prompt: () => [
+      "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
+      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
+      groundingRules(),
+      "Stop reading once you can name what your entries assert.",
+      "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
+      "Every obligation id the PRD defines is in the implements of at least one task, and implements names only ids the PRD defines. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
+      "The document must deserialize into this exact shape:",
+      SKELETON_SHAPE,
+      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
+      "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
+      "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.",
+      "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
+      "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
+      "The host overwrites acceptance_digest: send the placeholder shown.",
+      "Generate large or repetitive fixture data with code rather than writing it literally.",
+      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
+      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+      "Do not run commands or write files."
+    ].join("\n")
+  };
+}
+
+// #554: the operational findings of a freeze outcome whose subject is an
+// entry this loop authored. `repeated` holds those whose entry is unchanged
+// since the previous freeze reported it unproven: retrying the host did not
+// help, so its author is told. Each is remembered for the next freeze.
+function unprovenAuthored(state, outcome, routed) {
+  const findings = routed.operational
+    ? (Array.isArray(outcome?.gateEnvelope?.policy_findings) ? outcome.gateEnvelope.policy_findings : [])
+    : routed.fatalFindings;
+  const seen = new Map();
+  const repeated = new Set();
+  for (const finding of findings) {
+    if (finding?.remediation_scope !== "operational" || typeof finding.subject !== "string") continue;
+    if (!state.entries || !state.entries.has(finding.subject)) continue;
+    const key = acceptanceEntryKey(state.entries.get(finding.subject));
+    seen.set(finding.subject, key);
+    if (state.unproven?.get(finding.subject) === key) repeated.add(finding);
+  }
+  state.unproven = seen;
+  return { repeated, subjects: new Set(seen.keys()) };
+}
+
+// #555: the entries each gate finding is for, read as the gate's routing
+// reads it: its subject when that is a criterion, else acceptanceRepairIds.
+// An omission of a held supplementary check is that held entry's. A finding
+// no rule attributes to one entry is phase-level. An entry's prompt shows
+// its own findings and the phase-level ones, never a sibling's. A stale
+// contract is the loop's to rebuild (refreshFromCurrentContract), no author's.
+function attributeEntryFindings(findings, ids, published, candidate, held) {
+  const own = new Map();
+  const phase = [];
+  for (const finding of findings) {
+    const selected = ids.has(finding.subject) ? new Set([finding.subject])
+      : acceptanceRepairIds([finding], ids, published, candidate, held);
+    const holder = [finding.subject, finding.deterministic_defect?.subject].find((id) => typeof id === "string" && held?.has(id));
+    const owners = selected && selected.size === 0 && holder ? new Set([holder]) : selected;
+    if (owners === null && finding?.deterministic_defect?.code !== "stale_acceptance_contract") {
+      const text = String(finding.text || "unnamed policy finding");
+      if (!phase.includes(text)) phase.push(text);
+    }
+    for (const id of owners || []) {
+      const open = own.get(id) || [];
+      if (!open.includes(finding.text)) open.push(finding.text);
+      own.set(id, open);
+    }
+  }
+  return { own, phase };
+}
+
+// #555 review: the phase-level findings of the latest gate are current; an
+// earlier one it no longer reports is kept as one not to regress, and one it
+// reports again is current again, as settleGateFindings keeps an entry's.
+function settlePhaseFindings(state, latest) {
+  const earlier = (state.earlierPhaseFindings || []).slice();
+  for (const text of state.phaseFindings || []) if (!latest.includes(text) && !earlier.includes(text)) earlier.push(text);
+  state.earlierPhaseFindings = earlier.filter((text) => !latest.includes(text));
+  state.phaseFindings = latest;
+}
+
+// #555 review r2: an entry's earlier findings (its own, or the phase-level
+// ones), bounded as authorPrompt bounds the phase history: the newest that
+// fit HISTORY_SHARE, each clipped to HISTORY_RECORD_BYTES, and the whole list,
+// which holds no sibling's finding, in a host-written file read by its path.
+function earlierFindingsText(heading, texts) {
+  if (!Array.isArray(texts) || texts.length === 0) return "";
+  const full = texts.map(String);
+  const count = fitLines(full.slice().reverse().map((found) => clipBytes(found, HISTORY_RECORD_BYTES)), HISTORY_SHARE).length;
+  const shown = full.slice(full.length - count).map((found) => clipBytes(found, HISTORY_RECORD_BYTES));
+  let out = `\n${heading}${shown.length > 0 ? `\n- ${shown.join("\n- ")}` : ""}`;
+  if (count < full.length) out += `\n${full.length - count} older distinct findings are not repeated here.`;
+  if (count < full.length || shown.some((line, index) => line !== full[full.length - count + index])) {
+    out += `\nEvery one, in full, is in ${contextFile("json", JSON.stringify(full)).path} (host-written context for this call: read it by its exact path).`;
+  }
+  return out;
+}
+
 async function repairFrozenStage(w, verified, findings) {
   const owner = frozenFindingOwner(findings[0]);
   if (findings.some((finding) => frozenFindingOwner(finding) !== owner)) {
@@ -132,6 +241,9 @@ async function repairFrozenStage(w, verified, findings) {
         if (requirement) owedSupplementary().set(entry.id, { requirement, text: currentRequirementText(requirement) });
       }
       state.retryIds = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract, state.entries);
+      // #555: each entry starts with only its own verification findings.
+      const opened = attributeEntryFindings(findings, new Set(Object.keys(args.acceptanceCriteria || {})), true, contract, state.entries);
+      [state.gateFindings, state.phaseFindings, state.earlierPhaseFindings] = [opened.own, opened.phase, []];
     }
     finalState = state;
     return await authorAcceptanceEntries(host, prompt, round, state);
@@ -211,4 +323,24 @@ function changedDependencySubjects(prior, next) {
     }
   }
   return reached;
+}
+
+function malformedAcceptanceFailure(id, reason, malformedClass) {
+  const finding = {text:redactSecretShapedText(`candidate artifact was refused: acceptance entry ${id}: ${String(reason)}`), subject:id};
+  return {failure:{status:"failed",malformed:true,malformedClass,entryId:id,findings:[finding],summary:finding.text}};
+}
+
+// Show retained coverage so a rewrite makes each removal deliberate.
+function currentCoversText(entry) {
+  return Array.isArray(entry?.covers) && entry.covers.length > 0
+    ? `\nThis entry currently covers ${JSON.stringify(entry.covers)}. Keep every one of them in covers unless the new check no longer fails when that requirement is violated; the host re-opens each one you drop that no other check covers as an owed supplementary check.`
+    : "";
+}
+
+// Omission preserves the current entry; an explicit value remains the author's.
+// Call after host-owned fields so supplementary coverage still belongs to the host.
+function inheritAcceptanceCovers(entry, prior) {
+  if (!Object.prototype.hasOwnProperty.call(entry, "covers") && Array.isArray(prior?.covers)) {
+    entry.covers = prior.covers.slice();
+  }
 }

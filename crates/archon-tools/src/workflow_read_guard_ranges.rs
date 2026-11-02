@@ -1,20 +1,36 @@
 //! Shared read-range hashing plus the read-set sidecar and write credit of a
 //! write-capable guard. Both modes retain ranges for each agent session.
-use super::{RangeKey, WorkflowReadGuard, records::append_record, thrash};
+use super::{RangeKey, WorkflowReadGuard, read_only, records::append_record, thrash};
 use crate::tool::ToolContext;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
+pub(crate) fn effective_replay_limit(configured: usize) -> usize {
+    if configured == 0 {
+        crate::READ_REPLAY_CONTEXT_BYTES
+    } else {
+        configured.min(crate::READ_REPLAY_CONTEXT_BYTES)
+    }
+}
+
+pub(crate) fn result_fits_replay(text: &str, configured: usize, note: Option<&str>) -> bool {
+    let mut result = text.to_owned();
+    if let Some(note) = note {
+        result.push_str("\n\n");
+        result.push_str(note);
+    }
+    serde_json::to_vec(&serde_json::Value::String(result))
+        .is_ok_and(|bytes| bytes.len() <= effective_replay_limit(configured))
+}
+
 impl WorkflowReadGuard {
-    /// Forget this agent's ranges when its model-visible history is replaced.
+    /// Forget this agent's cached results when its model-visible history is replaced.
     pub fn clear_ranges_for(&self, ctx: &ToolContext) {
         let session = (ctx.session_id.clone(), ctx.subagent_id.clone());
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .ranges
-            .retain(|key, _| key.session != session);
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.ranges.retain(|key, _| key.session != session);
+        state.searches.retain(|key, _| key.session != session);
     }
 
     /// Empty for a read-only guard, which does not expose orientation and has
@@ -32,7 +48,7 @@ impl WorkflowReadGuard {
                 let requested_path = state
                     .ranges
                     .get(key)
-                    .map(|(_, _, requested_path)| requested_path.as_str())
+                    .map(|(_, _, requested_path, _)| requested_path.as_str())
                     .unwrap_or_else(|| key.path.to_str().unwrap_or("<path>"));
                 format!(
                     "{} offset={} limit={}",
@@ -68,27 +84,28 @@ impl WorkflowReadGuard {
             offset,
             limit,
         };
-        let replay_limit_bytes = if replay_limit_bytes == 0 {
-            crate::READ_REPLAY_CONTEXT_BYTES
-        } else {
-            replay_limit_bytes.min(crate::READ_REPLAY_CONTEXT_BYTES)
-        };
-        let mut replay_result = std::str::from_utf8(bytes).unwrap_or_default().to_string();
-        if let Some(note) = result_note {
-            replay_result.push_str("\n\n");
-            replay_result.push_str(note);
-        }
-        let replay_bytes = serde_json::to_vec(&serde_json::Value::String(replay_result))
-            .map_or(usize::MAX, |serialized| serialized.len());
+        let fits = result_fits_replay(
+            std::str::from_utf8(bytes).unwrap_or_default(),
+            replay_limit_bytes,
+            result_note,
+        );
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !force
-            && let Some((old_hash, call, _)) = state.ranges.get(&key)
+            && let Some((old_hash, call, _, refunded)) = state.ranges.get_mut(&key)
             && *old_hash == hash
         {
-            if replay_bytes > replay_limit_bytes {
+            if !fits {
                 return Ok(None);
             }
+            let call = *call;
+            let first_repeat = !std::mem::replace(refunded, true);
             let budget_note = if self.read_only() {
+                // Issue-556: only the first repeat since the range was last
+                // read in full is free; later repeats keep their charge, so a
+                // cycle over any number of ranges reaches the hard ceiling.
+                if first_repeat {
+                    read_only::refund_inspection(&mut state, &agent_key);
+                }
                 ""
             } else {
                 " This still consumes the read-before-write budget."
@@ -120,7 +137,7 @@ impl WorkflowReadGuard {
         }
         state
             .ranges
-            .insert(key, (hash, call, requested_path.to_owned()));
+            .insert(key, (hash, call, requested_path.to_owned(), false));
         Ok(None)
     }
 

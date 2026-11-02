@@ -63,11 +63,8 @@ struct Proof {
 
 /// A pass the round counts: exactly `check_record`'s rule.
 fn passed(result: &CheckResult) -> bool {
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    result.operational_error.is_none()
-        && result.exit_code == Some(0)
-        && !archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr)
+    // Issue 544: the capture's classification of the raw streams.
+    result.operational_error.is_none() && result.exit_code == Some(0) && !result.reports_zero_work()
 }
 
 /// The check's id and the exact text the host runs for it.

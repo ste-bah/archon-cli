@@ -1,3 +1,6 @@
+/// Environment override for the Codex CLI authentication file path.
+pub const CODEX_AUTH_FILE_ENV: &str = archon_shell::credential_paths::CODEX_AUTH_FILE_ENV;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;

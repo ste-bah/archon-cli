@@ -12,7 +12,11 @@
 //! rule of `workflow_acceptance_executability_silent` (#356): the first time
 //! it is unproven and resumable, and the same unchanged check failing so
 //! again after a resume goes to its author. Everything else stays the
-//! host's.
+//! host's. Issue 554: a mutation run that gave no verdict for a reason the
+//! host cannot tell apart from the check's own run (no exit status, an input
+//! with no recorded state, an input left unrestored) follows that strike
+//! rule too, and one whose own text the shell rejects in parse-only mode
+//! is its author's.
 
 use archon_workflow::acceptance_scratch::faults::{CheckFault, classify};
 
@@ -27,6 +31,7 @@ pub(super) enum Fault {
     },
     Ambiguous(String),
     Host,
+    Availability(crate::command::workflow_host_fault::Class),
 }
 
 /// Whose the operational error of `result` is, by the typed cause the
@@ -38,6 +43,14 @@ pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
     else {
         return Fault::Host;
     };
+    if let Some(archon_workflow::acceptance_scratch::faults::FaultCause::SiteSetupIo {
+        raw_os_error,
+    }) = result.fault
+    {
+        return Fault::Availability(crate::command::workflow_host_fault::io_class(
+            &std::io::Error::from_raw_os_error(raw_os_error),
+        ));
+    }
     match classify(result.fault.as_ref(), error) {
         CheckFault::Check { trigger, remedy } => Fault::Check {
             trigger,
@@ -45,6 +58,15 @@ pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
             error: error.to_string(),
         },
         CheckFault::Ambiguous => Fault::Ambiguous(error.to_string()),
+        CheckFault::Host
+            if matches!(
+                error,
+                archon_workflow::acceptance_scratch::CHECK_TIMED_OUT
+                    | archon_workflow::acceptance_scratch::CHECK_DEFERRED
+            ) =>
+        {
+            Fault::Availability(crate::command::workflow_host_fault::Class::Transient)
+        }
         CheckFault::Host => Fault::Host,
     }
 }
@@ -52,17 +74,40 @@ pub(super) fn of_result(result: Option<&CheckResult>) -> Fault {
 /// Whose a mutation run's failure to give a verdict is: its operational
 /// error, else a signal its wrapper saw. The live-root guard is the host's:
 /// the host chose where the check ran.
-pub(super) fn of_mutation(result: &CheckResult, markers: &mutation::Markers) -> Fault {
+///
+/// Issue 554: a run that recorded no exit status whose own text `command`
+/// the shell that runs it rejects in parse-only mode is its author's at
+/// once, with the shell's error. Any other run without a verdict (`reason`: no exit status,
+/// an input with no recorded state, an input left unrestored) may be the
+/// host's as well as the check's, so it follows the strike rule: the same
+/// unchanged check failing so again goes to its author.
+pub(super) fn of_mutation(
+    result: &CheckResult,
+    markers: &mutation::Markers,
+    command: &str,
+    reason: &str,
+) -> Fault {
     if result.operational_error.is_some() {
         return of_result(Some(result));
     }
     if markers.guarded(result) {
         return Fault::Host;
     }
-    match markers.observed_signal(result) {
-        Some(signal) => Fault::Ambiguous(format!("the check wrapper observed signal {signal}")),
-        None => Fault::Host,
+    if let Some(signal) = markers.observed_signal(result) {
+        return Fault::Ambiguous(format!("the check wrapper observed signal {signal}"));
     }
+    // Decided by the check's own text alone: a run's stderr cannot say which
+    // process printed a syntax error.
+    if markers.status(result).is_none()
+        && let Some(error) = archon_workflow::acceptance_check_shell::shell_parse_error(command)
+    {
+        return Fault::Check {
+            trigger: "the shell that runs it rejects its text in parse-only mode, so the check never recorded its exit status",
+            remedy: "fix exactly that shell syntax so the whole check parses (`sh -n` accepts it), and keep every assertion and every call into the deliverable",
+            error,
+        };
+    }
+    Fault::Ambiguous(reason.to_string())
 }
 
 /// Settle check `id` of `contract`, whose run `at` (where it ran, for the
@@ -107,6 +152,10 @@ pub(super) fn settle(
                     )
                 },
             )
+        }
+        (Fault::Availability(class), _) => {
+            probe.unproven_as(id, unproven, UnprovenCause::from_class(class));
+            None
         }
         (Fault::Ambiguous(_) | Fault::Host, _) => {
             probe.unproven(id, unproven);
