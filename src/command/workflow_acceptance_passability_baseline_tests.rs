@@ -127,6 +127,13 @@ async fn an_author_probe_finding_does_not_withhold_another_checks_parser_refutat
         "error: unexpected argument '--new-flag' found"
     );
     assert_eq!(judgment.host_call_id, "host:argument-parser-usage");
+    // #562: the passability stage, after the probe's own finding.
+    assert_eq!(findings[0].gate_stage, None);
+    assert_eq!(
+        findings[1].gate_stage,
+        Some(crate::command::workflow_gate::GateStage::Passability)
+    );
+    assert!(super::is_passability_call(&judgment.host_call_id));
     assert_eq!(
         contract.acceptance[0].judgment.verdict,
         JudgeDecision::Accepted

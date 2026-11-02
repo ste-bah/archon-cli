@@ -146,6 +146,7 @@ pub(super) async fn pre_implementation_findings_with_limits(
             scope,
         )
         .with_defect(identity)
+        .judged_at(crate::command::workflow_gate::GateStage::Probe, None)
     };
     // What the host could not prove is the host's (operational), never the
     // author's: it is not published in any gate mode, and no author is

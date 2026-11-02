@@ -42,7 +42,7 @@ use super::fidelity_resume::{Cluster, LintIncomplete, resolve};
 use super::fidelity_store::{Standing, StoreIdentity, VerdictStore, store_dir};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;
 use crate::command::workflow_freeze_budget::FreezeResume;
-use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId};
+use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId, GateStage};
 #[cfg(test)]
 use set_helpers::mentions_whole;
 use set_helpers::named_set_tasks;
@@ -116,6 +116,7 @@ pub(crate) async fn evaluate_lint_with_fidelity_resumable(
                         Some(finding.source_path),
                         archon_workflow::RemediationScope::Body,
                     )
+                    .judged_at(GateStage::Critic, None)
                 }));
             Ok(evaluation)
         }
@@ -170,6 +171,7 @@ pub(crate) async fn audit_task_file_candidate(
                 Some(finding.source_path),
                 archon_workflow::RemediationScope::Body,
             )
+            .judged_at(GateStage::Critic, Some(finding.subject))
         })
         .collect();
     Ok((audit.report, findings))

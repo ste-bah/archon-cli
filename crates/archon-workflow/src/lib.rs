@@ -168,7 +168,7 @@ pub use v2::{
     FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION, FIXED_DECOMPOSITION_TEMPLATE_VERSION,
     FinalizationRecordV1, FixedDecompositionStateV1, FixedRunIdentityV1,
     GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
-    HostCommandRequest, HostCommandResult, HostCommandSubject, ObserverAuthority,
+    GateStage, HostCommandRequest, HostCommandResult, HostCommandSubject, ObserverAuthority,
     PREPARED_PUBLICATION_SCHEMA_VERSION, PROJECT_ARTIFACT_POLICY_VERSION,
     PUBLICATION_RECEIPT_SCHEMA_VERSION, PortableAcceptanceIdentityV1, PreparedPublicationEntry,
     PreparedPublicationV1, PublicationReceiptV1, PublishedArtifactReceipt,

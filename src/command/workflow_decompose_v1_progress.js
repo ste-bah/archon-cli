@@ -20,6 +20,8 @@
 // that changes reasons remains the same failure. An attempt whose set strictly
 // shrinks the previous attempt's, at a measure no worse, is neutral: it
 // neither adds to nor resets the window (workflow_decompose_v1_failing_set.js).
+// Issue 562: fewer open findings than ever before, or a subject at a later gate
+// stage than ever before, is progress too (gateStageStep, same file).
 // A stall PAUSES the run and resume opens a fresh window while preserving the
 // best measure and the baseline, both reconstructed by replay.
 //
@@ -147,6 +149,11 @@ function newProgress(_seed) {
   return {
     best: null,
     bestFailing: null,
+    // Issue 562 ratchets (gateStageStep): the fewest open findings, each
+    // subject's best [earliest, furthest] gate stage, and the subjects eligible.
+    bestOpen: null, bestOpenLevel: null,
+    stageBest: new Map(),
+    stageEligible: new Set(),
     last: null,
     repair: newRepairEpisode(0),
     history: [],
@@ -201,7 +208,8 @@ function authorRoundReport(policy, state) {
   return { passed: state.roundPassed, outage: state.roundOutage };
 }
 
-// Only a strict subset of the baseline failing-subject set or a measure that beats every
+// Only a strict subset of the baseline failing-subject set, a better #562 ratchet
+// (gateStageStep) or a measure that beats every
 // earlier attempt is progress. Trading defects cannot shrink the set, and
 // renaming or rewording within the same subjects cannot reset the window. The
 // entries that passed in the clean
@@ -218,13 +226,18 @@ function recordAttempt(progress, call, findings, answered = true, round = NO_ROU
   if (oldMeasureBetter) progress.best = measure;
   // #561: the baseline and neutral rules, with their bound (failing_set.js).
   const { better, neutral } = failingSetStep(progress, measure, oldMeasureBetter);
+  // #562: fewer open findings, or a subject at a later gate stage (failing_set.js).
+  const { fewer, advanced } = gateStageStep(progress, findings, measure, better);
+  const progressed = better || fewer || advanced.length > 0;
   const entry = {
     call,
     kind: ["packaging", "refused", "judged"][measure.tier],
     stage: DEFECT_STAGES[measure.stage] || "passed",
     findings: measure.count,
-    progress: better,
-    ...(neutral ? { neutral: true } : {}),
+    progress: progressed,
+    ...(neutral && !progressed ? { neutral: true } : {}),
+    ...(fewer ? { open_findings: progress.bestOpen } : {}),
+    ...(advanced.length > 0 ? { advanced: advanced.slice(0, PAUSE_EVIDENCE_FINDINGS).map(boundText) } : {}),
     ...(credited.length > 0 ? { entries: credited } : {})
   };
   if (round.outage) entry.outage = true;
@@ -407,6 +420,7 @@ function loopEvidence(progress, reason, lastFindings) {
     answered_attempts: progress.answered,
     stall_window: STALL_ATTEMPTS,
     best_failing: progress.bestFailing instanceof Set ? [...progress.bestFailing] : [],
+    ...gateStageEvidence(progress),
     progress_history: progress.history.slice(-PAUSE_EVIDENCE_HISTORY),
     progress_history_total: progress.history.length,
     last_findings: boundFindings(lastFindings),

@@ -433,5 +433,15 @@ mod tests {
         script.sort();
         host.sort();
         assert_eq!(script, host);
+        // #562: the gate stages, in the host's pipeline order.
+        let gate_stages = quoted(&body("const GATE_STAGES = [", "];"));
+        let host: Vec<_> = (archon_workflow::GateStage::ALL.iter())
+            .map(|stage| stage.name())
+            .collect();
+        assert_eq!(gate_stages, host);
+        let wire: Vec<_> = (archon_workflow::GateStage::ALL.iter())
+            .map(|stage| serde_json::to_value(stage).unwrap())
+            .collect();
+        assert_eq!(wire, host);
     }
 }

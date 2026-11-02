@@ -8,6 +8,8 @@ use anyhow::{Context, Result, anyhow};
 use archon_core::config::GateMode;
 use serde::Serialize;
 
+pub(crate) use archon_workflow::GateStage;
+
 pub(crate) const OFF_MESSAGE: &str = "gate_mode=off — nothing was evaluated; this is not a pass\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +41,10 @@ pub(crate) struct GateFinding {
     pub(crate) subject: String,
     pub(crate) source_path: Option<PathBuf>,
     pub(crate) remediation_scope: archon_workflow::RemediationScope,
+    /// #562: the gate stage that produced it, and what it decided within
+    /// `subject` when the subject alone does not name that.
+    pub(crate) gate_stage: Option<GateStage>,
+    pub(crate) judged_item: Option<String>,
 }
 
 impl GateFinding {
@@ -56,7 +62,15 @@ impl GateFinding {
             subject: subject.into(),
             source_path,
             remediation_scope,
+            gate_stage: None,
+            judged_item: None,
         }
+    }
+    /// The same finding as produced by `stage` of its gate, deciding `item`.
+    pub(crate) fn judged_at(mut self, stage: GateStage, item: Option<String>) -> Self {
+        self.gate_stage = Some(stage);
+        self.judged_item = item;
+        self
     }
     pub(crate) fn with_defect(
         mut self,
@@ -172,6 +186,8 @@ impl GateEvaluation {
                     .source_path
                     .map(|path| path.to_string_lossy().replace('\\', "/")),
                 remediation_scope: finding.remediation_scope,
+                gate_stage: finding.gate_stage,
+                judged_item: finding.judged_item,
             })
             .collect();
         Ok(archon_workflow::GateEnvelopeV1 {

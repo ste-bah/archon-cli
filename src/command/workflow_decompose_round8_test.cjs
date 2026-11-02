@@ -45,10 +45,11 @@ async function changedMembershipWithoutSubsetProgressPausesAtTheExistingAttemptW
   const sets = [
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     [1, 2, 3, 4, 5, 6],
-    [1, 7, 3, 8, 4],
-    [7, 8, 4, 6, 9],
+    // #562: each trade keeps six open findings; fewer than the fewest so far is progress.
+    [1, 7, 3, 8, 4, 11],
+    [7, 8, 4, 6, 9, 11],
     // #561: a trade; a strict subset of the previous set ([7, 8]) would be neutral.
-    [7, 8, 4, 6, 10]
+    [7, 8, 4, 6, 10, 11]
   ];
   const ctx = { args: { gateMode: 'enforce' } };
   vm.createContext(withAuthorContext(ctx));

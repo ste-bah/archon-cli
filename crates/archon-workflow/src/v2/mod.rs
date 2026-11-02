@@ -125,7 +125,7 @@ pub use finalization::{
 };
 pub use gate_envelope::{
     GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
-    RemediationScope,
+    GateStage, RemediationScope,
 };
 pub use host_api::{
     AgentResultMode, WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod,

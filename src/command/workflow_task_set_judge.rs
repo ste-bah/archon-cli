@@ -51,9 +51,9 @@ pub(crate) fn named_files_for_reauthor_cached(
 
 #[path = "workflow_task_set_judge_each.rs"]
 mod each;
-#[cfg(test)]
-pub(crate) use each::not_judged;
-pub(crate) use each::{author_note, judge_each, not_judged_findings, not_judged_findings_of};
+pub(crate) use each::{
+    author_note, judge_each, not_judged, not_judged_findings, not_judged_findings_of,
+};
 #[path = "workflow_task_set_judge_rounds.rs"]
 mod rounds;
 use rounds::judge_prompted_with_roots;

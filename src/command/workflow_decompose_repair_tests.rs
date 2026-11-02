@@ -59,6 +59,8 @@ fn decl(name: &str) -> String {
 mod author_calls;
 #[path = "workflow_decompose_body_repair_tests.rs"]
 mod body_repair;
+#[path = "workflow_decompose_repair_decls.rs"]
+mod decls;
 #[path = "workflow_decompose_frozen_routing_tests.rs"]
 pub(crate) mod frozen_routing;
 #[path = "workflow_decompose_refusal_progress_tests.rs"]
@@ -70,92 +72,7 @@ pub(crate) mod set_gate_skeleton;
 
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
-    for name in [
-        "STALL_ATTEMPTS",
-        "DEFECT_STAGES",
-        "PASSED_STAGE",
-        "STAGE_CODES",
-        "REFUSED_PREFIX",
-        "PAUSE_EVIDENCE_HISTORY",
-        "PAUSE_EVIDENCE_FINDINGS",
-        "PAUSE_EVIDENCE_TEXT",
-        "PACKAGING_TIER",
-        "REFUSED_TIER",
-        "JUDGED_TIER",
-        "progressText",
-        "findingTier",
-        "findingKey",
-        "hostDefect",
-        "isDeterministic",
-        "stageOf",
-        "attemptMeasure",
-        // Issue 529: a strictly shrinking failing-subject set is progress.
-        "failingSubjectKey",
-        "isStrictSubset",
-        "failingSetStep",
-        "isBetter",
-        "newProgress",
-        // Issue 357: the per-entry shape-repair frontier.
-        "newRepairEpisode",
-        "openRepairEpisode",
-        "PASSED_MEASURE",
-        "recordRepairs",
-        // Issue 357 round 7: every failed round credits its passes.
-        "creditPassed",
-        "recordRound",
-        "restoreFloor",
-        "creditedRound",
-        "NO_ROUND",
-        "authorRoundReport",
-        "recordStep",
-        "recordAttempt",
-        "recordAnswered",
-        "recordOperational",
-        "stallReason",
-        "boundText",
-        "boundFindings",
-        "loopEvidence",
-        "PAUSES",
-        "pauseLoop",
-        "progressOperationalComponents",
-        "pauseAuthorLoop",
-        "PACKAGING_REFUSAL",
-        "AUTHOR_CALLS",
-        "routeFindings",
-        "authoredSourceMatches",
-        "stopFixed",
-        "requireCommitted",
-        "authorPrompt",
-        // Issue 288: the bounded earlier-attempt history authorPrompt shows.
-        "HISTORY_SHARE",
-        "PRIOR_SHARE",
-        "CATALOGUE_SHARE",
-        "CONTEXT_BUDGET",
-        "HISTORY_RECORD_BYTES",
-        "CUT_MARK",
-        "AUTHOR_PROMPT_LIMIT",
-        "utf8Bytes",
-        "clipBytes",
-        "fitLines",
-        "CONTEXT_FILES",
-        "contextFile",
-        "historyKey",
-        "earlierFindings",
-        "requireDispatchable",
-        "repairEvent",
-        "authorCandidate",
-        "verifyFrozenStage",
-        "frozenFindingOwner",
-        "repairFrozenStage",
-        "acceptanceStagePolicy",
-        "FROZEN_REPAIRS",
-        "prepareAuthorStages",
-        "frozenBodyReusable",
-        "changedDependencySubjects",
-        "acceptanceRepairIds",
-        "unprovenAuthored",
-        "acceptanceEntryKey",
-    ] {
+    for name in decls::SCRIPT_DECLS {
         script.push_str(&decl(name));
         script.push('\n');
     }

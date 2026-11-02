@@ -134,6 +134,11 @@ async fn a_refuted_check_is_never_staged_and_its_finding_returns_to_the_author()
         finding.remediation_scope,
         archon_workflow::RemediationScope::CandidateArtifact
     );
+    // #562: the judge's stage, so a check that moves on to the probe advances.
+    assert_eq!(
+        finding.gate_stage,
+        Some(crate::command::workflow_gate::GateStage::Judge)
+    );
     assert!(
         finding.text.contains("a passing false state"),
         "{}",
@@ -219,6 +224,14 @@ async fn a_judge_refutation_reaches_its_author_while_a_sibling_is_host_unproven_
         archon_workflow::RemediationScope::Operational
     );
     assert!(pending.text.contains("could not prove"), "{}", pending.text);
+    assert_eq!(
+        (refutation.gate_stage, pending.gate_stage),
+        (
+            Some(crate::command::workflow_gate::GateStage::Judge),
+            Some(crate::command::workflow_gate::GateStage::Probe)
+        ),
+        "#562: the judge's refutation, and the probe's own finding"
+    );
     let judge_cache = temp
         .path()
         .join(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)

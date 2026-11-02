@@ -278,6 +278,8 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
                 subject: "acceptance".into(),
                 source_path: None,
                 remediation_scope: self.first_scope,
+                gate_stage: None,
+                judged_item: None,
             }]
         } else {
             Vec::new()

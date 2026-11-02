@@ -132,20 +132,33 @@ pub(crate) async fn judge_baseline_failures(
             .and_then(serde_json::Value::as_str)
             == Some("host")
         {
-            "host:argument-parser-usage".to_string()
+            HOST_PASSABILITY_CALL.to_string()
         } else {
-            format!("acceptance-passability-batch:{id}")
+            format!("{PASSABILITY_CALL}{id}")
         };
         entry.judgment.sampling.clone_from(&decision.sampling);
-        findings.push(GateFinding::new(
-            GateId::FreezeAcceptance,
-            text,
-            id,
-            Some(contract_path.clone()),
-            archon_workflow::RemediationScope::CandidateArtifact,
-        ));
+        findings.push(
+            GateFinding::new(
+                GateId::FreezeAcceptance,
+                text,
+                id,
+                Some(contract_path.clone()),
+                archon_workflow::RemediationScope::CandidateArtifact,
+            )
+            .judged_at(crate::command::workflow_gate::GateStage::Passability, None),
+        );
     }
     Ok(findings)
+}
+
+/// The host call id prefix of a passability verdict, and the id of one the
+/// host decided itself from argument-parser usage output.
+pub(crate) const PASSABILITY_CALL: &str = "acceptance-passability-batch:";
+pub(crate) const HOST_PASSABILITY_CALL: &str = "host:argument-parser-usage";
+
+/// Whether a check's judgment came from the passability stage (#562).
+pub(crate) fn is_passability_call(host_call_id: &str) -> bool {
+    host_call_id.starts_with(PASSABILITY_CALL) || host_call_id == HOST_PASSABILITY_CALL
 }
 
 #[cfg(test)]

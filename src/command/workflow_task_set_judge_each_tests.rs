@@ -233,6 +233,10 @@ async fn an_oversize_check_goes_to_its_author_unjudged_549() {
         (client.prompts.lock().unwrap().iter()).all(|prompt| !prompt.contains("AC-X-002")),
         "the judge is never asked about a check whose files were withheld"
     );
+    // #562: no model judged it, so its finding carries no gate stage.
+    let findings = not_judged_findings_of(Path::new("acceptance-contract.json"), [oversize]);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].gate_stage, None);
 }
 
 #[tokio::test]

@@ -161,7 +161,9 @@ const judgedSet = subjects => subjects.map(subject => finding(subject, `judged $
 
 function tradesAfterABestMeasureStillPause() {
   const progress = ctx.newProgress([]);
-  const flags = [freezeFindings(3, ['AC-X-001', 'AC-X-002', 'AC-X-003']), judgedSet(['AC-X-001', 'AC-X-004']),
+  // #562: AC-X-002 and AC-X-003 are judged from the first attempt on, so no
+  // later attempt moves them to a later gate stage.
+  const flags = [[...freezeFindings(3, ['AC-X-001']), ...judgedSet(['AC-X-002', 'AC-X-003'])], judgedSet(['AC-X-001', 'AC-X-004']),
     judgedSet(['AC-X-002', 'AC-X-003']), judgedSet(['AC-X-001', 'AC-X-003']), judgedSet(['AC-X-001', 'AC-X-002'])]
     .map((findings, index) => ctx.recordAttempt(progress, index + 1, findings));
   assert.deepEqual(flags, [true, true, false, false, false], 'a subset of an older set is no credit after a better measure');

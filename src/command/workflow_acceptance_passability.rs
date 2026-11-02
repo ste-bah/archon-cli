@@ -348,7 +348,7 @@ fn candidates(
 
 #[path = "workflow_acceptance_passability_baseline.rs"]
 mod baseline;
-pub(crate) use baseline::judge_baseline_failures;
+pub(crate) use baseline::{is_passability_call, judge_baseline_failures};
 
 #[path = "workflow_acceptance_passability_judge.rs"]
 mod passability_judge;
