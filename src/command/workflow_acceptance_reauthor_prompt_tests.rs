@@ -139,7 +139,12 @@ fn non_baseline_prompt_keeps_the_refused_check_verbatim() {
         "Do not run commands or write files.".to_string(),
     ]
     .join("\n");
-    assert_eq!(prompt, expected);
+    let compared = prompt
+        .lines()
+        .filter(|line| !line.starts_with("Checks run at the check site with PATH="))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(compared, expected);
     let replaced = prompt
         .lines()
         .find(|line| line.starts_with("The entry being replaced"))

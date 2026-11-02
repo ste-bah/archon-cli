@@ -484,3 +484,7 @@ pub(crate) mod test_client;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_path_prompt_tests.rs"]
+mod path_prompt_tests;

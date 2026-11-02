@@ -136,6 +136,12 @@ pub(super) fn author_prompt_with_prefetch(
         "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The findings below explain why the current entry needs revision. Author ONLY this entry, not the whole contract.",
         frozen.id
     ));
+    if let Some(path) = crate::command::acceptance_scratch_policy::check_site_path(
+        &scope.project_root,
+        &scope.task_root,
+    ) {
+        prompt.push(crate::command::acceptance_scratch_policy::check_site_path_line(&path));
+    }
     prompt.extend([
         format!("Read the PRD at {}.", scope.prd_path.display()),
         format!(
