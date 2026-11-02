@@ -324,3 +324,23 @@ function changedDependencySubjects(prior, next) {
   }
   return reached;
 }
+
+function malformedAcceptanceFailure(id, reason, malformedClass) {
+  const finding = {text:redactSecretShapedText(`candidate artifact was refused: acceptance entry ${id}: ${String(reason)}`), subject:id};
+  return {failure:{status:"failed",malformed:true,malformedClass,entryId:id,findings:[finding],summary:finding.text}};
+}
+
+// Show retained coverage so a rewrite makes each removal deliberate.
+function currentCoversText(entry) {
+  return Array.isArray(entry?.covers) && entry.covers.length > 0
+    ? `\nThis entry currently covers ${JSON.stringify(entry.covers)}. Keep every one of them in covers unless the new check no longer fails when that requirement is violated; the host re-opens each one you drop that no other check covers as an owed supplementary check.`
+    : "";
+}
+
+// Omission preserves the current entry; an explicit value remains the author's.
+// Call after host-owned fields so supplementary coverage still belongs to the host.
+function inheritAcceptanceCovers(entry, prior) {
+  if (!Object.prototype.hasOwnProperty.call(entry, "covers") && Array.isArray(prior?.covers)) {
+    entry.covers = prior.covers.slice();
+  }
+}

@@ -43,7 +43,7 @@ function host(gates) {
       seen.authored.push(id);
       seen.prompts.push({id, task:options.task});
       return {status:'accepted', stopReason:'end_turn',
-        content:JSON.stringify({id, version:seen.authored.filter(x => x === id).length, criterion:''})};
+        content:JSON.stringify({id, version:seen.authored.filter(x => x === id).length, criterion:'', covers:[]})};
     },
     hostCommand: async (_, {stdin}) => {
       seen.stdins.push(stdin);

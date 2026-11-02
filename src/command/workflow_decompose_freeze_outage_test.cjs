@@ -31,7 +31,7 @@ async function run(gates) {
         authored.push(id);
         prompts.push(options.task);
         return {status:'accepted', stopReason:'end_turn',
-          content:JSON.stringify({id, version:authored.filter(x => x === id).length, criterion:''})};
+          content:JSON.stringify({id, version:authored.filter(x => x === id).length, criterion:'', covers:[]})};
       },
       hostCommand: async (_, {stdin}) => {
         stdins.push(stdin);

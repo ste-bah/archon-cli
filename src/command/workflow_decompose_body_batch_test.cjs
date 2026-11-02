@@ -18,7 +18,7 @@ function harness(cap, options = {}) {
  let active=0,peak=0,failedAt=null,firstEndedAfterFourthStarted=null; const bodyCalls=[],bodyPrompts=[],landed=[];
  const w={
   agent:async(id,opts)=>{
-   if(!id.startsWith('body-')) return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:'AC-X-1'})};
+   if(!id.startsWith('body-')) return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:'AC-X-1',covers:[]})};
    bodyPrompts.push(opts.task);
    const taskId=opts.task.match(/host-frozen task_id (TASK-X-\d+)/)[1];
    bodyCalls.push({id,taskId,peakAtStart:active+1,afterFailure:failedAt!==null}); active++;peak=Math.max(peak,active);

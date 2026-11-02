@@ -270,7 +270,7 @@ async function inactivityCutWithProgressKeepsTheWindow() {
     agent: async (_id, options) => {
       const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
       if (id === 'AC-002' && cuts < 4) { cuts += 1; return { status: 'failed', summary: CUT }; }
-      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id, check: { kind: 'command', command: 'true' } }) };
+      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id, covers: [], check: { kind: 'command', command: 'true' } }) };
     },
     pause: async (id, evidence) => { pauses.push({ id, evidence, cuts }); return { resumed: true }; },
     hostCommand: async (cap) => ({ publicationReceipt: { call_id: cap }, postcondition: { satisfied: true }, gateEnvelope: { policy_findings: [] } }),

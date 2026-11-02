@@ -118,6 +118,7 @@ fn acceptance_reply_seed_keeps_the_criterion_from_its_author_prompt() {
 #[test]
 fn acceptance_reply_seed_criterion_ends_at_the_entry_finding_sections_555() {
     for section in [
+        "This entry currently covers [\"REQ-X\",\"REQ-Y\"]. Keep every one of them in covers unless the new check no longer fails when that requirement is violated; the host re-opens each one you drop that no other check covers as an owed supplementary check.",
         "Repair this entry's gate findings open in the latest gate result:\n- check 'AC-1': weak",
         "The freeze judge could not use this entry's last check:\n- no verdict",
         "Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:\n- old",
@@ -290,3 +291,30 @@ fn supplementary_host_stamp_uses_current_prd_text_not_finding_text() {
         current
     );
 }
+
+#[test]
+fn omitted_empty_covers_still_match_the_recorded_gate_round() {
+    let mut original = entry("AC-1");
+    original.as_object_mut().unwrap().remove("covers");
+    let records = [
+        reply(
+            "acceptance-author-AC-1-4",
+            "10:00:00",
+            &original.to_string(),
+        ),
+        gate(
+            "freeze-acceptance",
+            "10:01:00",
+            &json!({"entries":[original]}).to_string(),
+            vec![],
+            true,
+        ),
+    ];
+    let derived = derive(&records, &[], &criteria(&["AC-1"])).unwrap();
+    let (_, _, replies, invalid, _) = entries_seed(&derived);
+    assert!(invalid.is_empty(), "{invalid:?}");
+    assert!(replies.is_empty(), "the gate already holds this reply");
+}
+
+#[path = "workflow_decompose_seed_covers_tests.rs"]
+mod covers;

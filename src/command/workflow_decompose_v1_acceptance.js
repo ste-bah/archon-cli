@@ -38,7 +38,7 @@ function acceptanceReplyFormat() {
     "Return exactly one complete reply with one entry and one check.",
     "A complete reply looks exactly like this (each fence line alone on its line):",
     "```json",
-    "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",
+    "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",
     "```",
     "```check",
     "set -eu",
@@ -93,11 +93,6 @@ function unwrapEntry(parsed, id) {
   return parsed;
 }
 
-function malformedAcceptanceFailure(id, reason, malformedClass) {
-  const finding = {text:redactSecretShapedText(`candidate artifact was refused: acceptance entry ${id}: ${String(reason)}`), subject:id};
-  return {failure:{status:"failed",malformed:true,malformedClass,entryId:id,findings:[finding],summary:finding.text}};
-}
-
 // H4 (Batch O): every PRD requirement id is covered by some check. The host
 // freeze names each requirement no entry covers as the supplementary check it
 // is owed ("check 'SUP-<id>': PRD requirement <id> is covered by no
@@ -144,7 +139,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     + earlierFindingsText("Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:", state.earlierGateFindings?.get(id))
     + (state.phaseFindings?.length > 0 ? `\nPhase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- ${state.phaseFindings.join("\n- ")}` : "")
     + earlierFindingsText("Earlier gate results raised these phase-level findings; the latest gate result no longer reports them. Do not regress them:", state.earlierPhaseFindings)
-    + superseded;
+    + superseded + currentCoversText(state.entries.get(id));
   // Issue 288: the catalogue and the completed entries are bounded records
   // that name host-written files (workflow_decompose_v1_context.js). A file
   // the host could not write is an outage of this entry's call, made before
@@ -214,6 +209,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     if (blockRefusal) return malformedAcceptanceFailure(id, blockRefusal, "command-block-refusal");
     if (entry && entry.id === id) {
       setHostOwnedFields(entry, criteria);
+      inheritAcceptanceCovers(entry, state.entries.get(id));
       let serialized;
       // QuickJS bounds JSON.stringify by its stack as it bounds JSON.parse: a
       // reply nested past it is no entry, like one that does not parse.

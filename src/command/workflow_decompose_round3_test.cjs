@@ -110,10 +110,10 @@ async function partial(operational, replacing) {
   const w = { agent: async (callId) => {
     const [, id, ordinal] = /^acceptance-author-(\w+)-(\d+)$/.exec(callId);
     const round = Math.floor((Number(ordinal) - 1) / 3);
-    if (replacing && round === 1) return answer(JSON.stringify({ id, version: 0 }));
+    if (replacing && round === 1) return answer(JSON.stringify({ id, version: 0, covers: [] }));
     if (ids.indexOf(id) < round - (replacing ? 1 : 0)) {
       completed.push(id);
-      return answer(JSON.stringify({ id, version: round }));
+      return answer(JSON.stringify({ id, version: round, covers: [] }));
     }
     return operational ? { status: 'failed', summary: 'transport' } : answer('malformed');
   }, hostCommand: async () => replacing && ++gates === 1

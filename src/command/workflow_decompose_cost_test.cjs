@@ -17,7 +17,7 @@ async function run(globalFinding = false, structural = false, refusal = null) {
    const key=options.task.match(/Author ONLY entry ([^:]+):/)[1];
    calls.push({key,round,task:options.task}); active++;peak=Math.max(peak,active);
    await new Promise(resolve=>setTimeout(resolve,5)); active--;
-   return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:key,version:round})};
+   return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:key,version:round,covers:[]})};
   },
   hostCommand:async(cap,options)=>{
    const findings=[];
@@ -45,7 +45,7 @@ async function failedEntry() {
  const w={agent:async(_,options)=>{
   const id=options.task.match(/Author ONLY entry ([^:]+):/)[1];calls[id]=(calls[id]||0)+1;
   if(id==='B'&&fail) {fail=false;return {status:'failed',summary:'transport'};}
-  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id})};
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,covers:[]})};
  }};
  const state={entries:new Map(),retryIds:null};
  assert.equal((await context.authorAcceptanceEntries(w,'author',1,state)).status,'failed');
@@ -82,7 +82,7 @@ async function invalidAuthor(command, envelope = false) {
  const check={kind:'command',cwd:'project_root',...command};
  const w={agent:async()=>{
   calls++;
-  const entry={id:'A',criterion:'',check};
+  const entry={id:'A',criterion:'',covers:[],check};
   return {status:'accepted',stopReason:'end_turn',content:JSON.stringify(envelope?{acceptance:[entry]}:entry)};
  }};
  const result=await ctx.authorAcceptanceEntries(w,'author',1,state);
@@ -98,7 +98,7 @@ async function invalidAuthor(command, envelope = false) {
  const prompts=[];let freezes=0;
  await ctx.authorCandidate({agent:async(_,options)=>{
   prompts.push(options.task);
-  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:'A',criterion:'',check:{kind:'command',cwd:'project_root',...(prompts.length===1?command:{command:'test -f output'})}})};
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:'A',criterion:'',covers:[],check:{kind:'command',cwd:'project_root',...(prompts.length===1?command:{command:'test -f output'})}})};
  },hostCommand:async()=>{
   freezes++;
   return {publicationReceipt:{call_id:'freeze'},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}};
@@ -127,7 +127,7 @@ async function hostCriterion(value, envelope = false) {
  const state={entries:new Map(),retryIds:null};let calls=0;
  const w={agent:async()=>{
   calls++;
-  const entry={id:'A',check:{kind:'command',command:'test -f output',cwd:'project_root'},...value};
+  const entry={id:'A',covers:[],check:{kind:'command',command:'test -f output',cwd:'project_root'},...value};
   return {status:'accepted',stopReason:'end_turn',content:JSON.stringify(envelope?{acceptance:[entry]}:entry)};
  }};
  assert.equal((await ctx.authorAcceptanceEntries(w,'author',1,state)).status,'accepted');
@@ -146,7 +146,7 @@ async function supplementaryPointer() {
  const retained=state.entries.get('A');const calls=[];
  await ctx.authorAcceptanceEntries({agent:async(_,options)=>{
   const id=options.task.match(/Author ONLY entry ([^:]+):/)[1];calls.push(id);
-  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id})};
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,covers:[]})};
  }},'repair',2,state);
  assert.deepEqual(calls,['SUP-REQ-X']);
  assert.equal(state.entries.get('A'),retained,'healthy sibling retained unchanged');

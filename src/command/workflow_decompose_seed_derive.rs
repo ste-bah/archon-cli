@@ -303,7 +303,7 @@ fn gate_round(
     replies: &[Reply<'_>],
     refuted: &std::collections::BTreeSet<String>,
 ) -> u64 {
-    let mut state: BTreeMap<&str, &Value> = BTreeMap::new();
+    let mut state: BTreeMap<&str, Value> = BTreeMap::new();
     let mut repaired_after_gate: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
     let mut round = 0;
@@ -313,7 +313,7 @@ fn gate_round(
             // even if the author repeats byte-for-byte what the gate saw.
             repaired_after_gate.insert(reply.id.clone());
         }
-        state.insert(&reply.id, &reply.entry);
+        state.insert(&reply.id, record::comparison_entry(reply.entry.clone()));
         let round_ends = replies
             .get(index + 1)
             .is_none_or(|next| next.ordinal != reply.ordinal);
@@ -321,7 +321,7 @@ fn gate_round(
             && repaired_after_gate.is_empty()
             && state
                 .iter()
-                .all(|(id, entry)| candidate.get(*id) == Some(*entry))
+                .all(|(id, entry)| candidate.get(*id) == Some(entry))
         {
             round = reply.ordinal;
         }
@@ -372,6 +372,7 @@ fn acceptance(
     }
     // Oldest first by ordinal; one round's replies keep their start order.
     replies_read.sort_by_key(|reply| reply.ordinal);
+    record::inherit_reply_covers(&mut replies_read)?;
     let mut judged = Vec::new();
     let mut refuted_ids = std::collections::BTreeSet::new();
     for gate in gates
@@ -382,10 +383,7 @@ fn acceptance(
         let entries = record::candidate_entries(stdin, &record.call.id)?;
         // Compared as the loop kept them: a candidate an older runtime
         // assembled may predate the host-owned stamp.
-        let by_id: BTreeMap<String, Value> = entries
-            .iter()
-            .map(|(id, entry, _)| (id.clone(), host.stamp(entry.clone(), id)))
-            .collect();
+        let by_id = record::comparison_entries(&entries, host);
         let mut refuted = std::collections::BTreeSet::new();
         // A gate may name an entry with either a refuted-check finding or a
         // check-local defect, even when its bytes match the candidate. That

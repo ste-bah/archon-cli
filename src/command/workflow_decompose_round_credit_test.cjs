@@ -56,10 +56,10 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
         if (value === 'down') return {status:'failed', summary:'transport'};
         if (value === 'bad') return {status:'accepted', stopReason:'end_turn', content:'not json'};
         if (value === 'badUnknown') return {status:'accepted', stopReason:'end_turn', content:'opaque parser fixture'};
-        if (value === 'stopUnknown') return {status:'accepted', stopReason:version % 2 ? 'provider_stop_a' : 'provider_stop_b', content:JSON.stringify({id, version})};
+        if (value === 'stopUnknown') return {status:'accepted', stopReason:version % 2 ? 'provider_stop_a' : 'provider_stop_b', content:JSON.stringify({id, version, covers:[]})};
         if (value === 'bad2') return {status:'accepted', stopReason:'end_turn', content:'{"id":'};
-        if (value === 'noend') return {status:'accepted', stopReason:'max_tokens', content:JSON.stringify({id, version, criterion:''})};
-        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:value === 'wrong' ? 'OTHER' : id, version, criterion:''})};
+        if (value === 'noend') return {status:'accepted', stopReason:'max_tokens', content:JSON.stringify({id, version, criterion:'', covers:[]})};
+        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:value === 'wrong' ? 'OTHER' : id, version, criterion:'', covers:[]})};
       },
       hostCommand: async () => {
         if (++gate > 40) throw new Error('gate exhausted');

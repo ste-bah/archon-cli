@@ -37,12 +37,12 @@ async function run(sequence, {supplementary = false, wrapper = false, resumed = 
         if (calls >= 40) throw new Error('bounded test exhausted');
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
         ids.push(id);
-        if (id === 'A' && supplementary) return accepted({id,criterion:''});
+        if (id === 'A' && supplementary) return accepted({id,criterion:'',covers:[]});
         prompts.push(options.task); rounds.push(call); calls++;
         const version = (versions.get(id) || 0) + 1; versions.set(id, version);
         if (sequence(version) === 'transport') return {status:'failed',summary:'transport'};
         if (sequence(version) === 'incomplete') return {status:'accepted',stopReason:'end_turn',content:'malformed'};
-        const entry = {id,version,criterion:'',check:{kind:'command',command:'test -f output',cwd:'project_root'}};
+        const entry = {id,version,criterion:'',covers:[],check:{kind:'command',command:'test -f output',cwd:'project_root'}};
         return accepted(wrapper ? {acceptance:[entry]} : entry);
       },
       hostCommand: async () => { freezes++; return clean(); },
@@ -135,7 +135,7 @@ async function refuted(sequence, {ids = ['A'], always = false, resumed = false} 
         if (++calls > 60) throw new Error('bounded test exhausted');
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
         const version = (versions.get(id) || 0) + 1; versions.set(id, version);
-        return accepted({id,version,criterion:'c'});
+        return accepted({id,version,criterion:'c',covers:[]});
       },
       hostCommand: async () => {
         gates++;

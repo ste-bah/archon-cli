@@ -21,7 +21,7 @@ function setup(extra = {}) {
   const w = {
     agent: async (id, options) => {
       calls.push({ id, task: options.task });
-      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id: 'AC-X-001' }) };
+      return { status: 'accepted', stopReason: 'end_turn', content: JSON.stringify({ id: 'AC-X-001', covers: [] }) };
     },
     checkpoint: async (id, options) => { events.push({ id, ...options }); return {}; },
     pause: async (id, evidence) => { pauses.push({ id, evidence }); return { resumed: true }; }
@@ -36,7 +36,7 @@ async function ownedSourceDispatchesAuthorWithinTheAttemptWindow() {
   s.w.agent = async (id, options) => {
     s.calls.push({id,task:options.task});
     const entry = /Author ONLY entry ([^:]+):/.exec(options.task)[1];
-    return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:entry})};
+    return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:entry,covers:[]})};
   };
   s.w.hostCommand = async () => ++gates < 8 ? { gateEnvelope: { policy_findings: [
     finding('unknown', '/subjects/acceptance-contract.json') ] } } : clean();
@@ -75,7 +75,7 @@ async function malformedCallsNeverRepeatAcrossThreeCycles() {
   const s = setup();
   s.w.agent = async (id, options) => {
     s.calls.push({ id, task: options.task });
-    return { status: 'accepted', stopReason: 'end_turn', content: s.calls.length <= 33 ? 'unusable' : '{"id":"AC-X-001"}' };
+    return { status: 'accepted', stopReason: 'end_turn', content: s.calls.length <= 33 ? 'unusable' : '{"id":"AC-X-001","covers":[]}' };
   };
   s.w.hostCommand = async () => clean();
   await s.ctx.authorCandidate(s.w, s.policy);
@@ -270,7 +270,7 @@ async function acceptanceContextRecoveryReplaysEveryEntryAndRung() {
       const task = options.task.includes('Author ONLY entry') ? options.task
         : [...binding.files.values()].find(text => text.includes('Author ONLY entry') &&
           options.task.includes(require('node:crypto').createHash('sha256').update(text).digest('hex')));
-      return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:/Author ONLY entry ([^:]+):/.exec(task)[1]})};
+      return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:/Author ONLY entry ([^:]+):/.exec(task)[1],covers:[]})};
     });
     recorded.w.hostCommand = capture('host', () => ++gates <= 8
       ? {gateEnvelope:{policy_findings:[finding('candidate_artifact')]}} : clean());

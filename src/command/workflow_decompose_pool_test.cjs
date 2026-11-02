@@ -74,7 +74,7 @@ function acceptanceRun(seed, cap, criteria, state, options={}) {
   await c.sleep(options.durations?.[id] ?? 1+Math.floor(random()*50)); active--; ends.push({id,at:c.now(),active});
   if(options.throws===id) throw new Error(options.throwMessage||`stopped at ${id}`);
   if(options.fails===id&&(options.round||1)===1) return {status:'failed',summary:'transport'};
-  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,seed})};
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,seed,covers:[]})};
  }};
  const run=c.drive(ctx.authorAcceptanceEntries(w,'author',options.round||1,state||{entries:new Map(),retryIds:null}));
  return {run,prompts,ends,starts,peak:()=>peak,active:()=>active,now:c.now};

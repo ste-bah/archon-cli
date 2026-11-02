@@ -37,7 +37,7 @@ async function round(ctx, owed = []) {
   const w = {agent: async (_, options) => {
     const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
     tasks.set(id, options.task);
-    return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, criterion:'',
+    return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, criterion:'', covers:[],
       check:{kind:'command', command:'test -f out/result.json', cwd:'project_root'}})};
   }};
   const out = await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 1, {entries:new Map(), retryIds:null});
@@ -116,7 +116,7 @@ test('a live-root refusal reaches the same entry\'s next call', async () => {
   const tasks = [];
   const w = {agent: async (_, options) => {
     tasks.push(options.task);
-    return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:'AC-1', criterion:'',
+    return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:'AC-1', criterion:'', covers:[],
       check:{kind:'command', command:`test -f ${REPO}/out`, cwd:'project_root'}})};
   }};
   const first = await ctx.authorAcceptanceEntries(w, 'author', 1, state);

@@ -38,7 +38,7 @@ async function run(seq, cap) {
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
         const version = (versions.get(id) || 0) + 1; versions.set(id, version);
         prompts.push({id, version, task:options.task});
-        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, version, criterion:''})};
+        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, version, criterion:'', covers:[]})};
       },
       hostCommand: async () => {
         if (++gates > 1) return clean();
