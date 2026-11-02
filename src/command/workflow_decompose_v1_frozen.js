@@ -197,6 +197,23 @@ function settlePhaseFindings(state, latest) {
   state.phaseFindings = latest;
 }
 
+// #555 review r2: an entry's earlier findings (its own, or the phase-level
+// ones), bounded as authorPrompt bounds the phase history: the newest that
+// fit HISTORY_SHARE, each clipped to HISTORY_RECORD_BYTES, and the whole list,
+// which holds no sibling's finding, in a host-written file read by its path.
+function earlierFindingsText(heading, texts) {
+  if (!Array.isArray(texts) || texts.length === 0) return "";
+  const full = texts.map(String);
+  const count = fitLines(full.slice().reverse().map((found) => clipBytes(found, HISTORY_RECORD_BYTES)), HISTORY_SHARE).length;
+  const shown = full.slice(full.length - count).map((found) => clipBytes(found, HISTORY_RECORD_BYTES));
+  let out = `\n${heading}${shown.length > 0 ? `\n- ${shown.join("\n- ")}` : ""}`;
+  if (count < full.length) out += `\n${full.length - count} older distinct findings are not repeated here.`;
+  if (count < full.length || shown.some((line, index) => line !== full[full.length - count + index])) {
+    out += `\nEvery one, in full, is in ${contextFile("json", JSON.stringify(full)).path} (host-written context for this call: read it by its exact path).`;
+  }
+  return out;
+}
+
 async function repairFrozenStage(w, verified, findings) {
   const owner = frozenFindingOwner(findings[0]);
   if (findings.some((finding) => frozenFindingOwner(finding) !== owner)) {

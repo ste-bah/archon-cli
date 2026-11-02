@@ -228,6 +228,36 @@ async function anEntryRungThreeTextNamesItsOwnFindings() {
   }
 }
 
+// #555 review r2: an entry's earlier findings, its own and the phase-level
+// ones, are shown bounded as the phase history is: a long history still
+// leaves a dispatchable prompt, and the whole list is in a host-written file
+// that holds no sibling's finding.
+async function aLongEarlierHistoryStaysDispatchable(kind) {
+  const entry = id => ({id, criterion:id.toLowerCase(), check:{kind:'command', command:`t ${id}`, cwd:'project_root'},
+    gap_permitted:false, covers:[], judgment:{verdict:'accepted', counterexample:'', reason:'', host_call_id:''}});
+  const candidate = JSON.stringify({entries:['A', 'B', 'C'].map(entry), supplementary:[]});
+  const cleared = Array.from({length:66}, (_, n) => kind === 'phase'
+    ? finding('acceptance', `candidate artifact was refused: contract-wide defect ${n} ${'p'.repeat(4096)}`)
+    : finding('A', `check 'A': own earlier defect ${n} ${'a'.repeat(4096)}`));
+  const gates = cleared.map((f, n) => ({call_id:`g${n}`, published:false, findings:[f]}));
+  gates.push({call_id:'g', published:false, findings:[finding('A', "check 'A' was refuted: alpha-defect"),
+    finding('B', "check 'B' was refuted: beta-defect")]});
+  const {ctx} = context({transition_index:0, author_ordinals:{acceptance:25}, pause_ordinals:{acceptance:2},
+    subjects:{acceptance:{kind:'entries', candidate, replies:[], invalid:{}, carried:3, gates}}});
+  const {seen, w} = host([clean]);
+  w.pause = async (_, evidence) => { throw new Error(`paused: ${evidence && evidence.reason}`); };
+  await ctx.authorCandidate(w, policy(ctx));
+  const a = seen.prompts.find(p => p.id === 'A').task;
+  assert.ok(Buffer.byteLength(a) <= vm.runInContext('AUTHOR_PROMPT_LIMIT', ctx), `A's prompt fits the dispatch limit: ${Buffer.byteLength(a)}`);
+  assert.match(a, /open in the latest gate result:\n- check 'A' was refuted: alpha-defect/, 'the current finding is whole');
+  assert.match(a, /older distinct findings are not repeated here/);
+  const path = /Every one, in full, is in (\S+) \(host-written context/.exec(a)?.[1];
+  assert.ok(path, 'the full history is in a named file');
+  const full = JSON.parse(ctx.__archonAuthorContext.files.get(path));
+  assert.deepEqual(full, cleared.map(f => f.text), 'the file holds the whole history');
+  assert.doesNotMatch(JSON.stringify(full), /beta-defect/, 'and no sibling finding');
+}
+
 const tests = [
   ['an entry prompt carries no sibling finding', anEntryPromptCarriesNoSiblingFinding],
   ['a supplementary entry gets only its own finding', aSupplementaryEntryGetsOnlyItsOwnFinding],
@@ -240,6 +270,8 @@ const tests = [
   ['a cleared phase-level finding stays as one not to regress', aClearedPhaseLevelFindingStaysAsOneNotToRegress],
   ['a seeded loop keeps earlier phase-level findings', aSeededLoopKeepsEarlierPhaseLevelFindings],
   ['an entry rung-3 text names its own findings', anEntryRungThreeTextNamesItsOwnFindings],
+  ['a long phase-level history stays dispatchable', () => aLongEarlierHistoryStaysDispatchable('phase')],
+  ['a long entry history stays dispatchable', () => aLongEarlierHistoryStaysDispatchable('entry')],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {
