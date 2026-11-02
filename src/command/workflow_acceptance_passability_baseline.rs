@@ -15,13 +15,10 @@ pub(crate) async fn judge_baseline_failures(
 ) -> Result<Vec<GateFinding>> {
     let mut findings = probed.findings;
     let baseline = probed.baseline;
-    // Deliver already proven authored defects before any fallible host observation.
-    if findings
+    // Proven authored defects defer model judging, but not deterministic proofs.
+    let defer_assessment = findings
         .iter()
-        .any(|finding| finding.remediation_scope != archon_workflow::RemediationScope::Operational)
-    {
-        return Ok(findings);
-    }
+        .any(|finding| finding.remediation_scope != archon_workflow::RemediationScope::Operational);
     // No baseline means every probed check is already unproven, the host's.
     let Some(runs) = baseline else {
         return Ok(findings);
@@ -101,7 +98,7 @@ pub(crate) async fn judge_baseline_failures(
             pending.push(candidate);
         }
     }
-    if refuted.is_empty() && !pending.is_empty() {
+    if !defer_assessment && refuted.is_empty() && !pending.is_empty() {
         refuted.extend(
             assess(
                 client,
@@ -150,3 +147,7 @@ pub(crate) async fn judge_baseline_failures(
     }
     Ok(findings)
 }
+
+#[cfg(test)]
+#[path = "workflow_acceptance_passability_baseline_tests.rs"]
+mod tests;
