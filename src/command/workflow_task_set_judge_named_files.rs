@@ -50,6 +50,12 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
         .map(|file| match file.bytes {
             Some(bytes) => supplied(&file.path, &bytes, remaining),
             None if file.status == "over_budget" => over_budget(&file.path),
+            // Discovery finds path-shaped text, not necessarily file operands.
+            None if file.status == "absent" => serde_json::json!({
+                "path": file.path,
+                "status": file.status,
+                "detail": "The host found no file at this path. It may be a pattern or text argument, not a file; this alone is not evidence that behaviour is missing."
+            }),
             None => serde_json::json!({"path": file.path, "status": file.status}),
         })
         .collect()

@@ -458,3 +458,38 @@ fn canonical_tree_aliases_are_diagnosed_and_never_movable() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn discovery_preserves_missing_candidates_but_prompt_view_explains_uncertainty() {
+    use crate::command::workflow_task_set::judge::{
+        JudgeRoots, ReauthorPrefetchCache, named_files_for_reauthor_cached,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let check = entry("grep -q 'ABC-1/2 budget' src/x.rs", "project_root");
+    let discovery = input_discovery(&check, root.path(), root.path());
+    assert!(discovery.eligible.iter().any(|path| path == "ABC-1/2"));
+    assert!(discovery.candidates.iter().any(|candidate| {
+        candidate.path == "ABC-1/2" && candidate.exclusion == Some(ExclusionReason::MissingAtRoot)
+    }));
+    let roots = JudgeRoots {
+        project: Some(root.path().to_path_buf()),
+        repository: None,
+        task_root: Some(root.path().to_path_buf()),
+        repository_commit: None,
+    };
+    let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
+    let files = named_files_for_reauthor_cached(
+        &check,
+        &roots,
+        &[],
+        &mut remaining,
+        &mut ReauthorPrefetchCache::default(),
+    );
+    let pattern = files.iter().find(|file| file["path"] == "ABC-1/2").unwrap();
+    assert!(
+        pattern["detail"]
+            .as_str()
+            .unwrap()
+            .contains("not evidence that behaviour is missing")
+    );
+}
