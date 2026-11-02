@@ -3,6 +3,8 @@
 //! Split out of `vector_store.rs` to keep that file under the 500-line
 //! ceiling after `docs delete` was added.
 
+use hnsw_rs::prelude::Distance;
+
 use super::*;
 
 pub(super) fn hnsw_dump_basename(timestamp: chrono::DateTime<chrono::Utc>) -> String {
@@ -38,6 +40,41 @@ pub(super) fn build_hnsw_index(
         hnsw.insert((&record.vector, record.hnsw_id));
     }
     Ok(hnsw)
+}
+
+/// Return the `top_k` nearest neighbours of `query` in `hnsw` as
+/// `(hnsw_id, distance)` pairs, nearest first.
+///
+/// `hnsw_rs` 0.3.4 can return fewer hits than the graph holds (#545). Layer
+/// assignment is random for each build, and `reverse_update_neighborhood_simple`
+/// stores a reverse link at the new point's top layer, not at layer 0. A point
+/// whose only layer-0 in-link came from an upper-layer point therefore has no
+/// layer-0 neighbours, and a search that enters layer 0 at that point stops
+/// after one hit. When the graph returns fewer than `min(top_k, points)` hits,
+/// an exact scan of the graph's own points gives the complete answer with the
+/// same distance function.
+pub(super) fn search_hnsw_neighbours(
+    hnsw: &Hnsw<'_, f32, DistCosine>,
+    query: &[f32],
+    top_k: usize,
+    ef: usize,
+) -> Vec<(usize, f32)> {
+    let hits: Vec<_> = hnsw
+        .search(query, top_k, ef.max(top_k))
+        .into_iter()
+        .map(|hit| (hit.get_origin_id(), hit.get_distance()))
+        .collect();
+    if hits.len() >= top_k.min(hnsw.get_nb_point()) {
+        return hits;
+    }
+    let mut exact: Vec<_> = hnsw
+        .get_point_indexation()
+        .into_iter()
+        .map(|point| (point.get_origin_id(), DistCosine.eval(query, point.get_v())))
+        .collect();
+    exact.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
+    exact.truncate(top_k);
+    exact
 }
 
 pub(super) fn encode_vector(vector: &[f32]) -> Vec<u8> {

@@ -184,16 +184,15 @@ fn search_hits(
     if top_k == 0 {
         return Ok(Vec::new());
     }
-    hnsw.search(&query, top_k, ef.max(top_k))
+    super::search_hnsw_neighbours(hnsw, &query, top_k, ef)
         .into_iter()
-        .map(|hit| {
-            let origin_id = hit.get_origin_id();
+        .map(|(origin_id, distance)| {
             let chunk_id = chunk_ids
                 .get(&origin_id)
                 .with_context(|| format!("persisted HNSW hit {origin_id} is missing chunk ID"))?;
             Ok(HnswSearchHit {
                 chunk_id: chunk_id.clone(),
-                distance: hit.get_distance(),
+                distance,
             })
         })
         .collect()
