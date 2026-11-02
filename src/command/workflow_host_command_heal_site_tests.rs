@@ -195,6 +195,76 @@ async fn host_command_site_lacks_program_goes_to_its_author_not_an_install_remed
     );
 }
 
+/// Issue 557: a check that starts a program neither its site nor the host
+/// has (here a heredoc terminator repeated after the heredoc closed, which
+/// the shell runs as a command, exit 127) is never the host's: no host
+/// action makes it available, so the freeze returns it at once as its
+/// author's finding, with no install advice.
+#[cfg(unix)]
+#[tokio::test]
+async fn issue557_host_command_program_absent_goes_to_its_author_not_operational() {
+    use crate::command::workflow_task_set::executability::{HOST_PATH, probe_tests::trees};
+    use archon_workflow::task_set_contract::TrustedCwd;
+    let trees = trees(&[(
+        "AC-X-001",
+        "set -e\ncat <<'PY'\nprint('x')\nPY\nPY\ntest -f feature.txt",
+        TrustedCwd::RepoRoot,
+    )]);
+    std::fs::create_dir_all(trees.set.project.path().join(".archon")).unwrap();
+    std::fs::write(trees.set.project.path().join(".archon/config.toml"), format!(
+        "[workflow.acceptance_execution]\nrepository={:?}\nscratch_parent={:?}\nproject_inputs=[\"data\"]\nproject_repository_view=\"separate\"\ntoolchain_path=\"/usr/bin:/bin:/usr/sbin:/sbin\"\ntimeout_secs=60\noutput_bytes=8192\nscratch_bytes=16777216\n",
+        trees.repo.display().to_string(), trees.outside.path().join("scratch").display().to_string(),
+    )).unwrap();
+    HOST_PATH.with(|path| *path.borrow_mut() = Some("/usr/bin:/bin".to_string()));
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let probed = crate::command::workflow_task_set::coverage_gate::pre_implementation_findings(
+        trees.set.project.path(),
+        &trees.set.tasks,
+        &trees.set.project.path().join("input.md"),
+        &trees.contract(),
+        &resume,
+    )
+    .await
+    .unwrap();
+    HOST_PATH.with(|path| *path.borrow_mut() = None);
+    assert_eq!(probed.findings.len(), 1, "{:?}", probed.findings);
+    let finding = &probed.findings[0];
+    let code = finding
+        .deterministic_defect
+        .as_ref()
+        .map(|defect| defect.code.as_str());
+    assert_ne!(code, Some("host_program_absent"), "{finding:?}");
+    assert_eq!(
+        finding.remediation_scope,
+        archon_workflow::RemediationScope::CandidateArtifact,
+        "{finding:?}"
+    );
+    assert!(
+        probed.host_unproven_reason.is_none(),
+        "{:?}",
+        probed.host_unproven_reason
+    );
+    let text = &finding.text;
+    assert!(
+        text.contains("neither the check's site nor the host has `PY`"),
+        "{text}"
+    );
+    for false_claim in ["install", "operational", "probed again on retry"] {
+        assert!(!text.contains(false_claim), "{false_claim}: {text}");
+    }
+    let fixture = fixture(0, false);
+    *fixture.process.evaluation.lock().unwrap() = Some(
+        crate::command::workflow_gate::GateEvaluation::new("freeze", probed.findings),
+    );
+    let outcome = run_script(&fixture, r#"async function workflow(w) { return await w.hostCommand("freeze-acceptance", { stdin: "{}" }); }"#).await;
+    assert_eq!(
+        fixture.process.calls.load(Ordering::SeqCst),
+        1,
+        "an authored finding returns at once, never retried as the host's: {outcome:?}"
+    );
+    outcome.unwrap();
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn host_command_configured_scratch_busy_lease_recovers_after_settlement_window() {

@@ -266,8 +266,10 @@ pub(crate) fn no_verdict_cause(
                         "the host has `{name}`, but the check's site does not provide it: the check must not depend on it; check the criterion with what the site provides"
                     )
                 } else {
+                    // Issue 557: no host action makes a program available
+                    // that neither the site nor the host has.
                     format!(
-                        "install `{name}` on the host and in the check environment, or replace the check's required program"
+                        "neither the check's site nor the host has `{name}`, and no host action makes it available: the check must not depend on it; if it does not mean to run `{name}` (for example a word left on a line of its own), remove it; check the criterion with what the site provides"
                     )
                 }
             ),

@@ -227,7 +227,15 @@ pub(super) fn settle_as(
                 "check '{id}': it cannot be proven on the base commit {short}: {why}. The host has no repair that makes the check's site provide it, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides, without depending on that program or subcommand"
             ));
         }
-        UnprovenCause::Host | UnprovenCause::PermanentHost | UnprovenCause::ProgramAbsent => {
+        // Issue 557: a program neither the site nor the host has is the
+        // author's at once for the same reason (the re-author path already
+        // sends it there): no host action makes it available.
+        UnprovenCause::ProgramAbsent => {
+            return Some(format!(
+                "check '{id}': it cannot be proven on the base commit {short}: {why}. Neither the check's site nor the host has that program, and no host action makes it available, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides: make it fail by its own assertion on that tree, never by starting a program that neither the site nor the host has"
+            ));
+        }
+        UnprovenCause::Host | UnprovenCause::PermanentHost => {
             "it is probed again on retry, and goes to its author if it fails so again"
         }
     };
@@ -467,6 +475,9 @@ mod clock_strike_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_silent_fence_tests.rs"]
 mod fence_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_program_absent_tests.rs"]
+mod program_absent_tests;
 
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_setup_roots_tests.rs"]

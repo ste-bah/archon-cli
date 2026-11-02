@@ -98,10 +98,14 @@ async fn issue548_a_scratch_freeze_sends_a_missing_cargo_subcommand_to_its_autho
 }
 
 /// Issue 333: at a real freeze, a check of a subcommand no program anywhere
-/// provides is unproven (never a proof), and the same check that shows
-/// first that the tree provides it is a proof.
+/// provides is never a proof, and the same check that shows first that the
+/// tree provides it is a proof. Issue 557 (replaces
+/// `a_scratch_freeze_proves_a_deliverable_alias_only_when_the_check_shows_it`):
+/// no host action makes that subcommand available, so the unguarded check
+/// goes to its author at once with the guard to add, never the host's.
 #[tokio::test]
-async fn a_scratch_freeze_proves_a_deliverable_alias_only_when_the_check_shows_it() {
+async fn issue557_a_scratch_freeze_sends_an_unguarded_alias_to_its_author_and_proves_the_guarded_one()
+ {
     let Some(cargo) = host_cargo() else {
         eprintln!("skipped: no cargo on the host's PATH");
         return;
@@ -125,14 +129,16 @@ async fn a_scratch_freeze_proves_a_deliverable_alias_only_when_the_check_shows_i
     let unproven = probe.take_unproven();
     let runs = probe.take_baseline_runs().expect("a baseline");
     assert!(
-        findings.is_empty(),
-        "never the author's at first: {findings:?}"
+        !unproven.contains_key("AC-333-001"),
+        "never the host's: {unproven:?}"
     );
-    let why = unproven.get("AC-333-001").expect("never a proof");
+    let why = findings.get("AC-333-001").expect("never a proof");
     assert!(
         why.contains("passes only if the deliverable adds it"),
         "{why}"
     );
+    assert!(why.contains("no host action makes it available"), "{why}");
+    assert!(!why.contains("It failed so again"), "no strike: {why}");
     assert!(!runs.failures.contains_key("AC-333-001"), "{runs:?}");
     assert!(
         runs.failures.contains_key("AC-333-002"),

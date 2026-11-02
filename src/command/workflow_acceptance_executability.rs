@@ -99,6 +99,8 @@ pub(crate) enum UnprovenCause {
     /// its author at once, in the same budget, with no strike saved.
     SiteLacks,
     /// The check runs a program neither its site nor the host provides.
+    /// Issue 557: no host action makes it available, so it goes to its
+    /// author at once on the probe path too, with no strike saved.
     ProgramAbsent,
 }
 

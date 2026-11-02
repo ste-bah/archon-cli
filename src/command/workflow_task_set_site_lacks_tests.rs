@@ -203,3 +203,58 @@ async fn an_unproven_check_does_not_hold_back_another_checks_authored_finding_is
         second.judged_ids.lock().unwrap()
     );
 }
+
+/// Issue 557, through the whole-set freeze: a check whose heredoc
+/// terminator is repeated after the heredoc closed starts that stray word,
+/// which neither its site nor the host has (exit 127). No host action makes
+/// it available, so it reaches its author on the first attempt with a true
+/// text and no install advice, and the freeze publishes its replacement
+/// without a resume.
+#[tokio::test]
+async fn issue557_a_program_neither_site_nor_host_has_reaches_its_author_without_a_resume() {
+    use crate::command::workflow_task_set::executability::HOST_PATH;
+    let (project, _outside, tasks, prd) = site_set(
+        "set -e\ncat <<'PY'\nprint('x')\nPY\nPY\ntest -f out.json",
+        "/usr/bin:/bin:/usr/sbin:/sbin",
+        "/usr/bin:/bin".to_string(),
+    );
+    // The other check is sound, so nothing else sends the set to an author:
+    // only the probe path's own routing can reach AC-X-002's author.
+    let path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
+    let mut draft: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    draft["acceptance"][0]["check"]["command"] = SOUND.into();
+    std::fs::write(&path, serde_json::to_vec(&draft).unwrap()).unwrap();
+    let client = Arc::new(ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, SOUND),
+        |_, _| true,
+    ));
+    let prepared = freeze((project.path(), &tasks, &prd), client.clone()).await;
+    HOST_PATH.with(|path| *path.borrow_mut() = None);
+    let prepared = prepared.expect("the replacement publishes in the same attempt, no resume");
+    assert!(prepared.findings.is_empty(), "{:?}", prepared.findings);
+    assert_eq!(client.authored(), 1, "only AC-X-002's author is asked");
+    let prompts = client.prompts.lock().unwrap().clone();
+    let finding = (prompts.iter())
+        .find(|prompt| prompt.contains("PY: command not found"))
+        .unwrap_or_else(|| panic!("its author was asked: {prompts:#?}"));
+    assert!(finding.contains("AC-X-002"), "{finding}");
+    assert!(
+        finding.contains("neither the check's site nor the host has `PY`"),
+        "{finding}"
+    );
+    for false_claim in [
+        "on the host and in the check environment",
+        "probed again on retry",
+    ] {
+        assert!(!finding.contains(false_claim), "{false_claim}: {finding}");
+    }
+    let contract = prepared.contract().unwrap();
+    let replaced = (contract.acceptance.iter())
+        .find(|entry| entry.id == "AC-X-002")
+        .expect("AC-X-002 is published");
+    assert!(matches!(
+        &replaced.check,
+        archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } if command == SOUND
+    ));
+}
