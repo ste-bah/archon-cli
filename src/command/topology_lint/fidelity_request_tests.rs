@@ -140,10 +140,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 559: the acceptance reply format shows covers; a re-authored entry prompt states its current covers as a JSON array; a reply with no covers key keeps them.
     // Issue 561: the best attempt's failing set becomes the subset baseline; a strict shrink of the previous attempt's set is neutral; new workflow_decompose_v1_failing_set.js.
     // Issue 559 guard: the entry author reads the current entry with state.entries?.get.
+    // Issue 562: fewer open findings and a subject's advance to a later gate stage are progress; gate findings carry their stage.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "4a0cab3c19ae180e5022c05a1e5dcbdd2ac6d6bbb8b36d9f4f5087965953217d"
+        "8302ce1657402eb50c3ab1818094da06d0a75dc8b6477c058d30dc3c4634f700"
     );
 }
