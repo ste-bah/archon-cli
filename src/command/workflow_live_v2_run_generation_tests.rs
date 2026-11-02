@@ -194,9 +194,11 @@ async fn assert_running_action_finalizes(action: LifecycleAction) {
         "{result:?}"
     );
     assert!(store.run_dir(&run.id).join("v2/finalization.json").exists());
-    assert!(std::fs::read_to_string(store.events_path(&run.id))
-        .unwrap()
-        .contains("terminal_status"));
+    assert!(
+        std::fs::read_to_string(store.events_path(&run.id))
+            .unwrap()
+            .contains("terminal_status")
+    );
 }
 
 #[tokio::test]
