@@ -18,6 +18,18 @@ pub(crate) fn logic_identity() -> Option<(u32, String, String)> {
     ))
 }
 
+/// The freeze-acceptance logic a bounded check verdict is judged by: its
+/// version and pinned source digest, without the build (Issue 288). The
+/// freeze-acceptance closure hashes the code that runs and judges a check
+/// (`bounded_verdict_logic_closure_covers_check_execution`), and
+/// `logic_361_sources_match_their_pinned_digest` fails on any change to it
+/// that was not re-pinned, so a deploy that changes none of it keeps the
+/// verdict. [`logic_identity`] keeps the build for the stores that use it.
+pub(crate) fn verdict_logic() -> Option<(u32, String)> {
+    let (version, digest, _) = logic_identity()?;
+    Some((version, digest))
+}
+
 /// The shell that evaluates the literal `test` predicate is part of the
 /// execution environment even when its path and PATH variable stay constant.
 pub(crate) fn shell_binary_digest(path: Option<&str>) -> Option<String> {

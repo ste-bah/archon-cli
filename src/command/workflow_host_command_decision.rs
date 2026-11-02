@@ -133,6 +133,8 @@ pub(crate) fn stale_acceptance_contract(
         subject: "acceptance".into(),
         source_path: None,
         remediation_scope: RemediationScope::CandidateArtifact,
+        gate_stage: None,
+        judged_item: None,
     });
     unpublished(
         exit_code,
@@ -164,6 +166,8 @@ pub(crate) fn candidate_refusal_envelope(command_id: &str, reason: &str) -> Gate
             subject: command_id.to_string(),
             source_path: None,
             remediation_scope: RemediationScope::CandidateArtifact,
+            gate_stage: None,
+            judged_item: None,
         }],
         operational_error: None,
     }
@@ -225,6 +229,8 @@ mod tests {
                 subject: "AC-X-001".into(),
                 source_path: None,
                 remediation_scope: scope,
+                gate_stage: None,
+                judged_item: None,
             }],
             operational_error: None,
         }
@@ -361,6 +367,8 @@ mod tests {
                     subject: "TASK-X-001".into(),
                     source_path: None,
                     remediation_scope: *scope,
+                    gate_stage: None,
+                    judged_item: None,
                 })
                 .collect(),
             operational_error: None,

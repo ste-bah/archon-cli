@@ -418,8 +418,9 @@ fn read_pin(project_root: &Path, task_root: &Path) -> Result<AcceptancePin> {
             path.display()
         )
     })?;
-    serde_json::from_slice(&bytes)
-        .with_context(|| format!("parsing acceptance pin {}", path.display()))
+    serde_json::from_slice(&bytes).map_err(|error| archon_workflow::WorkflowError::ArtifactInvalid(format!(
+        "parsing acceptance pin {}: {error}; restore valid JSON from its authenticated freeze metadata", path.display(),
+    )).into())
 }
 
 /// Exactly the `freeze-acceptance` postcondition: bundle, lock, pin, the PRD's

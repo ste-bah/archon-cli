@@ -320,7 +320,7 @@ async fn gc_obsolete_output(case: u8) {
         if case == 0 {
             super::super::output::write_repairs(&dir, &["repair".into()]);
         } else {
-            let result = archon_workflow::acceptance_scratch::CheckResult {
+            let result = archon_workflow::acceptance_scratch::CheckResult { verdict_streams: Default::default(),
                 fault: None,
                 acceptance_id: "AC-X".into(),
                 environment_note: None,

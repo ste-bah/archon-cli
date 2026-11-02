@@ -30,8 +30,9 @@ impl super::ScratchRoots {
         env
     }
 
-    pub(super) fn mutation_root(&self) -> &super::mutation_fd::SiteRoot {
-        &self.mutation_root
+    /// The held site root; `None` once teardown has released it.
+    pub(super) fn mutation_root(&self) -> Option<&super::mutation_fd::SiteRoot> {
+        self.mutation_root.as_ref()
     }
 
     pub fn root(&self) -> &Path {

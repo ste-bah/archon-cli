@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const dir = process.env.ARCHON_DECOMPOSE_SCRIPT_DIR || __dirname;
-const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_reply_blocks.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(dir+'/'+f,'utf8')).join('\n');
+const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_reply_blocks.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(dir+'/'+f,'utf8')).join('\n');
 
 function clock() {
  let now=0,seq=0; const timers=[];
@@ -74,7 +74,7 @@ function acceptanceRun(seed, cap, criteria, state, options={}) {
   await c.sleep(options.durations?.[id] ?? 1+Math.floor(random()*50)); active--; ends.push({id,at:c.now(),active});
   if(options.throws===id) throw new Error(options.throwMessage||`stopped at ${id}`);
   if(options.fails===id&&(options.round||1)===1) return {status:'failed',summary:'transport'};
-  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,seed})};
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,seed,covers:[]})};
  }};
  const run=c.drive(ctx.authorAcceptanceEntries(w,'author',options.round||1,state||{entries:new Map(),retryIds:null}));
  return {run,prompts,ends,starts,peak:()=>peak,active:()=>active,now:c.now};

@@ -16,12 +16,11 @@ pub(super) fn check_record(
     result: &CheckResult,
     universe: Option<&WorkflowV2TaskUniverse>,
 ) -> AcceptanceCheckRecordV1 {
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
     // A3: exit 0 from a run that ran no test at all proves nothing.
+    // Issue 544: the capture's classification of the raw streams.
     let zero_work = result.operational_error.is_none()
         && result.exit_code == Some(0)
-        && archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr);
+        && result.reports_zero_work();
     let status = if result.operational_error.is_some() {
         AcceptanceCheckStatus::Error
     } else if result.exit_code == Some(0) && !zero_work {

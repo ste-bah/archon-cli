@@ -17,6 +17,11 @@ pub struct CopyLayout {
     /// materialized layout; reports use this per-check view.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub check_siblings: std::collections::BTreeMap<String, Vec<SiblingRevision>>,
+    /// Whether the scratch site that ran the checks kept its build target
+    /// in a build cache (so the site top holds no target directory); `None`
+    /// for the probe's own copy and for layouts recorded before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_build_cache: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -98,6 +103,7 @@ pub fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
 
 pub fn deferred(id: &str) -> CheckResult {
     CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: id.to_string(),

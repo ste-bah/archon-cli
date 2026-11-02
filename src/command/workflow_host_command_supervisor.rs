@@ -2,16 +2,13 @@
 //!
 //! No shell is involved. The catalog supplies the executable, argv, cwd,
 //! environment, limits, and timeout; model bytes can reach only piped stdin.
-
-use std::process::Stdio;
-use std::time::Duration;
-
-use crate::command::workflow_test_seams::host_command_window;
-use archon_workflow::{WorkflowError, WorkflowResult};
-use tokio::sync::{mpsc, watch};
-
 use super::workflow_host_command_catalog::ResolvedHostCommand;
 use super::workflow_host_command_teardown_latch::{TeardownLatch, TeardownToken};
+use crate::command::workflow_test_seams::host_command_window;
+use archon_workflow::{WorkflowError, WorkflowResult};
+use std::process::Stdio;
+use std::time::Duration;
+use tokio::sync::{mpsc, watch};
 #[path = "workflow_host_command_supervisor_io.rs"]
 mod io;
 pub(crate) use io::create_spill_directories;
@@ -26,21 +23,18 @@ mod termination;
 #[cfg(all(test, unix))]
 pub(crate) use termination::SCANS_PAUSED;
 use termination::{confine, leader_exit, reap, terminate_and_reap, terminate_completed_group};
-
 #[cfg(unix)]
 const CLEANUP_GRACE: Duration = Duration::from_millis(100);
-const REAP_DEADLINE: Duration = Duration::from_secs(2);
+pub(crate) const REAP_DEADLINE: Duration = Duration::from_secs(2);
 /// How often the tree is scanned while the command runs (Issue 270 round
 /// 2): a descendant that leaves the group and the session is tied to the
 /// command only while its parent lives, so it has to be seen meanwhile.
 const TREE_SCAN_INTERVAL: Duration = Duration::from_millis(500);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostCommandSignal {
     Paused,
     Cancelled,
 }
-
 impl HostCommandSignal {
     #[cfg(all(test, unix))]
     pub(crate) fn as_str(self) -> &'static str {
@@ -480,7 +474,7 @@ pub(crate) async fn supervise_process_group(
             abort_stdin(stdin_task);
             let error = match event {
                 SupervisorEvent::Failed(detail) => io::failed(&request, &detail),
-                SupervisorEvent::Checkpoint(detail) => WorkflowError::HostOperational(detail),
+                SupervisorEvent::Checkpoint(error) => error,
             };
             let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
             let teardown = match &pipes {

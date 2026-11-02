@@ -317,13 +317,12 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                 evidence.finish(&response)?;
             }
             let mut outcome = response.map_err(WorkflowV2AgentError::into_workflow_error)?;
+            // Issue-550: a records_landed reply stands for the artifact the host composes.
             if let Some(records) = records
-                && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&outcome.content)
+                && let Ok(value) = serde_json::from_str::<serde_json::Value>(&outcome.content)
                 && value.get("records_landed").is_some()
             {
-                value["tasks"] = records.assemble(&value)?["tasks"].clone();
-                value.as_object_mut().unwrap().remove("records_landed");
-                outcome.content = serde_json::to_string(&value)?;
+                outcome.content = serde_json::to_string(&records.compose(&value)?)?;
             }
             let stop_reason = outcome.stop_reason.take().ok_or_else(|| {
                 WorkflowError::StageFailed(

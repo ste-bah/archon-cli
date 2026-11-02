@@ -4,6 +4,7 @@ use super::*;
 
 fn result(exit: Option<i32>, stderr: &str) -> CheckResult {
     CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: "AC-X".into(),

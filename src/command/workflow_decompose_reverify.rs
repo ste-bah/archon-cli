@@ -132,25 +132,14 @@ pub(crate) async fn reverify(
         &state.identity.starting_binary_revision,
     )?;
     let program = std::env::current_exe()?.canonicalize()?;
-    let base_context = HostCommandResolutionContext {
+    let base_context = heal::context(
         program,
-        project_root: project_root.clone(),
-        prd_path: prd_path.clone(),
+        (&project_root, &prd_path, &task_root),
+        &run_dir,
         prd_digest,
-        task_root: task_root.clone(),
-        run_staging_root: run_dir.join("host-command-staging"),
-        frozen_task_id: None,
-        frozen_task_file: None,
-        freeze_provider_environment:
-            crate::command::workflow_decompose::freeze_provider_environment(env_vars),
-        acceptance_environment_allowlist: config
-            .workflow
-            .acceptance_execution
-            .as_ref()
-            .map(|policy| policy.environment_allowlist.clone())
-            .unwrap_or_default(),
-        gate_mode: config.workflow.gate_mode,
-    };
+        config,
+        env_vars,
+    );
     let event_seq = store.next_event_seq(run_id)?;
     let invocation_id = format!("reverify-{event_seq}");
     WorkflowEventLog::new(store.clone()).emit(
@@ -181,27 +170,35 @@ pub(crate) async fn reverify(
     let mut failed_subjects = Vec::new();
     let mut all_accepted = true;
     let mut operational_failure = false;
-    let acceptance =
-        match acceptance::reverify_checks(&project_root, &prd_path, &task_root, config, env_vars)
-            .await
-        {
-            Ok(acceptance) => acceptance,
-            Err(error) => {
-                return Err(publish::record_operational_failure(
-                    &store,
-                    run_id,
-                    &run_dir,
-                    &_lease,
-                    invocation_generation,
-                    &invocation_status,
-                    &v2,
-                    &prior.call.id,
-                    &prior_digest,
-                    &invocation_id,
-                    &error,
-                ));
-            }
-        };
+    let control = (
+        &store,
+        run_id,
+        invocation_generation,
+        paused_authorization.as_ref(),
+    );
+    let paths = (
+        project_root.as_path(),
+        prd_path.as_path(),
+        task_root.as_path(),
+    );
+    let acceptance = match heal::checks(control, paths, config, env_vars).await {
+        Ok(acceptance) => acceptance,
+        Err(error) => {
+            return Err(publish::record_operational_failure(
+                &store,
+                run_id,
+                &run_dir,
+                &_lease,
+                invocation_generation,
+                &invocation_status,
+                &v2,
+                &prior.call.id,
+                &prior_digest,
+                &invocation_id,
+                &error,
+            ));
+        }
+    };
     let judged_contract_bytes = acceptance.judged_contract_bytes;
     let checks = acceptance.checks;
     operational_failure |= acceptance.operational_failure;
@@ -482,19 +479,11 @@ pub(crate) async fn reverify(
             "reverify recorded operational_failure: {cause}; run reverify again"
         ));
     }
-    let verdicts = report
-        .subjects
-        .iter()
-        .map(|subject| format!("{}={}", subject.task_id, subject.verdict))
-        .chain(
-            report
-                .checks
-                .iter()
-                .map(|check| format!("{}={}", check.check_id, check.verdict)),
-        )
-        .collect::<Vec<_>>()
-        .join(", ");
+    let verdicts = heal::verdicts(&report);
     Ok(format!(
         "Reverify report: {report_id}\nOutcome: {outcome}\nSubjects: {verdicts}\nResume: archon workflow resume --live --yes {run_id}"
     ))
 }
+
+#[path = "workflow_decompose_reverify_heal.rs"]
+mod heal;

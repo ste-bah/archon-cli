@@ -36,6 +36,10 @@ pub enum Fault {
     PauseMidCall,
     /// SIGKILL of the run process while the provider holds that request.
     KillMidCall,
+    /// #536: [`Fault::KillMidCall`] with the request still held while the
+    /// resume starts, so the host command child that made it still runs:
+    /// the resume must settle that recorded child by itself.
+    KillMidCallChildRunning,
     /// The first attempt of host command `target` reaches the supervisor's
     /// no-progress timeout; the run must recover without a resume.
     TimeoutOnce,
@@ -129,6 +133,10 @@ fault_matrix! {
     #[cfg(unix)]
     kill_mid_set_gate_fidelity: KillMidCall "fidelity" 3;
     #[cfg(unix)]
+    kill_mid_freeze_acceptance_judge_resume_settles_running_child: KillMidCallChildRunning "judge" 1;
+    #[cfg(unix)]
+    kill_mid_body_gate_fidelity_resume_settles_running_child: KillMidCallChildRunning "fidelity" 1;
+    #[cfg(unix)]
     timeout_freeze_acceptance: TimeoutOnce "freeze-acceptance" 1;
     #[cfg(unix)]
     timeout_freeze_skeleton: TimeoutOnce "freeze-skeleton" 1;
@@ -142,7 +150,10 @@ fault_matrix! {
 
 fn run_cell(name: &str, cell: Cell) {
     progress(name, "starting");
-    let mid_call = matches!(cell.fault, Fault::PauseMidCall | Fault::KillMidCall);
+    let mid_call = matches!(
+        cell.fault,
+        Fault::PauseMidCall | Fault::KillMidCall | Fault::KillMidCallChildRunning
+    );
     let project = project_with(Plan {
         variant: Variant::Golden,
         block: mid_call.then(|| (cell.target.to_string(), cell.nth)),
@@ -156,7 +167,7 @@ fn run_cell(name: &str, cell: Cell) {
             ("ARCHON_TEST_HOLD_DIR", hold.display().to_string()),
         ],
         Fault::TimeoutOnce => vec![("ARCHON_TEST_HOST_COMMAND_TIMEOUT_ONCE", cell.target.into())],
-        Fault::PauseMidCall | Fault::KillMidCall => Vec::new(),
+        Fault::PauseMidCall | Fault::KillMidCall | Fault::KillMidCallChildRunning => Vec::new(),
     };
     let mut child = spawn_decompose(root, &seams);
     let mut expected_requests = read_golden_requests();
@@ -214,7 +225,7 @@ fn run_cell(name: &str, cell: Cell) {
             // The held call was never admitted, so no attempt number moves.
             None
         }
-        Fault::PauseMidCall | Fault::KillMidCall => {
+        Fault::PauseMidCall | Fault::KillMidCall | Fault::KillMidCallChildRunning => {
             await_provider_boundary(&project.provider, root, &mut child, name);
             let key = project
                 .provider
@@ -230,15 +241,25 @@ fn run_cell(name: &str, cell: Cell) {
             let provider = &project.provider;
             let author = author_call_prefix(&key);
             let pause = cell.fault == Fault::PauseMidCall;
-            interrupt(
-                root,
-                &mut child,
-                pause,
-                false,
-                || provider.release(),
-                author.as_deref(),
-                name,
-            );
+            if cell.fault == Fault::KillMidCallChildRunning {
+                kill_and_resume_while_child_runs(
+                    root,
+                    &mut child,
+                    || provider.release(),
+                    author.as_deref(),
+                    name,
+                );
+            } else {
+                interrupt(
+                    root,
+                    &mut child,
+                    pause,
+                    false,
+                    || provider.release(),
+                    author.as_deref(),
+                    name,
+                );
+            }
             Some(author.unwrap_or_else(|| host_command_of(cell.target, cell.nth)))
         }
     };
@@ -313,6 +334,76 @@ fn interrupt(
     assert_only_call_accepted_again(&before, &accepted_call_counts(root), author);
 }
 
+/// #536: kills the run while the provider still holds the request, and
+/// resumes before releasing it: the recorded host command child that made
+/// the request is alive when the resume starts. One resume must settle it
+/// by itself (no manual kill) and finish the run.
+fn kill_and_resume_while_child_runs(
+    root: &Path,
+    child: &mut Child,
+    release: impl FnOnce(),
+    author: Option<&str>,
+    name: &str,
+) {
+    let run_id = run_id(root);
+    child.kill().unwrap();
+    let _ = wait_decompose(root, child, name);
+    let running = recorded_children_running(root);
+    assert!(
+        !running.is_empty(),
+        "{name}: a recorded host command child must still run when the resume starts"
+    );
+    let before = accepted_call_counts(root);
+    progress(name, &format!("resuming while {running:?} still run"));
+    let resumed = resume(root, &run_id);
+    assert!(
+        resumed.status.success(),
+        "{name}: one resume must settle the running child and finish the run: {}\n{}",
+        String::from_utf8_lossy(&resumed.stdout),
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let survivors = running
+        .iter()
+        .filter(|pid| process_runs(**pid))
+        .collect::<Vec<_>>();
+    assert!(
+        survivors.is_empty(),
+        "{name}: the resume must end the recorded children: {survivors:?}"
+    );
+    release();
+    assert_only_call_accepted_again(&before, &accepted_call_counts(root), author);
+}
+
+/// The leader pids of the run's host command group records that run now.
+fn recorded_children_running(root: &Path) -> Vec<u32> {
+    let dir = crate::project::one_run(root).join("v2/host-command-groups");
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .filter_map(|path| {
+            let record: serde_json::Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+            u32::try_from(record["pid"].as_u64()?).ok()
+        })
+        .filter(|pid| process_runs(*pid))
+        .collect()
+}
+
+/// Whether `pid` names a process that has not exited (a zombie has).
+fn process_runs(pid: u32) -> bool {
+    std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .is_ok_and(|output| {
+            let state = String::from_utf8_lossy(&output.stdout);
+            let state = state.trim();
+            output.status.success() && !state.is_empty() && !state.starts_with('Z')
+        })
+}
+
 fn wait_decompose(root: &Path, child: &mut Child, name: &str) -> std::process::ExitStatus {
     wait_for_child(
         child,
@@ -370,8 +461,10 @@ fn the_matrix_names_each_cell_once_and_maps_every_interrupted_request() {
     let mut names = std::collections::BTreeSet::new();
     for (name, cell) in MATRIX {
         assert!(names.insert(*name), "{name} appears twice");
-        if matches!(cell.fault, Fault::PauseMidCall | Fault::KillMidCall)
-            && !matches!(cell.target, "acceptance" | "skeleton" | "body")
+        if matches!(
+            cell.fault,
+            Fault::PauseMidCall | Fault::KillMidCall | Fault::KillMidCallChildRunning
+        ) && !matches!(cell.target, "acceptance" | "skeleton" | "body")
         {
             let _ = host_command_of(cell.target, cell.nth);
         }

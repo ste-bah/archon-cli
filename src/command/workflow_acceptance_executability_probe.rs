@@ -33,57 +33,6 @@ impl HostProbe {
         )
     }
 
-    /// Run frozen accepted checks against the probe's current hermetic site.
-    /// Reverification deliberately does not reuse the pre-implementation run:
-    /// it needs the finished tree and the copy layout that actually ran it.
-    pub(crate) async fn run_reverify_copy(
-        &self,
-        contract: &AcceptanceContract,
-        ids: &BTreeSet<String>,
-    ) -> std::result::Result<
-        (
-            Vec<CheckEvidence>,
-            Option<String>,
-            BTreeMap<String, String>,
-            BTreeMap<String, String>,
-        ),
-        String,
-    > {
-        let digest = contract_digest(contract)?;
-        let refs = refs_for(contract, &digest, ids);
-        let Some(commit) = self.site_commit() else {
-            let reason = match &self.site {
-                Site::Unavailable(reason) => reason.clone(),
-                _ => format!("{} has no commit to copy", self.repository.display()),
-            };
-            return Ok((
-                Vec::new(),
-                None,
-                refs.into_iter()
-                    .map(|reference| (reference.acceptance_id, reason.clone()))
-                    .collect(),
-                BTreeMap::new(),
-            ));
-        };
-        let tree = Baseline {
-            commit: commit.clone(),
-            repository: self.repository.clone(),
-        };
-        let run = repairs::tree_results(self, &tree, contract, &digest, &refs, None, true).await;
-        let missing = refs
-            .iter()
-            .filter_map(|reference| {
-                run.unrun(&reference.acceptance_id)
-                    .map(|why| (reference.acceptance_id.clone(), why))
-            })
-            .collect();
-        let evidence = run.results.into_values().collect::<Vec<_>>();
-        let baseline_findings =
-            baseline::cannot_fail_findings(self, &tree, contract, &digest, &refs, Some(&evidence))
-                .await;
-        Ok((evidence, Some(commit), missing, baseline_findings))
-    }
-
     /// The commit the site observes, when it observes one.
     pub(super) fn site_commit(&self) -> Option<String> {
         match &self.site {
@@ -107,7 +56,9 @@ impl HostProbe {
     /// root by its absolute path: run in a copy, it would still read or
     /// change the live tree, so it is never run. A check carrying a host
     /// policy defect is never run either
-    /// ([`check_fault::policy_refused`]).
+    /// ([`check_fault::policy_refused`]). Issue 554: nor is a check whose
+    /// text the shell that runs it rejects in parse-only mode; that is its
+    /// author's, with the shell's own error, whatever a run would exit with.
     fn live_root_findings(
         &self,
         contract: &AcceptanceContract,
@@ -122,10 +73,16 @@ impl HostProbe {
                     .chain(&contract.supplementary)
                     .find(|entry| entry.id == reference.acceptance_id)?;
                 let (_, text) = executed_text(entry)?;
-                let named = live_root::named_root(text, &roots)?;
+                if let Some(named) = live_root::named_root(text, &roots) {
+                    return Some((
+                        entry.id.clone(),
+                        live_root::live_root_finding(&entry.id, named),
+                    ));
+                }
+                let error = archon_workflow::acceptance_check_shell::shell_parse_error(text)?;
                 Some((
                     entry.id.clone(),
-                    live_root::live_root_finding(&entry.id, named),
+                    archon_workflow::acceptance_check_shell::parse_finding(&entry.id, &error),
                 ))
             })
             .collect()
@@ -248,7 +205,11 @@ impl HostProbe {
         }
         if let Site::Unavailable(reason) = &self.site {
             for reference in &all {
-                self.unproven(&reference.acceptance_id, reason.clone());
+                self.unproven_as(
+                    &reference.acceptance_id,
+                    reason.0.clone(),
+                    UnprovenCause::from_class(reason.1),
+                );
             }
             return BTreeMap::new();
         }
@@ -406,7 +367,11 @@ impl HostProbe {
         match (&self.site, &self.baseline) {
             (Site::Unavailable(reason), _) => {
                 for reference in &sound {
-                    self.unproven(&reference.acceptance_id, reason.clone());
+                    self.unproven_as(
+                        &reference.acceptance_id,
+                        reason.0.clone(),
+                        UnprovenCause::from_class(reason.1),
+                    );
                 }
             }
             (_, None) => {
@@ -493,3 +458,6 @@ impl ExecutabilityProbe for HostProbe {
             .map(|baseline| baseline.commit.clone())
     }
 }
+
+#[path = "workflow_acceptance_executability_reverify.rs"]
+mod reverify;

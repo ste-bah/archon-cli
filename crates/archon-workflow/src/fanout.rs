@@ -108,18 +108,57 @@ async fn run_with_retry(
 }
 
 fn retryable_error(err: &WorkflowError) -> bool {
-    let text = err.to_string().to_ascii_lowercase();
-    text.contains("429")
-        || text.contains("rate limit")
-        || text.contains("timeout")
-        || text.contains("temporar")
-        || text.contains("error decoding response body")
-        || text.contains("error sending request")
-        || text.contains("request failed")
-        || text.contains("connection reset")
-        || text.contains("connection closed")
-        || text.contains("broken pipe")
-        || text.contains("502")
-        || text.contains("503")
-        || text.contains("504")
+    // The display text as 86fbab995 saw it, provider faults included.
+    crate::llm_retry::display_is(
+        err,
+        &err.to_string(),
+        archon_llm::provider::ShownTest::FanoutRetry,
+    )
 }
+
+#[cfg(test)]
+mod r3_tests {
+    use super::*;
+    #[test]
+    fn r3_retry_preserves_main_rate_limit_specificity() {
+        assert!(!retryable_error(&WorkflowError::StageFailed(
+            "rate_limit_error".into()
+        )));
+    }
+    #[test]
+    fn r3_retry_keeps_typed_provider_facts() {
+        // 86fbab995's Display redacted the whole authorization line, 503 included.
+        let fault = archon_llm::provider::LlmError::Http("Authorization: Bearer token; 503".into());
+        assert!(!retryable_error(&WorkflowError::Port(Box::new(fault))));
+        let fault = archon_llm::provider::LlmError::Http("token rejected; 503".into());
+        assert!(retryable_error(&WorkflowError::Port(Box::new(fault))));
+        // ProviderNotFound's 86fbab995 Display printed its fields as given.
+        let fault = archon_llm::provider::LlmError::ProviderNotFound {
+            name: "Cookie: x; 503".into(),
+            available: "example".into(),
+        };
+        assert!(retryable_error(&WorkflowError::Port(Box::new(fault))));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn fanout_r6_visible_wrapper_text_decides_like_main() {
+    // 86fbab995 scanned the visible display, not a fault deeper in the chain.
+    #[derive(Debug, thiserror::Error)]
+    #[error("HTTP 503")]
+    struct Visible(#[source] archon_llm::provider::LlmError);
+    let fault = archon_llm::provider::LlmError::Http("ordinary failure".into());
+    assert!(retryable_error(&WorkflowError::port(Visible(fault))));
+}
+
+#[cfg(test)]
+#[test]
+fn fanout_r4_typed_body_decode_failure_retries() {
+    let fault = archon_llm::provider::LlmError::Http("error decoding response body".into());
+    assert!(retryable_error(&WorkflowError::Port(Box::new(fault))));
+}
+
+#[cfg(test)]
+#[path = "fanout_characterization.rs"]
+mod c0_characterization;

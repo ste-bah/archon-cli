@@ -1,3 +1,6 @@
+/// Environment override for the Codex CLI authentication file path.
+pub const CODEX_AUTH_FILE_ENV: &str = "ARCHON_CODEX_AUTH_FILE";
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -60,7 +63,7 @@ fn codex_cli_auth_path() -> PathBuf {
     // `HOME`, so a spawned `archon` could not be pointed at a scratch profile.
     // Worse than a red test -- it meant the auth-status tests read whatever
     // Codex credentials the developer actually had installed.
-    if let Some(path) = std::env::var_os("ARCHON_CODEX_AUTH_FILE")
+    if let Some(path) = std::env::var_os(CODEX_AUTH_FILE_ENV)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
     {

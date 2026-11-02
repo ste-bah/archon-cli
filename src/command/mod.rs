@@ -415,6 +415,7 @@ mod workflow_host_command_terminal_stop_tests;
 mod workflow_host_command_tests;
 #[cfg(test)]
 mod workflow_host_command_verify_tests;
+mod workflow_host_retry;
 pub(crate) mod workflow_json_parse_diagnostic;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_provider_route;
@@ -458,3 +459,12 @@ mod workflow_host_staging_anchor_unix;
 pub(crate) mod workflow_host_staging_pause;
 pub(crate) mod workflow_host_staging_residue;
 pub(crate) mod workflow_test_seams;
+
+#[cfg(test)]
+pub(crate) mod workflow_host_fault_test_hooks;
+
+pub(crate) mod workflow_host_command_committed;
+
+pub(crate) mod workflow_host_fault;
+
+mod workflow_host_probe_fault;

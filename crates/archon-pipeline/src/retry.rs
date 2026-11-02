@@ -105,35 +105,26 @@ pub fn classify_error(err: &anyhow::Error) -> RetryableError {
     }
 
     // Fallback: scan the display string for HTTP status patterns.
+    // A provider fault in the chain reads with 86fbab995's Display.
     let msg = err.to_string();
-
-    // Retryable status codes.
-    for code in &[429u16, 500, 502, 503] {
-        let pattern = format!("{}", code);
-        if msg.contains(&pattern) {
-            return RetryableError::Retryable {
-                status: *code,
-                message: msg.clone(),
-                retry_after: None,
-            };
+    let (retryable, status) = err
+        .chain()
+        .find_map(|cause| archon_llm::provider::LlmError::carried_by(cause))
+        .map_or_else(
+            || archon_llm::provider_fault::http_status_pattern(&msg),
+            |fault| fault.shown_status(&msg),
+        );
+    if retryable {
+        RetryableError::Retryable {
+            status,
+            message: msg,
+            retry_after: None,
         }
-    }
-
-    // Non-retryable status codes.
-    for code in &[400u16, 401, 403, 404, 422] {
-        let pattern = format!("{}", code);
-        if msg.contains(&pattern) {
-            return RetryableError::NonRetryable {
-                status: *code,
-                message: msg.clone(),
-            };
+    } else {
+        RetryableError::NonRetryable {
+            status,
+            message: msg,
         }
-    }
-
-    // Default: non-retryable.
-    RetryableError::NonRetryable {
-        status: 0,
-        message: msg,
     }
 }
 
@@ -376,3 +367,56 @@ where
         })
     }
 }
+
+#[cfg(test)]
+#[test]
+fn r3_retry_keeps_typed_provider_status() {
+    // 86fbab995's Display redacted the whole authorization line, 503 included,
+    // and its classifier scanned that Display.
+    let fault = archon_llm::provider::LlmError::Http("Authorization: Bearer token; 503".into());
+    let err = anyhow::Error::new(fault);
+    assert!(matches!(
+        classify_error(&err),
+        RetryableError::NonRetryable { status: 0, .. }
+    ));
+    let fault = archon_llm::provider::LlmError::Http("token rejected; 503".into());
+    assert!(matches!(
+        classify_error(&anyhow::Error::new(fault)),
+        RetryableError::Retryable { status: 503, .. }
+    ));
+}
+
+#[cfg(test)]
+#[test]
+fn r6_retry_classifies_visible_text_like_main() {
+    use archon_llm::provider::LlmError;
+    // 86fbab995 scanned err.to_string(): an outer context hides the inner fault.
+    let err = anyhow::Error::new(LlmError::Http("ordinary failure".into())).context("HTTP 503");
+    assert!(matches!(
+        classify_error(&err),
+        RetryableError::Retryable {
+            status: 503,
+            retry_after: None,
+            ..
+        }
+    ));
+    // 86fbab995 never derived a retry_after hint in this classifier.
+    let err = anyhow::Error::new(LlmError::RateLimited {
+        message: "429".into(),
+        retry_after_secs: 7,
+        from_provider: true,
+        pipeline_retry_after_secs: None,
+    });
+    assert!(matches!(
+        classify_error(&err),
+        RetryableError::Retryable {
+            status: 429,
+            retry_after: None,
+            ..
+        }
+    ));
+}
+
+#[cfg(test)]
+#[path = "retry_characterization.rs"]
+mod c0_characterization;

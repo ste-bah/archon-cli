@@ -61,6 +61,15 @@
 //! and a contradiction between them is always seen; the rename means a
 //! process killed mid-write leaves no partial record under a real key.
 
+// env! requires a literal, so derive the name and compiled value together.
+macro_rules! build_environment {
+    ($name:literal) => {
+        pub(crate) const SOURCES_DIGEST_ENV: &str = $name;
+        pub(crate) const SOURCES_DIGEST: &str = env!($name);
+    };
+}
+build_environment!("ARCHON_FIDELITY_SOURCES_DIGEST");
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -189,7 +198,7 @@ pub(super) struct VerdictStore {
 
 impl VerdictStore {
     pub(super) fn new(dir: PathBuf, identity: StoreIdentity) -> Self {
-        Self::built_from(dir, identity, env!("ARCHON_FIDELITY_SOURCES_DIGEST"))
+        Self::built_from(dir, identity, SOURCES_DIGEST)
     }
 
     /// A store of a binary whose critic sources hash to `built`, as

@@ -22,7 +22,7 @@ impl LlmProvider for FailingSummaryProvider {
             retry_after_secs: 30,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         })
     }
 

@@ -24,12 +24,20 @@ const MAX_INLINE_RATE_LIMIT_RETRY_SECS: u64 = 60;
 /// partial SSE frame at EOF (`parse_error`), `timeout_error`, `api_error`,
 /// `overloaded_error`, a rate limit, a transport fault. No HTTP status is
 /// invented: none is known for an error event.
-pub(super) fn stream_error_before_content(error_type: &str, message: &str) -> LlmError {
-    let message = archon_observability::redaction::redact_text(message);
-    let diagnostic = format!("stream failed before producing content ({error_type}): {message}");
+pub(crate) fn stream_error_before_content(
+    error_type: &str,
+    message: impl Into<crate::provider::DiagnosticMessage>,
+) -> LlmError {
+    // 86fbab995 redacted the event text before composing the diagnostic.
+    let message = crate::provider::DiagnosticMessage::redacted_at_source(message.into().as_str());
+    let diagnostic = message.with_prefix(&format!(
+        "stream failed before producing content ({error_type}): "
+    ));
     let error = crate::provider_fault::from_stream_error(error_type, &diagnostic);
     if error.is_operational() {
-        crate::provider_fault::from_native_transport(diagnostic)
+        // Forward the diagnostic itself: a Display round trip would keep
+        // only the redacted text and drop raw evidence such as a status.
+        LlmError::Transport(diagnostic)
     } else {
         error
     }
@@ -173,7 +181,7 @@ mod tests {
             );
         }
         let secret = "sk-ant-api03-FAKE-1234567890";
-        let before = LlmError::Auth(format!("authentication error: {secret}"));
+        let before = LlmError::Auth(format!("authentication error: {secret}").into());
         let error = stream_error_before_content("authentication_error", secret);
         println!(
             "EVIDENCE #364 sse-rejection BEFORE: Auth ({:?}), secret_visible={} AFTER: {error}",
@@ -199,7 +207,7 @@ mod tests {
             retry_after_secs: 30,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         };
 
         assert_eq!(classify(&err), RetryDecision::Retry);
@@ -211,7 +219,7 @@ mod tests {
             retry_after_secs: 8_004,
             from_provider: true,
             pipeline_retry_after_secs: None,
-            message: String::new(),
+            message: String::new().into(),
         };
 
         assert_eq!(classify(&err), RetryDecision::FailFast);

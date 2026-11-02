@@ -43,11 +43,33 @@ impl ScratchRoots {
         }
         if self.registered {
             self.relink()?;
-            if let Err(error) = git(
-                &self.live_repository,
-                &["worktree", "remove", "--force"],
-                &[&self.repository],
-            ) {
+            // Git lists each worktree by its resolved path: this site's copy
+            // is compared by its own resolved identity, taken before git
+            // removes it (an aliased root never reads as unregistered).
+            let owned = resolved(&self.repository).ok_or_else(|| {
+                invalid(format!(
+                    "cannot resolve the owned scratch worktree {}; its registration is unverifiable",
+                    self.repository.display()
+                ))
+            })?;
+            // Whether the live repository's own administrative entry for this
+            // copy is intact before git removes it: only then can a failed
+            // removal that leaves the copy unregistered be git's own
+            // unregistering (#534). An entry already gone or damaged is damage
+            // outside the site (H5), never a teardown this host verified.
+            let intact = self.links_own_worktree(&self.repository.join(".git"));
+            let remove = || {
+                git(
+                    &self.live_repository,
+                    &["worktree", "remove", "--force"],
+                    &[&self.repository],
+                )
+            };
+            #[cfg(test)]
+            let removal = io::remove_tests::worktree_remove(&self.repository, remove);
+            #[cfg(not(test))]
+            let removal = remove();
+            if let Err(error) = removal {
                 let text = error.to_string();
                 let path = self.repository.to_string_lossy();
                 let check_removal = text.contains("failed to delete")
@@ -60,28 +82,49 @@ impl ScratchRoots {
                         &["worktree", "list", "--porcelain"],
                         &[],
                     ) {
-                        let expected = format!("worktree {}", self.repository.display());
-                        self.registered = listed.lines().any(|line| line == expected);
+                        self.registered = registered_in(&listed, &self.repository, &owned);
                     }
                     if !self.registered {
                         return Err(WorkflowError::ScratchSiteRemoval(text));
                     }
                 }
-                return Err(error);
+                // #534: a writer outside this host can add an entry to the
+                // copy while git deletes it. Git still unregisters the
+                // worktree; the owned removal below takes what is left.
+                // Only when git reached that deletion: its own C-locale
+                // failure for this copy (`git` runs with LC_ALL=C). A lookup
+                // or validation refusal ("not a working tree") never did,
+                // whatever the listing shows afterwards.
+                if !intact || !raced_copy_delete(&text, &self.repository, &owned) {
+                    return Err(error);
+                }
+                let listed = git(
+                    &self.live_repository,
+                    &["worktree", "list", "--porcelain"],
+                    &[],
+                );
+                if !listed.is_ok_and(|listed| !registered_in(&listed, &self.repository, &owned)) {
+                    return Err(error);
+                }
             }
             let listed = git(
                 &self.live_repository,
                 &["worktree", "list", "--porcelain"],
                 &[],
             )?;
-            let expected = format!("worktree {}", self.repository.display());
-            if listed.lines().any(|line| line == expected) {
+            if registered_in(&listed, &self.repository, &owned) {
                 return Err(invalid(
                     "owned scratch worktree remains registered after removal",
                 ));
             }
             self.registered = false;
         }
+        // Release the site's own root handle before removing the root. On
+        // Windows a directory this process holds open without delete
+        // sharing cannot be removed (ERROR_SHARING_VIOLATION, os error 32);
+        // a Unix descriptor never blocks removal. No check runs on a site
+        // being torn down, and a retried teardown needs no handle.
+        self.mutation_root = None;
         if let Err(error) = io::remove_owned_tree(&self.root) {
             if let WorkflowError::Io { path, source } = &error
                 && path.starts_with(&self.root)
@@ -130,6 +173,47 @@ impl ScratchRoots {
             _ => false,
         }
     }
+}
+
+/// Where `path` resolves: its canonical spelling, or, once it is gone, its
+/// parent's canonical spelling with its name. `None` when neither resolves.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    let canonical = |path: &Path| std::fs::canonicalize(path).map(archon_shell::paths::plain);
+    if let Ok(path) = canonical(path) {
+        return Some(path);
+    }
+    Some(canonical(path.parent()?).ok()?.join(path.file_name()?))
+}
+
+/// Whether git's failure is the one `git worktree remove` gives after it found
+/// the worktree and began deleting the copy at `path` (resolved `owned`), and
+/// a racing writer kept a directory non-empty (builtin/worktree.c
+/// `delete_git_work_tree`: "failed to delete '<path>'" with the errno text).
+/// The named path is compared as text with the copy's spellings taken before
+/// git ran, never resolved: after the failure a writer may have made any
+/// path (git's administrative entry included) a link to a recreated copy.
+fn raced_copy_delete(text: &str, path: &Path, owned: &Path) -> bool {
+    text.lines().any(|line| {
+        let Some((_, rest)) = line.split_once("failed to delete '") else {
+            return false;
+        };
+        let Some(named) = rest.trim_end().strip_suffix("': Directory not empty") else {
+            return false;
+        };
+        let named = Path::new(named);
+        named == path || named == owned
+    })
+}
+
+/// Whether `git worktree list --porcelain` output still registers the copy
+/// at `path`, whose resolved identity is `owned`. A listed path that no
+/// longer resolves counts when it is spelled as `path`.
+fn registered_in(listed: &str, path: &Path, owned: &Path) -> bool {
+    listed
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(Path::new)
+        .any(|named| named == path || resolved(named).is_some_and(|named| named == owned))
 }
 
 impl Drop for ScratchRoots {

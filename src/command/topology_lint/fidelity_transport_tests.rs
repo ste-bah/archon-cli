@@ -119,3 +119,35 @@ async fn issue356_transport_critic_idle_before_headers() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn host_command_real_provider_idle_retains_transient_identity() {
+    let (client, mut transport) = client_for(Some(1), true, false).await;
+    let call = tokio::spawn(async move {
+        client
+            .send_message_with_progress(
+                vec![serde_json::json!({"role":"user","content":"check"})],
+                vec![],
+                vec![],
+                "reviewer",
+                0.0,
+                archon_shell::progress::Progress::new(true),
+            )
+            .await
+    });
+    transport.ready().await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(1)).await;
+    settle().await;
+    let error = tokio::time::timeout(Duration::from_secs(10), call)
+        .await
+        .expect("idle must end")
+        .unwrap()
+        .unwrap_err();
+    let error = anyhow::Error::new(error);
+    assert_eq!(
+        crate::command::workflow_host_fault::classify(&error),
+        crate::command::workflow_host_fault::Class::Transient,
+        "{error:#}"
+    );
+}

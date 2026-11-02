@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+archon-llm = { path = "../archon-llm" }
 archon-permissions = { path = "../archon-permissions" }
 # Bash discovery for the Bash tool. A leaf crate — archon-core's hook executor
 # already depends on it — so this adds no cycle, and it means the tool and the

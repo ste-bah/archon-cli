@@ -171,6 +171,12 @@ pub(crate) struct FreezeIncomplete {
     cause: IncompleteCause,
     progress: String,
     authored_judge_reply: bool,
+    fault_class: crate::command::workflow_host_fault::Class,
+    /// The checks a stalled step left without a verdict, when it names them.
+    subjects: Vec<String>,
+    /// Findings this freeze already had for its own checks when a later step
+    /// could not complete (#552): each goes to its own author in that round.
+    known_findings: Vec<crate::command::workflow_gate::GateFinding>,
 }
 
 #[derive(Debug)]
@@ -211,6 +217,9 @@ impl FreezeIncomplete {
             },
             progress: progress.line(),
             authored_judge_reply: false,
+            subjects: Vec::new(),
+            known_findings: Vec::new(),
+            fault_class: crate::command::workflow_host_fault::Class::Transient,
         }
     }
 
@@ -221,6 +230,9 @@ impl FreezeIncomplete {
             cause: IncompleteCause::Stalled(reason.into()),
             progress: progress.line(),
             authored_judge_reply: false,
+            subjects: Vec::new(),
+            known_findings: Vec::new(),
+            fault_class: crate::command::workflow_host_fault::Class::Permanent,
         }
     }
 
@@ -232,6 +244,9 @@ impl FreezeIncomplete {
             cause: IncompleteCause::Unsaved(reason.into()),
             progress: FreezeProgress::default().line(),
             authored_judge_reply: false,
+            subjects: Vec::new(),
+            known_findings: Vec::new(),
+            fault_class: crate::command::workflow_host_fault::Class::Permanent,
         }
     }
 
@@ -244,6 +259,7 @@ impl FreezeIncomplete {
         judge_error: impl Into<String>,
     ) -> Self {
         let mut incomplete = Self::new(budget, progress, deferred);
+        incomplete.fault_class = crate::command::workflow_host_fault::Class::Permanent;
         if let IncompleteCause::Budget {
             lacking,
             judge_error: cause,
@@ -258,6 +274,17 @@ impl FreezeIncomplete {
 
     /// Mark a retryable judge reply whose incompleteness was authored by the
     /// model. Provider, host and persistence failures remain operational.
+    pub(crate) fn with_fault_class(
+        mut self,
+        class: crate::command::workflow_host_fault::Class,
+    ) -> Self {
+        self.fault_class = class;
+        self
+    }
+    pub(crate) fn fault_class(&self) -> crate::command::workflow_host_fault::Class {
+        self.fault_class
+    }
+
     pub(crate) fn authored_judge_reply(mut self) -> Self {
         self.authored_judge_reply = true;
         self
@@ -265,6 +292,46 @@ impl FreezeIncomplete {
 
     pub(crate) fn is_authored_judge_reply(&self) -> bool {
         self.authored_judge_reply
+    }
+
+    /// Name the checks a stalled step left without a verdict (#552).
+    pub(crate) fn with_subjects(mut self, subjects: Vec<String>) -> Self {
+        self.subjects = subjects;
+        self
+    }
+
+    /// Keep `findings` this freeze already had for its own checks, and name
+    /// their checks among its subjects (#552).
+    pub(crate) fn add_known_findings(
+        &mut self,
+        findings: Vec<crate::command::workflow_gate::GateFinding>,
+    ) {
+        if findings.is_empty() {
+            return;
+        }
+        let mut subjects = self.subjects().to_vec();
+        for finding in &findings {
+            if !subjects.contains(&finding.subject) {
+                subjects.push(finding.subject.clone());
+            }
+        }
+        self.subjects = subjects;
+        self.known_findings.extend(findings);
+    }
+
+    /// The findings this freeze already had when a later step stalled.
+    pub(crate) fn known_findings(&self) -> &[crate::command::workflow_gate::GateFinding] {
+        &self.known_findings
+    }
+
+    /// The checks this freeze left without a verdict, as data: the ones it
+    /// names, else the deferred checks of its budget.
+    pub(crate) fn subjects(&self) -> &[String] {
+        if self.subjects.is_empty() {
+            self.deferred()
+        } else {
+            &self.subjects
+        }
     }
 
     /// The checks still awaiting a verdict; none when the cause names none.

@@ -309,6 +309,43 @@ impl WorkflowV2ResultStore {
         }))
     }
 
+    /// Positive evidence that an admission still lacks a completed publication
+    /// observation and has not been invalidated. Publication recovery uses this instead of
+    /// treating identical content as another invocation of the same call.
+    pub fn admission_needs_publication_observation(
+        &self,
+        call_id: &str,
+        input_hash: &str,
+        sequence: u64,
+    ) -> WorkflowResult<bool> {
+        let history = self.call_history(call_id)?.ok_or_else(|| WorkflowError::StateCorrupt(format!(
+            "call history for {call_id} is unreadable; restore its authenticated admission and result records",
+        )))?;
+        let matching = history
+            .iter()
+            .filter(|record| record.admission_sequence == Some(sequence))
+            .collect::<Vec<_>>();
+        let observation_pending = |record: &WorkflowV2CallRecord| {
+            record.result.data["publicationReceipt"].is_object()
+                && record.result.data["gateEnvelope"]["operational_error"].is_object()
+        };
+        let already_observed = history.iter().any(|record| {
+            record.input_hash == input_hash
+                && record.admission_sequence > Some(sequence)
+                && !is_unfinished_attempt(record)
+                && record.result.data["publicationReceipt"].is_object()
+                && record.result.data["gateEnvelope"]["operational_error"].is_null()
+        });
+        Ok(!already_observed
+            && !matching.is_empty()
+            && matching.iter().all(|record| {
+                record.call.id == call_id
+                    && record.input_hash == input_hash
+                    && record.invalidated_by.is_none()
+                    && (is_unfinished_attempt(record) || observation_pending(record))
+            }))
+    }
+
     /// Put `record`, read from its call's history, back into the call's
     /// slot. Whatever holds the slot now is archived first (D79), then the
     /// record is written exactly as it was (temporary file and rename). A

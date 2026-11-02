@@ -137,40 +137,6 @@ function requireFixedArgs() {
   }
 }
 
-// The skeleton's author policy, whether it authors the skeleton first or
-// re-authors it because the set gate found an obligation no task claims or
-// a claim the PRD does not define (Batch O). `initialFeedback` carries the
-// set gate's exact findings into the first attempt.
-function skeletonPolicy(initialFeedback, initialRung) {
-  return {
-    phase: "skeleton",
-    capability: "freeze-skeleton",
-    retryScopes: new Set(["candidate_artifact", "skeleton"]),
-    initialFeedback,
-    ...(Number.isInteger(initialRung) ? { initialRung } : {}),
-    prompt: () => [
-      "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
-      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
-      groundingRules(),
-      "Stop reading once you can name what your entries assert.",
-      "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
-      "Every obligation id the PRD defines is in the implements of at least one task, and implements names only ids the PRD defines. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
-      "The document must deserialize into this exact shape:",
-      SKELETON_SHAPE,
-      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
-      "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
-      "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.",
-      "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
-      "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
-      "The host overwrites acceptance_digest: send the placeholder shown.",
-      "Generate large or repetitive fixture data with code rather than writing it literally.",
-      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
-      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
-      "Do not run commands or write files."
-    ].join("\n")
-  };
-}
-
 // One body policy, whether the body is authored fresh after the skeleton or
 // re-authored because the set gate named it (Issue-46). `initialFeedback`
 // carries the set gate's exact finding texts into the first attempt.
@@ -229,17 +195,24 @@ async function authorCandidate(w, policy) {
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
-  const allFindings = feedback.slice();
+  // Issue 551: the findings open in the latest gate result. Earlier findings
+  // stay in `history`, shown as ones not to regress, never as current.
+  let openFindings = [];
   let judgeFeedback = [];
+  // #552: the latest round's freeze judged nothing (an unusable judge reply).
+  let judgedNothing = false;
   let repairRung = Number.isInteger(policy.initialRung) ? policy.initialRung : 1;
   let repairCycle = 1;
   const progress = newProgress(feedback);
   const authorState = { entries: new Map(), retryIds: null, retryPreparation: true };
+  // #555: findings the loop opens with that name no entry are phase-level;
+  // a frozen stage's repair attributes its own to each entry (repairFrozenStage).
+  if (policy.author) authorState.phaseFindings = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
   // Issue 360: after an upgrade, start from the latest durable candidate (workflow_decompose_v1_seed.js).
   const seeded = args.phaseSeed && !seedWouldReplaceLiveFeedback(policy)
     ? seedAuthorLoop(policy, authorState)
     : null;
-  if (seeded) [feedback, lastFindings] = [seeded.feedback.slice(), seeded.feedback.slice()];
+  if (seeded) [feedback, lastFindings, openFindings] = [seeded.feedback.slice(), seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
   for (;;) {
     const stall = stallReason(progress);
@@ -262,9 +235,13 @@ async function authorCandidate(w, policy) {
         repairCycle += 1;
         // Entry authors keep their own refusal in authorState; do not copy
         // a sibling's finding into another entry's fresh-context prompt.
-        feedback = policy.author ? judgeFeedback.slice()
-          : [...new Set([...allFindings, ...lastFindings])];
-        history.length = 0;
+        // Other authors keep their open findings and the history that marks
+        // repeats and earlier findings (Issue 551).
+        // A round that judged nothing keeps the history (#552).
+        if (policy.author) {
+          feedback = judgeFeedback.slice();
+          if (!judgedNothing) history.length = 0;
+        }
       }
       await repairEvent(w, policy.phase, repairRung, repairCycle, call, progress.calls);
     }
@@ -274,17 +251,24 @@ async function authorCandidate(w, policy) {
     const addedBefore = authorState.added || 0;
     const rungInstruction = repairRung === 1 ? ""
       : repairRung === 2 ? "\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding."
+      : repairRung === 3 && policy.author ? "\nReturn a complete replacement of this entry that repairs every finding listed below for this entry and keeps every earlier one listed for it satisfied."
       : repairRung === 3 ? "\nReturn a complete replacement. Work through the findings in smaller groups while preserving every finding from this and earlier attempts."
+      : policy.author ? "\nReturn a complete replacement of this entry that repairs only the findings listed below for this entry."
       : "\nThis subject is deferred while independent subjects settle. Return a complete replacement when re-entered with the latest findings.";
     const midpoint = Math.ceil(feedback.length / 2);
     const groupFeedback = repairRung === 3 && feedback.length > 1
       ? (nextCall % 2 === 1 ? feedback.slice(0, midpoint) : feedback.slice(midpoint))
       : feedback;
-    const promptFeedback = [...new Set([...(policy.initialFeedback || []), ...(policy.author ? feedback : [...allFindings, ...feedback])])];
+    // #555: the part of an entry prompt every entry shares names no finding:
+    // each entry reads only its own, and the phase-level ones, in its own
+    // section (authorOne). The round's findings, its history and its groups
+    // belong to every subject at once, so they stay out of it.
+    const promptFeedback = policy.author ? [] : [...new Set([...feedback, ...openFindings, ...(policy.initialFeedback || [])])];
+    const group = repairRung === 3 && !policy.author ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : "";
     let authored;
     try {
       const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}${repairRung === 3 ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : ""}`, attempt + 1, promptFeedback, history);
+      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
         // Context writes are not journaled. Reserve no ordinal until the
@@ -338,10 +322,7 @@ async function authorCandidate(w, policy) {
         recordOperational(progress, call, authored.summary, advanced, round, "provider");
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
-      if (authored.refusals || authored.malformed) {
-        attempt += 1;
-        for (const finding of lastFindings) if (!allFindings.includes(finding)) allFindings.push(finding);
-      }
+      if (authored.refusals || authored.malformed) attempt += 1;
       continue;
     }
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
@@ -350,7 +331,6 @@ async function authorCandidate(w, policy) {
         ? incompleteReplyFeedback(authored.content)
         : `Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
-      for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
       recordAnswered(progress, call, "incomplete", false, !measuredReplies);
       continue;
     }
@@ -361,21 +341,53 @@ async function authorCandidate(w, policy) {
     });
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
+    // #554: a check the host could not prove, on an entry this loop
+    // authored, goes to its author once the next freeze reports it again on
+    // the entry's unchanged text; until then the host probes it again.
+    const unproven = routed.operationalKind === "authored_judge_reply"
+      ? { repeated: new Set(), subjects: new Set() }
+      : unprovenAuthored(authorState, outcome, routed);
+    if (routed.operational && unproven.repeated.size > 0) {
+      routed.operational = null;
+      for (const finding of unproven.repeated) {
+        const text = String(finding.text || "unnamed policy finding");
+        routed.all.push(text);
+        routed.allFindings.push(finding);
+        routed.fatal.push(text);
+        routed.fatalFindings.push(finding);
+        routed.fatalOperational[routed.fatal.length - 1] = true;
+      }
+    }
     if (routed.operational) {
       if (routed.operationalKind === "authored_judge_reply") {
         // The judge could not use this candidate. Feed its reason to the
         // author so the next call creates a replacement.
+        // #552: the host names the checks the judge left undecided as data.
+        // The text match is kept only for an envelope saved before that.
         if (policy.author) {
-          const named = /still have no [^(]*\(([^)]*)\)/.exec(routed.operational);
-          const namedIds = new Set(named ? named[1].split(",").map(id => id.trim()) : []);
+          const subjects = outcome.gateEnvelope.operational_error.subjects;
+          const listed = Array.isArray(subjects) && subjects.length > 0 ? subjects.map(String) : null;
+          const named = listed ? null : /still have no [^(]*\(([^)]*)\)/.exec(routed.operational);
+          const namedIds = new Set(listed || (named ? named[1].split(",").map(id => id.trim()) : []));
           const retryIds = (authorState.order || []).filter(id => namedIds.has(id));
           authorState.retryIds = retryIds.length > 0 ? new Set(retryIds) : null;
+          // #552: the open findings of the last gate that judged stay current;
+          // the note goes only to the entries it names.
+          // A check the host already knew it could not judge has its own
+          // finding in the envelope: that is its note, never another's.
+          const note = `freeze judge reply unusable: ${routed.operational}`;
+          const own = new Map();
+          for (const finding of outcome.gateEnvelope.policy_findings || []) {
+            own.set(finding.subject, [own.get(finding.subject), String(finding.text || "")].filter(Boolean).join("\n- "));
+          }
+          authorState.judgeNotes = new Map([...(authorState.retryIds || authorState.order || [])].map(id => [id, own.get(id) || note]));
+        } else {
+          feedback = [`freeze judge reply unusable: ${routed.operational}`];
+          judgeFeedback = feedback.slice();
         }
+        judgedNothing = true;
         recordAnswered(progress, call, "authored_judge_reply", advanced, !measuredReplies, round);
-        feedback = [`freeze judge reply unusable: ${routed.operational}`];
-        judgeFeedback = feedback.slice();
-        lastFindings = feedback.slice();
-        for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
+        lastFindings = [`freeze judge reply unusable: ${routed.operational}`];
         continue;
       }
       // The gate never judged the candidate; only the round that made it can
@@ -386,8 +398,8 @@ async function authorCandidate(w, policy) {
       carried = authored.content;
       continue;
     }
-    const ownedFatal = routed.fatalFindings.filter((finding) => {
-      if (finding.remediation_scope === "operational") return false;
+    const ownedFound = routed.fatalFindings.filter((finding) => {
+      if (finding.remediation_scope === "operational") return unproven.repeated.has(finding);
       const source = typeof finding.source_path === "string" ? finding.source_path.replace(/\\/g, "/") : "";
       if (policy.target && authoredSourceMatches(source, policy.target.fileName)) return true;
       return policy.phase === "acceptance" && (source === `${String(args.taskRoot || "").replace(/\\/g, "/")}/acceptance-contract.json` || source === "acceptance-contract.json")
@@ -395,8 +407,11 @@ async function authorCandidate(w, policy) {
         && (Object.prototype.hasOwnProperty.call(args.acceptanceCriteria || {}, finding.subject)
           || authorState.entries.has(finding.subject));
     });
+    const ownedFatal = ownedFound.map((finding) => unproven.repeated.has(finding)
+      ? { ...finding, text: `the host could not prove this check on two freezes of its unchanged text, so a host retry does not help: change the check so that the host can run it to its own verdict. The host reported: ${finding.text}` }
+      : finding);
     if (ownedFatal.length > 0) {
-      const owned = new Set(ownedFatal);
+      const owned = new Set(ownedFound);
       const ownedText = ownedFatal.map((finding) => String(finding.text || "unnamed policy finding"));
       routed.fatal = routed.fatal.filter((_, index) => !owned.has(routed.fatalFindings[index]));
       routed.fatalOperational = routed.fatalOperational.filter((_, index) => !owned.has(routed.fatalFindings[index]));
@@ -407,16 +422,10 @@ async function authorCandidate(w, policy) {
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = routed.retryFindings;
-      if (!authorState.gateFindings) authorState.gateFindings = new Map();
-      for (const finding of repair) {
-        const selected = ids.has(finding.subject) ? new Set([finding.subject])
-          : acceptanceRepairIds([finding], ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
-        for (const id of selected || authorState.entries.keys()) {
-          const prior = authorState.gateFindings.get(id) || [];
-          if (!prior.includes(finding.text)) prior.push(finding.text);
-          authorState.gateFindings.set(id, prior);
-        }
-      }
+      const latest = attributeEntryFindings(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+      settleGateFindings(authorState, latest.own);
+      settlePhaseFindings(authorState, latest.phase);
+      authorState.judgeNotes = null;
       const stale = repair.find(finding => finding?.deterministic_defect?.code === "stale_acceptance_contract");
       if (stale) {
         // The contract changed after this freeze was prepared: rebuild the
@@ -443,11 +452,23 @@ async function authorCandidate(w, policy) {
     // (an operational finding) beside findings the author can repair stops
     // nothing: it blocks publication, the author repairs its own, and the
     // next freeze probes the unproven check again.
-    const fatal = routed.retry.length > 0
-      ? routed.fatal.filter((text, index) => !routed.fatalOperational[index])
-      : routed.fatal;
+    // #554: nor does a check the host could not prove on an entry this
+    // loop authored end the phase: the same candidate is frozen again, and
+    // the check goes to its author if that freeze reports it again.
+    const pending = routed.fatalFindings.filter((finding) => finding.remediation_scope === "operational"
+      && unproven.subjects.has(finding.subject));
+    const fatal = routed.fatal.filter((text, index) => !(routed.retry.length > 0 && routed.fatalOperational[index])
+      && !pending.includes(routed.fatalFindings[index]));
     if (fatal.length > 0) {
       await stopFixed(`${policy.phase} stopped: ${fatal.join(" | ")}`);
+    }
+    if (routed.retry.length === 0 && pending.length > 0) {
+      if (!measuredReplies) progress.answered += 1;
+      const texts = pending.map((finding) => String(finding.text || "unnamed policy finding"));
+      recordOperational(progress, call, texts.join(" | "), advanced, round, policy.capability);
+      lastFindings = texts;
+      carried = authored.content;
+      continue;
     }
     if (routed.retry.length === 0) {
       requireCommitted(outcome, policy.phase);
@@ -457,9 +478,10 @@ async function authorCandidate(w, policy) {
     attempt += 1;
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
+    judgedNothing = false;
     if (policy.author) judgeFeedback = feedback.slice();
     lastFindings = routed.retry.slice();
-    for (const finding of feedback) if (!allFindings.includes(finding)) allFindings.push(finding);
+    openFindings = routed.retry.slice();
     // `advanced` is not credited here on purpose: the gate measured the whole
     // candidate, and that measure decides (Issue 261).
     recordAttempt(progress, call, routed.retryFindings, !measuredReplies, round);

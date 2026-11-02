@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 function context(criteria = { A: 'a' }) {
   const logs = [];
@@ -110,10 +110,10 @@ async function partial(operational, replacing) {
   const w = { agent: async (callId) => {
     const [, id, ordinal] = /^acceptance-author-(\w+)-(\d+)$/.exec(callId);
     const round = Math.floor((Number(ordinal) - 1) / 3);
-    if (replacing && round === 1) return answer(JSON.stringify({ id, version: 0 }));
+    if (replacing && round === 1) return answer(JSON.stringify({ id, version: 0, covers: [] }));
     if (ids.indexOf(id) < round - (replacing ? 1 : 0)) {
       completed.push(id);
-      return answer(JSON.stringify({ id, version: round }));
+      return answer(JSON.stringify({ id, version: round, covers: [] }));
     }
     return operational ? { status: 'failed', summary: 'transport' } : answer('malformed');
   }, hostCommand: async () => replacing && ++gates === 1

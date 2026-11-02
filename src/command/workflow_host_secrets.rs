@@ -128,8 +128,18 @@ impl HostSecrets {
         reader: impl std::io::Read,
         context: &str,
     ) -> WorkflowResult<T> {
-        serde_json::from_reader(reader)
-            .map_err(|error| WorkflowError::StageFailed(self.text(&format!("{context}: {error}"))))
+        serde_json::from_reader(reader).map_err(|error| {
+            if !error.is_io() {
+                return WorkflowError::port(super::workflow_host_fault::EvidenceRefused(
+                    self.text(&format!("{context}: {error}")),
+                ));
+            }
+            let error = anyhow::Error::new(error);
+            WorkflowError::port(super::workflow_host_fault::Fault {
+                class: super::workflow_host_fault::classify(&error),
+                text: self.text(&format!("{context}: {error}")),
+            })
+        })
     }
 
     /// Redact every free String field, preserving closed wire-contract enums.
@@ -142,7 +152,9 @@ impl HostSecrets {
             finding.text = self.text(&finding.text);
             finding.subject = self.text(&finding.subject);
             if let Some(defect) = &mut finding.deterministic_defect {
-                defect.code = self.text(&defect.code);
+                if !super::workflow_host_fault::is_finding_code(&defect.code) {
+                    defect.code = self.text(&defect.code);
+                }
                 defect.subject = self.text(&defect.subject);
                 defect.location = self.text(&defect.location);
             }
@@ -152,7 +164,9 @@ impl HostSecrets {
         }
         if let Some(error) = &mut envelope.operational_error {
             error.text = self.text(&error.text);
-            error.kind = self.text(&error.kind);
+            if !super::workflow_host_fault::is_kind(&error.kind) {
+                error.kind = self.text(&error.kind);
+            }
         }
         envelope
     }
@@ -164,14 +178,20 @@ impl HostSecrets {
         for finding in &envelope.policy_findings {
             strings.extend([&finding.text, &finding.subject]);
             if let Some(defect) = &finding.deterministic_defect {
-                strings.extend([&defect.code, &defect.subject, &defect.location]);
+                strings.extend([&defect.subject, &defect.location]);
+                if !super::workflow_host_fault::is_finding_code(&defect.code) {
+                    strings.push(&defect.code);
+                }
             }
             if let Some(path) = &finding.source_path {
                 strings.push(path);
             }
         }
         if let Some(error) = &envelope.operational_error {
-            strings.extend([&error.text, &error.kind]);
+            strings.push(&error.text);
+            if !super::workflow_host_fault::is_kind(&error.kind) {
+                strings.push(&error.kind);
+            }
         }
         (envelope.schema_version != archon_workflow::GATE_ENVELOPE_SCHEMA_VERSION
             && self.holds_secret(envelope.schema_version.to_string().as_bytes()))

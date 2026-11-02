@@ -1,6 +1,24 @@
 //! Refusals address live identities rather than a scope an escapee left.
 use super::{HostCommandGroupRecord, stall_note};
 
+/// The refusal when the recorded scope's membership cannot be read.
+#[cfg(any(unix, test))]
+pub(super) fn membership_refusal(
+    record: &HostCommandGroupRecord,
+    run: &str,
+    error: &dyn std::fmt::Display,
+) -> String {
+    format!(
+        "run {run} cannot resume: host command '{}' membership cannot be read ({error}); verify its processes, then remove {} and resume again",
+        record.command_id,
+        record
+            .file
+            .as_ref()
+            .map(|path| super::refusal_files(path))
+            .unwrap_or_default()
+    )
+}
+
 pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: usize) -> String {
     if record.pid == 0 {
         return format!(
@@ -42,17 +60,7 @@ pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: 
         });
         match identities {
             Ok(pins) => live.extend(pins),
-            Err(error) => {
-                return format!(
-                    "run {run} cannot resume: host command '{}' membership cannot be read ({error}); verify its processes, then remove {} and resume again",
-                    record.command_id,
-                    record
-                        .file
-                        .as_ref()
-                        .map(|path| super::refusal_files(path))
-                        .unwrap_or_default()
-                );
-            }
+            Err(error) => return membership_refusal(record, run, &error),
         }
     }
     #[cfg(windows)]

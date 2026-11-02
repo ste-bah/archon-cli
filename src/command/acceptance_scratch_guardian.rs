@@ -351,9 +351,13 @@ fn acquire_lease_observing_busy(
             }
             on_busy();
             if std::time::Instant::now() >= deadline {
-                return Err(WorkflowError::PolicyDenied(
-                    "native observation already owns this repository".into(),
-                ));
+                return Err(WorkflowError::Io {
+                    path,
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "native observation already owns this repository",
+                    ),
+                });
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }

@@ -6,20 +6,31 @@ pub(super) fn body_input_finding(error: &Error) -> Option<GateEvaluation> {
     workflow_gate::task_body_input_finding(error, GateId::WorkflowLintTaskSet, "task-set")
 }
 
-pub(super) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
-    // Unanswered fidelity batches remain resumable operational errors.
-    if let Some((report, status)) = crate::command::topology_lint::resumable_exit(error) {
-        eprintln!("{report}");
-        crate::command::workflow_host_exit_drain::exit_after_drain(status);
+pub(crate) fn gate_error_evaluation(error: &Error) -> GateEvaluation {
+    // Unanswered fidelity batches retain their resumable evidence. Typed transient
+    // causes heal inside the host call; permanent causes return with a remedy.
+    if let Some(incomplete) = crate::command::topology_lint::LintIncomplete::caused(error) {
+        eprintln!("{}", incomplete.report());
     }
     crate::command::workflow_host_command_operational::exit_if_unsettled_publish(error);
-    let evaluation = GateEvaluation::new("", Vec::new()).with_operational_error(error.to_string());
-    if crate::command::workflow_freeze_budget::FreezeIncomplete::caused(error).is_some_and(
-        crate::command::workflow_freeze_budget::FreezeIncomplete::is_authored_judge_reply,
-    ) {
-        evaluation.with_operational_error_kind("authored_judge_reply")
-    } else {
-        evaluation
+    let evaluation = crate::command::topology_lint::LintIncomplete::caused(error)
+        .and_then(|incomplete| incomplete.evaluation.clone())
+        .unwrap_or_else(|| GateEvaluation::new("", Vec::new()))
+        .with_host_error(error);
+    match crate::command::workflow_freeze_budget::FreezeIncomplete::caused(error) {
+        // #552: the checks it left without a verdict travel as data.
+        Some(incomplete) => {
+            let mut evaluation =
+                evaluation.with_operational_subjects(incomplete.subjects().to_vec());
+            // Each check already known not judged keeps its own finding.
+            (evaluation.findings).extend(incomplete.known_findings().iter().cloned());
+            if incomplete.is_authored_judge_reply() {
+                evaluation.with_operational_error_kind("authored_judge_reply")
+            } else {
+                evaluation
+            }
+        }
+        None => evaluation,
     }
 }
 
@@ -41,6 +52,39 @@ mod tests {
             archon_workflow::RemediationScope::Body
         );
         assert!(envelope.operational_error.is_none());
+    }
+
+    /// #552: the checks an authored incomplete freeze judge left without a
+    /// verdict travel as data in the envelope, never only in its message.
+    #[test]
+    fn authored_incomplete_freeze_judge_names_its_checks_in_the_gate_envelope_552() {
+        let progress = crate::command::workflow_freeze_budget::FreezeProgress::default();
+        let stalled = crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+            "malformed judge reply",
+            &progress,
+        )
+        .with_subjects(vec!["AC-X-002".into()])
+        .authored_judge_reply();
+        let budget = crate::command::workflow_freeze_budget::FreezeBudget::unlimited();
+        let awaiting = crate::command::workflow_freeze_budget::FreezeIncomplete::awaiting_judge(
+            &budget,
+            &progress,
+            vec!["AC-X-003".into(), "AC-X-004".into()],
+            "malformed judge reply",
+        )
+        .authored_judge_reply();
+        for (error, ids) in [
+            (stalled, vec!["AC-X-002"]),
+            (awaiting, vec!["AC-X-003", "AC-X-004"]),
+        ] {
+            let error = gate_error_evaluation(&Error::new(error))
+                .into_envelope()
+                .unwrap()
+                .operational_error
+                .unwrap();
+            assert_eq!(error.kind, "authored_judge_reply");
+            assert_eq!(error.subjects, ids);
+        }
     }
 
     #[test]
@@ -69,10 +113,46 @@ mod tests {
     }
 
     #[test]
-    fn provider_gate_failure_keeps_the_generic_operational_kind() {
+    fn host_command_unknown_provider_failure_returns_its_permanent_diagnostic() {
         let envelope = gate_error_evaluation(&Error::msg("provider gave no reply"))
             .into_envelope()
             .unwrap();
-        assert_eq!(envelope.operational_error.unwrap().kind, "gate_operational");
+        let error = envelope.operational_error.unwrap();
+        assert_eq!(error.kind, "permanent_host_fault");
+        assert!(error.text.contains("provider gave no reply"));
+    }
+
+    #[test]
+    fn typed_provider_transport_keeps_the_transient_operational_kind() {
+        let envelope = gate_error_evaluation(&Error::new(std::io::Error::from(
+            std::io::ErrorKind::ConnectionReset,
+        )))
+        .into_envelope()
+        .unwrap();
+        assert_eq!(
+            envelope.operational_error.unwrap().kind,
+            "transient_host_fault"
+        );
+    }
+    #[test]
+    fn host_command_typed_decode_fault_preserves_path_and_remedy() {
+        let error = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        ))
+        .context("reading TASK file TASK-X-001.md");
+        let error = gate_error_evaluation(&error)
+            .into_envelope()
+            .unwrap()
+            .operational_error
+            .unwrap();
+        assert!(error.text.contains("TASK-X-001.md"));
+        assert!(
+            error.text.contains("stream did not contain valid UTF-8"),
+            "{}",
+            error.text
+        );
+        assert_eq!(error.kind, "permanent_host_fault");
+        assert!(error.text.contains("restore valid bytes"), "{}", error.text);
     }
 }

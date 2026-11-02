@@ -10,7 +10,8 @@ pub(crate) async fn endpoint(reply: &'static [u8]) -> (String, tokio::task::Join
     let peer = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut buf = [0; 8192];
-        socket.read(&mut buf).await.unwrap();
+        let n = socket.read(&mut buf).await.unwrap();
+        assert!(n > 0, "provider fixture must receive request bytes");
         if !reply.is_empty() {
             socket.write_all(reply).await.unwrap();
         }

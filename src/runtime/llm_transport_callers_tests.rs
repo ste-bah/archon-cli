@@ -85,8 +85,8 @@ async fn silent_stream_ends_at(callers: TransportCallers, local: bool, ends: u64
         .unwrap()
         .expect_err("a silent stream yields no reply");
     assert!(
-        matches!(error, archon_workflow::WorkflowError::ControlPaused(_)),
-        "a transport idle stop stays resumable: {error:#}"
+        matches!(&error, archon_workflow::WorkflowError::Port(source) if source.is::<archon_llm::transport_idle::TransportIdle>()),
+        "transport idle retains its typed identity: {error:#}"
     );
     tokio::time::resume();
 }
@@ -115,19 +115,19 @@ fn issue356_backstop_by_caller_class() {
 }
 
 #[tokio::test]
-async fn issue356_command_anthropic_dead_stream_ends_at_its_idle_bound() {
+async fn host_command_remote_transport_ends_at_command_idle_bound() {
     silent_stream_ends_at(TransportCallers::Command, false, 1_800).await;
 }
 #[tokio::test]
-async fn issue356_workflow_anthropic_dead_stream_outlasts_judge_window() {
+async fn host_command_remote_transport_outlasts_judge_window() {
     silent_stream_ends_at(TransportCallers::Workflow, false, 7_800).await;
 }
 #[tokio::test]
-async fn issue356_command_local_dead_stream_ends_at_configured_timeout() {
+async fn host_command_local_transport_ends_at_configured_idle_bound() {
     // The fixture configures `[llm.local] timeout_secs = 300`.
     silent_stream_ends_at(TransportCallers::Command, true, 300).await;
 }
 #[tokio::test]
-async fn issue356_workflow_local_dead_stream_outlasts_judge_window() {
+async fn host_command_local_transport_outlasts_judge_window() {
     silent_stream_ends_at(TransportCallers::Workflow, true, 7_800).await;
 }

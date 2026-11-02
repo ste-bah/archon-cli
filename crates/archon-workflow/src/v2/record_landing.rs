@@ -74,7 +74,7 @@ fn with_schema(err: WorkflowError, kind: RecordKind) -> WorkflowError {
 }
 pub struct RecordLanding {
     root: PathBuf,
-    kind: RecordKind,
+    pub(super) kind: RecordKind,
     subjects: Vec<String>,
     subjects_are_tasks: bool,
     lock: Mutex<()>,
@@ -286,7 +286,7 @@ impl RecordLanding {
         }
         write(&path, &record)
     }
-    fn records(&self) -> WorkflowResult<BTreeMap<String, StageRecord>> {
+    pub(super) fn records(&self) -> WorkflowResult<BTreeMap<String, StageRecord>> {
         let mut records = BTreeMap::new();
         for entry in std::fs::read_dir(&self.root).map_err(invalid)? {
             let path = entry.map_err(invalid)?.path();
@@ -317,8 +317,11 @@ impl RecordLanding {
     }
     pub fn hint(&self) -> WorkflowResult<String> {
         let records = self.records()?;
+        if self.kind == RecordKind::Skeleton {
+            return self.skeleton_hint(&records);
+        }
         Ok(format!(
-            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. Skeleton subjects are task ids you establish; final raw skeleton may contain records_landed instead of tasks. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Schema: {}",
+            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Schema: {}",
             records.len(),
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
             serde_json::to_string(&self.remaining()?)?,

@@ -213,11 +213,22 @@ pub(crate) fn audit_prepared_publication(
 /// mid-publish is settled to one whole version by the next recovery. The
 /// staged sources stay: the caller removes them through the staging anchor,
 /// never by a path a child could have redirected (#297 round 8).
+#[cfg(test)]
 pub(crate) fn publish_audited(
     audited: AuditedPublication,
     destinations: &BTreeMap<String, PathBuf>,
     journal_pin: &Path,
     tasks_root: &Path,
+) -> Result<PublicationReceiptV1> {
+    publish_audited_for_call(audited, destinations, journal_pin, tasks_root, None)
+}
+
+pub(crate) fn publish_audited_for_call(
+    audited: AuditedPublication,
+    destinations: &BTreeMap<String, PathBuf>,
+    journal_pin: &Path,
+    tasks_root: &Path,
+    claim: Option<&crate::command::workflow_host_command_committed::Claim>,
 ) -> Result<PublicationReceiptV1> {
     let _chain_lock =
         super::workflow_task_set::ChainLock::acquire_waiting(journal_pin, tasks_root)?;
@@ -257,49 +268,61 @@ pub(crate) fn publish_audited(
         prior.insert(entry.relative_path.clone(), path_digest(destination)?);
         files.push((destination.clone(), entry.bytes.clone()));
     }
-    for (target, _) in &files {
-        authorize_receipt(journal_pin, tasks_root, target)?;
-    }
-    // Reuse the freeze publisher's tested rollback behaviour. The child never
-    // calls this; parent-only audit is complete before this point.
-    super::workflow_task_set::publish_files_atomically(
-        journal_pin,
-        tasks_root,
-        &files,
-        "restart the host command phase after inspecting publication state",
-    )?;
-
     let mut receipts = Vec::with_capacity(audited.entries.len());
     for entry in audited.entries {
         let destination = destinations
             .get(&entry.relative_path)
             .expect("destination set equality established");
-        let bytes = std::fs::read(destination)
-            .with_context(|| format!("reading published output {}", destination.display()))?;
-        let live_digest = content_digest(&bytes);
-        let expected_digest = content_digest(&entry.bytes);
-        if live_digest != expected_digest {
-            return Err(anyhow!(
-                "published output {} does not match audited bytes",
-                destination.display()
-            ));
-        }
         receipts.push(PublishedArtifactReceipt {
             relative_path: entry.relative_path.clone(),
             destination_path: path_text(destination),
-            byte_len: bytes.len() as u64,
-            blake3: live_digest,
+            byte_len: entry.bytes.len() as u64,
+            blake3: content_digest(&entry.bytes),
             prior_blake3: prior.remove(&entry.relative_path).flatten(),
         });
     }
     receipts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(PublicationReceiptV1 {
+    let receipt = PublicationReceiptV1 {
         schema_version: PUBLICATION_RECEIPT_SCHEMA_VERSION,
         call_id: audited.call_id,
         command_id: audited.command_id,
         entries: receipts,
         committed_at: chrono::Utc::now().to_rfc3339(),
-    })
+    };
+    // This parent-owned marker and every audited artifact share the commit point.
+    if let Some(envelope) = destinations.get("gate-envelope.json") {
+        files.push((
+            crate::command::workflow_host_command_committed::path(envelope),
+            serde_json::to_vec_pretty(
+                &crate::command::workflow_host_command_committed::Committed {
+                    receipt: receipt.clone(),
+                    claim: claim.cloned(),
+                },
+            )?,
+        ));
+    }
+    for (target, _) in &files {
+        authorize_receipt(journal_pin, tasks_root, target)?;
+    }
+    // Reuse the freeze publisher's tested rollback behaviour. The child never
+    // calls this; parent-only audit is complete before this point.
+    match super::workflow_task_set::publish_files_atomically(
+        journal_pin,
+        tasks_root,
+        &files,
+        "restart the host command phase after inspecting publication state",
+    ) {
+        Ok(()) => {}
+        Err(error)
+            if error
+                .downcast_ref::<crate::command::workflow_host_command_committed::CommitRecorded>()
+                .is_some() =>
+        {
+            tracing::warn!(%error, "committed publication needs observation and journal settlement");
+        }
+        Err(error) => return Err(error),
+    }
+    Ok(receipt)
 }
 
 fn staged_files(root: &Path) -> Result<BTreeSet<String>> {
@@ -467,20 +490,6 @@ fn path_digest(path: &Path) -> Result<Option<String>> {
     Ok(Some(content_digest(&std::fs::read(path)?)))
 }
 
-fn sanitize_component(value: &str) -> String {
-    let value = value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    if value.is_empty() {
-        "call".to_string()
-    } else {
-        value
-    }
-}
+#[path = "workflow_host_command_publish_name.rs"]
+mod name;
+use name::sanitize_component;

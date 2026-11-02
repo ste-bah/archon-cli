@@ -19,7 +19,7 @@ use super::REAP_DEADLINE;
 pub(super) enum SupervisorEvent {
     /// The rest of the message after "host command '<id>' ".
     Failed(String),
-    Checkpoint(String),
+    Checkpoint(WorkflowError),
 }
 
 #[derive(Debug)]

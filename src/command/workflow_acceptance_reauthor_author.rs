@@ -34,6 +34,33 @@ pub(super) fn prefetch_files_cached(
     notes: &[String],
     cache: &mut crate::command::workflow_task_set::judge::ReauthorPrefetchCache,
 ) -> Vec<serde_json::Value> {
+    let inputs = prefetch_inputs(frozen, notes, &scope.project_root, &scope.repository_root);
+    let roots = crate::command::workflow_task_set::judge::JudgeRoots {
+        project: Some(scope.project_root.clone()),
+        repository: Some(scope.repository_root.clone()),
+        task_root: Some(scope.task_root.clone()),
+        repository_commit: scope
+            .baseline
+            .as_ref()
+            .map(|baseline| baseline.commit.clone()),
+    };
+    // This prompt is fitted by the existing request-history budget.
+    let mut remaining = usize::MAX;
+    crate::command::workflow_task_set::judge::named_files_for_reauthor_cached(
+        frozen,
+        &roots,
+        &inputs,
+        &mut remaining,
+        cache,
+    )
+}
+
+pub(crate) fn prefetch_inputs(
+    frozen: &AcceptanceCriterion,
+    notes: &[String],
+    project: &Path,
+    repository: &Path,
+) -> Vec<String> {
     let cwd = match &frozen.check {
         archon_workflow::task_set_contract::AcceptanceCheck::Command { cwd, .. } => *cwd,
         _ => archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
@@ -47,26 +74,13 @@ pub(super) fn prefetch_files_cached(
         };
         inputs.extend(
             crate::command::workflow_task_set::executability::named_inputs(
-                &finding,
-                &scope.project_root,
-                &scope.repository_root,
+                &finding, project, repository,
             ),
         );
     }
     inputs.sort();
     inputs.dedup();
-    crate::command::workflow_task_set::judge::named_files_for_reauthor_cached(
-        frozen,
-        &scope.project_root,
-        &scope.repository_root,
-        &scope.task_root,
-        scope
-            .baseline
-            .as_ref()
-            .map(|baseline| baseline.commit.clone()),
-        &inputs,
-        cache,
-    )
+    inputs
 }
 
 #[cfg(test)]

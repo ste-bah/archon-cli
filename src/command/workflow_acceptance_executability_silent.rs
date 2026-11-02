@@ -65,62 +65,6 @@ pub(super) fn baseline_context(
     }
 }
 
-/// Issue 420: the copy `probe`'s checks run in, as (depth of a check's
-/// working directory below the copy's top, the names the top holds). A
-/// scratch site holds `repo`, `project` and its own directories
-/// (`acceptance_scratch::ScratchRoots::prepare`); the probe's own copy
-/// holds `repo` and `project` (`HermeticCopy::at`), or keeps a project its
-/// repository tracks inside `repo`, at its depth there. The live tree is no
-/// copy (`None`): a path above a check's directory may be real there.
-fn scratch_copy_tree(
-    probe: &HostProbe,
-    contract: &AcceptanceContract,
-    layout: Option<&super::hermetic::CopyLayout>,
-) -> Option<(usize, Vec<String>)> {
-    const SCRATCH: &[&str] = &[
-        "repo",
-        "project",
-        "home",
-        "tmp",
-        "cargo-home",
-        "target",
-        "project-baseline",
-    ];
-    match probe.site {
-        Site::Scratch(_) => {
-            let mut roots: Vec<String> = SCRATCH.iter().map(|root| (*root).to_string()).collect();
-            roots.extend(layout.map_or_else(
-                || {
-                    hermetic::siblings::copied_root_names(
-                        &probe.project,
-                        &probe.repository,
-                        contract,
-                    )
-                },
-                |layout| {
-                    layout
-                        .siblings
-                        .iter()
-                        .filter_map(|sibling| {
-                            sibling
-                                .path
-                                .components()
-                                .find_map(|component| match component {
-                                    std::path::Component::Normal(name) => {
-                                        Some(name.to_string_lossy().into_owned())
-                                    }
-                                    _ => None,
-                                })
-                        })
-                        .collect()
-                },
-            ));
-            Some((1, roots))
-        }
-        Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
-    }
-}
-
 impl HostProbe {
     /// Where this probe's checks run, for judging their results: its
     /// site's own environment and `contract`'s deliverables.
@@ -141,7 +85,7 @@ pub(super) async fn silent_failure_off_thread(
         .await
         .unwrap_or_else(|error| {
             let why = format!("deciding its verdict failed: {error}");
-            Some((why, UnprovenCause::Host))
+            Some((why, UnprovenCause::PermanentHost))
         })
 }
 
@@ -153,6 +97,26 @@ pub(super) fn silent_failure(
     at: &Context,
 ) -> Option<String> {
     silent_failure_cause(contract, result, at).map(|(why, _)| why)
+}
+
+/// Issue 544: whether two copies of one result (its raw capture and its
+/// masked copy) give the same text verdicts at `probe`'s site: the
+/// no-verdict cause and the setup-path rule. A result store keeps a result
+/// only when they agree, so a reused verdict never differs from the raw one.
+pub(super) fn verdict_oracle(
+    probe: &HostProbe,
+    contract: &AcceptanceContract,
+) -> super::resume::VerdictOracle {
+    let (contract, at) = (contract.clone(), context(probe, contract));
+    std::sync::Arc::new(move |raw: &CheckResult, masked: &CheckResult| {
+        let cause = |result: &CheckResult| {
+            silent_failure_cause(&contract, result, &at).map(|(_, cause)| cause)
+        };
+        let setup = |result: &CheckResult| setup_path_failure(&contract, result, &at).is_some();
+        super::verdict::may_be_host_failure(raw) == super::verdict::may_be_host_failure(masked)
+            && cause(raw) == cause(masked)
+            && setup(raw) == setup(masked)
+    })
 }
 
 /// [`silent_failure`] with its cause ([`UnprovenCause`]).
@@ -228,22 +192,11 @@ fn check_text<'a>(contract: &'a AcceptanceContract, id: &str) -> &'a str {
         .map_or("", |(_, text)| text)
 }
 
-/// Settle check `id`, which failed on `commit` without a verdict (`why`):
-/// unproven the first time (the strike is saved, which a staged freeze
-/// counts as progress, so it is retried); the author's finding when an
-/// earlier attempt already saw it fail so.
 #[cfg(test)]
-pub(super) fn settle(
-    probe: &HostProbe,
-    commit: &str,
-    contract: &AcceptanceContract,
-    result: &CheckResult,
-    why: &str,
-    at: &Context,
-) -> Option<String> {
-    let why = (why, UnprovenCause::Host);
-    settle_as(probe, commit, contract, result, why, at)
-}
+#[path = "workflow_acceptance_executability_silent_test_helpers.rs"]
+mod test_helpers;
+#[cfg(test)]
+pub(super) use test_helpers::settle;
 
 /// [`settle`], recording an unproven check with the cause of `why`.
 pub(super) fn settle_as(
@@ -262,10 +215,27 @@ pub(super) fn settle_as(
     let signature = setup_path_signature(contract, id, result, why, at);
     let retried = match cause {
         UnprovenCause::TransientHost => "the host retries its inconclusive listing probe",
+        // Issue 548: nothing in the host adds a program to the site it
+        // built (its search path is the configured toolchain path, its
+        // cargo home holds only the seed's caches), so a site that lacks
+        // what the check runs never comes to provide it, and no retry can
+        // prove it. It goes to its author at once, in the same budget, with
+        // no strike saved: nothing is held against the author (F6), and no
+        // attempt is spent on it.
         UnprovenCause::SiteLacks => {
-            "its site lacks what the host has, which is the host's to repair and never its author's; it is probed again once the site provides it"
+            return Some(format!(
+                "check '{id}': it cannot be proven on the base commit {short}: {why}. The host has no repair that makes the check's site provide it, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides, without depending on that program or subcommand"
+            ));
         }
-        UnprovenCause::Host | UnprovenCause::ProgramAbsent => {
+        // Issue 557: a program neither the site nor the host has is the
+        // author's at once for the same reason (the re-author path already
+        // sends it there): no host action makes it available.
+        UnprovenCause::ProgramAbsent => {
+            return Some(format!(
+                "check '{id}': it cannot be proven on the base commit {short}: {why}. Neither the check's site nor the host has that program, and no host action makes it available, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides: make it fail by its own assertion on that tree, never by starting a program that neither the site nor the host has"
+            ));
+        }
+        UnprovenCause::Host | UnprovenCause::PermanentHost => {
             "it is probed again on retry, and goes to its author if it fails so again"
         }
     };
@@ -346,7 +316,11 @@ enum Credit {
 pub(super) fn ran(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
     let path = stall_strike(probe, commit, contract, id);
     if let Err(error) = archon_workflow::stage_write::remove_file(&path) {
-        probe.unproven(id, format!("stall strike could not be cleared: {error}"));
+        probe.unproven_error(
+            id,
+            error.into(),
+            format!("stall strike {} could not be cleared", path.display()),
+        );
     }
 }
 
@@ -448,7 +422,7 @@ fn struck(
     match settled {
         Ok(finding) => finding,
         Err(error) => {
-            probe.unproven(id, format!("{unsaved}: {error}"));
+            probe.unproven_error(id, error.into(), unsaved);
             None
         }
     }
@@ -487,7 +461,11 @@ pub(super) fn clear(probe: &HostProbe, commit: &str, contract: &AcceptanceContra
         Ok(())
     });
     if let Err(error) = cleared {
-        probe.unproven(id, format!("baseline strike could not be cleared: {error}"));
+        probe.unproven_error(
+            id,
+            error.into(),
+            "baseline strike could not be cleared".into(),
+        );
     }
 }
 
@@ -497,3 +475,14 @@ mod clock_strike_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_silent_fence_tests.rs"]
 mod fence_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_program_absent_tests.rs"]
+mod program_absent_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_setup_roots_tests.rs"]
+mod setup_roots_tests;
+
+#[path = "workflow_acceptance_executability_silent_copy_tree.rs"]
+mod copy_tree;
+use copy_tree::scratch_copy_tree;

@@ -5,7 +5,7 @@ impl From<AuthError> for crate::provider::LlmError {
     fn from(error: AuthError) -> Self {
         match error {
             AuthError::Provider(error) => error,
-            other => Self::Auth(other.to_string()),
+            other => Self::Auth(other.to_string().into()),
         }
     }
 }
@@ -34,7 +34,9 @@ pub(crate) fn auth_error_to_api(err: AuthError) -> ApiError {
             error_type,
             message,
         },
-        other => ApiError::AuthError(other.to_string()),
+        // A transparent provider fault keeps its raw text for classifiers.
+        AuthError::Provider(error) => ApiError::AuthError(error.display_message()),
+        other => ApiError::AuthError(other.to_string().into()),
     }
 }
 

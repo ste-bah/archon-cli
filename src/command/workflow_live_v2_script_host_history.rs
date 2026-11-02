@@ -2,7 +2,6 @@
 //! `archon_workflow::v2::script::history_replay`.
 use super::*;
 use archon_workflow::v2::script::history_replay::{replayable_answer, replayable_history};
-
 #[derive(serde::Serialize, serde::Deserialize)]
 struct LandingRejudgeObservation {
     schema_version: u32,
@@ -13,7 +12,6 @@ struct LandingRejudgeObservation {
     logic_build: Option<String>,
     outcome: Option<archon_workflow::HostCommandResult>,
 }
-
 impl LandingRejudgeObservation {
     fn key(
         executor: &dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
@@ -50,7 +48,6 @@ impl LandingRejudgeObservation {
         Ok((key, observation))
     }
 }
-
 impl WorkflowScriptHost {
     /// The recorded result of a call that a later call over the same subject
     /// has superseded, when this is a fixed run resuming and the call arrives
@@ -83,7 +80,11 @@ impl WorkflowScriptHost {
         // a landing the executor finds still live is the artifact on disk.
         let history = !self.predates_phase_seed(&record)?
             && replayable_history(&record, &records, input_hash);
-        if !history && !self.landed_record_still_on_disk(&record, input_hash)? {
+        if !history
+            && !self
+                .landed_record_still_on_disk(&record, input_hash)
+                .await?
+        {
             return Ok(None);
         }
         if !self.outcome_holds(&record)? {
@@ -98,7 +99,6 @@ impl WorkflowScriptHost {
             None => self.result_view(&record)?,
         }))
     }
-
     /// A landing request already answered is history, except an unpublished
     /// refusal judged by older logic or the request of its subject's current
     /// body (`archon_workflow::v2::script::landing_lineage`). A refusal is
@@ -211,7 +211,7 @@ impl WorkflowScriptHost {
             // Reconcile a displaced file under the frozen chain lock before
             // deciding which bytes can receive a verdict.
             let mut receipt_restore_used = false;
-            match executor.landing_receipt_matches_disk(&current) {
+            match executor.observe_landing_receipt(&current, generation).await {
                 Ok(true) => {}
                 Ok(false) | Err(WorkflowError::HostOperational(_)) => {
                     let (restored, candidate, superseded) = executor
@@ -316,11 +316,12 @@ impl WorkflowScriptHost {
                     }));
                 }
                 let outcome = judged.outcome;
-                let receipt_matches = match executor.landing_receipt_matches_disk(&current) {
-                    Ok(true) => true,
-                    Ok(false) | Err(WorkflowError::HostOperational(_)) => false,
-                    Err(error) => return Err(error),
-                };
+                let receipt_matches =
+                    match executor.observe_landing_receipt(&current, generation).await {
+                        Ok(true) => true,
+                        Ok(false) | Err(WorkflowError::HostOperational(_)) => false,
+                        Err(error) => return Err(error),
+                    };
                 if !receipt_matches {
                     let (_restored, candidate, superseded) = executor
                         // A judge has already run in this pass. Treat any
@@ -398,7 +399,6 @@ impl WorkflowScriptHost {
             None => self.result_view(&record)?,
         }))
     }
-
     fn rejudged_answer(
         &self,
         landing: &WorkflowV2CallRecord,
@@ -480,7 +480,7 @@ impl WorkflowScriptHost {
     /// a non-deterministic judge would answer differently. Re-asking is how a
     /// resumed run lost an accepted contract. A receipt that no longer matches
     /// (an operator edit during the pause) falls through to live execution.
-    fn landed_record_still_on_disk(
+    async fn landed_record_still_on_disk(
         &self,
         record: &WorkflowV2CallRecord,
         input_hash: &str,
@@ -494,6 +494,7 @@ impl WorkflowScriptHost {
         let Some(executor) = self.runner.host_command_executor.as_ref() else {
             return Ok(false);
         };
-        executor.record_is_live(record)
+        self.observe_host_metadata(&record.call.id, || executor.record_is_live(record))
+            .await
     }
 }

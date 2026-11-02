@@ -44,14 +44,20 @@ pub(super) async fn ask(
         };
         (entry.id.clone(), decision)
     };
-    match super::super::judge::judge_prompted(
-        client,
-        subset,
-        prompt,
-        model,
-        super::super::judge::require_judged_prose,
-        None,
-    )
+    match super::super::judge::judge_refutations(client, subset, prompt, model, |answered| {
+        entries(answered).any(|entry| {
+            let Some(candidate) = pending.iter().find(|candidate| candidate.id == entry.id) else {
+                return false;
+            };
+            let mut decision = decision(entry).1;
+            super::evidence::ground_refutation(
+                &mut decision,
+                &candidate.evidence,
+                &candidate.shown["check"],
+            );
+            decision.verdict != archon_workflow::task_set_contract::JudgeDecision::Accepted
+        })
+    })
     .await
     {
         Ok(judged) => Ok((entries(&judged).map(decision).collect(), None)),
@@ -77,7 +83,8 @@ pub(in crate::command::workflow_task_set) fn incomplete_judge_error(
         .is_some_and(super::super::judge::JudgeIncomplete::is_authored_reply);
     let cause = archon_observability::redaction::redact_text(&format!("{error:#}"));
     let incomplete =
-        FreezeIncomplete::awaiting_judge(&resume.budget, &resume.progress, deferred, cause);
+        FreezeIncomplete::awaiting_judge(&resume.budget, &resume.progress, deferred, cause)
+            .with_fault_class(crate::command::workflow_host_fault::classify(&error));
     if authored_reply {
         incomplete.authored_judge_reply().into()
     } else {

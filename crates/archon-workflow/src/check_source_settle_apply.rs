@@ -124,7 +124,7 @@ fn accept_owned(
             Err(PublishLockError::Unsettled(evidence)) => {
                 return Err(ApplyError::Unsettled(evidence));
             }
-            Err(PublishLockError::Failed(error)) => return Err(ApplyError::Failed(error)),
+            Err(error) => return Err(ApplyError::Failed(error.to_string())),
         }
     }
     Err(ApplyError::Failed(format!(

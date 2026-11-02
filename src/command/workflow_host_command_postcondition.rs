@@ -29,6 +29,18 @@ pub(super) fn evaluate_outcome_postcondition(
     command_id: &str,
     envelope: &archon_workflow::GateEnvelopeV1,
 ) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
+    let _read = crate::command::workflow_task_set::ChainRead::workflow(
+        &context.project_root,
+        &context.task_root,
+    )?;
+    evaluate_outcome_postcondition_locked(context, command_id, envelope)
+}
+
+pub(super) fn evaluate_outcome_postcondition_locked(
+    context: &HostCommandResolutionContext,
+    command_id: &str,
+    envelope: &archon_workflow::GateEnvelopeV1,
+) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
     if matches!(
         command_id,
         "verify-frozen-acceptance" | "verify-frozen-skeleton"
@@ -42,7 +54,7 @@ pub(super) fn evaluate_outcome_postcondition(
             },
         ));
     }
-    evaluate_postcondition(context, command_id)
+    evaluate_postcondition_locked(context, command_id)
 }
 
 pub(super) fn evaluate_postcondition(
@@ -54,6 +66,14 @@ pub(super) fn evaluate_postcondition(
         &context.project_root,
         &context.task_root,
     )?;
+    evaluate_postcondition_locked(context, command_id)
+}
+
+/// The caller holds the chain read lock through receipt and postcondition observation.
+pub(super) fn evaluate_postcondition_locked(
+    context: &HostCommandResolutionContext,
+    command_id: &str,
+) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
     let pin = read_acceptance_pin(context)?;
     // A frozen-chain verification (Issue-46) answers the same question the
     // freeze it stands in for answered: the artifact on disk is the one the
@@ -90,7 +110,7 @@ pub(super) fn evaluate_postcondition(
         ));
     }
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
-        .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
+        .map_err(WorkflowError::port)?;
     if matches!(command_id, "freeze-skeleton" | "verify-frozen-skeleton") {
         if command_id == "freeze-skeleton" {
             // The publication is committed and this read authenticated it.

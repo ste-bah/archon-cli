@@ -34,6 +34,7 @@ pub async fn execute_check_at(
                 crate::DeclarativeFloorEvaluation::Passed => {}
                 crate::DeclarativeFloorEvaluation::Failed { findings } => {
                     return Ok(CheckResult {
+                        verdict_streams: Default::default(),
                         fault: None,
                         classification: None,
                         acceptance_id: reference.acceptance_id.clone(),

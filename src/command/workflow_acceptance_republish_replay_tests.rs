@@ -233,7 +233,9 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
     );
     assert!(prompts[2].contains("cargo nextest"), "{}", prompts[2]);
     assert!(
-        prompts[2].contains("program unavailable at the probe site")
+        // Issue 557: the probe path sends a program neither the site nor the
+        // host has to the author at once, with its own text.
+        prompts[2].contains("Neither the check's site nor the host has that program")
             && prompts[2].contains("cargo-nextest"),
         "the missing site program is an author finding, not HostUnproven/operational: {}",
         prompts[2]
@@ -243,7 +245,7 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
         (
             "site-program",
             &prompts[2],
-            "program unavailable at the probe site",
+            "Neither the check's site nor the host has that program",
         ),
     ] {
         let finding = prompt

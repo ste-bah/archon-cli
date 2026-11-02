@@ -9,6 +9,8 @@ use crate::command::workflow_host_command_logic::{CAPABILITY_LOGIC, LOGIC_DENYLI
 use crate::command::workflow_host_command_logic_closure::{Closure, Workspace};
 use crate::command::workflow_host_command_logic_source::{SourceTree, hashed_text_for_file};
 
+#[path = "workflow_host_command_logic_denylist_tests.rs"]
+mod denylist_tests;
 #[path = "workflow_host_command_logic_digest_tests.rs"]
 mod digest_tests;
 
@@ -137,34 +139,6 @@ pub(crate) fn walk_problems(hashed: &Hashed) -> Vec<String> {
         }
     }
     problems
-}
-
-/// The walk is sound: every reference it meets resolves, and lands on a
-/// hashed or a denied file. Every denylist entry is reached and says why.
-/// `workflow_host_command_logic_walk_tests` proves this check can fail.
-#[test]
-fn logic_361_every_referenced_module_is_hashed_or_denied() {
-    let mut reached = BTreeSet::new();
-    for (id, hashed) in REPOSITORY.iter() {
-        let problems = walk_problems(hashed);
-        assert!(
-            problems.is_empty(),
-            "{id}: the logic walk is unsound (teach the walk, never ignore it):\n{}",
-            problems.join("\n")
-        );
-        let closure = &hashed.closure;
-        reached.extend(closure.denied.keys().cloned());
-    }
-    for (entry, reason) in LOGIC_DENYLIST {
-        assert!(
-            reason.len() > 20,
-            "{entry}: a denylist entry needs its reason"
-        );
-        assert!(
-            reached.contains(*entry),
-            "{entry}: no capability reaches it; remove it"
-        );
-    }
 }
 
 /// The logic changes that landed outside round 1's hand lists now trip the

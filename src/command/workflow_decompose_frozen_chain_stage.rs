@@ -72,62 +72,65 @@ pub(crate) fn stage_verify(
     call_id: Option<&str>,
     read_only: bool,
 ) -> Result<archon_workflow::PreparedPublicationV1> {
-    let stage = FrozenStage::parse(stage)?;
-    let gate_envelope = gate_envelope.ok_or_else(|| {
-        anyhow!("trusted staged verify-frozen-chain requires --gate-envelope <PATH>")
-    })?;
-    let call_id = call_id
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("trusted staged verify-frozen-chain requires --call-id <ID>"))?;
-    let absolute = |path: &Path| {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            cwd.join(path)
-        }
-    };
-    let evaluation = match verify_frozen_stage_with_recovery(
-        cwd,
-        &absolute(prd),
-        &absolute(tasks),
-        stage,
-        !read_only,
-    ) {
-        Ok(snapshot) => crate::command::workflow_gate::GateEvaluation::new(
-            if stage == FrozenStage::Skeleton {
-                serde_json::to_string(&snapshot.to_argument())?
+    let result = (|| {
+        let stage = FrozenStage::parse(stage)?;
+        let gate_envelope = gate_envelope.ok_or_else(|| {
+            anyhow!("trusted staged verify-frozen-chain requires --gate-envelope <PATH>")
+        })?;
+        let call_id = call_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("trusted staged verify-frozen-chain requires --call-id <ID>"))?;
+        let absolute = |path: &Path| {
+            if path.is_absolute() {
+                path.to_path_buf()
             } else {
-                format!(
-                    "{} verified: acceptance={}, skeleton={}, {} frozen subject(s), {} body file(s) present",
-                    stage.command_id(),
-                    snapshot.acceptance,
-                    snapshot.skeleton,
-                    snapshot.subjects.len(),
-                    snapshot.bodies.len()
-                )
-            },
-            Vec::new(),
-        ),
-        Err(error) => {
-            // Issue 338: a set no read can settle pauses the run instead.
-            // Proven journal corruption keeps its permanent envelope and exact remedy.
-            if !crate::command::workflow_task_set::UnsettledPublish::permanent(&error) {
-                crate::command::workflow_host_command_operational::exit_if_unsettled_publish(
-                    &error,
-                );
+                cwd.join(path)
             }
-            super::verification::evaluation(&error, cwd, &absolute(tasks), stage)
-        }
-    };
-    let staging_root = gate_envelope
-        .parent()
-        .ok_or_else(|| anyhow!("staged verify-frozen-chain envelope has no parent"))?;
-    crate::command::workflow_gate_envelope::stage_gate_evaluation(
-        staging_root,
-        gate_envelope,
-        call_id,
-        stage.command_id(),
-        evaluation,
-        Vec::new(),
-    )
+        };
+        let evaluation = match verify_frozen_stage_with_recovery(
+            cwd,
+            &absolute(prd),
+            &absolute(tasks),
+            stage,
+            !read_only,
+        ) {
+            Ok(snapshot) => crate::command::workflow_gate::GateEvaluation::new(
+                if stage == FrozenStage::Skeleton {
+                    serde_json::to_string(&snapshot.to_argument())?
+                } else {
+                    format!(
+                        "{} verified: acceptance={}, skeleton={}, {} frozen subject(s), {} body file(s) present",
+                        stage.command_id(),
+                        snapshot.acceptance,
+                        snapshot.skeleton,
+                        snapshot.subjects.len(),
+                        snapshot.bodies.len()
+                    )
+                },
+                Vec::new(),
+            ),
+            Err(error) => {
+                // Issue 338: a set no read can settle pauses the run instead.
+                // Proven journal corruption keeps its permanent envelope and exact remedy.
+                if !crate::command::workflow_task_set::UnsettledPublish::permanent(&error) {
+                    crate::command::workflow_host_command_operational::exit_if_unsettled_publish(
+                        &error,
+                    );
+                }
+                super::verification::evaluation(&error, cwd, &absolute(tasks), stage)
+            }
+        };
+        let staging_root = gate_envelope
+            .parent()
+            .ok_or_else(|| anyhow!("staged verify-frozen-chain envelope has no parent"))?;
+        crate::command::workflow_gate_envelope::stage_gate_evaluation(
+            staging_root,
+            gate_envelope,
+            call_id,
+            stage.command_id(),
+            evaluation,
+            Vec::new(),
+        )
+    })();
+    result.map_err(crate::command::workflow_host_fault::child_failure)
 }

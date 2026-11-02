@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const fields = ['check/command', 'check/cwd', 'check/kind'];
 const shape = (id, field) => ({text:`acceptance entry '${id}' was refused: ${field} invalid`,
@@ -56,10 +56,10 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
         if (value === 'down') return {status:'failed', summary:'transport'};
         if (value === 'bad') return {status:'accepted', stopReason:'end_turn', content:'not json'};
         if (value === 'badUnknown') return {status:'accepted', stopReason:'end_turn', content:'opaque parser fixture'};
-        if (value === 'stopUnknown') return {status:'accepted', stopReason:version % 2 ? 'provider_stop_a' : 'provider_stop_b', content:JSON.stringify({id, version})};
+        if (value === 'stopUnknown') return {status:'accepted', stopReason:version % 2 ? 'provider_stop_a' : 'provider_stop_b', content:JSON.stringify({id, version, covers:[]})};
         if (value === 'bad2') return {status:'accepted', stopReason:'end_turn', content:'{"id":'};
-        if (value === 'noend') return {status:'accepted', stopReason:'max_tokens', content:JSON.stringify({id, version, criterion:''})};
-        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:value === 'wrong' ? 'OTHER' : id, version, criterion:''})};
+        if (value === 'noend') return {status:'accepted', stopReason:'max_tokens', content:JSON.stringify({id, version, criterion:'', covers:[]})};
+        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:value === 'wrong' ? 'OTHER' : id, version, criterion:'', covers:[]})};
       },
       hostCommand: async () => {
         if (++gate > 40) throw new Error('gate exhausted');
@@ -168,15 +168,18 @@ async function unmeasuredRewriteIsNotCredited(kind) {
 
 // B's unparseable reply is B's own note: C (whose call failed in the same
 // round) keeps the gate's findings as its repair list and never reads B's note.
-async function malformedNoteIsPerEntry() {
+// #555: each keeps only its own gate finding, never the sibling's.
+async function malformedNoteIsPerEntry_555() {
   const out = await run({B:['ok', 'bad', 'ok'], C:['ok', 'down', 'ok']}, [refute(['B', 'C']), clean]);
   assert.equal(out.error, undefined, JSON.stringify(out.pauses));
   const c3 = out.prompt('C', 3), b3 = out.prompt('B', 3);
   assert.doesNotMatch(c3, /acceptance entry B returned no complete entry/, 'C reads no sibling note');
-  const gate = /Repair these exact authoritative findings:\n- check 'B' was refuted: repair B\n- check 'C' was refuted: repair C/;
-  assert.match(c3, gate, 'the repair list is still the gate findings');
+  const gate = id => new RegExp(`open in the latest gate result:\\n- check '${id}' was refuted: repair ${id}`);
+  assert.match(c3, gate('C'), 'the repair list is still the gate findings');
+  assert.doesNotMatch(c3, /check 'B' was refuted/, "C reads no sibling gate finding");
   assert.match(b3, /refused this entry's last answered reply[\s\S]*acceptance entry B returned no complete entry/, 'B reads its own note');
-  assert.match(b3, gate, 'B still reads the gate findings');
+  assert.match(b3, gate('B'), 'B still reads the gate findings');
+  assert.doesNotMatch(b3, /check 'C' was refuted/, "B reads no sibling gate finding");
 }
 
 // An unparseable reply is an answered reply: its note replaces B's shape
@@ -344,7 +347,7 @@ const tests = [
   ['mixed malformed and validator refusals keep both progress kinds', mixedMalformedAndValidatorRefusalsKeepBothProgress],
   ['an unmeasured rewrite beside an unparseable reply is not credited', () => unmeasuredRewriteIsNotCredited('bad')],
   ['an unmeasured rewrite beside a transport failure is not credited', () => unmeasuredRewriteIsNotCredited('down')],
-  ['an unparseable reply is noted for its own entry only', malformedNoteIsPerEntry],
+  ['an unparseable reply is noted for its own entry only (#555)', malformedNoteIsPerEntry_555],
   ['a refusal is replaced by an unparseable note', () => refusalAfterOtherFailure('bad')],
   ['a refusal survives a transport failure', () => refusalAfterOtherFailure('down')],
   ['F1 probe: a repair after an outage still reads its refusal', refusalSurvivesOutage],

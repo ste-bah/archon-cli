@@ -33,7 +33,7 @@ pub(super) fn report_operational_failure(
             "staged command failed operationally",
             Vec::new(),
         )
-        .with_operational_error(format!("{error:#}")),
+        .with_host_error(&error),
         Vec::new(),
     )
 }
@@ -46,12 +46,14 @@ pub(super) fn report_authored_judge_incomplete(
     command_id: &str,
     incomplete: &crate::command::workflow_freeze_budget::FreezeIncomplete,
 ) -> Result<()> {
+    // #552: each check already known not judged keeps its own finding.
     let evaluation = crate::command::workflow_gate::GateEvaluation::new(
         "staged acceptance judge returned no usable authored verdict",
-        Vec::new(),
+        incomplete.known_findings().to_vec(),
     )
     .with_operational_error(incomplete.report())
-    .with_operational_error_kind("authored_judge_reply");
+    .with_operational_error_kind("authored_judge_reply")
+    .with_operational_subjects(incomplete.subjects().to_vec());
     write_staged_manifest(cwd, staged, command_id, evaluation, Vec::new())
 }
 

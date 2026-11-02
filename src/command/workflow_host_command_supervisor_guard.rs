@@ -62,9 +62,10 @@ impl ProcessGroupGuard {
                 .await
                 .and_then(|result| result)
                 .map_err(|error| {
-                    archon_workflow::WorkflowError::HostOperational(format!(
-                        "recording host command identities stalled: {error}"
-                    ))
+                    crate::command::workflow_host_fault::workflow(
+                        error.into(),
+                        "recording host command identities stalled".into(),
+                    )
                 })?;
         }
         Ok(())
@@ -109,8 +110,8 @@ impl ProcessGroupGuard {
             drop(pending);
             evidence
         });
-        progress.watch(work).await.map_err(|error| archon_workflow::WorkflowError::HostOperational(
-            format!("settling host command survivor evidence stalled ({files}); repair the host I/O and recheck these records on resume: {error}")
+        progress.watch(work).await.map_err(|error| crate::command::workflow_host_fault::workflow(
+            error.into(), format!("settling host command survivor evidence stalled ({files}); inspect these survivor records"),
         ))
     }
 }

@@ -22,39 +22,7 @@ impl LlmError {
         match self {
             Self::RateLimited { .. } | Self::Overloaded { .. } | Self::Transport(_) => true,
             Self::Server { status, .. } => matches!(*status, 408 | 429 | 500..=599),
-            Self::Http(text) => {
-                if let Some(status) = status_field(text) {
-                    return matches!(status, 408 | 429 | 500..=599);
-                }
-                // An opened stream's idle/protocol exhaustion is no-progress,
-                // not proof of an unavailable endpoint. It earns no clock credit.
-                if text.starts_with("protocol:")
-                    || text.starts_with("parse_error:")
-                    || text.contains(crate::transport_idle::TRANSPORT_STALL_MARKER)
-                    || text.contains("provider transport stalled:")
-                    || text.contains("stream idle timeout")
-                    || text.contains("no complete answer")
-                {
-                    return false;
-                }
-                let text = text.to_ascii_lowercase();
-                [
-                    "connection",
-                    "socket",
-                    "broken pipe",
-                    "error sending request",
-                    "request failed",
-                    "http_error",
-                    "overloaded",
-                    "server_error",
-                    "rate limit",
-                    "timed out",
-                    "timeout",
-                    "temporar",
-                ]
-                .iter()
-                .any(|marker| text.contains(marker))
-            }
+            Self::Http(text) => http_operational(text.raw()),
             _ => false,
         }
     }
@@ -63,7 +31,7 @@ impl LlmError {
     /// a timeout. Legacy HTTP diagnostics retain a leading status field.
     pub fn is_permanent(&self) -> bool {
         match self {
-            Self::Http(text) => status_field(text)
+            Self::Http(text) => status_field(text.raw())
                 .is_some_and(|status| (400..500).contains(&status) && !matches!(status, 408 | 429)),
             _ => !self.is_operational(),
         }
@@ -88,23 +56,6 @@ impl LlmError {
             _ => None,
         }
     }
-}
-
-/// Parse only a leading status field, never codes quoted in a response body.
-pub fn status_field(text: &str) -> Option<u16> {
-    let text = text.trim().to_ascii_lowercase();
-    let value = [
-        "http error: ",
-        "http ",
-        "status ",
-        "server error (",
-        "server error ",
-    ]
-    .iter()
-    .find_map(|prefix| text.strip_prefix(prefix))
-    .unwrap_or(&text);
-    let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
-    (digits.len() == 3).then(|| digits.parse().ok()).flatten()
 }
 
 // A workflow caller owns the durable retry and its host clocks. Provider-local
@@ -182,8 +133,9 @@ pub(crate) fn structured_rejection(status: u16, body: &str) -> Option<LlmError> 
             )
         })?;
     Some(LlmError::Rejected {
-        error_type: kind.to_string(),
-        message: archon_observability::redaction::redact_text(body),
+        error_type: kind.to_string().into(),
+        // 86fbab995 redacted the body here, before any classifier read it.
+        message: crate::provider::DiagnosticMessage::redacted_at_source(body),
     })
 }
 
@@ -195,12 +147,12 @@ pub fn from_transport(error: reqwest::Error) -> LlmError {
     let mut source = error.source();
     while let Some(cause) = source {
         if cause.downcast_ref::<serde_json::Error>().is_some() {
-            return LlmError::Serialize(error.to_string());
+            return LlmError::Serialize(error.to_string().into());
         }
         source = cause.source();
     }
     if error.is_builder() || error.is_redirect() {
-        LlmError::Serialize(error.to_string())
+        LlmError::Serialize(error.to_string().into())
     } else if let Some(status) = error.status() {
         from_status(status.as_u16(), &Default::default(), error.to_string())
     } else {
@@ -211,12 +163,12 @@ pub fn from_transport(error: reqwest::Error) -> LlmError {
 /// For adapters that expose a native transport failure without an HTTP error.
 /// Call only at a transport boundary, never with an arbitrary diagnostic.
 pub fn from_native_transport(error: impl std::fmt::Display) -> LlmError {
-    LlmError::Transport(error.to_string())
+    LlmError::Transport(error.to_string().into())
 }
 
 /// Unknown causes retain their diagnostic without inventing an outage class.
 /// An incomplete/idle stream does not prove the endpoint was unavailable.
-pub(crate) fn unknown(message: impl Into<String>) -> LlmError {
+pub(crate) fn unknown(message: impl Into<crate::provider::DiagnosticMessage>) -> LlmError {
     LlmError::Http(message.into())
 }
 
@@ -233,16 +185,16 @@ pub fn from_status(status: u16, headers: &reqwest::header::HeaderMap, body: Stri
             crate::anthropic_support::retry_after_from_header(value, chrono::Utc::now())
         });
     match status {
-        401 | 403 => LlmError::Auth(body),
+        401 | 403 => LlmError::Auth(body.into()),
         429 => LlmError::RateLimited {
             retry_after_secs: 0,
             from_provider: false,
             pipeline_retry_after_secs: hint,
-            message: diagnostic_message(&body),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(&body),
         },
         _ => LlmError::Server {
             status,
-            message: diagnostic_message(&body),
+            message: body.into(),
             pipeline_retry_after_secs: hint,
         },
     }
@@ -269,12 +221,16 @@ pub(crate) fn body_read_error(
 /// Known transient event classes remain typed across executor outcomes. The
 /// interactive stream decorator retains its existing pre-content diagnostics.
 /// Preserve the producer's event class through completion and turn adapters.
-pub fn from_stream_error(kind: &str, message: &str) -> LlmError {
-    let message = diagnostic_message(message);
+pub fn from_stream_error(
+    kind: &str,
+    message: impl Into<crate::provider::DiagnosticMessage>,
+) -> LlmError {
+    // 86fbab995 redacted the event text first; every mapping below saw that.
+    let message = crate::provider::DiagnosticMessage::redacted_at_source(message.into().as_str());
     match kind {
         "aborted" => LlmError::Aborted,
         "network" | "http_error" | "transport" | "connection_error" | "timeout_error" => {
-            from_native_transport(message)
+            LlmError::Transport(message)
         }
         "rate_limited" | "rate_limit_error" | "rate_limit_exceeded" => LlmError::RateLimited {
             retry_after_secs: 0,
@@ -303,7 +259,7 @@ pub fn from_stream_error(kind: &str, message: &str) -> LlmError {
             error_type: kind.into(),
             message,
         },
-        _ => unknown(format!("{kind}: {message}")),
+        _ => unknown(message.with_prefix(&format!("{kind}: "))),
     }
 }
 
@@ -311,7 +267,7 @@ pub(crate) fn transport_event(error: reqwest::Error) -> crate::streaming::Stream
     error_event(from_transport(error))
 }
 
-pub(crate) fn error_event(error: LlmError) -> crate::streaming::StreamEvent {
+pub fn error_event(error: LlmError) -> crate::streaming::StreamEvent {
     let kind = match &error {
         LlmError::Transport(_) => "network",
         LlmError::Serialize(_) | LlmError::Unsupported(_) | LlmError::ProviderNotFound { .. } => {
@@ -328,7 +284,11 @@ pub(crate) fn error_event(error: LlmError) -> crate::streaming::StreamEvent {
         LlmError::Aborted => "aborted",
         LlmError::Http(_) => "protocol",
     };
-    let kind = kind.to_string();
+    let kind = if let LlmError::Rejected { error_type, .. } = &error {
+        error_type.clone()
+    } else {
+        kind.into()
+    };
     let message = match &error {
         LlmError::Transport(message)
         | LlmError::Serialize(message)
@@ -339,7 +299,8 @@ pub(crate) fn error_event(error: LlmError) -> crate::streaming::StreamEvent {
         {
             message.clone()
         }
-        error => error.to_string(),
+        // 86fbab995 used the Display text for every other variant.
+        error => error.display_message(),
     };
     crate::streaming::StreamEvent::Error {
         error_type: kind,
@@ -392,7 +353,7 @@ fn into_api(error: LlmError) -> crate::anthropic::ApiError {
         } => ApiError::RateLimited {
             retry_after_secs: pipeline_retry_after_secs.unwrap_or(retry_after_secs),
             from_provider: from_provider || pipeline_retry_after_secs.is_some(),
-            message: diagnostic_message(&message),
+            message: crate::provider::DiagnosticMessage::redacted_at_source(message.as_str()),
         },
         LlmError::Rejected {
             error_type,
@@ -403,7 +364,7 @@ fn into_api(error: LlmError) -> crate::anthropic::ApiError {
         },
         other => ApiError::Rejected {
             error_type: "request_error".into(),
-            message: other.to_string(),
+            message: other.display_message(),
         },
     }
 }
@@ -421,3 +382,27 @@ mod diagnostic_redaction_tests {
     }
     include!("provider_fault_redaction_cases.rs");
 }
+
+#[cfg(test)]
+#[test]
+fn server_redaction_provider_fault_forwarder() {
+    crate::server_redaction_tests::check(into_api(LlmError::Server {
+        status: 500,
+        message: crate::server_redaction_tests::BODY.into(),
+        pipeline_retry_after_secs: Some(7),
+    }));
+}
+
+#[cfg(test)]
+#[path = "provider_fault_characterization_tests.rs"]
+mod c0_characterization;
+
+#[path = "provider_fault_text.rs"]
+mod text;
+
+use text::http_operational;
+pub use text::{
+    RateLimitEvidence, fanout_retry_text_matches, http_status_pattern, pipeline_overload_code,
+    pipeline_transient_text, rate_limit_matches, rate_limit_text_matches, retry_error_class_text,
+    send_retry_text, status_field, transient_text_matches, workflow_context_fault,
+};

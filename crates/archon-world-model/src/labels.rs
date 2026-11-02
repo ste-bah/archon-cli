@@ -18,7 +18,7 @@ impl DeterministicLabelBuilder {
             labels.retry = true;
         }
 
-        if normalized.contains("rate limit")
+        if archon_llm::provider_fault::rate_limit_text_matches(&normalized)
             || normalized.contains("provider incident")
             || normalized.contains("auth failed")
         {

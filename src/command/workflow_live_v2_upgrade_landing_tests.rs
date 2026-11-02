@@ -98,6 +98,8 @@ impl WorkflowHostCommandExecutor for LandingHost {
                 subject: "TASK-X-001".into(),
                 source_path: None,
                 remediation_scope: archon_workflow::RemediationScope::Body,
+                gate_stage: None,
+                judged_item: None,
             };
             if let Some(envelope) = outcome.gate_envelope.as_mut() {
                 envelope.policy_findings = vec![finding];
@@ -126,6 +128,8 @@ impl WorkflowHostCommandExecutor for LandingHost {
                     subject: "TASK-X-001".into(),
                     source_path: None,
                     remediation_scope: archon_workflow::RemediationScope::Body,
+                    gate_stage: None,
+                    judged_item: None,
                 }]
             } else {
                 Vec::new()

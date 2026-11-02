@@ -69,7 +69,7 @@ pub(super) async fn apply(
         Ok(Some(loaded)) => loaded,
         Ok(None) => return Ok(Outcome::default()),
         Err(PublishLockError::Unsettled(evidence)) => return Err(paused(&evidence)),
-        Err(PublishLockError::Failed(error)) => {
+        Err(error) => {
             // Fail closed: no check runs on sources nobody can show it was
             // frozen with.
             let why = format!(

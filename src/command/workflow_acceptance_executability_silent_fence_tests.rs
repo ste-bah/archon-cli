@@ -47,6 +47,7 @@ async fn takeover(case: u8) {
         // The production boundary: ownership changes while verdict classification is awaited.
         let at = context(&probe, &contract);
         let result = CheckResult {
+            verdict_streams: Default::default(),
             fault: None,
             acceptance_id: "check".into(),
             environment_note: None,

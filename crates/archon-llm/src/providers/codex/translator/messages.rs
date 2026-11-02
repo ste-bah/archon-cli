@@ -275,7 +275,7 @@ fn tool_use_to_function_call(block: &serde_json::Value) -> Result<ResponseInputI
         .cloned()
         .unwrap_or(serde_json::Value::Null);
     let arguments = serde_json::to_string(&input)
-        .map_err(|e| LlmError::Serialize(format!("tool_use input: {e}")))?;
+        .map_err(|e| LlmError::Serialize(format!("tool_use input: {e}").into()))?;
     Ok(ResponseInputItem::FunctionCall {
         call_id,
         name,

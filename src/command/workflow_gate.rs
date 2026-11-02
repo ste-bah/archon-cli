@@ -8,6 +8,8 @@ use anyhow::{Context, Result, anyhow};
 use archon_core::config::GateMode;
 use serde::Serialize;
 
+pub(crate) use archon_workflow::GateStage;
+
 pub(crate) const OFF_MESSAGE: &str = "gate_mode=off — nothing was evaluated; this is not a pass\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +41,10 @@ pub(crate) struct GateFinding {
     pub(crate) subject: String,
     pub(crate) source_path: Option<PathBuf>,
     pub(crate) remediation_scope: archon_workflow::RemediationScope,
+    /// #562: the gate stage that produced it, and what it decided within
+    /// `subject` when the subject alone does not name that.
+    pub(crate) gate_stage: Option<GateStage>,
+    pub(crate) judged_item: Option<String>,
 }
 
 impl GateFinding {
@@ -56,7 +62,15 @@ impl GateFinding {
             subject: subject.into(),
             source_path,
             remediation_scope,
+            gate_stage: None,
+            judged_item: None,
         }
+    }
+    /// The same finding as produced by `stage` of its gate, deciding `item`.
+    pub(crate) fn judged_at(mut self, stage: GateStage, item: Option<String>) -> Self {
+        self.gate_stage = Some(stage);
+        self.judged_item = item;
+        self
     }
     pub(crate) fn with_defect(
         mut self,
@@ -73,6 +87,7 @@ pub(crate) struct GateEvaluation {
     pub(crate) findings: Vec<GateFinding>,
     operational_error: Option<String>,
     operational_error_kind: Option<String>,
+    operational_subjects: Vec<String>,
     publication_identity: Option<String>,
     expected_acceptance_contract: Option<archon_workflow::v2::ExpectedAcceptanceContract>,
 }
@@ -84,6 +99,7 @@ impl GateEvaluation {
             findings,
             operational_error: None,
             operational_error_kind: None,
+            operational_subjects: Vec::new(),
             publication_identity: None,
             expected_acceptance_contract: None,
         }
@@ -94,8 +110,32 @@ impl GateEvaluation {
         self
     }
 
+    pub(crate) fn with_host_error(mut self, error: &anyhow::Error) -> Self {
+        let fault = crate::command::workflow_host_fault::envelope(error);
+        let existing = self.operational_error.take();
+        let kind = if existing.is_some()
+            && self.operational_error_kind.as_deref() != Some("transient_host_fault")
+        {
+            "permanent_host_fault".to_string()
+        } else {
+            fault.kind
+        };
+        self.operational_error = Some(match existing {
+            Some(text) => format!("{text}; {}", fault.text),
+            None => fault.text,
+        });
+        self.operational_error_kind = Some(kind);
+        self
+    }
+
     pub(crate) fn with_operational_error_kind(mut self, kind: impl Into<String>) -> Self {
         self.operational_error_kind = Some(kind.into());
+        self
+    }
+
+    /// The subjects the operational error left without an outcome (#552).
+    pub(crate) fn with_operational_subjects(mut self, subjects: Vec<String>) -> Self {
+        self.operational_subjects = subjects;
         self
     }
 
@@ -131,8 +171,9 @@ impl GateEvaluation {
                 .map(|text| archon_workflow::GateOperationalError {
                     kind: self
                         .operational_error_kind
-                        .unwrap_or_else(|| "gate_operational".to_string()),
+                        .unwrap_or_else(|| "permanent_host_fault".to_string()),
                     text,
+                    subjects: self.operational_subjects,
                 });
         let policy_findings = self
             .findings
@@ -145,6 +186,8 @@ impl GateEvaluation {
                     .source_path
                     .map(|path| path.to_string_lossy().replace('\\', "/")),
                 remediation_scope: finding.remediation_scope,
+                gate_stage: finding.gate_stage,
+                judged_item: finding.judged_item,
             })
             .collect();
         Ok(archon_workflow::GateEnvelopeV1 {
@@ -407,56 +450,6 @@ pub(crate) fn append_shadow_records(
         .with_context(|| format!("writing workflow gate shadow log {}", path.display()))
 }
 
-/// Records the findings of a call the parent has already committed.
-///
-/// The staged child must not write here. It only ever produces a prepared
-/// publication, and the parent refuses that publication on non-zero exit,
-/// digest mismatch, sentinel violation or timeout. A child that appended its
-/// findings first left them behind on exactly those refusals, so the log
-/// carried evidence from a call that never landed.
-pub(crate) fn append_published_shadow_records(
-    cwd: &Path,
-    call_id: &str,
-    gate_label: &str,
-    findings: &[archon_workflow::GatePolicyFinding],
-    mode: &'static str,
-) -> Result<()> {
-    if findings.is_empty() {
-        return Ok(());
-    }
-    let path = shadow_log_path(cwd);
-    let parent = path.parent().expect("shadow log has a parent");
-    std::fs::create_dir_all(parent).with_context(|| {
-        format!(
-            "creating workflow gate shadow log directory {}",
-            parent.display()
-        )
-    })?;
-    let timestamp = chrono::Utc::now().to_rfc3339();
-    let mut lines = Vec::with_capacity(findings.len());
-    for finding in findings {
-        let record = ShadowRecord {
-            schema_version: "workflow-gate-shadow-v1",
-            gate_id: gate_label,
-            finding: &finding.text,
-            subject: &finding.subject,
-            source_path: finding.source_path.clone(),
-            mode,
-            timestamp: timestamp.clone(),
-            binary_commit: env!("ARCHON_GIT_HASH"),
-            call_id: Some(call_id),
-        };
-        lines.push(serde_json::to_string(&record)?);
-    }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("opening workflow gate shadow log {}", path.display()))?;
-    append_serialized_records(&mut file, &lines)
-        .with_context(|| format!("writing workflow gate shadow log {}", path.display()))
-}
-
 fn append_serialized_records(writer: &mut impl Write, records: &[String]) -> Result<()> {
     for record in records {
         let mut line = Vec::with_capacity(record.len() + 1);
@@ -472,6 +465,10 @@ fn append_serialized_records(writer: &mut impl Write, records: &[String]) -> Res
     }
     Ok(())
 }
+
+#[path = "workflow_gate_published_shadow.rs"]
+mod published_shadow;
+pub(crate) use published_shadow::append_published_shadow_records;
 
 #[cfg(test)]
 #[path = "workflow_gate_tests.rs"]

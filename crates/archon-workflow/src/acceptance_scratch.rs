@@ -3,7 +3,6 @@ use crate::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
-
 #[path = "acceptance_scratch_cache.rs"]
 mod cache;
 #[path = "acceptance_scratch_control.rs"]
@@ -78,12 +77,12 @@ pub use observe::AttributedTeardown;
 pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
 pub(crate) use process::drain_counted;
-pub use process::{CHECK_TIMED_OUT, CheckResult, MutationInputPlan, MutationPlan};
+pub use process::{CHECK_TIMED_OUT, CheckResult, MutationInputPlan, MutationPlan, VerdictStreams};
 pub use site_path::{
     SITE_BASELINE_DIRECTORY, SITE_CARGO_HOME_DIRECTORY, SITE_HOME_DIRECTORY,
     SITE_INTERNAL_DIRECTORIES, SITE_PROCESS_GROUPS_DIRECTORY, SITE_PROJECT_DIRECTORY,
     SITE_REPOSITORY_DIRECTORY, SITE_TARGET_DIRECTORY, SITE_TEMP_DIRECTORY, SitePathRefusal,
-    site_path_alone,
+    site_internal_directories, site_path_alone,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -115,50 +114,10 @@ fn invalid(message: impl Into<String>) -> WorkflowError {
 fn relative(path: &Path) -> bool {
     !path.as_os_str().is_empty() && path.components().all(|c| matches!(c, Component::Normal(_)))
 }
-impl ScratchPolicy {
-    pub fn validate(&self) -> WorkflowResult<()> {
-        for root in [
-            &self.repository,
-            &self.project,
-            &self.task_root,
-            &self.scratch_parent,
-        ]
-        .into_iter()
-        .chain(&self.build_cache)
-        {
-            if !root.is_absolute() || root.components().any(|c| matches!(c, Component::ParentDir)) {
-                return Err(invalid(
-                    "scratch policy roots must be absolute and normalized",
-                ));
-            }
-        }
-        if self.timeout_secs == 0 || self.output_bytes == 0 || self.scratch_bytes == 0 {
-            return Err(invalid("scratch limits must be positive"));
-        }
-        for input in self
-            .project_inputs
-            .iter()
-            .chain(&self.project_input_excludes)
-        {
-            if !relative(input) || input.components().any(|c| c.as_os_str() == ".git") {
-                return Err(invalid(
-                    "project input must be a normalized relative path without .git",
-                ));
-            }
-        }
-        crate::acceptance_check_environment::validate_operator_bindings(
-            &self.toolchain_path,
-            &self.environment,
-            &self.environment_allowlist,
-        )
-        .map_err(invalid)?;
-        Ok(())
-    }
-}
 
 pub struct ScratchRoots {
     root: PathBuf,
-    mutation_root: mutation_fd::SiteRoot,
+    mutation_root: Option<mutation_fd::SiteRoot>,
     /// CARGO_TARGET_DIR: `root/target`, or the held build cache's.
     target: PathBuf,
     lease: Option<cache::Lease>,
@@ -171,6 +130,9 @@ pub struct ScratchRoots {
     cleaned: bool,
     cleanup_timeout_secs: u64,
     host_environment: BTreeMap<String, String>,
+    /// Issue 544: what capture redacts (see
+    /// `acceptance_check_environment::redaction_values`).
+    redaction_environment: BTreeMap<String, String>,
     siblings: siblings::Copied,
 }
 impl ScratchRoots {
@@ -278,16 +240,23 @@ impl ScratchRoots {
             ),
             lease,
             root,
-            mutation_root,
+            mutation_root: Some(mutation_root),
             live_repository,
             registered: false,
             worktree_link: None,
             cleaned: false,
             cleanup_timeout_secs: policy.timeout_secs.max(5),
+            redaction_environment: crate::acceptance_check_environment::redaction_values(
+                &host_environment,
+                &policy.environment,
+                &crate::acceptance_check_environment::host_environment(),
+            ),
             host_environment,
             siblings: siblings::Copied::default(),
         };
         let setup = (|| {
+            #[cfg(test)]
+            observe::setup_fault_tests::fire(&roots.root)?;
             roots.registered = true;
             // Reclaim a fixed slot still registered by a stale holder.
             let reclaim: &[&str] = if roots.lease.is_some() { &["-f"] } else { &[] };
@@ -494,6 +463,13 @@ impl ScratchRoots {
         self.redact_output(bytes, false)
     }
     pub(super) fn redact_output(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
-        io::redact(&self.host_environment, bytes, truncated)
+        io::redact(&self.redaction_environment, bytes, truncated)
+    }
+    /// See `io::placeholders`.
+    pub(super) fn placeholder_output(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
+        io::placeholders(&self.redaction_environment, bytes, truncated)
     }
 }
+
+#[path = "acceptance_scratch_validate.rs"]
+mod validate;

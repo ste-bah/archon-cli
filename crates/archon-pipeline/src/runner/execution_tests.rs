@@ -6,7 +6,7 @@ fn overload_backoff_doubles_then_caps_without_changing_attempt_budget() {
     let error = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: None,
-        message: String::new(),
+        message: String::new().into(),
     });
     let delays: Vec<_> = (1..=8)
         .map(|attempt| pipeline_attempt_retry_delay(attempt, &error).as_secs())
@@ -21,18 +21,18 @@ fn provider_retry_after_seconds_are_honoured_for_rate_limits_and_overload() {
         retry_after_secs: 37,
         from_provider: true,
         pipeline_retry_after_secs: None,
-        message: String::new(),
+        message: String::new().into(),
     });
     let overloaded = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: Some(53),
-        message: String::new(),
+        message: String::new().into(),
     });
     let pipeline_hint_only = anyhow::Error::new(LlmError::RateLimited {
         retry_after_secs: 0,
         from_provider: false,
         pipeline_retry_after_secs: Some(120),
-        message: String::new(),
+        message: String::new().into(),
     });
     assert_eq!(
         pipeline_attempt_retry_delay(1, &rate_limited),
@@ -49,7 +49,7 @@ fn provider_retry_after_seconds_are_honoured_for_rate_limits_and_overload() {
     let huge_hint = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: Some(86_400 * 20),
-        message: String::new(),
+        message: String::new().into(),
     });
     assert_eq!(
         pipeline_attempt_retry_delay(1, &huge_hint),
@@ -111,7 +111,7 @@ fn overloaded_503_uses_ordinary_retry_delay_even_with_provider_hint() {
     let error = anyhow::Error::new(LlmError::Overloaded {
         status: Some(503),
         retry_after_secs: Some(90),
-        message: String::new(),
+        message: String::new().into(),
     });
     assert!(is_retryable_pipeline_attempt_error(&error));
     assert!(!is_pipeline_overload_error(&error));
@@ -163,7 +163,7 @@ async fn runner_sleep_uses_injectable_delay_without_waiting() {
     let error = anyhow::Error::new(LlmError::Overloaded {
         status: Some(529),
         retry_after_secs: None,
-        message: String::new(),
+        message: String::new().into(),
     });
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     for attempt in 1..PIPELINE_MAX_ATTEMPTS {
@@ -195,4 +195,40 @@ async fn openai_compat_529_retry_after_reaches_pipeline_sleeper() {
     })
     .await;
     assert_eq!(*seen.lock().unwrap(), [Duration::from_secs(120)]);
+}
+
+#[test]
+fn r10_context_window_display_reads_the_raw_fault() {
+    // 86fbab995 stored a server message redacted and scanned the redacted
+    // Display: the cookie line hides "context window" from both.
+    let fault = archon_llm::provider::LlmError::Server {
+        status: 503,
+        message: "Cookie: session=x; context window".into(),
+        pipeline_retry_after_secs: None,
+    };
+    assert!(!fault.to_string().contains("context window"));
+    assert!(!is_context_window_error(&anyhow::Error::new(fault)));
+    let shown = archon_llm::provider::LlmError::ProviderNotFound {
+        name: "Cookie: x; context window".into(),
+        available: "example".into(),
+    };
+    // ProviderNotFound's 86fbab995 Display printed its fields as given.
+    assert!(is_context_window_error(&anyhow::Error::new(shown)));
+}
+
+#[test]
+fn r11_wrapped_fault_text_reads_as_86fbab995_displayed_it() {
+    // A wrapper formatting the fault: main's ProviderNotFound Display printed
+    // its fields as given, so the wrapper text carried "timed out".
+    #[derive(Debug, thiserror::Error)]
+    #[error("{0}")]
+    struct Shows(#[source] archon_llm::provider::LlmError);
+    let fault = archon_llm::provider::LlmError::ProviderNotFound {
+        name: "Cookie: x; timed out".into(),
+        available: "example".into(),
+    };
+    assert!(!fault.to_string().contains("timed out"));
+    assert!(is_retryable_pipeline_attempt_error(&anyhow::Error::new(
+        Shows(fault)
+    )));
 }

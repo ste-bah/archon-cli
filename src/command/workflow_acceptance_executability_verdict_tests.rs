@@ -8,6 +8,7 @@ use super::{Context, may_be_host_failure, no_verdict};
 
 fn run(code: Option<i32>, stdout: &str, stderr: &str) -> CheckResult {
     CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-1".into(),
         exit_code: code,

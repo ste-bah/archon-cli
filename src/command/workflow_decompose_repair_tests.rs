@@ -4,7 +4,6 @@
 //! script, the same way the v3 prelude tests exercise prelude functions.
 
 use super::FIXED_SCRIPT_SOURCE;
-
 /// The embedded script, or the same files under `ARCHON_TEST_SCRIPT_ROOT` (the
 /// override the Node suites honour), so a script can be tested before it is
 /// embedded and an old script replayed to show a test fails before its fix.
@@ -19,6 +18,7 @@ pub(super) fn script_source() -> std::borrow::Cow<'static, str> {
         "workflow_decompose_v1_set_gate.js",
         "workflow_decompose_v1_frozen.js",
         "workflow_decompose_v1_progress.js",
+        "workflow_decompose_v1_failing_set.js",
         "workflow_decompose_v1_seed.js",
         "workflow_decompose_v1_context.js",
     ]
@@ -59,6 +59,10 @@ fn decl(name: &str) -> String {
 mod author_calls;
 #[path = "workflow_decompose_body_repair_tests.rs"]
 mod body_repair;
+#[path = "workflow_decompose_repair_decls.rs"]
+mod decls;
+#[path = "workflow_decompose_frozen_routing_tests.rs"]
+pub(crate) mod frozen_routing;
 #[path = "workflow_decompose_refusal_progress_tests.rs"]
 mod refusal_progress;
 #[path = "workflow_decompose_set_gate_tests.rs"]
@@ -66,94 +70,9 @@ mod set_gate;
 #[path = "workflow_decompose_set_gate_skeleton_tests.rs"]
 pub(crate) mod set_gate_skeleton;
 
-#[path = "workflow_decompose_frozen_routing_tests.rs"]
-pub(crate) mod frozen_routing;
-
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
-    for name in [
-        "STALL_ATTEMPTS",
-        "DEFECT_STAGES",
-        "PASSED_STAGE",
-        "STAGE_CODES",
-        "REFUSED_PREFIX",
-        "PAUSE_EVIDENCE_HISTORY",
-        "PAUSE_EVIDENCE_FINDINGS",
-        "PAUSE_EVIDENCE_TEXT",
-        "PACKAGING_TIER",
-        "REFUSED_TIER",
-        "JUDGED_TIER",
-        "progressText",
-        "findingTier",
-        "findingKey",
-        "hostDefect",
-        "isDeterministic",
-        "stageOf",
-        "attemptMeasure",
-        // Issue 529: a strictly shrinking failing-subject set is progress.
-        "failingSubjectKey",
-        "isStrictSubset",
-        "isBetter",
-        "newProgress",
-        // Issue 357: the per-entry shape-repair frontier.
-        "newRepairEpisode",
-        "openRepairEpisode",
-        "PASSED_MEASURE",
-        "recordRepairs",
-        // Issue 357 round 7: every failed round credits its passes.
-        "creditPassed",
-        "recordRound",
-        "restoreFloor",
-        "creditedRound",
-        "NO_ROUND",
-        "authorRoundReport",
-        "recordStep",
-        "recordAttempt",
-        "recordAnswered",
-        "recordOperational",
-        "stallReason",
-        "boundText",
-        "boundFindings",
-        "loopEvidence",
-        "PAUSES",
-        "pauseLoop",
-        "progressOperationalComponents",
-        "pauseAuthorLoop",
-        "PACKAGING_REFUSAL",
-        "AUTHOR_CALLS",
-        "routeFindings",
-        "authoredSourceMatches",
-        "stopFixed",
-        "requireCommitted",
-        "authorPrompt",
-        // Issue 288: the bounded earlier-attempt history authorPrompt shows.
-        "HISTORY_SHARE",
-        "PRIOR_SHARE",
-        "CATALOGUE_SHARE",
-        "CONTEXT_BUDGET",
-        "HISTORY_RECORD_BYTES",
-        "CUT_MARK",
-        "AUTHOR_PROMPT_LIMIT",
-        "utf8Bytes",
-        "clipBytes",
-        "fitLines",
-        "CONTEXT_FILES",
-        "contextFile",
-        "historyKey",
-        "earlierFindings",
-        "requireDispatchable",
-        "repairEvent",
-        "authorCandidate",
-        "verifyFrozenStage",
-        "frozenFindingOwner",
-        "repairFrozenStage",
-        "acceptanceStagePolicy",
-        "FROZEN_REPAIRS",
-        "prepareAuthorStages",
-        "frozenBodyReusable",
-        "changedDependencySubjects",
-        "acceptanceRepairIds",
-    ] {
+    for name in decls::SCRIPT_DECLS {
         script.push_str(&decl(name));
         script.push('\n');
     }
@@ -493,3 +412,6 @@ fn set_gate_author_loops_pause_without_progress() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[path = "workflow_decompose_context_equivalence_tests.rs"]
+mod context_equivalence;

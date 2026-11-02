@@ -29,6 +29,7 @@ pub mod multimodal;
 pub mod oauth;
 pub mod oauth_codex;
 pub mod provider;
+mod provider_diagnostic;
 pub mod providers;
 mod request_identity;
 // #123: declarative reasoning controls for OpenAI-compatible backends.
@@ -103,3 +104,6 @@ mod provider_fault_http_tests;
 
 #[cfg(test)]
 mod provider_fault_message_tests;
+
+#[cfg(test)]
+mod server_redaction_tests;

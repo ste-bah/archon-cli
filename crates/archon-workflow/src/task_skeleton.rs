@@ -79,6 +79,7 @@ pub struct TaskSetFinding {
 pub struct TaskSkeletonError {
     message: String,
     pub defects: Vec<crate::defect::ValidationDefect>,
+    pub io_cause: Option<(std::io::ErrorKind, Option<i32>)>,
     /// A failed read judged no content; retain its type for verification retry.
     pub io_kind: Option<std::io::ErrorKind>,
 }
@@ -171,14 +172,10 @@ pub fn validate_skeleton_set(
 }
 
 pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonResult<TaskSkeleton> {
-    let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|source| {
-        let mut failure = error(format!(
-            "task_root {} could not be canonicalized: {source}; restore it or re-run `workflow freeze-skeleton`",
-            tasks_root.display()
-        ));
-        failure.io_kind = Some(source.kind());
-        failure
-    })?;
+    let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|source| io_error(&source, format!(
+        "task_root {} could not be canonicalized: {source}; restore it or re-run `workflow freeze-skeleton`",
+        tasks_root.display()
+    )))?;
     let pinned = PathBuf::from(&pin.task_root);
     let pinned = pinned
         .canonicalize()
@@ -197,6 +194,15 @@ pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonRe
     let acceptance_lock: AcceptanceLock = read_json(&tasks_root.join(ACCEPTANCE_LOCK_FILE))?;
     require_blake3(&acceptance_lock.algorithm, ACCEPTANCE_LOCK_FILE)?;
     let acceptance_actual = content_digest(&acceptance_bytes);
+    // Issue 532: a tampered chain names its first decisive cause. Content
+    // digests come first, then acceptance links, then gate provenance; every
+    // check still runs, so no state changes its accept/refuse verdict.
+    if acceptance_lock.digest != acceptance_actual || pin.acceptance_digest != acceptance_actual {
+        return invalid(format!(
+            "acceptance chain differs from freeze event '{}': lock expected {}, pin expected {}, actual {}; restore the frozen version or re-run `workflow freeze-acceptance`",
+            pin.freeze_event_id, acceptance_lock.digest, pin.acceptance_digest, acceptance_actual
+        ));
+    }
     validate_gate_stamp(&acceptance_lock.gate, ACCEPTANCE_LOCK_FILE)
         .map_err(|source| error(source.to_string()))?;
     validate_gate_stamp(&pin.acceptance_gate, "acceptance pin")
@@ -206,16 +212,44 @@ pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonRe
             "acceptance lock/pin gate provenance mismatch; re-run `workflow freeze-acceptance` with the current binary",
         );
     }
-    if acceptance_lock.digest != acceptance_actual || pin.acceptance_digest != acceptance_actual {
-        return invalid(format!(
-            "acceptance chain differs from freeze event '{}': lock expected {}, pin expected {}, actual {}; restore the frozen version or re-run `workflow freeze-acceptance`",
-            pin.freeze_event_id, acceptance_lock.digest, pin.acceptance_digest, acceptance_actual
-        ));
-    }
 
     let skeleton_bytes = read_required(&tasks_root.join(TASK_SKELETON_FILE))?;
     let lock: TaskSkeletonLock = read_json(&tasks_root.join(TASK_SKELETON_LOCK_FILE))?;
     require_blake3(&lock.algorithm, TASK_SKELETON_LOCK_FILE)?;
+    let actual = content_digest(&skeleton_bytes);
+    let pinned_skeleton = pin.skeleton_digest.as_deref();
+    if lock.digest != actual || pinned_skeleton.is_some_and(|pinned| pinned != actual) {
+        return invalid(format!(
+            "task skeleton differs from freeze event '{}': lock expected {}, pin expected {}, actual {}; restore the frozen version or re-run `workflow freeze-skeleton`",
+            pin.freeze_event_id,
+            lock.digest,
+            pinned_skeleton.unwrap_or("no skeleton digest"),
+            actual
+        ));
+    }
+    if pinned_skeleton.is_none() {
+        return invalid(format!(
+            "freeze event '{}' has no skeleton_digest; run `workflow freeze-skeleton` before writing task bodies",
+            pin.freeze_event_id
+        ));
+    }
+    if lock.acceptance_digest != acceptance_actual {
+        return invalid(format!(
+            "{} acceptance_digest is {}, actual frozen acceptance digest {}; restore the frozen version or re-run `workflow freeze-skeleton`",
+            TASK_SKELETON_LOCK_FILE, lock.acceptance_digest, acceptance_actual
+        ));
+    }
+    let skeleton: TaskSkeleton = serde_json::from_slice(&skeleton_bytes).map_err(|parse| {
+        error(format!(
+            "{} is malformed JSON: {parse}; repair it or re-run `workflow freeze-skeleton`",
+            tasks_root.join(TASK_SKELETON_FILE).display()
+        ))
+    })?;
+    if skeleton.acceptance_digest != acceptance_actual {
+        // The body's own acceptance link is decisive before provenance; its
+        // defect report is the same one the full shape check gives.
+        validate_skeleton(&skeleton, &acceptance_actual)?;
+    }
     validate_gate_stamp(&lock.gate, TASK_SKELETON_LOCK_FILE)
         .map_err(|source| error(source.to_string()))?;
     let pin_skeleton_gate = pin.skeleton_gate.as_ref().ok_or_else(|| {
@@ -231,29 +265,6 @@ pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonRe
             "task skeleton lock/pin gate provenance mismatch; re-run `workflow freeze-skeleton` with the current binary",
         );
     }
-    let actual = content_digest(&skeleton_bytes);
-    let pinned_skeleton = pin.skeleton_digest.as_deref().ok_or_else(|| error(format!(
-        "freeze event '{}' has no skeleton_digest; run `workflow freeze-skeleton` before writing task bodies",
-        pin.freeze_event_id
-    )))?;
-    if lock.digest != actual || pinned_skeleton != actual {
-        return invalid(format!(
-            "task skeleton differs from freeze event '{}': lock expected {}, pin expected {}, actual {}; restore the frozen version or re-run `workflow freeze-skeleton`",
-            pin.freeze_event_id, lock.digest, pinned_skeleton, actual
-        ));
-    }
-    if lock.acceptance_digest != acceptance_actual {
-        return invalid(format!(
-            "{} acceptance_digest is {}, actual frozen acceptance digest {}; restore the frozen version or re-run `workflow freeze-skeleton`",
-            TASK_SKELETON_LOCK_FILE, lock.acceptance_digest, acceptance_actual
-        ));
-    }
-    let skeleton: TaskSkeleton = serde_json::from_slice(&skeleton_bytes).map_err(|parse| {
-        error(format!(
-            "{} is malformed JSON: {parse}; repair it or re-run `workflow freeze-skeleton`",
-            tasks_root.join(TASK_SKELETON_FILE).display()
-        ))
-    })?;
     validate_skeleton(&skeleton, &acceptance_actual)?;
     Ok(skeleton)
 }
@@ -415,7 +426,7 @@ fn require_blake3(algorithm: &str, file: &str) -> SkeletonResult<()> {
 
 fn read_required(path: &Path) -> SkeletonResult<Vec<u8>> {
     std::fs::read(path).map_err(|read| {
-        let mut failure = error(format!(
+        let mut failure = io_error(&read, format!(
             "required task-set artifact {} could not be read: {read}; restore it or run the named freeze command",
             path.display()
         ));
@@ -438,10 +449,18 @@ fn invalid<T>(message: impl Into<String>) -> SkeletonResult<T> {
     Err(error(message))
 }
 
+fn io_error(source: &std::io::Error, message: String) -> TaskSkeletonError {
+    let mut fault = error(message);
+    fault.io_cause = Some((source.kind(), source.raw_os_error()));
+    fault.io_kind = Some(source.kind());
+    fault
+}
+
 fn error(message: impl Into<String>) -> TaskSkeletonError {
     TaskSkeletonError {
         message: message.into(),
         defects: Vec::new(),
+        io_cause: None,
         io_kind: None,
     }
 }

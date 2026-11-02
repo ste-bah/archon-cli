@@ -243,7 +243,7 @@ struct Evidence {
     file: Option<std::fs::File>,
     record: HostCommandGroupRecord,
     failed: bool,
-    fault: Option<String>,
+    fault: Option<crate::command::workflow_host_fault::Fault>,
 }
 impl GroupEvidence {
     pub(super) fn new(file: std::fs::File, record: HostCommandGroupRecord) -> Self {
@@ -295,8 +295,12 @@ impl GroupEvidence {
                     .into()
             })
     }
-    pub(crate) fn failure(&self) -> Option<String> {
-        self.0.try_lock().ok().and_then(|state| state.fault.clone())
+    pub(crate) fn failure(&self) -> Option<archon_workflow::WorkflowError> {
+        self.0
+            .try_lock()
+            .ok()
+            .and_then(|state| state.fault.clone())
+            .map(archon_workflow::WorkflowError::port)
     }
     #[cfg(all(test, unix))]
     pub(crate) fn begin(&self) -> std::io::Result<()> {
@@ -381,7 +385,10 @@ impl Evidence {
         })();
         if let Err(error) = &result {
             self.fault
-                .get_or_insert_with(|| format!("survivor checkpoint failed: {error}"));
+                .get_or_insert_with(|| crate::command::workflow_host_fault::Fault {
+                    class: crate::command::workflow_host_fault::io_class(error),
+                    text: format!("survivor checkpoint failed: {error}"),
+                });
             self.failed = true;
             self.record.survivors_unknown = true;
         }

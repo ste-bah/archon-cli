@@ -410,7 +410,7 @@ impl LlmProvider for CodexProvider {
                                     let _ = tx
                                         .send(StreamEvent::Error {
                                             error_type: "translator_error".into(),
-                                            message: e.to_string(),
+                                            message: e.to_string().into(),
                                         })
                                         .await;
                                 }

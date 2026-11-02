@@ -1,3 +1,8 @@
+/// Environment override for the minimum adaptive indexing batch size.
+pub const BATCH_MIN_ENV: &str = "ARCHON_DOCS_BATCH_MIN";
+/// Environment override for the maximum adaptive indexing batch size.
+pub const BATCH_MAX_ENV: &str = "ARCHON_DOCS_BATCH_MAX";
+
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -14,8 +19,8 @@ impl AdaptiveBatchController {
         let enabled = std::env::var("ARCHON_DOCS_ADAPTIVE_BATCHING")
             .map(|value| value != "0" && value != "false")
             .unwrap_or(true);
-        let min = env_usize("ARCHON_DOCS_BATCH_MIN").unwrap_or_else(|| (initial / 4).max(1));
-        let max = env_usize("ARCHON_DOCS_BATCH_MAX").unwrap_or_else(|| (initial * 4).max(initial));
+        let min = env_usize(BATCH_MIN_ENV).unwrap_or_else(|| (initial / 4).max(1));
+        let max = env_usize(BATCH_MAX_ENV).unwrap_or_else(|| (initial * 4).max(initial));
         Self {
             current: initial.clamp(min, max),
             min,

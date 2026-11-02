@@ -101,3 +101,22 @@ fn generic_failure_default_label() {
         "[subagent_failure]"
     );
 }
+
+// Main deliberately distinguishes explicit HTTP/phrase evidence from aliases.
+#[test]
+fn agent_tool_shared_rate_limit_specificity_matches_main() {
+    for (message, expected) in [
+        ("rate_limited", "[subagent_failure]"),
+        ("rate_limit_error", "[subagent_failure]"),
+        ("ratelimit", "[subagent_failure]"),
+        ("HTTP 429:", "[subagent_rate_limited]"),
+        ("rate limit exceeded", "[subagent_rate_limited]"),
+        ("rate-limit", "[subagent_rate_limited]"),
+        (
+            "thread 'worker' panicked at src/foo.rs:1429:1",
+            "[subagent_panic]",
+        ),
+    ] {
+        assert_eq!(classify_failure_prefix(message), expected, "{message}");
+    }
+}

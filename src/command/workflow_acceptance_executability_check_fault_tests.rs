@@ -29,7 +29,7 @@ async fn output_past_the_site_limit_goes_to_the_checks_author_at_once() {
     assert!(!unproven.contains_key("AC-X-001"), "{unproven:?}");
 }
 
-async fn staged(
+pub(super) async fn staged(
     trees: &Trees,
 ) -> anyhow::Result<crate::command::workflow_task_set::coverage_gate::PreImplementation> {
     let resume = FreezeResume::saving(FreezeBudget::unlimited(), true);
@@ -43,7 +43,7 @@ async fn staged(
     .await
 }
 
-fn author_finding(
+pub(super) fn author_finding(
     found: anyhow::Result<crate::command::workflow_task_set::coverage_gate::PreImplementation>,
     id: &str,
 ) -> String {
@@ -98,7 +98,7 @@ fn mutation_run(
     signal: &str,
     error: Option<&str>,
 ) -> repairs::TreeRun {
-    let result = CheckResult {
+    let result = CheckResult { verdict_streams: Default::default(),
         fault: None,
         classification: None,
         acceptance_id: id.into(),
@@ -121,7 +121,7 @@ fn mutation_run(
     repairs::TreeRun::known(&[evidence], "already observed")
 }
 
-async fn prove_once(
+pub(super) async fn prove_once(
     trees: &Trees,
     markers: &mutation::Markers,
     run: repairs::TreeRun,

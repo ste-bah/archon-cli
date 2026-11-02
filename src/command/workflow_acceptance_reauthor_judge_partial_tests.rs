@@ -47,6 +47,7 @@ async fn an_incomplete_reauthor_judge_returns_decided_entries_and_retries_only_m
         &mut retry,
         &mut feedback,
         (&mut pending, &mut reused, &mut unproven),
+        &mut BTreeMap::new(),
     )
     .expect("typed incomplete judge");
 

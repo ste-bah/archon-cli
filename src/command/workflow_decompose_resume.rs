@@ -1,19 +1,16 @@
 use super::*;
 use crate::command::workflow_decompose_landing_reconcile as landing_reconcile;
-
-#[path = "workflow_decompose_resume_recovery.rs"]
-pub(crate) mod recovery;
-
+use crate::command::workflow_host_command_groups::settle_before_resume;
 #[path = "workflow_decompose_resume_dry_run.rs"]
 mod dry_run;
+#[path = "workflow_decompose_resume_recovery.rs"]
+pub(crate) mod recovery;
 pub(crate) use dry_run::dry_run_fixed_decomposition;
-
 #[path = "workflow_decompose_resume_entry.rs"]
 mod entry;
 pub(crate) use entry::{
     resume_fixed_decomposition_with_factory, resume_fixed_decomposition_with_factory_and_sink,
 };
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     cwd: &Path,
@@ -57,10 +54,10 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             // that fences the dead executor's work. The state names no log.
             if run.status == archon_workflow::RunStatus::Running {
                 let ended_groups =
-                    crate::command::workflow_host_command_groups::require_no_running_groups(
-                        &store.run_dir(run_id),
-                        run_id,
-                    )
+                    settle_before_resume(&store.run_dir(run_id), run_id, &execution_lease, || {
+                        entry::recovery_control(&store, &run, cancellation_requested)
+                    })
+                    .await
                     .map_err(|groups| {
                         groups.context(format!(
                             "the decomposition state is also unreadable: {error:#}"
@@ -90,10 +87,11 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     }
     // Any group record left here is from a dead executor: this process holds
     // the lease, and a live executor's groups end before it releases it.
-    let ended_groups = crate::command::workflow_host_command_groups::require_no_running_groups(
-        &store.run_dir(run_id),
-        run_id,
-    )?;
+    let ended_groups =
+        settle_before_resume(&store.run_dir(run_id), run_id, &execution_lease, || {
+            entry::recovery_control(&store, &run, cancellation_requested)
+        })
+        .await?;
     // Staging a dead executor left unsealed goes before any child runs.
     crate::command::workflow_host_staging_residue::clear_left(&store.run_dir(run_id))?;
     if run.status == archon_workflow::RunStatus::Running {
@@ -493,7 +491,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &store, run_id, ledger, result,
     )
 }
-
 #[path = "workflow_decompose_resume_policy.rs"]
 pub(crate) mod policy;
 #[path = "workflow_decompose_upgrade.rs"]

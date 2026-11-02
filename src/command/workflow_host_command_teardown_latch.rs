@@ -69,6 +69,15 @@ impl TeardownLatch {
         then(confirmed);
     }
 
+    /// Normal retry waits for the same confirmation cancellation cleanup uses.
+    pub(crate) async fn wait_confirmed(&self) -> bool {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.after_teardown(Box::new(move |confirmed| {
+            let _ = sender.send(confirmed);
+        }));
+        receiver.await.unwrap_or(false)
+    }
+
     fn report(&self, confirmed: bool) {
         let mut state = self.state();
         state.pending = state.pending.saturating_sub(1);

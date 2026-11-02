@@ -78,6 +78,20 @@ pub(in crate::command::workflow_task_set) fn acceptance_findings(
                 Some(contract_path.to_path_buf()),
                 scope,
             );
+            // #562: a verdict other than `accepted` is the judge's, or the
+            // passability stage's when that stage wrote it. A check the host
+            // did not judge (its sources withheld, or no usable verdict) has
+            // no model verdict, so no stage: it is the gate's own finding.
+            let not_judged = entry.is_some_and(|criterion| judge::not_judged(criterion).is_some());
+            if refuted && !not_judged && finding.identity.is_none() {
+                let stage = match entry.is_some_and(|criterion| {
+                    passability::is_passability_call(&criterion.judgment.host_call_id)
+                }) {
+                    true => crate::command::workflow_gate::GateStage::Passability,
+                    false => crate::command::workflow_gate::GateStage::Judge,
+                };
+                gate_finding = gate_finding.judged_at(stage, None);
+            }
             gate_finding.deterministic_defect = finding.identity;
             gate_finding
         }),

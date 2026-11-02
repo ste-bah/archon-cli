@@ -256,6 +256,7 @@ fn refusal_envelope() -> WorkflowResult<Vec<u8>> {
         operational_error: Some(archon_workflow::GateOperationalError {
             kind: "secret_redaction_refused".into(),
             text: "Host evidence could not be safely redacted; update the forwarded credentials and retry".into(),
+            subjects: Vec::new(),
         }),
     })?)
 }

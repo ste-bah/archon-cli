@@ -72,6 +72,7 @@ fn gate_operational_error_preserves_kind_text_and_stderr() {
             operational_error: Some(archon_workflow::GateOperationalError {
                 kind: "transport".into(),
                 text: "judge unavailable".into(),
+                subjects: Vec::new(),
             }),
         }),
         publication_receipt: None,
@@ -116,6 +117,7 @@ fn typed_input_invalid_gate_error_becomes_a_subject_finding() {
             operational_error: Some(archon_workflow::GateOperationalError {
                 kind: "input_invalid".into(),
                 text: "task body has no YAML task block".into(),
+                subjects: Vec::new(),
             }),
         }),
         publication_receipt: None,

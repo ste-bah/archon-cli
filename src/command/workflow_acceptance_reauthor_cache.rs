@@ -135,6 +135,10 @@ pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
         "workflow_task_set_judge_incomplete.rs",
         include_bytes!("workflow_task_set_judge_incomplete.rs"),
     ),
+    (
+        "workflow_task_set_judge_each.rs",
+        include_bytes!("workflow_task_set_judge_each.rs"),
+    ),
 ];
 
 pub(crate) fn prompt_and_judge_source_digest(sources: &[(&str, &[u8])]) -> String {
@@ -394,6 +398,11 @@ pub(crate) fn remove(state_dir: &Path) -> Result<()> {
 }
 
 pub(crate) fn archive(state_dir: &Path, publish_digest: &str) -> Result<()> {
+    #[cfg(test)]
+    crate::command::workflow_host_fault_test_hooks::fire(
+        crate::command::workflow_host_fault_test_hooks::Point::Archive,
+        state_dir,
+    )?;
     let records = state_dir.join(RECORDS);
     if !records.exists() {
         return Ok(());

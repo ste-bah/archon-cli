@@ -1,7 +1,10 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
-struct RegisteringProcess(std::path::PathBuf);
+struct RegisteringProcess {
+    path: std::path::PathBuf,
+    calls: std::sync::atomic::AtomicUsize,
+}
 #[async_trait::async_trait]
 impl HostCommandProcessAdapter for RegisteringProcess {
     async fn execute(
@@ -9,12 +12,17 @@ impl HostCommandProcessAdapter for RegisteringProcess {
         mut request: ResolvedHostCommand,
         control: HostCommandControl,
     ) -> WorkflowResult<SupervisedProcessOutput> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            return Err(WorkflowError::StageFailed(
+                "unexpected registration retry".into(),
+            ));
+        }
         request.program = "/bin/sh".into();
         request.args = vec!["-c".into(), "exit 0".into()];
         crate::command::workflow_host_command_supervisor::supervise_process_group(
             request,
             control,
-            Some(&self.0),
+            Some(&self.path),
         )
         .await
     }
@@ -43,46 +51,46 @@ async fn registration_failure(mode: &str) {
             std::fs::write(dir.parent().unwrap(), b"obstruction").unwrap();
         }
     }
+    let process = Arc::new(RegisteringProcess {
+        path: dir.clone(),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
     let executor = FixedHostCommandExecutor::with_process(
         fixed_decomposition_catalog("rev-1").unwrap(),
         fixture.context.clone(),
         run_root,
-        Arc::new(RegisteringProcess(dir.clone())),
+        process.clone(),
     );
     let result = executor.execute(lint(), Some(fixture.generation)).await;
     if mode == "readonly" {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let error = result.unwrap_err();
+    let result = result.unwrap();
+    assert_eq!(process.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let error = result.gate_envelope.unwrap().operational_error.unwrap();
+    assert_eq!(error.kind, "permanent_host_fault");
     assert!(
-        matches!(error, WorkflowError::ControlPaused(_)),
-        "{mode}: {error}"
+        error.text.contains(&dir.display().to_string()),
+        "{}",
+        error.text
     );
-    let note = error.to_string();
-    assert!(note.contains(&dir.display().to_string()), "{note}");
-    assert!(
-        note.contains(&format!(
-            "archon workflow resume --live --yes {}",
-            fixture.run_id
-        )),
-        "{note}"
-    );
+    assert!(error.text.contains("remedy:"), "{}", error.text);
     assert_eq!(
         fixture.store.load_state(&fixture.run_id).unwrap().status,
-        RunStatus::Paused
+        RunStatus::Running
     );
 }
 
 #[tokio::test]
-async fn readonly_registration_pauses() {
+async fn readonly_registration_requires_permission_repair() {
     registration_failure("readonly").await;
 }
 #[tokio::test]
-async fn obstructed_registration_pauses() {
+async fn obstructed_registration_requires_directory_repair() {
     registration_failure("not-directory").await;
 }
 #[tokio::test]
-async fn obstructed_parent_registration_pauses() {
+async fn obstructed_parent_registration_requires_directory_repair() {
     registration_failure("missing-parent").await;
 }
 

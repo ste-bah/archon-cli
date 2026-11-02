@@ -80,3 +80,113 @@ async fn a_run_authored_with_full_prior_entries_resumes_through_its_seed() {
         assert_eq!(entry["check"]["command"], format!("check {id}"));
     }
 }
+
+async fn fixed_author_task(
+    set: &crate::command::workflow_task_set::republish::test_fixture::FrozenSet,
+    notes: &[&str],
+) -> String {
+    let scope =
+        crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set_without_cache(
+            set.project.path(),
+            &set.tasks,
+            &set.prd,
+        )
+        .unwrap();
+    let run = Run::new();
+    let mut args = run.args();
+    args["projectRoot"] = serde_json::json!(set.project.path());
+    args["repositoryRoot"] = serde_json::json!(&scope.repository_root);
+    args["taskRoot"] = serde_json::json!(&set.tasks);
+    args["prdPath"] = serde_json::json!(&set.prd);
+    args["acceptanceCriteria"] = serde_json::json!({"AC-X-001":"criterion"});
+    let entry = serde_json::to_string(&set.contract().acceptance[0]).unwrap();
+    let notes = serde_json::to_string(notes).unwrap();
+    let script = format!(
+        r#"{FIXED_SCRIPT_SOURCE}
+async function workflow(w) {{
+  const id = "AC-X-001";
+  const notes = {notes};
+  const state = {{entries:new Map([[id,{entry}]]),order:[id]}};
+  const prompt = authorPrompt(acceptanceAuthorPrompt(), 1, notes, []);
+  await authorOne(w, prompt, 0, id, args.acceptanceCriteria[id], [], args.acceptanceCriteria, state);
+  return {{}};
+}}
+"#
+    );
+    run.run(&script, args)
+        .await
+        .expect("the real script host dispatches the author");
+    let tasks = run.authors.tasks();
+    assert_eq!(tasks.len(), 1);
+    tasks[0].clone()
+}
+
+#[tokio::test]
+async fn read_guard_fixed_author_receives_named_content_and_stop_rule() {
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set(&[(
+        "AC-X-001",
+        "inspect src/decision.data",
+        false,
+    )]);
+    let path = set.project.path().join("src/decision.data");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "deciding content is supplied\n").unwrap();
+    let task = fixed_author_task(&set, &[]).await;
+    assert!(task.contains("Answer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself."), "{task}");
+    assert!(task.contains("deciding content is supplied"), "{task}");
+    assert!(task.contains("Files already identified"));
+}
+
+#[tokio::test]
+async fn read_guard_fixed_author_prefetch_redacts_and_spends_the_existing_prompt_budget() {
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set(&[(
+        "AC-X-001",
+        "inspect src/private.data",
+        false,
+    )]);
+    let root = set.project.path().join("src");
+    std::fs::create_dir_all(&root).unwrap();
+    let secret = "sk-abcdefghijklmnopqrst0000";
+    std::fs::write(
+        root.join("private.data"),
+        format!("credential = {secret}\n"),
+    )
+    .unwrap();
+    std::fs::write(root.join("large.data"), "é".repeat(150_000)).unwrap();
+    let task = fixed_author_task(&set, &["considered inputs: src/large.data"]).await;
+    assert!(task.contains("***REDACTED***"), "{task}");
+    assert!(!task.contains(secret));
+    let (_, supplied) = task
+        .split_once("Files already identified for this check are supplied here when available: ")
+        .unwrap();
+    // The reply format stays the final task section (#392), so the supplied
+    // list is the first JSON value after its label, not the task's tail.
+    let supplied: serde_json::Value = serde_json::Deserializer::from_str(supplied)
+        .into_iter::<serde_json::Value>()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert!(
+        supplied
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file["path"] == "src/large.data" && file["status"] == "not_supplied")
+    );
+    assert!(!task.contains(&"é".repeat(1000)));
+    assert!(task.contains("Return exactly one complete reply with one entry and one check."));
+    assert!(task.len() <= 262_144);
+}
+
+#[tokio::test]
+async fn named_files_native_prefetch_leaves_the_dispatch_budget_for_the_script() {
+    let set = crate::command::workflow_task_set::republish::test_fixture::frozen_set(&[(
+        "AC-X-001",
+        "criterion",
+        false,
+    )]);
+    let notes = vec!["src/input.data"; 1024];
+    let task = fixed_author_task(&set, &notes).await;
+    assert!(task.contains("Author ONLY entry AC-X-001:"));
+    assert!(task.contains("Files already identified"));
+}

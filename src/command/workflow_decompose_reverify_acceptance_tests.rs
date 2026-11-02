@@ -453,3 +453,6 @@ fn reverify_incomplete_advice_names_the_retry_command() {
     assert!(text.contains("authentication_error"), "{text}");
     assert!(!text.contains("Retry the freeze"), "{text}");
 }
+
+#[path = "workflow_decompose_reverify_acceptance_tests_redaction.rs"]
+mod redaction;

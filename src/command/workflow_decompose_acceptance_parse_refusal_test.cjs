@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
 async function refusal(reply, stopReason = 'end_turn') {
@@ -187,7 +187,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.equal(json.resolveCommandBlock(heredocEntry, heredocReply), null);
   assert.equal(heredocEntry.check.command, 'cat <<\'EOF\'\n```js\n{"example": true}\nEOF',
     'info-string fence text in a resolved check script is preserved byte for byte');
-  const resolved = await refusal('```check\nprintf ok\necho done\ntrue\n```\n{"id":"A","check":{"kind":"command","command_block":true}}');
+  const resolved = await refusal('```check\nprintf ok\necho done\ntrue\n```\n{"id":"A","covers":[],"check":{"kind":"command","command_block":true}}');
   assert.equal(JSON.parse(resolved.content).entries[0].check.command, 'printf ok\necho done\ntrue');
   const exact = async (reply, message) => {
     const result = await refusal(reply);

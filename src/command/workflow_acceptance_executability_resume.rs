@@ -46,184 +46,14 @@ struct Saved {
 pub(super) struct ResultStore {
     pub(super) dir: PathBuf,
     redactor: Arc<Redactor>,
+    /// Issue 544: whether the raw and the masked copy of one result give the
+    /// same text verdicts at this probe's site (see `save_evidence`).
+    oracle: Option<VerdictOracle>,
 }
 
-impl ResultStore {
-    pub(super) fn new(dir: PathBuf, redactor: Redactor) -> Self {
-        Self {
-            dir,
-            redactor: Arc::new(redactor),
-        }
-    }
-
-    pub(super) fn path(&self, key: &str) -> Option<PathBuf> {
-        (key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
-            .then(|| self.dir.join(format!("{key}.json")))
-    }
-
-    pub(super) fn evidence_ref(&self, key: &str) -> Option<String> {
-        self.path(key).map(|path| path.display().to_string())
-    }
-
-    /// The verdict saved under `key`; incompatible evidence is a miss and is
-    /// left in place for investigation. Schema 3 is safe only at Scratch,
-    /// whose judging context supplies its fixed tree layout.
-    pub(super) fn load(&self, key: &str, allow_schema3: bool) -> Option<CheckEvidence> {
-        let path = self.path(key)?;
-        let saved = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok());
-        match saved {
-            Some(saved)
-                if (saved.schema == SCHEMA
-                    || (!allow_schema3 && saved.schema == 4)
-                    || (allow_schema3 && saved.schema == 3))
-                    && saved.key == key
-                    && saved.result.operational_error.is_none()
-                    && saved.result.classification.is_some()
-                    && !super::verdict::may_be_host_failure(&saved.result) =>
-            {
-                Some(CheckEvidence {
-                    result: saved.result,
-                    copy_layout: saved.copy_layout,
-                })
-            }
-            _ => None,
-        }
-    }
-
-    /// Save `result` under `key`, atomically; false when it was not saved.
-    #[cfg(test)]
-    pub(super) fn save(&self, key: &str, result: &CheckResult) -> bool {
-        self.save_evidence(key, result, None)
-    }
-
-    pub(super) fn save_evidence(
-        &self,
-        key: &str,
-        result: &CheckResult,
-        copy_layout: Option<CopyLayout>,
-    ) -> bool {
-        let Some(path) = self.path(key) else {
-            return false;
-        };
-        // Issue 328: nor a run that failed for its host (a program that
-        // could not start, a tree that did not build): no verdict.
-        if result.operational_error.is_some() || super::verdict::may_be_host_failure(result) {
-            return false;
-        }
-        let mut result = result.clone();
-        // Native command results are already classified at capture. Declarative
-        // results have no command and cannot be a script crash.
-        result.classify_raw("");
-        if let Some(classification) = &mut result.classification
-            && let CheckRunClass::ScriptDefect(defect) = &mut classification.crash
-        {
-            defect.signal = "see the fenced stderr below".into();
-            defect.rule =
-                String::from_utf8_lossy(&self.redactor.redact_bytes(defect.rule.as_bytes()))
-                    .into_owned();
-        }
-        result.stdout = self.redactor.redact_bytes(&result.stdout);
-        result.stderr = self.redactor.redact_bytes(&result.stderr);
-        let saved = Saved {
-            schema: SCHEMA,
-            key: key.to_string(),
-            result,
-            copy_layout,
-        };
-        let path = path.with_extension("provisional");
-        let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
-        let provisional = path.with_extension("provisional");
-        let same_result = std::fs::read(&provisional)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|previous| {
-                previous["key"] == key
-                    && serde_json::to_value(&saved.result)
-                        .is_ok_and(|result| previous["result"] == result)
-            });
-        let written = std::fs::create_dir_all(&self.dir).is_ok()
-            && serde_json::to_vec(&saved).is_ok_and(|bytes| write_owner_only(&staging, &bytes))
-            && (same_result || self.preserve_replaced(&provisional))
-            && std::fs::rename(&staging, &provisional).is_ok();
-        if !written {
-            let _ = std::fs::remove_file(&staging);
-        }
-        written
-    }
-
-    /// The mutation nonce saved under `key` (see `mutation_markers`).
-    fn load_nonce(&self, key: &str) -> Option<String> {
-        let path = self.path(key)?.with_extension("nonce");
-        Some(std::fs::read_to_string(path).ok()?.trim().to_string())
-    }
-
-    fn save_nonce(&self, key: &str, nonce: &str) {
-        if let Some(path) = self.path(key) {
-            let path = path.with_extension("nonce");
-            let staging = path.with_extension(format!("nonce.{}.tmp", std::process::id()));
-            let _ = std::fs::create_dir_all(&self.dir)
-                .and_then(|()| std::fs::write(&staging, nonce))
-                .and_then(|()| std::fs::rename(&staging, &path));
-            let _ = std::fs::remove_file(&staging);
-        }
-    }
-
-    pub(super) fn remove(&self, key: &str) {
-        if let Some(path) = self.path(key) {
-            let _ = std::fs::remove_file(path.with_extension("provisional"));
-        }
-    }
-
-    /// Keep prior evidence before promotion atomically replaces the active key.
-    fn preserve_replaced(&self, path: &std::path::Path) -> bool {
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
-            Err(error) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %error,
-                    "could not read prior acceptance evidence for archival"
-                );
-                return false;
-            }
-        };
-        let suffix = serde_json::from_slice::<serde_json::Value>(&bytes)
-            .ok()
-            .map(|value| {
-                if value["schema"] == 3 {
-                    "schema3"
-                } else if value["schema"] == 4 && value["copy_layout"].is_null() {
-                    "schema4-layoutless"
-                } else {
-                    "previous"
-                }
-            })
-            .unwrap_or("previous");
-        // Each distinct prior result adds one archive file; cleanup is intentionally absent so evidence is kept.
-        for index in 0.. {
-            let ext = if index == 0 {
-                suffix.to_string()
-            } else {
-                format!("{suffix}.{index}")
-            };
-            let archive = path.with_extension(ext);
-            match std::fs::hard_link(path, &archive) {
-                Ok(()) => return true,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if std::fs::read(&archive).is_ok_and(|archived| archived == bytes) {
-                        return true;
-                    }
-                }
-                Err(_) if write_archive(&archive, &bytes) => return true,
-                Err(_) => return false,
-            }
-        }
-        false
-    }
-}
+/// True when two copies of one result (raw, masked) give the same verdicts
+/// that the host reads from output text.
+pub(super) type VerdictOracle = Arc<dyn Fn(&CheckResult, &CheckResult) -> bool + Send + Sync>;
 
 impl HostProbe {
     /// Run under `resume`'s budget, saving verdicts when it says so.
@@ -374,6 +204,7 @@ impl HostProbe {
                         key,
                         result,
                         copy_layout.lock().ok().and_then(|layout| layout.clone()),
+                        save_predicates.get(&result.acceptance_id),
                     )
                 {
                     written.lock().expect("written lock").push(key.clone());
@@ -458,3 +289,6 @@ mod cap_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_bound_tests.rs"]
 mod bound_tests;
+
+#[path = "workflow_acceptance_executability_resume_store.rs"]
+mod store;

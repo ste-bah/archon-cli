@@ -154,20 +154,18 @@ impl Tool for GrepTool {
             }
         }
 
-        if results.is_empty() {
-            let mut message = "No matches found".to_string();
-            append_limits(
-                &mut message,
-                file_limit_hit,
-                result_limit_hit,
-                skipped_large,
-            );
-            ToolResult::success(message)
+        let mut output = if results.is_empty() {
+            "No matches found".to_string()
         } else {
-            let mut output = results.join("\n");
-            append_limits(&mut output, file_limit_hit, result_limit_hit, skipped_large);
-            ToolResult::success(output)
+            results.join("\n")
+        };
+        append_limits(&mut output, file_limit_hit, result_limit_hit, skipped_large);
+        if let Some(guard) = &ctx.workflow_read_guard
+            && let Some(note) = guard.search_result(ctx, &search_path, &input, &output)
+        {
+            return ToolResult::success(note);
         }
+        ToolResult::success(output)
     }
 
     fn working_tree_effect(&self) -> WorkingTreeEffect {

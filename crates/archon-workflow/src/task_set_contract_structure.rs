@@ -160,6 +160,7 @@ pub fn validate_acceptance_structure(
     Err(TaskSetContractError {
         message: defect_message(&defects),
         defects,
+        io_cause: None,
         io_kind: None,
     })
 }

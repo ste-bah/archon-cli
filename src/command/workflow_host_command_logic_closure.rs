@@ -65,6 +65,10 @@ pub(crate) struct Workspace {
     pub(crate) errors: BTreeSet<String>,
 }
 
+#[path = "workflow_host_command_logic_closure_deny.rs"]
+mod deny;
+pub(crate) use deny::LOGIC_DENYLIST_EXCEPTIONS;
+
 /// The binary crate the host-command subcommands are built into.
 const BINARY: &str = "archon";
 
@@ -385,12 +389,6 @@ impl Workspace {
             }
         }
         (out, assets)
-    }
-
-    fn denied<'d>(rel: &Path, deny: &[(&'d str, &str)]) -> Option<&'d str> {
-        deny.iter()
-            .map(|(entry, _)| *entry)
-            .find(|entry| rel == Path::new(entry) || entry.ends_with('/') && rel.starts_with(entry))
     }
 
     fn crate_of(&self, root: &str) -> String {

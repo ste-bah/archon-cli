@@ -79,8 +79,12 @@ async fn a_check_failing_only_because_the_base_does_not_build_is_unproven_not_pr
     trees.assert_live_untouched(copies.path());
 }
 
+/// Issue 557 (replaces `a_check_failing_only_because_a_tool_is_missing_is_unproven_not_proven`):
+/// a check that fails only because it starts a tool neither its site nor
+/// the host has is still no proof, and no host action makes the tool
+/// available, so it is its author's finding at once, never the host's.
 #[tokio::test]
-async fn a_check_failing_only_because_a_tool_is_missing_is_unproven_not_proven() {
+async fn issue557_a_check_failing_only_because_no_one_has_its_tool_goes_to_its_author_not_proven() {
     let missing = "archon-issue-328-absent-tool --verify feature.txt";
     let trees = trees(&[("AC-328-002", missing, REPO)]);
     let copies = tempfile::tempdir().unwrap();
@@ -89,11 +93,18 @@ async fn a_check_failing_only_because_a_tool_is_missing_is_unproven_not_proven()
         .with_copy_parent(copies.path().to_path_buf());
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = probe.take_unproven();
-    assert!(findings.is_empty(), "never the author's: {findings:?}");
-    let why = unproven
+    assert!(unproven.is_empty(), "never the host's: {unproven:?}");
+    let why = findings
         .get("AC-328-002")
-        .unwrap_or_else(|| panic!("a missing tool is no proof it can fail: {unproven:?}"));
+        .unwrap_or_else(|| panic!("a missing tool is no proof it can fail: {findings:?}"));
     assert!(why.contains("not on its search path (exit 127)"), "{why}");
+    assert!(why.contains("no host action makes it available"), "{why}");
+    assert!(!why.contains("install"), "{why}");
+    let runs = probe.take_baseline_runs().expect("a baseline");
+    assert!(
+        !runs.failures.contains_key("AC-328-002"),
+        "no proof: {runs:?}"
+    );
     trees.assert_live_untouched(copies.path());
 }
 

@@ -147,6 +147,7 @@ fn a_separate_project_copy_keeps_its_real_top_level_path_inside_the_tree() {
         }))
         .unwrap();
     let result = CheckResult {
+        verdict_streams: Default::default(),
         fault: None,
         acceptance_id: "AC-446".into(),
         exit_code: output.status.code(),
@@ -473,3 +474,8 @@ mod sibling_tests;
 
 #[path = "workflow_acceptance_executability_sibling_identity_tests.rs"]
 mod sibling_identity_tests;
+
+// The heal tests drive the Unix-only probe fixtures (probe_tests, with_copy_parent).
+#[cfg(unix)]
+#[path = "workflow_acceptance_executability_hermetic_heal_tests.rs"]
+mod heal_tests;

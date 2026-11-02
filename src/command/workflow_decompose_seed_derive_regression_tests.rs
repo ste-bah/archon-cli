@@ -113,6 +113,39 @@ fn acceptance_reply_seed_keeps_the_criterion_from_its_author_prompt() {
     );
 }
 
+/// #555: an entry prompt names its own findings (and the phase-level ones)
+/// between its criterion and the catalogue; none of them is criterion text.
+#[test]
+fn acceptance_reply_seed_criterion_ends_at_the_entry_finding_sections_555() {
+    for section in [
+        "This entry currently covers [\"REQ-X\",\"REQ-Y\"]. Keep every one of them in covers unless the new check no longer fails when that requirement is violated; the host re-opens each one you drop that no other check covers as an owed supplementary check.",
+        "Repair this entry's gate findings open in the latest gate result:\n- check 'AC-1': weak",
+        "The freeze judge could not use this entry's last check:\n- no verdict",
+        "Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:\n- old",
+        "Phase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- whole",
+        "Earlier gate results raised these phase-level findings; the latest gate result no longer reports them. Do not regress them:\n- whole",
+        "A newer published version of this entry replaced your previous draft before it was published. Your previous draft was:\n{}",
+    ] {
+        let mut record = reply(
+            "acceptance-author-AC-1-4",
+            "01:00:00",
+            &entry("AC-1").to_string(),
+        );
+        record.call.options.task = Some(format!(
+            "prompt\nAuthor ONLY entry AC-1: criterion of AC-1\n{section}\nAll criterion IDs and text (for consistency): {{}}\ncatalogue"
+        ));
+        let derived = super::super::derive(&[record], &[], &criteria(&["AC-1"])).unwrap();
+        let SubjectSeed::Entries { replies, .. } = &derived.subjects["acceptance"] else {
+            panic!("expected acceptance seed")
+        };
+        assert_eq!(
+            replies[0].criterion.as_deref(),
+            Some("criterion of AC-1"),
+            "{section}"
+        );
+    }
+}
+
 #[test]
 fn stale_acceptance_candidate_is_carried_without_verdict_or_findings() {
     let candidate = json!({
@@ -258,3 +291,30 @@ fn supplementary_host_stamp_uses_current_prd_text_not_finding_text() {
         current
     );
 }
+
+#[test]
+fn omitted_empty_covers_still_match_the_recorded_gate_round() {
+    let mut original = entry("AC-1");
+    original.as_object_mut().unwrap().remove("covers");
+    let records = [
+        reply(
+            "acceptance-author-AC-1-4",
+            "10:00:00",
+            &original.to_string(),
+        ),
+        gate(
+            "freeze-acceptance",
+            "10:01:00",
+            &json!({"entries":[original]}).to_string(),
+            vec![],
+            true,
+        ),
+    ];
+    let derived = derive(&records, &[], &criteria(&["AC-1"])).unwrap();
+    let (_, _, replies, invalid, _) = entries_seed(&derived);
+    assert!(invalid.is_empty(), "{invalid:?}");
+    assert!(replies.is_empty(), "the gate already holds this reply");
+}
+
+#[path = "workflow_decompose_seed_covers_tests.rs"]
+mod covers;

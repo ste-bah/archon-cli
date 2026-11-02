@@ -49,9 +49,9 @@ impl CodexAppServerRpcClient {
         match normalize_transport(&config.app_server_transport).as_str() {
             "stdio" => connect_stdio(config).await,
             "websocket" | "ws" => connect_websocket(config).await,
-            other => Err(LlmError::Unsupported(format!(
-                "unsupported Codex app-server transport `{other}`"
-            ))),
+            other => Err(LlmError::Unsupported(
+                format!("unsupported Codex app-server transport `{other}`").into(),
+            )),
         }
     }
 
@@ -93,40 +93,41 @@ impl CodexAppServerRpcClient {
         }
         match tokio::time::timeout(Duration::from_millis(timeout_ms.max(100)), rx).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(LlmError::Http(format!(
-                "Codex app-server request `{method}` channel closed"
-            ))),
+            Ok(Err(_)) => Err(LlmError::Http(
+                format!("Codex app-server request `{method}` channel closed").into(),
+            )),
             Err(_) => {
                 self.pending.lock().await.remove(&id);
-                Err(LlmError::Http(format!(
-                    "Codex app-server request `{method}` timed out"
-                )))
+                Err(LlmError::Http(
+                    format!("Codex app-server request `{method}` timed out").into(),
+                ))
             }
         }
     }
 
     async fn write_frame(&self, frame: &Value) -> Result<(), LlmError> {
-        let line = serde_json::to_string(frame).map_err(|e| LlmError::Serialize(e.to_string()))?;
+        let line =
+            serde_json::to_string(frame).map_err(|e| LlmError::Serialize(e.to_string().into()))?;
         let mut writer = self.writer.lock().await;
         match &mut *writer {
             RpcWriter::Stdio(stdin) => {
                 stdin
                     .write_all(line.as_bytes())
                     .await
-                    .map_err(|e| LlmError::Http(e.to_string()))?;
+                    .map_err(|e| LlmError::Http(e.to_string().into()))?;
                 stdin
                     .write_all(b"\n")
                     .await
-                    .map_err(|e| LlmError::Http(e.to_string()))?;
+                    .map_err(|e| LlmError::Http(e.to_string().into()))?;
                 stdin
                     .flush()
                     .await
-                    .map_err(|e| LlmError::Http(e.to_string()))
+                    .map_err(|e| LlmError::Http(e.to_string().into()))
             }
             RpcWriter::WebSocket(ws) => ws
                 .send(Message::Text(line.into()))
                 .await
-                .map_err(|e| LlmError::Http(e.to_string())),
+                .map_err(|e| LlmError::Http(e.to_string().into())),
         }
     }
 }
@@ -148,7 +149,7 @@ async fn connect_stdio(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| LlmError::Http(format!("failed to spawn Codex app-server: {e}")))?;
+        .map_err(|e| LlmError::Http(format!("failed to spawn Codex app-server: {e}").into()))?;
     let stdin = child
         .stdin
         .take()
@@ -179,9 +180,9 @@ async fn connect_websocket(
         .app_server_url
         .as_deref()
         .ok_or_else(|| LlmError::Http("Codex app-server WebSocket URL is not configured".into()))?;
-    let (socket, _) = connect_async(websocket_url(url))
-        .await
-        .map_err(|e| LlmError::Http(format!("Codex app-server WebSocket connect failed: {e}")))?;
+    let (socket, _) = connect_async(websocket_url(url)).await.map_err(|e| {
+        LlmError::Http(format!("Codex app-server WebSocket connect failed: {e}").into())
+    })?;
     let (sink, stream) = socket.split();
     let writer = Arc::new(Mutex::new(RpcWriter::WebSocket(sink)));
     let pending = PendingMap::default();
@@ -260,9 +261,9 @@ async fn handle_frame(
             return;
         }
         let result = if let Some(error) = value.get("error") {
-            Err(LlmError::Http(format!(
-                "Codex app-server RPC error: {error}"
-            )))
+            Err(LlmError::Http(
+                format!("Codex app-server RPC error: {error}").into(),
+            ))
         } else {
             Ok(value.get("result").cloned().unwrap_or(Value::Null))
         };
@@ -316,7 +317,7 @@ async fn reject_all(pending: PendingMap, message: &str) {
             Some("codex-app-server"),
             None,
         )
-        .unwrap_or_else(|| LlmError::Http(message.to_string()));
+        .unwrap_or_else(|| LlmError::Http(message.to_string().into()));
         let _ = tx.send(Err(err));
     }
 }
@@ -366,5 +367,59 @@ mod tests {
             websocket_url("https://codex.example.invalid/app-server"),
             "wss://codex.example.invalid/app-server"
         );
+    }
+}
+
+#[cfg(test)]
+mod provider_fault_redaction_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn codex_app_server_peer_diagnostics_redact_before_storage() {
+        let body = "request field needs correction; sk-ant-abcdefghijklmnopqrstuvwxyz123456; sk-abcdefghijklmnopqrstuvwxyz123456; Authorization: Bearer peer-private-credential";
+        let (tx, rx) = oneshot::channel();
+        let pending = Arc::new(Mutex::new(HashMap::from([(1, tx)])));
+        reject_all(pending, body).await;
+        let error = rx.await.unwrap().unwrap_err();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (client, server) = tokio::join!(connect_async(url), async {
+            let (socket, _) = listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(socket).await.unwrap()
+        });
+        let _server = server;
+        let (writer, _) = client.unwrap().0.split();
+        let writer = Arc::new(Mutex::new(RpcWriter::WebSocket(writer)));
+        let (tx, rx) = oneshot::channel();
+        let pending = Arc::new(Mutex::new(HashMap::from([(2, tx)])));
+        let (notify, _) = mpsc::channel(1);
+        handle_frame(
+            &serde_json::json!({"id": 2, "error": {"message": body}}).to_string(),
+            &pending,
+            &writer,
+            &notify,
+        )
+        .await;
+        let rpc_error = rx.await.unwrap().unwrap_err();
+        for error in [error, rpc_error] {
+            let LlmError::Http(ref message) = error else {
+                panic!("expected HTTP diagnostic")
+            };
+            for text in [
+                error.to_string(),
+                format!("{error:?}"),
+                serde_json::to_string(&error).unwrap(),
+                serde_json::to_string(message).unwrap(),
+            ] {
+                for secret in [
+                    "sk-ant-abcdefghijklmnopqrstuvwxyz123456",
+                    "sk-abcdefghijklmnopqrstuvwxyz123456",
+                    "peer-private-credential",
+                ] {
+                    assert!(!text.contains(secret), "credential leaked: {text}");
+                }
+                assert!(text.contains("request field needs correction"));
+            }
+        }
     }
 }

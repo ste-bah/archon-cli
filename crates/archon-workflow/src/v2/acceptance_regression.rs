@@ -368,12 +368,19 @@ pub struct FailingCheck {
     pub fingerprint: String,
 }
 
+/// Issue 544: the format of the failure fingerprints a cached verdict holds,
+/// part of its key (as result records carry a schema version that a reader
+/// checks before reuse). Fingerprints made before secrets became indexed
+/// placeholders sit under keys without it, so they are observed again,
+/// never compared with a fingerprint of another format.
+const VERDICT_CACHE_FORMAT: &str = "fingerprint-v2";
+
 impl FailingCheck {
     fn cache_key(&self) -> String {
         if self.fingerprint.is_empty() {
-            self.id.clone()
+            format!("{}#{VERDICT_CACHE_FORMAT}", self.id)
         } else {
-            format!("{}@{}", self.id, self.fingerprint)
+            format!("{}@{}#{VERDICT_CACHE_FORMAT}", self.id, self.fingerprint)
         }
     }
 }
@@ -454,6 +461,9 @@ pub async fn attribute_regressions(
     drive::run(&timeline, failing, &mut observations).await
 }
 
+#[cfg(test)]
+#[path = "acceptance_regression_cache_format_tests.rs"]
+mod cache_format_tests;
 #[cfg(test)]
 #[path = "acceptance_regression_tests.rs"]
 mod tests;

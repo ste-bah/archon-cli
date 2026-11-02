@@ -31,11 +31,17 @@
 //!   assertion, which is a verdict;
 //! - the tool gave no answer (it stalled, never stopped, could not start
 //!   or run, was killed, or failed without saying it has no `--list`): the
-//!   host could not tell.
+//!   host could not tell. Without a host plugin this is a transient host
+//!   fault, retried without an author finding;
+//! - a silent scratch overrun stopped the listing: with a host plugin,
+//!   the site lacks that program and the check goes to its author; without
+//!   one, the listing says nothing about built-ins, so it makes no claim.
+//!   A deterministic overrun need not clear on retry.
 //!
-//! So the listing only ever withholds a verdict, and every case where the
-//! site may lack what a check runs tells its author not to depend on it
-//! ([`missing`] has the whole table). A tool that says it has no listing
+//! So the listing withholds a verdict for an established missing dependency
+//! or a transient host fault ([`missing`] has the whole table). An
+//! established site lack tells its author not to depend on it.
+//! A tool that says it has no listing
 //! (`--list` succeeds listing nothing, or is rejected as an option), of
 //! whose `tool-word` the host has none, is not judged: the word may be a
 //! command its own deliverable adds to it (Issue 328).
@@ -108,24 +114,35 @@ pub(super) fn host_path() -> Option<String> {
 /// | lists commands without `word` | no | no | no verdict: no program anywhere provides it, so it passes only if the deliverable adds it (an alias in the tree); its author guards it (`tool --list \| grep -qw word && tool word`), so that its failure before the implementation is its own assertion |
 /// | lists none (it has no `--list`) | yes | no | no verdict: the environment lacks a program the host has; the check must not depend on it |
 /// | lists none (it has no `--list`) | no | no | verdict (Issue 328): nothing the site could install provides `word`, so only the deliverable can add it to its own tool |
-/// | no answer (it stalled, never stopped, could not run, failed) | any | no | no verdict: the host could not tell; the check must not depend on what it cannot show the site provides |
+/// | silent scratch overrun | yes | no | no verdict: the site lacks a program the host has; the check must not depend on it |
+/// | silent scratch overrun | no | no | verdict: the listing cannot establish built-ins and no program anywhere is known to be lacking; no claim or retry |
+/// | no answer (it stalled, never stopped, could not run, failed) | yes | no | no verdict: the site lacks a program the host has; the check must not depend on it |
+/// | no answer (it stalled, never stopped, could not run, failed) | no | no | no verdict: a transient host fault; retry the listing, with no evidence against the check or its site |
 ///
 /// A verdict is a can-fail proof: the check is then held to fail before
 /// the implementation and pass after it. Every verdict cell above is one
 /// where some implementation can make it pass -- the subcommand resolves,
-/// or only the deliverable can provide the word. (A rejection another
+/// the deliverable can provide the word, or a scratch overrun left that
+/// unknown. (A rejection another
 /// program's own line claims is judged as that program's, by this table.) Every cell where the site may lack what the check needs, which
 /// no implementation can supply, gives no verdict: the check goes back to
 /// its author, and never becomes a task that can never pass.
 ///
-/// Its cause (F6): only the cell where no program anywhere provides the
-/// word is [`UnprovenCause::ProgramAbsent`], its author's at once; every
-/// other no-verdict cell is the host's (the site lacks what the host has,
-/// or the host could not tell): [`UnprovenCause::SiteLacks`], unproven on
-/// every attempt, which no strike makes its author's.
+/// Its cause (F6): the cell where a listing shows no program anywhere
+/// provides the word is [`UnprovenCause::ProgramAbsent`]. A site lacking
+/// what the host lists or has (including a scratch overrun with a host plugin) is
+/// [`UnprovenCause::SiteLacks`].
+/// Issue 548: no host repair makes the site provide it, so a SiteLacks
+/// check also goes to its author at once (no strike), with the text of its
+/// cell: the check must not depend on what the site does not provide.
 /// A listing stopped by the no-progress rule before producing any output is instead
 /// [`UnprovenCause::TransientHost`]: no evidence about the site, and no
 /// strike or author finding, however often the host retries it.
+/// No answer without a host plugin is also transient: a failed host
+/// probe cannot establish that the check or its site is at fault.
+/// A scratch overrun without a host plugin makes no claim: the listing
+/// cannot establish built-ins, and a deterministic overrun need not clear
+/// on retry.
 pub(super) fn missing(
     commands: &[Simple],
     output: &str,
@@ -192,11 +209,18 @@ pub(super) fn missing(
                     format!("the host could not tell whether `{name}` is built into `{tool}`: {why}; the host must retry its listing probe, which gives no evidence that the check or its site is at fault"),
                     UnprovenCause::TransientHost,
                 )),
-                (Listing::ScratchUnproven(why), _) => site(format!(
-                    "the host could not tell whether `{name}` is built into `{tool}`: {why}; the check must not depend on `{tool} {name}`"
+                (Listing::ScratchUnproven(why), Some(host)) => site(format!(
+                    "{lacks}, though the host has one at {}; the host could not tell whether `{name}` is built into `{tool}`: {why}; the check must not depend on `{tool} {name}`",
+                    host.display()
                 )),
-                (Listing::NoAnswer(why), _) => site(format!(
-                    "{lacks}, and the host could not tell whether `{name}` is built into `{tool}`: {why}. {depends}"
+                (Listing::ScratchUnproven(_), None) => None,
+                (Listing::NoAnswer(why), Some(host)) => site(format!(
+                    "{lacks}, though the host has one at {}; the host could not tell whether `{name}` is built into `{tool}`: {why}. {depends}",
+                    host.display()
+                )),
+                (Listing::NoAnswer(why), None) => Some((
+                    format!("the host could not tell whether `{name}` is built into `{tool}`: {why}; the host retries its listing probe, which gives no evidence that the check or its site is at fault"),
+                    UnprovenCause::TransientHost,
                 )),
             }
         })
@@ -425,6 +449,10 @@ fn plugin(tool: &str, name: &str, at: &Context) -> Option<PathBuf> {
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_subcommand_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_subcommand_no_answer_tests.rs"]
+mod no_answer_tests;
 
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_subcommand_probe_tests.rs"]

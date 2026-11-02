@@ -192,12 +192,18 @@ async fn logic_361_a_logic_change_reruns_only_its_capability() {
     // Bumps are relative to the current freeze-skeleton logic, so a later catalog bump keeps this test meaningful.
     let skeleton = crate::command::workflow_host_command_logic::versions()["freeze-skeleton"];
     assert_eq!(run.run(Arc::new(run.launched()), SCRIPT).await, (4, 0));
-    assert_eq!(run.stamps("freeze-skeleton"), vec![Some(u64::from(skeleton))]);
+    assert_eq!(
+        run.stamps("freeze-skeleton"),
+        vec![Some(u64::from(skeleton))]
+    );
     let stricter = run.upgraded(&[("freeze-skeleton", skeleton + 1)]);
     assert_eq!(run.run(stricter.clone(), SCRIPT).await, (1, 3));
     assert_eq!(stricter.calls.load(Ordering::SeqCst), 1);
     // The new verdict is keyed and stamped by the new logic, and holds.
-    assert!(run.stamps("freeze-skeleton").contains(&Some(u64::from(skeleton + 1))));
+    assert!(
+        run.stamps("freeze-skeleton")
+            .contains(&Some(u64::from(skeleton + 1)))
+    );
     assert_eq!(
         run.run(run.upgraded(&[("freeze-skeleton", skeleton + 1)]), SCRIPT)
             .await,

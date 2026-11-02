@@ -191,7 +191,24 @@ pub(crate) async fn reauthor_refused(
     (project_root, prd_path, task_root): (&Path, &Path, &Path),
     decision: &LaunchAcceptance,
 ) -> Result<(String, serde_json::Value)> {
-    let ids: BTreeSet<String> = decision.reauthor.keys().cloned().collect();
+    Box::pin(reauthor_selected(
+        client,
+        probe,
+        (project_root, prd_path, task_root),
+        decision,
+        &decision.reauthor,
+    ))
+    .await
+}
+
+pub(super) async fn reauthor_selected(
+    client: &dyn WorkflowLlmClient,
+    probe: &dyn ExecutabilityProbe,
+    (project_root, prd_path, task_root): (&Path, &Path, &Path),
+    decision: &LaunchAcceptance,
+    selected: &std::collections::BTreeMap<String, String>,
+) -> Result<(String, serde_json::Value)> {
+    let ids: BTreeSet<String> = selected.keys().cloned().collect();
     let named = ids.iter().cloned().collect::<Vec<_>>().join(",");
     let build_cache =
         crate::command::workflow_task_set::reauthor::site_uses_build_cache(project_root, task_root);
@@ -210,7 +227,7 @@ pub(crate) async fn reauthor_refused(
             ids: &ids,
             gate: ReauthorGate {
                 probe,
-                seeds: &decision.reauthor,
+                seeds: selected,
             },
             trigger: &trigger,
         },
@@ -220,52 +237,15 @@ pub(crate) async fn reauthor_refused(
     .with_context(|| {
         format!(
             "the launch routed frozen check(s) {named} to re-authoring because this build's acceptance entry rules refuse them ({}), and the repair did not finish",
-            decision.reauthor.values().cloned().collect::<Vec<_>>().join(" | ")
+            selected.values().cloned().collect::<Vec<_>>().join(" | ")
         )
     })?;
-    for diagnostic in &result.diagnostics {
-        eprintln!("{diagnostic}");
-    }
-    for (id, reason) in &result.unproven {
-        let owner = match result.authored_pending.contains_key(id) {
-            true => "its author",
-            false => "the host",
-        };
-        eprintln!("acceptance check {id} remains pending for {owner}: {reason}");
-    }
-    let published = ids
-        .iter()
-        .filter(|id| !result.unproven.contains_key(*id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let pending = result.unproven.keys().cloned().collect::<Vec<_>>();
-    let authored_pending = (pending.iter())
-        .filter(|id| result.authored_pending.contains_key(*id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let line = format!(
-        "frozen_chain_launch acceptance=reauthored published_ids={} pending_ids={} acceptance_digest={} freeze_event={} skeleton_digest={}",
-        published.join(","),
-        pending.join(","),
-        result.acceptance_digest,
-        result.freeze_event_id,
-        result.skeleton_digest.as_deref().unwrap_or("none")
-    );
-    let detail = serde_json::json!({
-        "event": REAUTHORED_EVENT,
-        "ids": ids,
-        "published_ids": published,
-        "pending_ids": pending,
-        "authored_pending_ids": authored_pending,
-        "refusals": decision.reauthor,
-        "recorded_logic": decision.recorded,
-        "acceptance_digest": result.acceptance_digest,
-        "freeze_event_id": result.freeze_event_id,
-        "skeleton_digest": result.skeleton_digest,
-        "unproven": result.unproven,
-    });
-    Ok((line, detail))
+    repair_report(result, decision)
 }
+
+#[path = "workflow_decompose_launch_repair_report.rs"]
+mod report;
+use report::repair_report;
 
 /// The launch's acceptance step, run only once the launch holds the claim
 /// on its task root (`create_claimed_run`): a chain another run owns is never
@@ -295,48 +275,15 @@ pub(crate) async fn after_claim(
         log(line)?;
     }
     if !decision.reauthor.is_empty() {
-        let skeleton_path = task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
-        let old_skeleton_bytes = if launched.skeleton {
-            Some(std::fs::read(&skeleton_path).with_context(|| {
-                format!(
-                    "reading frozen task skeleton before repair at {}",
-                    skeleton_path.display()
-                )
-            })?)
-        } else {
-            None
-        };
-        let old_bodies = if launched.skeleton {
-            body_contents(task_root, launched)?
-        } else {
-            Default::default()
-        };
-        let repaired = async {
-            let client = factory
-                .build_client(archon_workflow::WorkflowLlmClientRequest {
-                    cwd: project_root.to_path_buf(),
-                    origin: "workflow-decompose-launch-reauthor".into(),
-                    session_id: format!(
-                        "workflow-decompose-launch-reauthor-{}",
-                        uuid::Uuid::new_v4()
-                    ),
-                    read_roots: vec![repository_root.to_path_buf()],
-                })
-                .await
-                .context("building the client that re-authors refused frozen checks")?;
-            let probe = crate::command::workflow_task_set::executability::HostProbe::for_task_set_with_limits(
-                project_root,
-                task_root,
-                cargo_limits.clone(),
-            );
-            reauthor_refused(
-                client.as_ref(),
-                &probe,
-                (project_root, prd_path, task_root),
-                &decision,
-            )
-            .await
-        }
+        let (old_skeleton_bytes, old_bodies) =
+            heal::before((store, run_id), task_root, launched).await?;
+        let repaired = heal::repair(
+            factory,
+            &decision,
+            (store, run_id),
+            (project_root, prd_path, task_root, repository_root),
+            cargo_limits.clone(),
+        )
         .await;
         let (line, detail) = match repaired {
             Ok(repaired) => repaired,
@@ -396,33 +343,16 @@ pub(crate) async fn after_claim(
         }
         // Validate the published chain before clearing the launch snapshot for
         // a pending route; even a partial repair must preserve frozen inputs.
-        let republished = frozen_chain_snapshot(project_root, prd_path, task_root)
-            .context("reading the frozen chain the launch republished")?;
-        let new_skeleton_bytes = if launched.skeleton {
-            Some(std::fs::read(&skeleton_path).with_context(|| {
-                format!(
-                    "reading republished task skeleton at {}",
-                    skeleton_path.display()
-                )
-            })?)
-        } else {
-            None
-        };
-        let acceptance_path =
-            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-        let acceptance_bytes = std::fs::read(&acceptance_path).with_context(|| {
-            format!(
-                "reading republished acceptance contract at {}",
-                acceptance_path.display()
-            )
-        })?;
-        let acceptance_digest =
-            archon_workflow::task_set_contract::content_digest(&acceptance_bytes);
-        let new_bodies = if launched.skeleton {
-            body_contents(task_root, &republished)?
-        } else {
-            Default::default()
-        };
+        let observed = heal::after(
+            (store, run_id),
+            (project_root, prd_path, task_root),
+            launched.skeleton,
+        )
+        .await?;
+        let republished = observed.snapshot;
+        let new_skeleton_bytes = observed.skeleton;
+        let new_bodies = observed.bodies;
+        let acceptance_digest = observed.acceptance_digest;
         if let Err(difference) = compare_repaired_chain(
             launched,
             &republished,
@@ -497,3 +427,6 @@ pub(crate) async fn after_claim(
     }
     Ok(())
 }
+
+#[path = "workflow_decompose_launch_heal.rs"]
+pub(crate) mod heal;
