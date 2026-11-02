@@ -17,7 +17,7 @@
           "sampling": {
             "logic_identity": [
               74,
-              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -69,7 +69,7 @@
           "sampling": {
             "logic_identity": [
               74,
-              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -100,7 +100,7 @@
           "sampling": {
             "logic_identity": [
               74,
-              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -129,7 +129,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1.\nAuthor ONLY entry AC-X-001: The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: none.\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
+            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1.\nAuthor ONLY entry AC-X-001: The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: none.\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
           }
         },
         "depends_on": [],
@@ -170,7 +170,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -189,7 +189,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-001: SUPPLEMENTARY check owed to PRD requirement REQ-X-001 (no other check covers it): The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nIts covers is exactly [\"REQ-X-001\"]; it must fail whenever REQ-X-001 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-001': PRD requirement REQ-X-001 is covered by no acceptance check; author supplementary check SUP-REQ-X-001 with covers [\"REQ-X-001\"] that fails whenever REQ-X-001 is violated: The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 1, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
+            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-001: SUPPLEMENTARY check owed to PRD requirement REQ-X-001 (no other check covers it): The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nIts covers is exactly [\"REQ-X-001\"]; it must fail whenever REQ-X-001 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-001': PRD requirement REQ-X-001 is covered by no acceptance check; author supplementary check SUP-REQ-X-001 with covers [\"REQ-X-001\"] that fails whenever REQ-X-001 is violated: The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 1, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
           }
         },
         "depends_on": [],
@@ -230,7 +230,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -249,7 +249,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-002: SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nIts covers is exactly [\"REQ-X-002\"]; it must fail whenever REQ-X-002 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-002': PRD requirement REQ-X-002 is covered by no acceptance check; author supplementary check SUP-REQ-X-002 with covers [\"REQ-X-002\"] that fails whenever REQ-X-002 is violated: The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 2, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\n- SUP-REQ-X-001 sha256:de8c0875d25eef2712bd9acfb0e05963c1302e774adbe3db94e49be077ae0d77 covers=[REQ-X-001] command cwd=repo_root: test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
+            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named deciding input that is absent is behaviour not implemented yet and is judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<requirement id defined by the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-002: SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nIts covers is exactly [\"REQ-X-002\"]; it must fail whenever REQ-X-002 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-002': PRD requirement REQ-X-002 is covered by no acceptance check; author supplementary check SUP-REQ-X-002 with covers [\"REQ-X-002\"] that fails whenever REQ-X-002 is violated: The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 2, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\n- SUP-REQ-X-001 sha256:de8c0875d25eef2712bd9acfb0e05963c1302e774adbe3db94e49be077ae0d77 covers=[REQ-X-001] command cwd=repo_root: test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
           }
         },
         "depends_on": [],
@@ -290,7 +290,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -350,7 +350,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -410,7 +410,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -472,7 +472,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -554,7 +554,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+            "logicDigest": "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
             "logicVersion": 74,
             "postcondition": {
               "satisfied": true,
@@ -565,7 +565,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "a08419dcf4fad56b57f003ee31d3cf25dbcc98b2b132c67c573326ea1e68bc67",
+                  "blake3": "39ba34c05e727777477545f018bb73e2e1e347e47929832c19a2d95d455f602a",
                   "content": {
                     "acceptance": [
                       {
@@ -584,7 +584,7 @@
                           "sampling": {
                             "logic_identity": [
                               74,
-                              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -637,7 +637,7 @@
                           "sampling": {
                             "logic_identity": [
                               74,
-                              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -668,7 +668,7 @@
                           "sampling": {
                             "logic_identity": [
                               74,
-                              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -686,11 +686,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "7d4fc73bcf2f3461447d56a19ccfa849bbfd01e5499907c5796bd93e621fdf5e",
+                  "blake3": "9545230082914760f153eee3734c79c2f66cb89cf229e4a63f43b9d6789dcdb6",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+                    "digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -702,18 +702,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f",
+                  "blake3": "9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1",
                   "content": {
-                    "acceptance_digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+                    "acceptance_digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-dab7f72bb7c2",
+                    "freeze_event_id": "acceptance-freeze-742d9ece092c",
                     "lineage_recording": 1,
-                    "skeleton_digest": "458cd27468706a2936f2ce933f2c57d44400728e0d974c56ecad0de830059887",
+                    "skeleton_digest": "8b7409484badf6ca75baa23afb8632948443ef47adef5ac11b39205c386a0408",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -787,7 +787,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -842,7 +842,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+            "logicDigest": "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
             "logicVersion": 74,
             "postcondition": {
               "satisfied": true,
@@ -853,7 +853,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "a08419dcf4fad56b57f003ee31d3cf25dbcc98b2b132c67c573326ea1e68bc67",
+                  "blake3": "39ba34c05e727777477545f018bb73e2e1e347e47929832c19a2d95d455f602a",
                   "content": {
                     "acceptance": [
                       {
@@ -872,7 +872,7 @@
                           "sampling": {
                             "logic_identity": [
                               74,
-                              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -925,7 +925,7 @@
                           "sampling": {
                             "logic_identity": [
                               74,
-                              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -956,7 +956,7 @@
                           "sampling": {
                             "logic_identity": [
                               74,
-                              "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                              "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -975,11 +975,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "7d4fc73bcf2f3461447d56a19ccfa849bbfd01e5499907c5796bd93e621fdf5e",
+                  "blake3": "9545230082914760f153eee3734c79c2f66cb89cf229e4a63f43b9d6789dcdb6",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+                    "digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -992,18 +992,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f",
+                  "blake3": "9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1",
                   "content": {
-                    "acceptance_digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+                    "acceptance_digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-dab7f72bb7c2",
+                    "freeze_event_id": "acceptance-freeze-742d9ece092c",
                     "lineage_recording": 1,
-                    "skeleton_digest": "458cd27468706a2936f2ce933f2c57d44400728e0d974c56ecad0de830059887",
+                    "skeleton_digest": "8b7409484badf6ca75baa23afb8632948443ef47adef5ac11b39205c386a0408",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1032,7 +1032,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
             "stderrBytes": 647,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"a08419dcf4fad56b57f003ee31d3cf25dbcc98b2b132c67c573326ea1e68bc67\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"7d4fc73bcf2f3461447d56a19ccfa849bbfd01e5499907c5796bd93e621fdf5e\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a1a9a9045a02f46fdfe9fd91b490f4c3887582b7f3e9ece47014f7087245976f\",\"exists\":true},\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"39ba34c05e727777477545f018bb73e2e1e347e47929832c19a2d95d455f602a\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"9545230082914760f153eee3734c79c2f66cb89cf229e4a63f43b9d6789dcdb6\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a3ae13c1014b76c39a1bb1ed29bc27fd56c79cfa9cd420684a31ec8d0cd18c90\",\"exists\":true},\"schema_version\":1}",
             "stdoutBytes": 799,
             "stdoutTruncated": false,
             "timedOut": false
@@ -1051,7 +1051,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1106,7 +1106,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+            "logicDigest": "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
             "logicVersion": 6,
             "postcondition": {
               "satisfied": true,
@@ -1117,18 +1117,18 @@
               "command_id": "freeze-skeleton",
               "entries": [
                 {
-                  "blake3": "fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f",
+                  "blake3": "9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1",
                   "content": {
-                    "acceptance_digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+                    "acceptance_digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-dab7f72bb7c2",
+                    "freeze_event_id": "acceptance-freeze-742d9ece092c",
                     "lineage_recording": 1,
-                    "skeleton_digest": "458cd27468706a2936f2ce933f2c57d44400728e0d974c56ecad0de830059887",
+                    "skeleton_digest": "8b7409484badf6ca75baa23afb8632948443ef47adef5ac11b39205c386a0408",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1152,9 +1152,9 @@
                   "relative_path": "gate-envelope.json"
                 },
                 {
-                  "blake3": "b0d550fca81628af12af26fa666e524857e66b6ac4b038cdb7288942a0a051e8",
+                  "blake3": "45a1ee6b6ae3817f3a2caa2c7c13b216aeaa0668053ae9b42792ac1ff67e7b99",
                   "content": {
-                    "acceptance_digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+                    "acceptance_digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
                     "schema_version": 1,
                     "tasks": [
                       {
@@ -1231,11 +1231,11 @@
                   "relative_path": "task-skeleton.json"
                 },
                 {
-                  "blake3": "11b1e2aebfa3255a3a36fa59164e65a6e8a9e6687afd15f8aa057e793aaa34c2",
+                  "blake3": "d7db70eba9a5727691ad7d8aaa853f73f6a910eedc64b72bade595d3f2d53f56",
                   "content": {
-                    "acceptance_digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+                    "acceptance_digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
                     "algorithm": "blake3",
-                    "digest": "458cd27468706a2936f2ce933f2c57d44400728e0d974c56ecad0de830059887",
+                    "digest": "8b7409484badf6ca75baa23afb8632948443ef47adef5ac11b39205c386a0408",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1252,7 +1252,7 @@
             "stderr": "",
             "stderrBytes": 0,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"b0d550fca81628af12af26fa666e524857e66b6ac4b038cdb7288942a0a051e8\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"11b1e2aebfa3255a3a36fa59164e65a6e8a9e6687afd15f8aa057e793aaa34c2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"45a1ee6b6ae3817f3a2caa2c7c13b216aeaa0668053ae9b42792ac1ff67e7b99\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"d7db70eba9a5727691ad7d8aaa853f73f6a910eedc64b72bade595d3f2d53f56\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
             "stdoutBytes": 662,
             "stdoutTruncated": false,
             "subjects": [
@@ -1281,7 +1281,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1344,7 +1344,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+            "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
             "logicVersion": 29,
             "postcondition": {
               "satisfied": true,
@@ -1401,7 +1401,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1464,7 +1464,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+            "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
             "logicVersion": 29,
             "postcondition": {
               "satisfied": true,
@@ -1521,7 +1521,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1630,7 +1630,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1684,7 +1684,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+            "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
             "logicVersion": 24,
             "postcondition": {
               "satisfied": true,
@@ -1739,7 +1739,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1770,7 +1770,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                  "logicDigest": "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                   "logicVersion": 74,
                   "postcondition": {
                     "satisfied": true,
@@ -1781,13 +1781,13 @@
                     "command_id": "freeze-acceptance",
                     "entries": [
                       {
-                        "blake3": "a08419dcf4fad56b57f003ee31d3cf25dbcc98b2b132c67c573326ea1e68bc67",
+                        "blake3": "39ba34c05e727777477545f018bb73e2e1e347e47929832c19a2d95d455f602a",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.json"
                       },
                       {
-                        "blake3": "7d4fc73bcf2f3461447d56a19ccfa849bbfd01e5499907c5796bd93e621fdf5e",
+                        "blake3": "9545230082914760f153eee3734c79c2f66cb89cf229e4a63f43b9d6789dcdb6",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.lock"
@@ -1833,7 +1833,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                      "logicDigest": "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                       "logicVersion": 74,
                       "postcondition": {
                         "satisfied": true,
@@ -1844,13 +1844,13 @@
                         "command_id": "freeze-acceptance",
                         "entries": [
                           {
-                            "blake3": "a08419dcf4fad56b57f003ee31d3cf25dbcc98b2b132c67c573326ea1e68bc67",
+                            "blake3": "39ba34c05e727777477545f018bb73e2e1e347e47929832c19a2d95d455f602a",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.json"
                           },
                           {
-                            "blake3": "7d4fc73bcf2f3461447d56a19ccfa849bbfd01e5499907c5796bd93e621fdf5e",
+                            "blake3": "9545230082914760f153eee3734c79c2f66cb89cf229e4a63f43b9d6789dcdb6",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.lock"
@@ -1872,7 +1872,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                       "stderrBytes": 647,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"a08419dcf4fad56b57f003ee31d3cf25dbcc98b2b132c67c573326ea1e68bc67\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"7d4fc73bcf2f3461447d56a19ccfa849bbfd01e5499907c5796bd93e621fdf5e\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a1a9a9045a02f46fdfe9fd91b490f4c3887582b7f3e9ece47014f7087245976f\",\"exists\":true},\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"39ba34c05e727777477545f018bb73e2e1e347e47929832c19a2d95d455f602a\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"9545230082914760f153eee3734c79c2f66cb89cf229e4a63f43b9d6789dcdb6\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a3ae13c1014b76c39a1bb1ed29bc27fd56c79cfa9cd420684a31ec8d0cd18c90\",\"exists\":true},\"schema_version\":1}",
                       "stdoutBytes": 799,
                       "stdoutTruncated": false,
                       "timedOut": false
@@ -1894,7 +1894,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                   "stderrBytes": 647,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"a08419dcf4fad56b57f003ee31d3cf25dbcc98b2b132c67c573326ea1e68bc67\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"7d4fc73bcf2f3461447d56a19ccfa849bbfd01e5499907c5796bd93e621fdf5e\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a1a9a9045a02f46fdfe9fd91b490f4c3887582b7f3e9ece47014f7087245976f\",\"exists\":true},\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"39ba34c05e727777477545f018bb73e2e1e347e47929832c19a2d95d455f602a\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"9545230082914760f153eee3734c79c2f66cb89cf229e4a63f43b9d6789dcdb6\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a3ae13c1014b76c39a1bb1ed29bc27fd56c79cfa9cd420684a31ec8d0cd18c90\",\"exists\":true},\"schema_version\":1}",
                   "stdoutBytes": 799,
                   "stdoutTruncated": false,
                   "summary": "host command '<host-call-id>' completed with exit Some(0)",
@@ -1916,7 +1916,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                  "logicDigest": "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                   "logicVersion": 6,
                   "postcondition": {
                     "satisfied": true,
@@ -1927,7 +1927,7 @@
                     "command_id": "freeze-skeleton",
                     "entries": [
                       {
-                        "blake3": "fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f",
+                        "blake3": "9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1",
                         "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                         "prior_blake3": "<receipt-digest-of-overwritten-content>",
                         "relative_path": "acceptance-pin.json"
@@ -1938,12 +1938,12 @@
                         "relative_path": "gate-envelope.json"
                       },
                       {
-                        "blake3": "b0d550fca81628af12af26fa666e524857e66b6ac4b038cdb7288942a0a051e8",
+                        "blake3": "45a1ee6b6ae3817f3a2caa2c7c13b216aeaa0668053ae9b42792ac1ff67e7b99",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                         "relative_path": "task-skeleton.json"
                       },
                       {
-                        "blake3": "11b1e2aebfa3255a3a36fa59164e65a6e8a9e6687afd15f8aa057e793aaa34c2",
+                        "blake3": "d7db70eba9a5727691ad7d8aaa853f73f6a910eedc64b72bade595d3f2d53f56",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                         "relative_path": "task-skeleton.lock"
                       }
@@ -1977,7 +1977,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+                      "logicDigest": "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
                       "logicVersion": 6,
                       "postcondition": {
                         "satisfied": true,
@@ -1988,7 +1988,7 @@
                         "command_id": "freeze-skeleton",
                         "entries": [
                           {
-                            "blake3": "fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f",
+                            "blake3": "9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1",
                             "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                             "prior_blake3": "<receipt-digest-of-overwritten-content>",
                             "relative_path": "acceptance-pin.json"
@@ -1999,12 +1999,12 @@
                             "relative_path": "gate-envelope.json"
                           },
                           {
-                            "blake3": "b0d550fca81628af12af26fa666e524857e66b6ac4b038cdb7288942a0a051e8",
+                            "blake3": "45a1ee6b6ae3817f3a2caa2c7c13b216aeaa0668053ae9b42792ac1ff67e7b99",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                             "relative_path": "task-skeleton.json"
                           },
                           {
-                            "blake3": "11b1e2aebfa3255a3a36fa59164e65a6e8a9e6687afd15f8aa057e793aaa34c2",
+                            "blake3": "d7db70eba9a5727691ad7d8aaa853f73f6a910eedc64b72bade595d3f2d53f56",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                             "relative_path": "task-skeleton.lock"
                           }
@@ -2014,7 +2014,7 @@
                       "stderr": "",
                       "stderrBytes": 0,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"b0d550fca81628af12af26fa666e524857e66b6ac4b038cdb7288942a0a051e8\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"11b1e2aebfa3255a3a36fa59164e65a6e8a9e6687afd15f8aa057e793aaa34c2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"45a1ee6b6ae3817f3a2caa2c7c13b216aeaa0668053ae9b42792ac1ff67e7b99\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"d7db70eba9a5727691ad7d8aaa853f73f6a910eedc64b72bade595d3f2d53f56\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                       "stdoutBytes": 662,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2046,7 +2046,7 @@
                   "stderr": "",
                   "stderrBytes": 0,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"fca4795f740db824fde178c4ccc7fa0be7d3fdb1333d294134208b6ab170721f\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"b0d550fca81628af12af26fa666e524857e66b6ac4b038cdb7288942a0a051e8\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"11b1e2aebfa3255a3a36fa59164e65a6e8a9e6687afd15f8aa057e793aaa34c2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"9f20c622ea1c07b225909192ab2c6c610850a43cd0262114b30749e8eb78fca1\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"45a1ee6b6ae3817f3a2caa2c7c13b216aeaa0668053ae9b42792ac1ff67e7b99\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"d7db70eba9a5727691ad7d8aaa853f73f6a910eedc64b72bade595d3f2d53f56\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                   "stdoutBytes": 662,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2078,7 +2078,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+                  "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
                   "logicVersion": 29,
                   "postcondition": {
                     "satisfied": true,
@@ -2128,7 +2128,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+                      "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
                       "logicVersion": 29,
                       "postcondition": {
                         "satisfied": true,
@@ -2210,7 +2210,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+                  "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
                   "logicVersion": 29,
                   "postcondition": {
                     "satisfied": true,
@@ -2260,7 +2260,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+                      "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
                       "logicVersion": 29,
                       "postcondition": {
                         "satisfied": true,
@@ -2342,7 +2342,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+                  "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
                   "logicVersion": 24,
                   "postcondition": {
                     "satisfied": true,
@@ -2387,7 +2387,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+                      "logicDigest": "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
                       "logicVersion": 24,
                       "postcondition": {
                         "satisfied": true,
@@ -2686,7 +2686,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -2734,14 +2734,14 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde",
+        "scaffold_hash": "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
     ]
   ],
   "skeleton": {
-    "acceptance_digest": "dab7f72bb7c2d53870b2338f26b5aeb07c46b302c998e37f1c1ef043d4ae1c0c",
+    "acceptance_digest": "742d9ece092c93d4dc1c08c8d55d352838d78cfd005b8fd1005cafb57353b1bd",
     "schema_version": 1,
     "tasks": [
       {

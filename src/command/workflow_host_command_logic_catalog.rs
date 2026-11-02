@@ -181,8 +181,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either.
-        sources_digest: "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either.
+        sources_digest: "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -228,8 +228,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: freeze-skeleton runs no check, so the probe path's routing and text of a program neither the site nor the host has never reach it. #558 re-pin only: freeze-skeleton runs no check and judges no baseline failure, so the passability stage's routing never reaches it.
-        sources_digest: "186e8a2e6f7bfc180891c19894ecb234eb7e2f0b733a11bb1e343b35f51e8ee4",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: freeze-skeleton runs no check, so the probe path's routing and text of a program neither the site nor the host has never reach it. #558 re-pin only: freeze-skeleton runs no check and judges no baseline failure, so the passability stage's routing never reaches it. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either.
+        sources_digest: "3d8f1f69ec017808c2f768da413f35f4d62ff50d307260023accc7c675d5ff5d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -303,8 +303,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either.
-        sources_digest: "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either.
+        sources_digest: "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
         build_bound: false,
     },
     CapabilityLogic {
@@ -364,8 +364,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either.
-        sources_digest: "5de85dc4fe5a5d84e1f4179cde876eeb96fb7deb65603ee01428493731692091",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either.
+        sources_digest: "c377aca4245e5f590e38ca233d393be8a627c5912a301e1c359eb7249358ec45",
         build_bound: false,
     },
     CapabilityLogic {
@@ -450,8 +450,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: frozen verification runs no probe; only the probe path's routing and text of a program neither the site nor the host has changed. #558 re-pin only: only this catalog's freeze-acceptance version and notes changed in this closure; frozen verification judges no baseline failure.
-        sources_digest: "d01307b0650c6fd35e585d4f69b5cdde9bb3d1f168a6cd1e9d39f32c82ad77a9",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: frozen verification runs no probe; only the probe path's routing and text of a program neither the site nor the host has changed. #558 re-pin only: only this catalog's freeze-acceptance version and notes changed in this closure; frozen verification judges no baseline failure. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either.
+        sources_digest: "2dc81d6404b9900ffd14361b68bb0a0d298f8037731214c1d31eba2bd4a0b8eb",
         build_bound: true,
     },
     CapabilityLogic {
@@ -493,8 +493,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #527 re-pin only: ARCHON_* names read through named constants instead of literals; no verdict rule changed.
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
-        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: frozen verification runs no probe; only the probe path's routing and text of a program neither the site nor the host has changed. #558 re-pin only: only this catalog's freeze-acceptance version and notes changed in this closure; frozen verification judges no baseline failure.
-        sources_digest: "d01307b0650c6fd35e585d4f69b5cdde9bb3d1f168a6cd1e9d39f32c82ad77a9",
+        // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: frozen verification runs no probe; only the probe path's routing and text of a program neither the site nor the host has changed. #558 re-pin only: only this catalog's freeze-acceptance version and notes changed in this closure; frozen verification judges no baseline failure. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either.
+        sources_digest: "2dc81d6404b9900ffd14361b68bb0a0d298f8037731214c1d31eba2bd4a0b8eb",
         build_bound: true,
     },
 ];

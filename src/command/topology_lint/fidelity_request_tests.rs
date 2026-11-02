@@ -137,10 +137,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 552: entry prompts list only their findings open in the latest gate result; a judge failure reaches only the entries it names, each with its own known finding.
     // Issue 554: an operational finding on an authored entry never stops the phase; it is re-frozen, then routed to its author; skeletonPolicy and unprovenAuthored moved into the frozen module.
     // Issue 555: an entry prompt carries only its own findings and phase-level ones (labelled, earlier ones as do-not-regress); the shared part names none; entry rung 3 names its own findings; earlier-findings sections are bounded with the full list in a context file.
+    // Issue 559: the acceptance reply format shows covers; a re-authored entry prompt states its current covers as a JSON array; a reply with no covers key keeps them.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "7ef1c3d6ea262aa69231d88b10472819087fc2b7e249a1de726c834b02da3dde"
+        "e1334d8c825c069ccc823956d13643561dd4c170f8dfa98e0a7544bc1032f519"
     );
 }
