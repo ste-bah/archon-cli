@@ -11,13 +11,17 @@
 // stage, fewer defects in total -- a repair at a later stage while an earlier
 // defect remains is a real, independent repair. Deterministic validators own the identities and stages; their
 // diagnostics and submitted values cannot reset a window. An attempt also
-// carries the set of failing subjects (judged or deterministic): a strictly
-// smaller set than every earlier attempt's is progress too (#529). Trading a
-// defect adds a subject, so it cannot shrink the set; the judge's free-text
-// never credits progress by itself, and a subject that changes reasons
-// remains the same failure.
+// carries the set of failing subjects (judged or deterministic): a strict
+// subset of the baseline set is progress too (#529). The baseline is the set
+// of the latest attempt that made progress by either rule (#561), so the
+// attempt that sets a new best measure brings every subject that first fails
+// there. A defect traded for another adds a subject, so it cannot shrink the
+// set; the judge's free-text never credits progress by itself, and a subject
+// that changes reasons remains the same failure. An attempt whose set strictly
+// shrinks the previous attempt's, at a measure no worse, is neutral: it
+// neither adds to nor resets the window (workflow_decompose_v1_failing_set.js).
 // A stall PAUSES the run and resume opens a fresh window while preserving the
-// best measure reconstructed by replay.
+// best measure and the baseline, both reconstructed by replay.
 //
 // Issue 357: an entry the author step refuses for its shape is measured in its
 // own repair frontier, not against the candidate best: a judged candidate is a
@@ -116,20 +120,6 @@ function attemptMeasure(findings) {
   };
 }
 
-function failingSubjectKey(finding) {
-  const defect = finding && finding.deterministic_defect;
-  const subject = defect && typeof defect.subject === "string" && defect.subject.length > 0
-    ? defect.subject : finding && typeof finding.subject === "string" && finding.subject.length > 0
-      ? finding.subject : null;
-  return subject === null ? findingKey(finding) : subject;
-}
-
-function isStrictSubset(set, best) {
-  if (set.size >= best.size) return false;
-  for (const value of set) if (!best.has(value)) return false;
-  return true;
-}
-
 function isBetter(measure, best) {
   if (!best) return true;
   if (measure.tier !== best.tier) return measure.tier > best.tier;
@@ -157,6 +147,7 @@ function newProgress(_seed) {
   return {
     best: null,
     bestFailing: null,
+    last: null,
     repair: newRepairEpisode(0),
     history: [],
     stalled: 0,
@@ -187,7 +178,8 @@ function recordStep(progress, entry, gateSucceeded = false) {
     progress.stalled = 0;
     // Real progress empties the window, so no episode may restore it.
     progress.repair.stalled = 0;
-  } else if (!operational) {
+  } else if (!operational && !entry.neutral) {
+    // A neutral attempt (failingSetStep) neither adds to nor resets the window.
     progress.stalled += 1;
   }
   if (operational) progress.stalledOperational += 1;
@@ -209,7 +201,7 @@ function authorRoundReport(policy, state) {
   return { passed: state.roundPassed, outage: state.roundOutage };
 }
 
-// Only a strictly smaller failing-subject set or a measure that beats every
+// Only a strict subset of the baseline failing-subject set or a measure that beats every
 // earlier attempt is progress. Trading defects cannot shrink the set, and
 // renaming or rewording within the same subjects cannot reset the window. The
 // entries that passed in the clean
@@ -223,17 +215,16 @@ function recordAttempt(progress, call, findings, answered = true, round = NO_ROU
   if (credited.length > 0) restoreFloor(progress);
   const measure = attemptMeasure(findings);
   const oldMeasureBetter = isBetter(measure, progress.best);
-  const hasFailingBaseline = progress.bestFailing instanceof Set;
-  const subsetBetter = hasFailingBaseline && isStrictSubset(measure.failingSubjects, progress.bestFailing);
-  const better = oldMeasureBetter || subsetBetter;
   if (oldMeasureBetter) progress.best = measure;
-  if (!hasFailingBaseline || subsetBetter) progress.bestFailing = measure.failingSubjects;
+  // #561: the baseline and neutral rules, with their bound (failing_set.js).
+  const { better, neutral } = failingSetStep(progress, measure, oldMeasureBetter);
   const entry = {
     call,
     kind: ["packaging", "refused", "judged"][measure.tier],
     stage: DEFECT_STAGES[measure.stage] || "passed",
     findings: measure.count,
     progress: better,
+    ...(neutral ? { neutral: true } : {}),
     ...(credited.length > 0 ? { entries: credited } : {})
   };
   if (round.outage) entry.outage = true;

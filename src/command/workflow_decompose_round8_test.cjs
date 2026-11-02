@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const det = (code, subject, stage, text = `${code} ${subject}`) => ({ text, subject,
   remediation_scope: 'candidate_artifact',
@@ -47,7 +47,8 @@ async function changedMembershipWithoutSubsetProgressPausesAtTheExistingAttemptW
     [1, 2, 3, 4, 5, 6],
     [1, 7, 3, 8, 4],
     [7, 8, 4, 6, 9],
-    [7, 8]
+    // #561: a trade; a strict subset of the previous set ([7, 8]) would be neutral.
+    [7, 8, 4, 6, 10]
   ];
   const ctx = { args: { gateMode: 'enforce' } };
   vm.createContext(withAuthorContext(ctx));
@@ -145,11 +146,15 @@ async function shapes() {
   assert.equal(out.calls, 7);
 }
 // The total never rises past the best at the same first failing stage.
+// #561: each fall back to the best set strictly shrinks the previous set, so
+// it is neutral; the three rises fill the window.
 async function sameStageTotalMustFall() {
   const out = await author(n => [det('missing_runnable_test', 'TASK-X-001', 'shape'),
     ...range(n % 2 ? 3 : 4, i => det('invalid_verifier', `TASK-X-${i}`, 'contracts'))]);
   assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4);
+  assert.equal(out.calls, 6);
+  assert.deepEqual(Array.from(out.pauses[0].progress_history, entry => Boolean(entry.neutral)),
+    [false, false, true, false, true, false]);
 }
 // Finding 5, under the Issue 288 rule: a stalled observe loop pauses
 // (resumable) and returns no artifact. Its evidence names the LATEST round's

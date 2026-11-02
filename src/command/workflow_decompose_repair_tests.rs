@@ -4,7 +4,6 @@
 //! script, the same way the v3 prelude tests exercise prelude functions.
 
 use super::FIXED_SCRIPT_SOURCE;
-
 /// The embedded script, or the same files under `ARCHON_TEST_SCRIPT_ROOT` (the
 /// override the Node suites honour), so a script can be tested before it is
 /// embedded and an old script replayed to show a test fails before its fix.
@@ -19,6 +18,7 @@ pub(super) fn script_source() -> std::borrow::Cow<'static, str> {
         "workflow_decompose_v1_set_gate.js",
         "workflow_decompose_v1_frozen.js",
         "workflow_decompose_v1_progress.js",
+        "workflow_decompose_v1_failing_set.js",
         "workflow_decompose_v1_seed.js",
         "workflow_decompose_v1_context.js",
     ]
@@ -59,15 +59,14 @@ fn decl(name: &str) -> String {
 mod author_calls;
 #[path = "workflow_decompose_body_repair_tests.rs"]
 mod body_repair;
+#[path = "workflow_decompose_frozen_routing_tests.rs"]
+pub(crate) mod frozen_routing;
 #[path = "workflow_decompose_refusal_progress_tests.rs"]
 mod refusal_progress;
 #[path = "workflow_decompose_set_gate_tests.rs"]
 mod set_gate;
 #[path = "workflow_decompose_set_gate_skeleton_tests.rs"]
 pub(crate) mod set_gate_skeleton;
-
-#[path = "workflow_decompose_frozen_routing_tests.rs"]
-pub(crate) mod frozen_routing;
 
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
@@ -93,6 +92,7 @@ fn run_js(driver: &str) -> String {
         // Issue 529: a strictly shrinking failing-subject set is progress.
         "failingSubjectKey",
         "isStrictSubset",
+        "failingSetStep",
         "isBetter",
         "newProgress",
         // Issue 357: the per-entry shape-repair frontier.
