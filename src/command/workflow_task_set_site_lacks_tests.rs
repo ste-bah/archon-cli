@@ -235,8 +235,9 @@ async fn issue557_a_program_neither_site_nor_host_has_reaches_its_author_without
     assert!(prepared.findings.is_empty(), "{:?}", prepared.findings);
     assert_eq!(client.authored(), 1, "only AC-X-002's author is asked");
     let prompts = client.prompts.lock().unwrap().clone();
+    // bash says "PY: command not found", dash (Linux /bin/sh) "PY: not found".
     let finding = (prompts.iter())
-        .find(|prompt| prompt.contains("PY: command not found"))
+        .find(|prompt| prompt.contains("PY: ") && prompt.contains("not found"))
         .unwrap_or_else(|| panic!("its author was asked: {prompts:#?}"));
     assert!(finding.contains("AC-X-002"), "{finding}");
     assert!(
