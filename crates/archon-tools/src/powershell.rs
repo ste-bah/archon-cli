@@ -79,7 +79,9 @@ impl Tool for PowerShellTool {
             .stdin(Stdio::null());
         #[cfg(unix)]
         cmd.process_group(0);
-        let mut child = match cmd.spawn() {
+        let mut child = match archon_shell::read_boundary::prepare_spawn(cmd.as_std())
+            .and_then(|()| cmd.spawn())
+        {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("PowerShell not available ({shell}): {e}")),
         };

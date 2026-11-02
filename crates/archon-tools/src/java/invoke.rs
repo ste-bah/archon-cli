@@ -116,7 +116,9 @@ async fn run_bounded_stage(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = match command.spawn() {
+    let mut child = match archon_shell::read_boundary::prepare_spawn(command.as_std())
+        .and_then(|()| command.spawn())
+    {
         Ok(child) => child,
         Err(e) => {
             return RunOutcome {

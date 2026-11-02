@@ -163,13 +163,14 @@ impl LspClient {
         // Spawn the server process
         let mut command = bash_write_sandbox::command(binary, boundary.as_ref());
         archon_shell::spawn::replace_environment(command.as_std_mut(), env);
-        let mut child = command
+        command
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .spawn()?;
+            .kill_on_drop(true);
+        archon_shell::read_boundary::prepare_spawn(command.as_std())?;
+        let mut child = command.spawn()?;
 
         let stdout = child
             .stdout

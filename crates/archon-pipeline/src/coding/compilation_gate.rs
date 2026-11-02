@@ -191,6 +191,7 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
     // is empty after a timeout. process-wrap's own job is private to it.
     #[cfg(windows)]
     command.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
+    archon_shell::read_boundary::prepare_spawn(command.as_std())?;
     let mut command = CommandWrap::from(command);
     command.wrap(KillOnDrop);
     #[cfg(unix)]

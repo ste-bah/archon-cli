@@ -4,6 +4,10 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "read_boundary_spawn.rs"]
+mod spawn;
+pub use spawn::prepare_spawn;
+
 /// A failed launch-specific authority rule must never turn into an uncontained launch.
 pub fn require_grant_rule<T>(rule: Result<T, String>) -> std::io::Result<T> {
     rule.map_err(|reason| {
@@ -85,33 +89,46 @@ pub fn operator_paths() -> Vec<PathBuf> {
 /// Add to an existing macOS sandbox profile, after all allow rules.
 pub fn macos_rules(paths: &[PathBuf]) -> String {
     let mut rules = String::new();
+    let mut ancestors = std::collections::HashSet::new();
     for path in paths {
         for path in path_spellings(path) {
-            let quoted = path
-                .to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"");
-            rules.push_str(&format!("(deny file-read* (subpath \"{quoted}\"))\n"));
+            rules.push_str(&format!("(deny file-read* (subpath {}))\n", quoted(&path)));
+            deny_macos_writes(&mut rules, &path, &mut ancestors);
         }
     }
     for path in path_spellings(&crate::credential_paths::operator_grant_root()) {
-        let quoted = |p: &Path| {
-            p.to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-        };
-        rules.push_str(&format!(
-            "(deny file-write* (subpath \"{}\"))\n",
-            quoted(&path)
-        ));
-        for ancestor in path.ancestors().skip(1) {
+        deny_macos_writes(&mut rules, &path, &mut ancestors);
+    }
+    rules
+}
+
+fn quoted(path: &Path) -> String {
+    format!(
+        "\"{}\"",
+        path.to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+    )
+}
+
+fn deny_macos_writes(
+    rules: &mut String,
+    path: &Path,
+    ancestors: &mut std::collections::HashSet<PathBuf>,
+) {
+    rules.push_str(&format!("(deny file-write* (subpath {}))\n", quoted(path)));
+    // Unlink covers ancestor removal and rename; the protected subtree keeps
+    // its full write denial without preventing initial ancestor creation.
+    // Preserve ancestor metadata and prevent symlink redirection while allowing mkdir.
+    for ancestor in path.ancestors().skip(1) {
+        if ancestors.insert(ancestor.to_path_buf()) {
             rules.push_str(&format!(
-                "(deny file-write* (literal \"{}\"))\n",
+                "(deny file-write-unlink file-write-mode file-write-owner file-write-flags file-write-setugid file-write-xattr (literal {0}))\n\
+                 (deny file-write-create (require-all (literal {0}) (vnode-type SYMLINK)))\n",
                 quoted(ancestor)
             ));
         }
     }
-    rules
 }
 
 // Resolve the longest existing prefix too: an atomic sibling may not exist
@@ -226,144 +243,8 @@ pub fn command(program: &OsStr) -> Command {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unavailable_boundary_does_not_claim_enforcement_for_a_program_name() {
-        if crate::write_boundary::mechanism().is_ok() {
-            return;
-        }
-        #[derive(Clone)]
-        struct Capture(std::sync::Arc<std::sync::Mutex<bool>>);
-        impl tracing::Subscriber for Capture {
-            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
-                true
-            }
-            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-                tracing::span::Id::from_u64(1)
-            }
-            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-            fn event(&self, event: &tracing::Event<'_>) {
-                struct Fields<'a>(&'a std::sync::Mutex<bool>);
-                impl tracing::field::Visit for Fields<'_> {
-                    fn record_debug(
-                        &mut self,
-                        field: &tracing::field::Field,
-                        value: &dyn std::fmt::Debug,
-                    ) {
-                        if field.name() == "credential_reads"
-                            && format!("{value:?}").contains("named-paths-denied")
-                        {
-                            *self.0.lock().unwrap() = true;
-                        }
-                    }
-                }
-                event.record(&mut Fields(&self.0));
-            }
-            fn enter(&self, _: &tracing::span::Id) {}
-            fn exit(&self, _: &tracing::span::Id) {}
-        }
-        let claimed = std::sync::Arc::new(std::sync::Mutex::new(false));
-        tracing::subscriber::with_default(Capture(claimed.clone()), || {
-            let _ = command(OsStr::new(crate::write_boundary::SANDBOX_EXEC));
-        });
-        assert!(
-            !*claimed.lock().unwrap(),
-            "host did not enforce any read policy"
-        );
-    }
-
-    #[test]
-    fn relocated_host_credentials_and_atomic_siblings_are_protected() {
-        const OVERRIDE: &str = "ARCHON_CREDENTIALS_FILE";
-        if std::env::var_os("ARCHON_R2_PATH_PROBE").is_none() {
-            let temp = tempfile::tempdir().unwrap();
-            let status = crate::spawn::command(std::env::current_exe().unwrap())
-                .args(["--exact", "read_boundary::tests::relocated_host_credentials_and_atomic_siblings_are_protected"])
-                .env("ARCHON_R2_PATH_PROBE", "1")
-                .env(OVERRIDE, temp.path().join("relocated.json"))
-                .status().unwrap();
-            assert!(
-                status.success(),
-                "relocated credential store must be denied"
-            );
-            return;
-        }
-        let relocated = PathBuf::from(std::env::var_os(OVERRIDE).unwrap());
-        let paths = operator_paths();
-        assert!(
-            paths.contains(&relocated),
-            "host credential override must be protected"
-        );
-        assert!(
-            paths.contains(&relocated.with_extension("json.tmp")),
-            "atomic sibling must be protected"
-        );
-    }
-    #[test]
-    fn credential_and_profile_paths_are_denied_by_absolute_path() {
-        let home = Path::new("/synthetic-operator");
-        let paths = denied_paths(home);
-        for name in [
-            ".archon/.credentials.json",
-            ".aws",
-            ".ssh",
-            ".profile",
-            ".bashrc",
-            ".zshenv",
-            ".cargo/credentials.toml",
-            ".codex/auth.json",
-        ] {
-            assert!(paths.contains(&home.join(name)));
-        }
-        let rules = macos_rules(&paths);
-        assert!(rules.contains("(deny file-read* (subpath \"/synthetic-operator/.aws\"))"));
-    }
-
-    #[test]
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn credential_file_is_unreadable_when_kernel_boundary_is_available() {
-        if crate::write_boundary::mechanism().is_err() {
-            eprintln!(
-                "kernel read probe unavailable in this host sandbox; profile/path policy is tested separately"
-            );
-            return;
-        }
-        let home = tempfile::tempdir().unwrap();
-        std::fs::create_dir(home.path().join(".aws")).unwrap();
-        let secret = home.path().join(".aws/credentials");
-        std::fs::write(&secret, "sk-test-file-355").unwrap();
-        #[cfg(target_os = "linux")]
-        let mut command = crate::spawn::command("/bin/sh");
-        #[cfg(target_os = "macos")]
-        let mut command = {
-            let mut command = crate::spawn::command(crate::write_boundary::SANDBOX_EXEC);
-            command.args([
-                "-p",
-                &format!(
-                    "(version 1)(allow default){}",
-                    macos_rules(&denied_paths(home.path()))
-                ),
-                "/bin/sh",
-            ]);
-            command
-        };
-        #[cfg(target_os = "linux")]
-        crate::write_boundary::landlock::LandlockSandbox::build_read(&denied_paths(home.path()))
-            .unwrap()
-            .install_std(&mut command);
-        let status = command
-            .args(["-c", "test ! -r \"$1\" || ! cat \"$1\" >/dev/null", "probe"])
-            .arg(&secret)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .unwrap();
-        assert!(status.success(), "credential read must be denied");
-    }
-}
+#[path = "read_boundary_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 mod r5_tests {

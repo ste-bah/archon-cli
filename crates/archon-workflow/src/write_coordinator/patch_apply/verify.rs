@@ -68,12 +68,10 @@ pub(crate) fn run_wave_verify_prepared(
         .ok_or_else(|| ApplyError::VerifyEnvironment("verify environment was not prepared".into()))?
         .with_remedy(crate::acceptance_check_environment::RUN_POLICY_REMEDY);
     let start = SystemTime::now();
-    let output = environment
-        .command(crate::acceptance::shell_program())
-        .arg("-c")
-        .arg(cmd)
-        .current_dir(canonical_root)
-        .output()
+    let mut process = environment.command(crate::acceptance::shell_program());
+    process.arg("-c").arg(cmd).current_dir(canonical_root);
+    let output = archon_shell::read_boundary::prepare_spawn(&process)
+        .and_then(|()| process.output())
         .map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {
                 ApplyError::GitMissing

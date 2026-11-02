@@ -681,7 +681,9 @@ fn pipeline_output(
 ) -> std::io::Result<std::process::Output> {
     let boundary = archon_tools::PipelineBoundary::current(project_root)?;
     let mut command = boundary.command(program).into_std();
-    let output = command.args(args).current_dir(project_root).output();
+    command.args(args).current_dir(project_root);
+    archon_shell::read_boundary::prepare_spawn(&command)?;
+    let output = command.output();
     boundary.settle()?;
     output
 }

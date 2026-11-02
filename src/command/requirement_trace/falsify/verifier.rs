@@ -150,14 +150,15 @@ pub(super) fn run_in_environment(
     timeout: Duration,
     environment: &archon_workflow::acceptance_check_environment::CommandEnvironment,
 ) -> Ran {
-    let spawned = environment
-        .command(&argv[0])
+    let mut process = environment.command(&argv[0]);
+    process
         .args(&argv[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
+        .stderr(Stdio::piped());
+    let spawned =
+        archon_shell::read_boundary::prepare_spawn(&process).and_then(|()| process.spawn());
     let mut child = match spawned {
         Ok(child) => child,
         Err(err) => {

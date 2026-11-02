@@ -163,9 +163,11 @@ pub(crate) fn run_supervised(
         .stderr(Stdio::piped());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut process, 0);
-    let mut child = process.spawn().map_err(|error| {
-        VerifierFailure::Environment(format!("artifact verifier could not start: {error}"))
-    })?;
+    let mut child = archon_shell::read_boundary::prepare_spawn(&process)
+        .and_then(|()| process.spawn())
+        .map_err(|error| {
+            VerifierFailure::Environment(format!("artifact verifier could not start: {error}"))
+        })?;
     let pid = child.id();
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());

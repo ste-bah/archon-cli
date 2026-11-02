@@ -149,18 +149,19 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
     #[cfg(unix)]
     cmd.process_group(0);
 
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return ToolResult::success(format_report(
-                "error",
-                -1,
-                &[],
-                false,
-                Some(&e.to_string()),
-            ));
-        }
-    };
+    let mut child =
+        match archon_shell::read_boundary::prepare_spawn(cmd.as_std()).and_then(|()| cmd.spawn()) {
+            Ok(c) => c,
+            Err(e) => {
+                return ToolResult::success(format_report(
+                    "error",
+                    -1,
+                    &[],
+                    false,
+                    Some(&e.to_string()),
+                ));
+            }
+        };
 
     // Issue-134: the whole group ends with this call, however it ends.
     let _live = crate::bash::LiveGroup::arm(child.id(), &ctx.session_id);

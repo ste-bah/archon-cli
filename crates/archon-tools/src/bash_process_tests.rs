@@ -85,7 +85,7 @@ async fn bash_runs_in_a_process_group_of_its_own() {
     let tool = BashTool::default();
     let result = tool
         .execute(
-            json!({"command": "ps -o pgid= -p $$"}),
+            json!({"command": process_probe_tests::command("group")}),
             &ToolContext {
                 working_dir: dir.path().to_path_buf(),
                 ..ToolContext::default()
@@ -130,14 +130,16 @@ async fn bash_runs_in_a_process_group_of_its_own() {
 ///
 /// Linux-only because `ps -o sid=` is. BSD `ps` on macOS reports a session
 /// pointer under `sess`, which is not comparable with `getsid`.
+/// That restriction belonged to the former probe; the native probe below
+/// works on both platforms without invoking `ps`.
 #[tokio::test]
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 async fn bash_runs_in_a_session_of_its_own() {
     let dir = tempfile::tempdir().unwrap();
     let tool = BashTool::default();
     let result = tool
         .execute(
-            json!({"command": "ps -o sid= -p $$"}),
+            json!({"command": process_probe_tests::command("session")}),
             &ToolContext {
                 working_dir: dir.path().to_path_buf(),
                 ..ToolContext::default()
@@ -185,10 +187,10 @@ async fn normal_completion_kills_delayed_background_mutation() {
         .execute(
             json!({
                 "command": format!(
-                    "sh -c 'kill -STOP \"$$\"; printf delayed > {}' & child=$!; printf '%s' \"$child\" > {}; \
-                     while kill -0 \"$child\" 2>/dev/null && ! ps -o stat= -p \"$child\" | grep -q '[Tt]'; do sleep 0.01; done",
+                    "PROCESS_PROBE_DELAYED_FILE={} PROCESS_PROBE_PID_FILE={} {}",
                     shell_quote(&delayed_file),
                     shell_quote(&pid_file),
+                    process_probe_tests::command("stopped"),
                 )
             }),
             &ToolContext {
@@ -462,3 +464,7 @@ fn timeout_message_names_the_limit_that_fired() {
 #[cfg(unix)]
 #[path = "bash_jobserver_tests.rs"]
 mod jobserver_tests;
+
+#[cfg(unix)]
+#[path = "bash_process_probe_tests.rs"]
+mod process_probe_tests;

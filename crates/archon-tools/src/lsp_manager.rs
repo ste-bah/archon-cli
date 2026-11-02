@@ -55,6 +55,14 @@ impl LspConfig {
 // LspServerManager
 // ---------------------------------------------------------------------------
 
+type LaunchScope = (
+    String,
+    Option<String>,
+    PathBuf,
+    Option<crate::workflow_read_guard::BoundaryPaths>,
+    bool,
+);
+
 /// Manages the lifecycle of an LSP server connection.
 ///
 /// Lazy initialization: the connection is established on first tool use.
@@ -62,13 +70,7 @@ pub struct LspServerManager {
     project_root: PathBuf,
     config: LspConfig,
     client: Option<LspClient>,
-    launch_scope: Option<(
-        String,
-        Option<String>,
-        PathBuf,
-        Option<crate::workflow_read_guard::BoundaryPaths>,
-        bool,
-    )>,
+    launch_scope: Option<LaunchScope>,
 }
 
 impl LspServerManager {

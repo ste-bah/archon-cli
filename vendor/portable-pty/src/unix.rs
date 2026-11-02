@@ -340,6 +340,7 @@ impl PtyFd {
                 })
         };
 
+        archon_shell::read_boundary::prepare_spawn(&cmd)?;
         let mut child = cmd.spawn()?;
 
         // Ensure that we close out the slave fds that Child retains;

@@ -12,7 +12,7 @@ use super::BASH_PROGRAM;
 
 const UNIX_DESCENDANT_CLEANUP: &str = r#"
 __archon_children() {
-    ps -axo pid=,ppid= 2>/dev/null | awk -v parent="$1" '$2 == parent { print $1 }'
+    pgrep -P "$1" 2>/dev/null
 }
 __archon_kill_tree() {
     for child in $(__archon_children "$1"); do
@@ -25,6 +25,11 @@ __archon_cleanup() {
     __archon_status=$?
     trap - EXIT
     for child in $(__archon_children "$$"); do
+        # On owner death, leave the watcher alive to sweep orphaned group members
+        # after this tree walk. Normal completion still removes the watcher.
+        if [ "$child" = "$__archon_watcher" ] && ! kill -0 "$__archon_owner" 2>/dev/null; then
+            continue
+        fi
         kill -STOP "$child" 2>/dev/null || true
         __archon_kill_tree "$child"
     done
@@ -39,11 +44,25 @@ __archon_owner=$PPID
 __archon_self=$$
 (
     trap 'exit 0' TERM
-    __archon_me=$(sh -c 'echo $PPID')
+    if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then
+        __archon_me=$BASHPID
+    else
+        # exec makes sh a direct child of this watcher, even on bash 3.2.
+        read -r __archon_me < <(exec sh -c 'echo "$PPID"')
+    fi
     while kill -0 "$__archon_owner" 2>/dev/null && kill -0 "$__archon_self" 2>/dev/null; do
         sleep 1
     done
-    for p in $(ps -axo pid=,pgid= 2>/dev/null | awk -v g="$__archon_self" -v me="$__archon_me" '$2 == g && $1 != me { print $1 }'); do
+    # macOS pgrep excludes ancestors, including the wrapper that owns EXIT cleanup.
+    kill -TERM "$__archon_self" 2>/dev/null
+    # Let the wrapper's EXIT trap walk descendants before their parents die.
+    __archon_wait=0
+    while kill -0 "$__archon_self" 2>/dev/null && [ "$__archon_wait" -lt 20 ]; do
+        sleep 0.1
+        __archon_wait=$((__archon_wait + 1))
+    done
+    for p in $(pgrep -g "$__archon_self" 2>/dev/null); do
+        [ "$p" = "$__archon_me" ] && continue
         kill -TERM "$p" 2>/dev/null
     done
     sleep 2
@@ -55,7 +74,8 @@ __archon_self=$$
 # whenever it reaps that job before exiting; the cleanup trap above SIGKILLs
 # the watcher and then forks more command substitutions, which can reap it
 # first. Whether it prints is that race; it leaked into tool output on Linux.
-disown "$!" 2>/dev/null || true
+__archon_watcher=$!
+disown "$__archon_watcher" 2>/dev/null || true
 (
     "$1" --noprofile --norc -c "$2"
     __archon_inner_status=$?
@@ -383,3 +403,7 @@ fn process_group_members(pgid: u32) -> Vec<u32> {
         })
         .collect()
 }
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[path = "bash_owner_exit_tests.rs"]
+mod owner_exit_tests;

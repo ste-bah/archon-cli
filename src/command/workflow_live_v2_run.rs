@@ -236,7 +236,7 @@ pub(crate) async fn resume_generated_v2_workflow_with_limits(
     lease.record_executor()?;
     let result = execute_generated_v2_run_with_limits(
         store,
-        &run_id,
+        run_id,
         run,
         plan,
         task.clone(),

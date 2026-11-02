@@ -154,6 +154,13 @@ pub fn credential_name(name: &str) -> bool {
         .any(|part| upper.contains(part))
 }
 
+/// Host transport probes use the same environment as their command launches.
+pub fn transport_command(program: impl AsRef<OsStr>, bindings: &[&str]) -> Command {
+    let mut command = crate::spawn::command(program);
+    transport_environment(&mut command, bindings);
+    command
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,11 +227,4 @@ mod tests {
             vec!["Path", "HOME", "LANG", "TMPDIR"]
         );
     }
-}
-
-/// Host transport probes use the same environment as their command launches.
-pub fn transport_command(program: impl AsRef<OsStr>, bindings: &[&str]) -> Command {
-    let mut command = crate::spawn::command(program);
-    transport_environment(&mut command, bindings);
-    command
 }

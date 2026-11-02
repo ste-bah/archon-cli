@@ -23,6 +23,7 @@ pub(super) fn spawn_wrapped_child(
 ) -> std::io::Result<Box<dyn ChildWrapper>> {
     use process_wrap::tokio::{CommandWrap, KillOnDrop};
 
+    archon_shell::read_boundary::prepare_spawn(command.as_std())?;
     let mut wrapper = CommandWrap::from(command);
     wrapper.wrap(KillOnDrop);
     // A session, not a process group (#197).
