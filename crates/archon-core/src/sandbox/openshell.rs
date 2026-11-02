@@ -123,7 +123,7 @@ pub struct OpenShellDoctorReport {
 }
 
 pub fn probe_openshell(binary: &str) -> OpenShellProbe {
-    match archon_shell::spawn::command(binary)
+    match archon_shell::execution_environment::transport_command(binary, &[])
         .arg("--version")
         .output()
     {
@@ -404,18 +404,7 @@ impl OpenShellSandboxBackend {
 }
 
 fn apply_openshell_env_policy(cmd: &mut TokioCommand, config: &OpenShellConfig) {
-    for name in [
-        "ANTHROPIC_API_KEY",
-        "CLAUDE_API_KEY",
-        "OPENAI_API_KEY",
-        "GITHUB_TOKEN",
-        "GH_TOKEN",
-        "GITLAB_TOKEN",
-        "NVIDIA_API_KEY",
-        "COPILOT_GITHUB_TOKEN",
-    ] {
-        cmd.env_remove(name);
-    }
+    archon_shell::execution_environment::transport_environment(cmd.as_std_mut(), &[]);
     if let Some(gateway) = config.gateway.as_deref().map(str::trim)
         && !gateway.is_empty()
     {

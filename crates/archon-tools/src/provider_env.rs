@@ -128,26 +128,35 @@ pub enum ProviderEnvSource {
     },
 }
 
-pub async fn resolve_provider_env(policy: &ProviderEnvPolicy) -> ProviderEnvResolution {
-    resolve_provider_env_with_timeout(policy, Duration::from_millis(PROFILE_TIMEOUT_MS)).await
-}
+#[path = "provider_env_authority.rs"]
+mod authority;
+pub use authority::{resolve_operator_provider_env, resolve_provider_env};
 
 async fn resolve_provider_env_with_timeout(
     policy: &ProviderEnvPolicy,
     profile_timeout: Duration,
+    operator_authorized: bool,
 ) -> ProviderEnvResolution {
     let keys = normalize_keys(policy.required_keys.clone());
-    let mut values = env_values(&keys);
+    let mut values = if operator_authorized {
+        env_values(&keys)
+    } else {
+        BTreeMap::new()
+    };
     let mut origins = values
         .keys()
         .map(|key| (key.clone(), ProviderEnvFoundIn::ProcessEnv))
         .collect::<BTreeMap<_, _>>();
     let mut errors = Vec::new();
-    let profile_sources = normalize_profiles(&policy.profile_sources);
+    let profile_sources = if operator_authorized {
+        policy.profile_sources.clone()
+    } else {
+        Vec::new()
+    };
     let profile_provenance = profile_provenance(&profile_sources);
     let mut resolver = ProviderEnvResolverProof::default();
     let mut resolution_failed = false;
-    if keys.iter().any(|key| !values.contains_key(key)) {
+    if operator_authorized && keys.iter().any(|key| !values.contains_key(key)) {
         let attempt = profile_values_with_timeout(&keys, &profile_sources, profile_timeout).await;
         resolver = attempt.resolver;
         if let Some(error) = attempt.error {
@@ -459,19 +468,6 @@ fn normalize_keys(keys: Vec<String>) -> Vec<String> {
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect()
-}
-
-fn normalize_profiles(profiles: &[String]) -> Vec<String> {
-    let profiles = profiles
-        .iter()
-        .map(|profile| profile.trim().to_string())
-        .filter(|profile| !profile.is_empty())
-        .collect::<Vec<_>>();
-    if profiles.is_empty() {
-        default_profile_sources()
-    } else {
-        profiles
-    }
 }
 
 fn shell_path(path: &str) -> Option<String> {

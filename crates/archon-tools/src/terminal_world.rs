@@ -1,4 +1,4 @@
-﻿//! Which execution world a terminal opens in (#201 Phase 6).
+//! Which execution world a terminal opens in (#201 Phase 6).
 //!
 //! `Bash` is routed through the active sandbox backend; terminals were not, so
 //! under `sandbox.backend = docker | ssh | openshell` opening a terminal handed
@@ -123,7 +123,7 @@ fn lands_in_the_same_world(answer: &SandboxTerminal, on_the_host: bool) -> bool 
 /// cannot be. `Err` is a real answer here, not a failure.
 pub(crate) fn plan(ctx: &ToolContext, shell: Option<&str>, cwd: &Path) -> Result<Launch, String> {
     match decide(ctx, shell, cwd) {
-        SandboxTerminal::Host => host_launch(shell, cwd),
+        SandboxTerminal::Host => host_launch(ctx, shell, cwd),
         SandboxTerminal::Open(command) => Ok(sandbox_launch(command)),
         SandboxTerminal::Refused(reason) => Err(reason),
     }
@@ -148,13 +148,24 @@ fn decide(ctx: &ToolContext, shell: Option<&str>, cwd: &Path) -> SandboxTerminal
     })
 }
 
-fn host_launch(shell: Option<&str>, cwd: &Path) -> Result<Launch, String> {
+fn host_launch(ctx: &ToolContext, shell: Option<&str>, cwd: &Path) -> Result<Launch, String> {
+    use crate::bash::bash_write_sandbox;
+    let mut env = crate::bash::host_env();
+    let boundary =
+        bash_write_sandbox::for_call(ctx, &mut env, &[]).map_err(|result| result.content)?;
     let shell = match shell {
         Some(shell) => shell,
         None => shells::default_shell(),
     };
+    let mut command = shells::build(shell, cwd)?;
+    if let Some(boundary) = &boundary {
+        bash_write_sandbox::apply_pty(boundary, &mut command)?;
+    }
+    for (key, value) in env {
+        command.env(key, value);
+    }
     Ok(Launch {
-        command: shells::build(shell, cwd)?,
+        command,
         shell: shell.to_string(),
         location: cwd.display().to_string(),
         sandboxed: false,
@@ -164,6 +175,30 @@ fn host_launch(shell: Option<&str>, cwd: &Path) -> Result<Launch, String> {
 fn sandbox_launch(command: SandboxTerminalCommand) -> Launch {
     let mut built = CommandBuilder::new(&command.program);
     built.args(&command.args);
+    // Host-owned authentication belongs to the local client, never the payload.
+    let mut client = archon_shell::spawn::command(&command.program);
+    archon_shell::execution_environment::transport_environment(
+        &mut client,
+        &[
+            "SSH_AUTH_SOCK",
+            "DOCKER_HOST",
+            "DOCKER_CONTEXT",
+            "DOCKER_CONFIG",
+            "DOCKER_TLS_VERIFY",
+            "DOCKER_CERT_PATH",
+        ],
+    );
+    // This host transport receives only the environment selected above; its
+    // PTY launch preserves these bindings rather than inheriting the parent.
+    let vars = client
+        .get_envs()
+        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())));
+    archon_shell::spawn::replace_library_environment(
+        &mut built,
+        vars,
+        CommandBuilder::env_clear,
+        |command, key, value| command.env(key, value),
+    );
     // Set on the launcher, not only inside the world: `ssh` forwards the local
     // `TERM` to the remote shell, so leaving it unset there costs the same
     // line-at-a-time degradation the host path already guards against.

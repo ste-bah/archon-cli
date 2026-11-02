@@ -488,3 +488,6 @@ fn the_shared_git_directory_opens_only_its_commit_state_for_git_mutation() {
 
 #[path = "bash_write_sandbox_boundary_tests.rs"]
 mod boundary_tests;
+
+#[path = "agent_launch_write_boundary_tests.rs"]
+mod agent_launch_tests;

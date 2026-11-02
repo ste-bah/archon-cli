@@ -92,6 +92,10 @@ pub(super) async fn run(
     bound: Duration,
 ) -> Result<Output, DockerCliError> {
     let mut command = archon_shell::spawn::tokio_command(binary);
+    archon_shell::execution_environment::transport_environment(
+        command.as_std_mut(),
+        archon_shell::execution_environment::DOCKER_CLIENT_BINDINGS,
+    );
     command
         .args(args)
         .stdin(Stdio::null())
@@ -166,6 +170,10 @@ pub(super) fn run_blocking(
     bound: Duration,
 ) -> Result<(), DockerCliError> {
     let mut command = archon_shell::spawn::command(binary);
+    archon_shell::execution_environment::transport_environment(
+        &mut command,
+        archon_shell::execution_environment::DOCKER_CLIENT_BINDINGS,
+    );
     command
         .args(args)
         .stdin(Stdio::null())

@@ -88,6 +88,7 @@ impl RemoteExec for OpenShellTransport {
         let args = openshell_fs_args(&self.config, &self.working_dir, script)
             .map_err(|error| io::Error::other(format!("openshell sandbox: {error}")))?;
         let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
+        archon_shell::execution_environment::transport_environment(cmd.as_std_mut(), &[]);
         cmd.args(args);
         apply_openshell_env_policy(&mut cmd, &self.config);
         run_transport_process(cmd, stdin, REMOTE_FS_TIMEOUT_MS, "openshell").await

@@ -459,17 +459,6 @@ impl CommandEnvironment {
         self
     }
 
-    /// Every child still passes through the process-wide spawn boundary.
-    pub fn command(&self, program: impl AsRef<OsStr>) -> std::process::Command {
-        let mut command = archon_shell::spawn::command(program);
-        archon_shell::spawn::replace_environment(&mut command, &self.variables);
-        command
-    }
-
-    pub fn tokio_command(&self, program: impl AsRef<OsStr>) -> tokio::process::Command {
-        tokio::process::Command::from(self.command(program))
-    }
-
     /// Call only for a failed verifier. Persist this separate diagnostic with
     /// the result; stdout/stderr must never change the verdict (Issue 349).
     pub fn note(&self, outputs: &[&[u8]]) -> Option<String> {
@@ -494,3 +483,6 @@ pub use withheld::{withheld, withheld_note};
 #[cfg(test)]
 #[path = "acceptance_check_environment_tests.rs"]
 mod tests;
+
+#[path = "acceptance_check_environment_command.rs"]
+mod command;

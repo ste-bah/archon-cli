@@ -218,3 +218,10 @@ fn r3_variable_names_require_identifier_boundaries() {
         None
     );
 }
+
+#[test]
+fn acceptance_check_environment_command_uses_shared_exact_policy() {
+    let source = include_str!("acceptance_check_environment_command.rs");
+    assert!(source.contains("execution_environment::"));
+    assert!(!source.contains("spawn::replace_environment"));
+}

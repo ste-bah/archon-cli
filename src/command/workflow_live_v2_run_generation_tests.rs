@@ -194,11 +194,9 @@ async fn assert_running_action_finalizes(action: LifecycleAction) {
         "{result:?}"
     );
     assert!(store.run_dir(&run.id).join("v2/finalization.json").exists());
-    assert!(
-        std::fs::read_to_string(store.events_path(&run.id))
-            .unwrap()
-            .contains("terminal_status")
-    );
+    assert!(std::fs::read_to_string(store.events_path(&run.id))
+        .unwrap()
+        .contains("terminal_status"));
 }
 
 #[tokio::test]
@@ -224,4 +222,160 @@ async fn round5_force_accept_stage_fences_the_call_and_keeps_the_executor_owner(
         source: "test".into(),
     })
     .await;
+}
+
+#[tokio::test]
+async fn provider_env_resume_cannot_grant_from_tampered_state_task() {
+    if std::env::var_os("ARCHON_R4_GRANT_PROBE").is_none() {
+        let home = tempfile::tempdir().unwrap();
+        let output = archon_shell::spawn::command(std::env::current_exe().unwrap())
+            .args([
+                "provider_env_resume_cannot_grant_from_tampered_state_task",
+                "--nocapture",
+            ])
+            .env("ARCHON_R4_GRANT_PROBE", "1")
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env("DECLARED_API_KEY", "synthetic-r4-grant")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let mut spec = super::super::workflow_run_finalizer_tests::spec();
+    spec.task = "never expose X_API_KEY".into();
+    let mut run = store.create_run(spec).unwrap();
+    let script = r#"export default async function workflow(w) { await w.agent("inspect", { task: "Inspect the area." }); }"#;
+    WorkflowBundle::create_for_run(&store, &run, script, WorkflowBundleOrigin::GeneratedHarness)
+        .unwrap();
+    run.spec.task = "required_env_keys: [X_API_KEY]".into();
+    let state_path = store.run_dir(&run.id).join("state.json");
+    std::fs::write(state_path, serde_json::to_vec(&run).unwrap()).unwrap();
+    let resumed = store.load_state(&run.id).unwrap();
+    let plan = live_plan_from_generated_bundle(&store, &resumed)
+        .await
+        .unwrap()
+        .unwrap();
+    let _ = plan;
+    assert!(
+        WorkflowBundle::verified_operator_env_grants(&store, &resumed.id)
+            .unwrap()
+            .is_empty()
+    );
+    // The same state tampering cannot widen a genuine launch declaration.
+    WorkflowBundle::create_for_run_with_operator_grants(
+        &store,
+        &run,
+        script,
+        WorkflowBundleOrigin::GeneratedHarness,
+        &["DECLARED_API_KEY".into()],
+    )
+    .unwrap();
+    assert_eq!(
+        WorkflowBundle::verified_operator_env_grants(&store, &resumed.id).unwrap(),
+        if archon_shell::read_boundary::operator_grants_supported() {
+            vec!["DECLARED_API_KEY"]
+        } else {
+            Vec::new()
+        }
+    );
+    let host_record = archon_shell::credential_paths::home()
+        .join(".archon/operator-env-grants")
+        .join(format!("{}.json", resumed.id));
+    assert_eq!(
+        host_record.is_file(),
+        archon_shell::read_boundary::operator_grants_supported(),
+        "issued launch grants must be persisted outside project state"
+    );
+    let resumed_grants = WorkflowBundle::verified_operator_env_grants(&store, &resumed.id).unwrap();
+    let policy =
+        archon_tools::provider_env::ProviderEnvPolicy::new(vec!["DECLARED_API_KEY".into()]);
+    let resolution =
+        archon_tools::provider_env::resolve_operator_provider_env(&policy, &resumed_grants, &[])
+            .await;
+    use archon_tools::tool::Tool;
+    let command = archon_tools::bash::BashTool::default()
+        .with_provider_env_resolution(resolution)
+        .execute(
+            serde_json::json!({"command": if archon_shell::read_boundary::operator_grants_supported() { "test -n \"$DECLARED_API_KEY\" && printf granted" } else { "test -z \"${DECLARED_API_KEY+x}\" && printf withheld" }}),
+            &archon_tools::tool::ToolContext {
+                working_dir: temp.path().to_path_buf(),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(
+        !command.is_error,
+        "resumed declared key must reach the command"
+    );
+    assert!(command.content.contains(
+        if archon_shell::read_boundary::operator_grants_supported() {
+            "granted"
+        } else {
+            "withheld"
+        }
+    ));
+    let compiled_path = store
+        .run_dir(&run.id)
+        .join(archon_workflow::bundle::COMPILED_SPEC_FILE);
+    let compiled = std::fs::read_to_string(&compiled_path).unwrap();
+    std::fs::write(
+        &compiled_path,
+        compiled.replace("DECLARED_API_KEY", "X_API_KEY"),
+    )
+    .unwrap();
+    assert_eq!(
+        WorkflowBundle::verified_operator_env_grants(&store, &resumed.id).unwrap(),
+        if archon_shell::read_boundary::operator_grants_supported() {
+            vec!["DECLARED_API_KEY"]
+        } else {
+            Vec::new()
+        }
+    );
+}
+
+#[tokio::test]
+async fn provider_env_resume_r5_refuses_operator_requested_id_state_substitution() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let victim = store
+        .create_run(super::super::workflow_run_finalizer_tests::spec())
+        .unwrap();
+    let donor = store
+        .create_run(super::super::workflow_run_finalizer_tests::spec())
+        .unwrap();
+    std::fs::write(
+        store.state_path(&victim.id),
+        serde_json::to_vec(&donor).unwrap(),
+    )
+    .unwrap();
+    let llm = Arc::new(ResumeBeforeReply {
+        store: store.clone(),
+        run_id: donor.id.clone(),
+        status: WorkflowV2Status::Accepted,
+    });
+    let (ui, _receiver) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let result = resume_generated_v2_workflow(
+        temp.path(),
+        &store,
+        &victim.id,
+        llm,
+        ui,
+        Vec::new(),
+        LiveApprovalMode::CliYes,
+        true,
+        &archon_core::config::LearningConfig::default(),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "resume must refuse a state ID different from the operator's CLI argument"
+    );
+    assert!(result.unwrap_err().to_string().contains("run id mismatch"));
 }

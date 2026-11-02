@@ -278,3 +278,6 @@ pub(crate) fn first_non_empty_line(bytes: &[u8]) -> Option<String> {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod agent_environment_tests;

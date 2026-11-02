@@ -15,7 +15,12 @@ async fn profile_preflight_reports_present_key_without_value() {
         reason: Some("test".to_string()),
     };
 
-    let resolved = resolve_provider_env(&policy).await;
+    let resolved =
+        resolve_operator_provider_env(&policy, &policy.required_keys, &policy.profile_sources)
+            .await;
+    if assert_disabled_operator_grants(&resolved) {
+        return;
+    }
 
     assert_eq!(
         resolved.proof.credential_state,
@@ -63,7 +68,12 @@ async fn missing_key_is_reported_without_secret() {
         reason: None,
     };
 
-    let resolved = resolve_provider_env(&policy).await;
+    let resolved =
+        resolve_operator_provider_env(&policy, &policy.required_keys, &policy.profile_sources)
+            .await;
+    if assert_disabled_operator_grants(&resolved) {
+        return;
+    }
 
     assert_eq!(
         resolved.proof.credential_state,
@@ -97,7 +107,12 @@ async fn adjacent_literal_exports_both_resolve_with_profile_provenance() {
         reason: Some("adjacent exports regression".to_string()),
     };
 
-    let resolved = resolve_provider_env(&policy).await;
+    let resolved =
+        resolve_operator_provider_env(&policy, &policy.required_keys, &policy.profile_sources)
+            .await;
+    if assert_disabled_operator_grants(&resolved) {
+        return;
+    }
 
     assert_eq!(
         resolved.proof.credential_state,
@@ -132,7 +147,12 @@ async fn set_but_empty_key_is_present_empty_and_fails_closed() {
         reason: Some("empty state regression".to_string()),
     };
 
-    let resolved = resolve_provider_env(&policy).await;
+    let resolved =
+        resolve_operator_provider_env(&policy, &policy.required_keys, &policy.profile_sources)
+            .await;
+    if assert_disabled_operator_grants(&resolved) {
+        return;
+    }
 
     assert_eq!(
         resolved.proof.redacted_env_keys_checked[0].state,
@@ -161,7 +181,8 @@ async fn profile_timeout_is_resolution_error_not_missing() {
         reason: Some("timeout regression".to_string()),
     };
 
-    let resolved = resolve_provider_env_with_timeout(&policy, Duration::from_millis(10)).await;
+    let resolved =
+        resolve_provider_env_with_timeout(&policy, Duration::from_millis(10), true).await;
 
     assert_eq!(
         resolved.proof.redacted_env_keys_checked[0].state,
@@ -282,4 +303,130 @@ fn malformed_nul_output_is_an_explicit_resolution_error() {
     .expect_err("unterminated record must fail");
 
     assert!(error.contains("malformed NUL output"));
+}
+
+#[tokio::test]
+async fn authored_policy_cannot_execute_a_profile_or_grant_ambient_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("executed");
+    let profile = dir.path().join("profile");
+    std::fs::write(
+        &profile,
+        format!(
+            "touch '{}'\nexport ARCHON_R2_AUTHORED_KEY=synthetic\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    let mut policy = ProviderEnvPolicy::new(vec!["PATH".into(), "ARCHON_R2_AUTHORED_KEY".into()]);
+    policy.profile_sources = vec![profile.display().to_string()];
+    let resolution = resolve_provider_env(&policy).await;
+    assert!(!marker.exists(), "authored profile must never execute");
+    let mut env = Vec::new();
+    resolution.apply_to_env(&mut env);
+    assert!(
+        env.is_empty(),
+        "authored requirement must not confer ambient authority"
+    );
+}
+
+#[tokio::test]
+async fn authored_requirements_cannot_grant_ambient_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("empty-profile");
+    std::fs::write(&profile, "").unwrap();
+    let mut policy = ProviderEnvPolicy::new(vec!["PATH".into()]);
+    policy.profile_sources = vec![profile.display().to_string()];
+    let resolution = resolve_provider_env(&policy).await;
+    let mut env = Vec::new();
+    resolution.apply_to_env(&mut env);
+    assert!(
+        env.is_empty(),
+        "generated requirements must not authorize ambient variables"
+    );
+}
+
+#[tokio::test]
+async fn negative_mention_is_not_an_operator_grant() {
+    let policy = ProviderEnvPolicy::new(vec!["X_API_KEY".into()]);
+    let resolution =
+        resolve_operator_provider_env(&policy, &["never expose X_API_KEY".into()], &[]).await;
+    assert!(resolution.proof.redacted_env_keys_checked.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn structured_operator_grant_reaches_command_and_undeclared_key_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+    std::fs::write(&profile, "export DECLARED_API_KEY=synthetic-declared\nexport UNDECLARED_API_KEY=synthetic-undeclared\n").unwrap();
+    let policy =
+        ProviderEnvPolicy::new(vec!["DECLARED_API_KEY".into(), "UNDECLARED_API_KEY".into()]);
+    let resolved = resolve_operator_provider_env(
+        &policy,
+        &["DECLARED_API_KEY".into()],
+        &[profile.display().to_string()],
+    )
+    .await;
+    let mut env = Vec::new();
+    resolved.apply_to_env(&mut env);
+    let status = archon_shell::execution_environment::command("/bin/sh")
+        .envs(env)
+        .args([
+            "-c",
+            if archon_shell::read_boundary::operator_grants_supported() {
+                "test -n \"$DECLARED_API_KEY\" && test -z \"${UNDECLARED_API_KEY+x}\""
+            } else {
+                "test -z \"${DECLARED_API_KEY+x}\" && test -z \"${UNDECLARED_API_KEY+x}\""
+            },
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn operator_env_r5_uncontained_host_never_resolves_operator_grants() {
+    if matches!(
+        archon_shell::write_boundary::mechanism(),
+        Ok(archon_shell::write_boundary::Mechanism::SandboxExec
+            | archon_shell::write_boundary::Mechanism::Landlock { .. })
+    ) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("provider-profile");
+    std::fs::write(
+        &profile,
+        "export ARCHON_R5_PROVIDER_KEY=synthetic-r5-value\n",
+    )
+    .unwrap();
+    let policy = ProviderEnvPolicy {
+        required_keys: vec!["ARCHON_R5_PROVIDER_KEY".into()],
+        profile_sources: vec![profile.display().to_string()],
+        reason: None,
+    };
+    let result =
+        resolve_operator_provider_env(&policy, &policy.required_keys, &policy.profile_sources)
+            .await;
+    assert!(
+        result.env.is_empty(),
+        "unsupported hosts must disable all operator grants"
+    );
+}
+
+fn assert_disabled_operator_grants(resolved: &ProviderEnvResolution) -> bool {
+    if archon_shell::read_boundary::operator_grants_supported() {
+        return false;
+    }
+    assert!(resolved.env.is_empty());
+    assert!(resolved.proof.profile_sources_checked.is_empty());
+    assert!(
+        resolved
+            .proof
+            .redacted_env_keys_checked
+            .iter()
+            .all(|key| key.state == ProviderEnvKeyState::Missing)
+    );
+    true
 }

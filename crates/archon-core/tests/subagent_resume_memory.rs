@@ -188,11 +188,18 @@ async fn boundary_worktree_readonly_backend_and_environment_are_preserved() {
         vec![read_target.display().to_string()],
     );
     spawn.allowed_tools.push("ContextProbe".into());
-    spawn.provider_env = Some(ProviderEnvSource::Policy(ProviderEnvPolicy {
+    let policy = ProviderEnvPolicy {
         required_keys: vec!["RESUME_TEST_API_KEY".into()],
         profile_sources: vec![profile.display().to_string()],
         reason: None,
-    }));
+    };
+    let resolution = archon_tools::provider_env::resolve_operator_provider_env(
+        &policy,
+        &policy.required_keys,
+        &policy.profile_sources,
+    )
+    .await;
+    spawn.provider_env = Some(ProviderEnvSource::Resolution(resolution));
     let sandbox = Arc::new(DockerSandboxBackend::new(
         DockerConfig {
             enabled: true,
@@ -366,11 +373,18 @@ async fn the_provider_overlay_and_redaction_are_frozen_at_spawn() {
     );
     let mut spawn = request(&workspace, Some("workspace-boundary"), vec![]);
     spawn.allowed_tools = vec!["Bash".into()];
-    spawn.provider_env = Some(ProviderEnvSource::Policy(ProviderEnvPolicy {
+    let policy = ProviderEnvPolicy {
         required_keys: vec!["RESUME_FIXTURE_API_KEY".into()],
         profile_sources: vec![profile.display().to_string()],
         reason: None,
-    }));
+    };
+    let resolution = archon_tools::provider_env::resolve_operator_provider_env(
+        &policy,
+        &policy.required_keys,
+        &policy.profile_sources,
+    )
+    .await;
+    spawn.provider_env = Some(ProviderEnvSource::Resolution(resolution));
     host.spawn("environment", spawn.clone(), parent(&root, &[]))
         .await
         .unwrap();

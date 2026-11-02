@@ -9,8 +9,9 @@
 //! for a shell to be leaked, and only one of them would have the `Drop` impl
 //! below.
 //!
-//! Deliberately a leaf — no `archon-*` dependencies — so anything above it can
-//! use it. `archon-shell` was the obvious existing home and was passed over: it
+//! Deliberately keeps PTY dependencies out of `archon-shell`, so its many
+//! consumers do not pay for a terminal. This crate uses that leaf crate for
+//! the shared agent environment policy. `archon-shell` was passed over: it
 //! is a `which` lookup that much of the workspace depends on, and hanging tokio
 //! and ConPTY off it would make every one of those dependents pay for a PTY
 //! they never open.
@@ -165,7 +166,7 @@ impl PtySession {
     /// pane, where xterm.js answers the terminal queries ConPTY asks. Anything
     /// else wants [`Self::spawn_headless`].
     pub fn spawn(command: CommandBuilder, size: PtySize) -> anyhow::Result<Self> {
-        Self::spawn_with(command, size, false)
+        Self::spawn_with(agent_command(command), size, false)
     }
 
     /// As [`Self::spawn`], but answer the terminal queries nobody else will.
@@ -174,6 +175,22 @@ impl PtySession {
     /// opens by asking for the cursor position and blocks the shell until it is
     /// told. A browser has an emulator to answer; a tool call does not.
     pub fn spawn_headless(command: CommandBuilder, size: PtySize) -> anyhow::Result<Self> {
+        Self::spawn_agent_headless(command, size)
+    }
+
+    /// An agent-authored terminal command with the shared environment policy.
+    pub fn spawn_agent_headless(command: CommandBuilder, size: PtySize) -> anyhow::Result<Self> {
+        Self::spawn_with(agent_command(command), size, true)
+    }
+
+    /// Host's own binary/provider transport: preserve its launch environment.
+    /// Call sites must select this from host-owned execution intent, never argv.
+    pub fn spawn_host_internal(command: CommandBuilder, size: PtySize) -> anyhow::Result<Self> {
+        Self::spawn_with(command, size, false)
+    }
+
+    /// Headless host-owned transport counterpart.
+    pub fn spawn_host_transport(command: CommandBuilder, size: PtySize) -> anyhow::Result<Self> {
         Self::spawn_with(command, size, true)
     }
 
@@ -340,3 +357,69 @@ fn pump_input(mut writer: Box<dyn Write + Send>, mut rx: mpsc::Receiver<Vec<u8>>
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+/// Bind portable-pty to the same environment policy as std/tokio launches.
+fn agent_command(mut command: CommandBuilder) -> CommandBuilder {
+    #[cfg(target_os = "macos")]
+    if !command.operator_reads_protected()
+        && matches!(
+            archon_shell::write_boundary::mechanism(),
+            Ok(archon_shell::write_boundary::Mechanism::SandboxExec)
+        )
+    {
+        let profile = format!(
+            "(version 1)(allow default){}",
+            archon_shell::read_boundary::macos_rules(&archon_shell::read_boundary::operator_paths())
+        );
+        command.get_argv_mut().splice(
+            0..0,
+            [
+                archon_shell::write_boundary::SANDBOX_EXEC.into(),
+                "-p".into(),
+                profile.into(),
+                "--".into(),
+            ],
+        );
+    }
+    command.protect_operator_reads();
+    let additions: Vec<_> = command
+        .iter_extra_env_as_str()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+    let vars = archon_shell::execution_environment::environment()
+        .into_iter()
+        .chain(
+            additions
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into())),
+        );
+    archon_shell::spawn::replace_library_environment(
+        &mut command,
+        vars,
+        CommandBuilder::env_clear,
+        |command, key, value| command.env(key, value),
+    );
+    #[cfg(not(target_os = "linux"))]
+    tracing::info!(
+        environment_policy = "safe-allowlist+explicit-bindings",
+        operator_env_grants = if archon_shell::read_boundary::operator_grants_supported() {
+            "enabled"
+        } else {
+            "disabled: kernel write containment unavailable"
+        },
+        credential_reads = "not-contained",
+        process_reads = "not-contained",
+        "agent PTY launch: read enforcement is reported by the host wrapper"
+    );
+    command
+}
+
+/*
+Original dependency rationale, before sharing the leaf environment policy.
+The PTY dependencies still stay here, outside archon-shell.
+//! Deliberately a leaf — no `archon-*` dependencies — so anything above it can
+//! use it. `archon-shell` was the obvious existing home and was passed over: it
+//! is a `which` lookup that much of the workspace depends on, and hanging tokio
+//! and ConPTY off it would make every one of those dependents pay for a PTY
+//! they never open.
+*/

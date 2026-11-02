@@ -57,7 +57,7 @@ __archon_self=$$
 # first. Whether it prints is that race; it leaked into tool output on Linux.
 disown "$!" 2>/dev/null || true
 (
-    "$1" -c "$2"
+    "$1" --noprofile --norc -c "$2"
     __archon_inner_status=$?
     exit "$__archon_inner_status"
 )
@@ -85,6 +85,11 @@ pub(super) fn contained_bash_command(
     use super::bash_write_sandbox::Applied;
     let mut command = match boundary {
         Some(Applied::SandboxExec(profile)) => {
+            tracing::info!(
+                credential_reads = "named-paths-denied",
+                process_reads = "not-contained",
+                "agent Bash launch"
+            );
             let mut command =
                 archon_shell::spawn::tokio_command(archon_shell::write_boundary::SANDBOX_EXEC);
             command.arg("-p").arg(profile).arg(BASH_PROGRAM.as_path());
@@ -92,7 +97,8 @@ pub(super) fn contained_bash_command(
         }
         #[cfg(target_os = "linux")]
         Some(Applied::Landlock(sandbox)) => {
-            let mut command = archon_shell::spawn::tokio_command(BASH_PROGRAM.as_path());
+            let mut command =
+                archon_shell::execution_environment::tokio_command(BASH_PROGRAM.as_path());
             // SAFETY: the hook makes two raw syscalls and allocates nothing.
             unsafe {
                 command.pre_exec(sandbox.restrict_hook());
@@ -107,10 +113,11 @@ pub(super) fn contained_bash_command(
         // command itself; it was captured before and is restored after
         // (`bash_write_sandbox::annotate`). So the child is plain bash.
         Some(Applied::HostSnapshot(_)) => {
-            archon_shell::spawn::tokio_command(BASH_PROGRAM.as_path())
+            archon_shell::execution_environment::tokio_command(BASH_PROGRAM.as_path())
         }
-        None => archon_shell::spawn::tokio_command(BASH_PROGRAM.as_path()),
+        None => archon_shell::execution_environment::tokio_command(BASH_PROGRAM.as_path()),
     };
+    command.args(["--noprofile", "--norc"]);
     match containment_for_platform(std::env::consts::OS) {
         BashContainment::ProcessGroup if cfg!(unix) => {
             // Process groups provide portable best-effort descendant cleanup,

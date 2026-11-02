@@ -108,7 +108,13 @@ pub struct SshDoctorReport {
 }
 
 pub fn probe_ssh(binary: &str) -> SshProbe {
-    match archon_shell::spawn::command(binary).arg("-V").output() {
+    match archon_shell::execution_environment::transport_command(
+        binary,
+        archon_shell::execution_environment::SSH_CLIENT_BINDINGS,
+    )
+    .arg("-V")
+    .output()
+    {
         Ok(output) => {
             let version = crate::sandbox::first_non_empty_line(&output.stdout)
                 .or_else(|| crate::sandbox::first_non_empty_line(&output.stderr))
@@ -338,6 +344,10 @@ impl SshSandboxBackend {
             }
         };
         let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
+        archon_shell::execution_environment::transport_environment(
+            cmd.as_std_mut(),
+            archon_shell::execution_environment::SSH_CLIENT_BINDINGS,
+        );
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

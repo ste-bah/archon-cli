@@ -196,3 +196,32 @@ async fn a_headless_session_gets_past_the_terminal_handshake() {
     );
     assert!(seen.contains("m42k"), "saw: {seen:?}");
 }
+
+#[tokio::test]
+#[cfg(unix)]
+async fn host_internal_pty_keeps_provider_environment() {
+    const KEY: &str = "ARCHON_R2_TEST_PROVIDER_KEY";
+    if std::env::var_os(KEY).is_none() {
+        let status = archon_shell::spawn::command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::host_internal_pty_keeps_provider_environment",
+            ])
+            .env(KEY, "synthetic-r2")
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "host-internal PTY must retain provider environment"
+        );
+        return;
+    }
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args(["-c", "if [ \"$ARCHON_R2_TEST_PROVIDER_KEY\" = synthetic-r2 ]; then echo provider-present; else echo provider-absent; fi"]);
+    let mut session = PtySession::spawn_host_internal(command, small()).unwrap();
+    let seen = read_until(&mut session, "provider-").await;
+    assert!(
+        seen.contains("provider-present"),
+        "host provider credential was withheld"
+    );
+}

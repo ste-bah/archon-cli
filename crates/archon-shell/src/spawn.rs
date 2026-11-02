@@ -141,3 +141,24 @@ mod env_tests;
 #[cfg(test)]
 #[path = "spawn_lint_tests.rs"]
 mod lint_tests;
+
+/// Replace a library command's environment under the same jobserver policy.
+/// The adapter passes its clear/set methods; the clear and sanitized overlay
+/// happen together here, just as for std commands in `replace_environment`.
+/// This keeps the leaf independent of a particular process/PTY library.
+pub fn replace_library_environment<C, I, K, V>(
+    command: &mut C,
+    vars: I,
+    clear: impl FnOnce(&mut C),
+    mut set: impl FnMut(&mut C, &OsStr, &OsStr),
+) where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    clear(command);
+    for (key, value) in vars {
+        let value = crate::jobserver::sanitize_variable(key.as_ref(), value.as_ref().to_owned());
+        set(command, key.as_ref(), &value);
+    }
+}

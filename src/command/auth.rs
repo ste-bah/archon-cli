@@ -255,10 +255,11 @@ fn remove_key(root: &mut serde_json::Value, key: &str) {
 }
 
 fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
+    archon_shell::credential_paths::register_store(path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("json.tmp");
+    let tmp = archon_shell::credential_paths::atomic_sibling(path);
     fs::write(&tmp, serde_json::to_string_pretty(value)?)?;
     #[cfg(unix)]
     {

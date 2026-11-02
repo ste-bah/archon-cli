@@ -17,6 +17,7 @@ pub fn load_config() -> Result<ArchonConfig, ConfigError> {
 /// Load configuration from a specific path. If the file does not exist,
 /// create the parent directory, write a default config, and return defaults.
 pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
+    archon_shell::credential_paths::register_store(&path);
     if !path.exists() {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -41,6 +42,7 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
 
 /// Load configuration from an existing path without creating a default file.
 pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, ConfigError> {
+    archon_shell::credential_paths::register_store(&path);
     if !path.exists() {
         return Ok(None);
     }

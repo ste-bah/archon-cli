@@ -286,3 +286,11 @@ pub mod jobserver;
 
 /// Shared inactivity bounds for job enumeration and teardown watchdogs.
 pub mod teardown_progress;
+
+/// Shared default-deny environment for agent-authored commands.
+pub mod execution_environment;
+/// Credential and startup-profile read protection for agent commands.
+pub mod read_boundary;
+
+/// Credential locations shared by host writers and agent read boundaries.
+pub mod credential_paths;

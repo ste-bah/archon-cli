@@ -149,7 +149,19 @@ async fn run_v2_workflow_with_origin(
             .await
             .map_err(|error| anyhow::anyhow!("reporting the bound repository: {error}"))?;
     }
-    WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
+    // Saved templates carry authored task text, not an operator declaration.
+    let grants = if matches!(origin, WorkflowBundleOrigin::GeneratedHarness) {
+        workflow_live_provider_env::operator_provider_env_grants(&task)
+    } else {
+        Vec::new()
+    };
+    WorkflowBundle::create_for_run_with_operator_grants(
+        store,
+        &run,
+        &plan.harness_source,
+        origin,
+        &grants,
+    )?;
     save_generated_v2_metadata(store, &run.id, &plan, snapshot)?;
     super::workflow_live_v2_metadata::save_cargo_resource_limits(store, &run.id, &cargo_limits)?;
     super::workflow_run_end_snapshot::toolchain::warn(store, &run.id, &ui_sink).await;
@@ -163,6 +175,7 @@ async fn run_v2_workflow_with_origin(
     lease.record_executor()?;
     let result = execute_generated_v2_run_with_limits(
         store,
+        &run_id,
         run,
         plan,
         task.clone(),
@@ -220,10 +233,10 @@ pub(crate) async fn resume_generated_v2_workflow_with_limits(
         }
     };
     let task = run.spec.task.clone();
-    let run_id = run.id.clone();
     lease.record_executor()?;
     let result = execute_generated_v2_run_with_limits(
         store,
+        &run_id,
         run,
         plan,
         task.clone(),
@@ -244,6 +257,7 @@ pub(crate) async fn resume_generated_v2_workflow_with_limits(
 #[allow(clippy::too_many_arguments)]
 async fn execute_generated_v2_run_with_limits(
     store: &WorkflowStore,
+    authority_run_id: &str,
     run: WorkflowRun,
     plan: WorkflowScriptPlan,
     task: String,
@@ -256,6 +270,12 @@ async fn execute_generated_v2_run_with_limits(
     cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     archon_config: Arc<archon_core::config::ArchonConfig>,
 ) -> Result<String> {
+    if run.id != authority_run_id {
+        anyhow::bail!(
+            "run id mismatch: requested {authority_run_id}, state.json contains {}",
+            run.id
+        );
+    }
     if let Err(WorkflowError::ControlCancelled(refused)) =
         archon_workflow::control_pause::require_executor(
             &store.load_state(&run.id)?,
@@ -274,9 +294,13 @@ async fn execute_generated_v2_run_with_limits(
         generated_config: plan.generated_config.clone(),
         cargo_limits: cargo_limits.clone(),
     };
+    // An absent or invalid verified grant record confers no authority.
+    let operator_grants =
+        WorkflowBundle::verified_operator_env_grants(store, authority_run_id).unwrap_or_default();
     let provider_env_resolution =
         workflow_live_provider_env::resolve_generated_workflow_provider_env(
             plan.task_universe.as_ref(),
+            &operator_grants,
         )
         .await;
     // Isolated agents lease a reusable build-cache directory instead of each

@@ -196,7 +196,7 @@ async fn run_session(
     cwd: std::path::PathBuf,
     size: PtySize,
 ) -> anyhow::Result<()> {
-    let mut session = PtySession::spawn(archon_command(&cwd)?, size)?;
+    let mut session = PtySession::spawn_host_internal(archon_command(&cwd)?, size)?;
     tracing::info!(pid = ?session.child_pid(), "terminal: session started");
 
     // Split so output can be written while input is still being awaited; a

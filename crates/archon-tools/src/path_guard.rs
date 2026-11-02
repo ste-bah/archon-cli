@@ -236,6 +236,18 @@ fn ensure_write_allowed(
     resolved_path: &Path,
     ctx: &ToolContext,
 ) -> Result<(), crate::path_guard_error::GuardError> {
+    let host_root = archon_shell::credential_paths::operator_grant_root();
+    for root in crate::workflow_read_guard::spellings(&host_root) {
+        for target in [requested_path, resolved_path] {
+            if archon_shell::paths::path_starts_with(target, &root)
+                || archon_shell::paths::path_starts_with(&root, target)
+            {
+                return Err(guard_refusal(
+                    "Operator environment grant records are host-owned and cannot be written by agent tools",
+                ));
+            }
+        }
+    }
     crate::path_guard_sealed::ensure_not_sealed(requested_path, resolved_path, ctx)?;
     if ctx.write_roots.is_empty() {
         return Ok(());

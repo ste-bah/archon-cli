@@ -24,9 +24,17 @@ pub(crate) fn default_shell() -> &'static str {
 /// Resolve `shell` to a launchable command rooted at `cwd`.
 pub(crate) fn build(shell: &str, cwd: &Path) -> Result<CommandBuilder, String> {
     let mut command = match shell {
-        "bash" => CommandBuilder::new(archon_shell::resolve_bash()),
+        "bash" => {
+            let mut command = CommandBuilder::new(archon_shell::resolve_bash());
+            command.args(["--noprofile", "--norc"]);
+            command
+        }
         "sh" => CommandBuilder::new(archon_shell::resolve_posix_shell()),
-        "cmd" => windows_only(shell, || CommandBuilder::new("cmd.exe"))?,
+        "cmd" => windows_only(shell, || {
+            let mut command = CommandBuilder::new("cmd.exe");
+            command.arg("/D");
+            command
+        })?,
         "powershell" => powershell()?,
         other => {
             return Err(format!(
@@ -35,6 +43,27 @@ pub(crate) fn build(shell: &str, cwd: &Path) -> Result<CommandBuilder, String> {
             ));
         }
     };
+    #[cfg(target_os = "macos")]
+    if matches!(
+        archon_shell::write_boundary::mechanism(),
+        Ok(archon_shell::write_boundary::Mechanism::SandboxExec)
+    ) {
+        command.get_argv_mut().splice(
+            0..0,
+            [
+                std::ffi::OsString::from(archon_shell::write_boundary::SANDBOX_EXEC),
+                "-p".into(),
+                format!(
+                    "(version 1)(allow default){}",
+                    archon_shell::read_boundary::macos_rules(
+                        &archon_shell::read_boundary::operator_paths()
+                    )
+                )
+                .into(),
+            ],
+        );
+    }
+    command.protect_operator_reads();
     command.cwd(cwd);
     // Claimed rather than discovered: this side renders nothing, but a program
     // that finds `TERM` unset falls back to line-at-a-time behaviour or refuses
@@ -51,7 +80,7 @@ fn powershell() -> Result<CommandBuilder, String> {
         .or_else(|_| which::which("powershell"))
         .map_err(|_| "no PowerShell on PATH (looked for pwsh, then powershell)".to_string())?;
     let mut command = CommandBuilder::new(program);
-    command.args(["-NoLogo"]);
+    command.args(["-NoLogo", "-NoProfile"]);
     Ok(command)
 }
 

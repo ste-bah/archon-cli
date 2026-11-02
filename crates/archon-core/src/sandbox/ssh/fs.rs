@@ -93,6 +93,10 @@ impl RemoteExec for SshTransport {
         let args = ssh_fs_args(&self.config, &self.working_dir, script)
             .map_err(|error| io::Error::other(format!("ssh sandbox: {error}")))?;
         let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
+        archon_shell::execution_environment::transport_environment(
+            cmd.as_std_mut(),
+            archon_shell::execution_environment::SSH_CLIENT_BINDINGS,
+        );
         cmd.args(args);
         run_transport_process(cmd, stdin, REMOTE_FS_TIMEOUT_MS, "ssh").await
     }

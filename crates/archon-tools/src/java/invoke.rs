@@ -48,12 +48,67 @@ pub async fn run_stage(
     timeout: Duration,
     cancel: Option<CancellationToken>,
 ) -> RunOutcome {
+    run_stage_with_context(
+        project,
+        stage,
+        timeout,
+        cancel,
+        &crate::tool::ToolContext {
+            working_dir: project.root.clone(),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+pub(crate) async fn run_stage_with_context(
+    project: &JavaProject,
+    stage: Stage,
+    timeout: Duration,
+    cancel: Option<CancellationToken>,
+    ctx: &crate::tool::ToolContext,
+) -> RunOutcome {
+    use crate::bash::bash_write_sandbox;
+    let mut env = crate::bash::host_env();
+    let boundary = match bash_write_sandbox::for_call(ctx, &mut env, &[]) {
+        Ok(boundary) => boundary,
+        Err(result) => {
+            return RunOutcome {
+                exit_code: -1,
+                output: String::new(),
+                aborted: Some(result.content),
+            };
+        }
+    };
+    let outcome = run_bounded_stage(project, stage, timeout, cancel, boundary.as_ref(), env).await;
+    let result = bash_write_sandbox::annotate(
+        boundary.as_ref(),
+        crate::tool::ToolResult::success(outcome.output),
+    );
+    RunOutcome {
+        output: result.content,
+        aborted: outcome
+            .aborted
+            .or_else(|| result.is_error.then(|| "write boundary violation".into())),
+        exit_code: outcome.exit_code,
+    }
+}
+
+async fn run_bounded_stage(
+    project: &JavaProject,
+    stage: Stage,
+    timeout: Duration,
+    cancel: Option<CancellationToken>,
+    boundary: Option<&crate::bash::bash_write_sandbox::ShellBoundary>,
+    env: Vec<(String, String)>,
+) -> RunOutcome {
     let program = match &project.launcher {
         Launcher::Wrapper(path) => path.clone(),
         Launcher::OnPath(name) => std::path::PathBuf::from(name),
     };
 
-    let mut command = archon_shell::spawn::tokio_command(&program);
+    let mut command = crate::bash::bash_write_sandbox::command(&program, boundary);
+    archon_shell::spawn::replace_environment(command.as_std_mut(), env);
     command
         .args(stage_args(project.build_system, stage))
         .current_dir(&project.root)

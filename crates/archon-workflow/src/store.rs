@@ -139,7 +139,15 @@ impl WorkflowStore {
     pub fn load_state(&self, run_id: &str) -> WorkflowResult<WorkflowRun> {
         let path = self.state_path(run_id);
         let raw = fs::read(&path).map_err(|e| WorkflowError::io(&path, e))?;
-        serde_json::from_slice(&raw).map_err(|e| WorkflowError::StateCorrupt(e.to_string()))
+        let run: WorkflowRun =
+            serde_json::from_slice(&raw).map_err(|e| WorkflowError::StateCorrupt(e.to_string()))?;
+        if run.id != run_id {
+            return Err(WorkflowError::StateCorrupt(format!(
+                "run id mismatch: requested {run_id}, state.json contains {}",
+                run.id
+            )));
+        }
+        Ok(run)
     }
 
     pub fn list_runs(&self) -> WorkflowResult<Vec<WorkflowRun>> {

@@ -181,7 +181,9 @@ async fn run(
     timeout: Duration,
     ctx: &ToolContext,
 ) -> ToolResult {
-    let outcome = invoke::run_stage(project, stage, timeout, ctx.cancel_parent.clone()).await;
+    let outcome =
+        invoke::run_stage_with_context(project, stage, timeout, ctx.cancel_parent.clone(), ctx)
+            .await;
 
     if let Some(reason) = &outcome.aborted {
         return ToolResult::error(format!(

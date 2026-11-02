@@ -234,6 +234,7 @@ pub fn load_layered_config(
 
 /// Read a file and parse it as a TOML `Value`.
 fn read_and_parse_toml(path: &Path) -> Result<Value, ConfigError> {
+    archon_shell::credential_paths::register_store(path);
     let content = fs::read_to_string(path).map_err(|error| {
         ConfigError::ValidationError(format!(
             "configuration at {} could not be read: {error}",

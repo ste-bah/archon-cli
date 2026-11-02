@@ -62,6 +62,13 @@ pub struct LspServerManager {
     project_root: PathBuf,
     config: LspConfig,
     client: Option<LspClient>,
+    launch_scope: Option<(
+        String,
+        Option<String>,
+        PathBuf,
+        Option<crate::workflow_read_guard::BoundaryPaths>,
+        bool,
+    )>,
 }
 
 impl LspServerManager {
@@ -72,6 +79,7 @@ impl LspServerManager {
             project_root,
             config,
             client: None,
+            launch_scope: None,
         }
     }
 
@@ -131,10 +139,31 @@ impl LspServerManager {
     /// Returns an error if no language server is detected or if the server
     /// binary is missing.
     pub async fn ensure_connected(&mut self) -> Result<(), crate::lsp_client::LspError> {
-        if self.client.is_some() {
+        self.ensure_connected_with_context(&crate::tool::ToolContext::default())
+            .await
+    }
+
+    pub(crate) async fn ensure_connected_with_context(
+        &mut self,
+        ctx: &crate::tool::ToolContext,
+    ) -> Result<(), crate::lsp_client::LspError> {
+        let scope = (
+            ctx.session_id.clone(),
+            ctx.subagent_id.clone(),
+            ctx.working_dir.clone(),
+            ctx.workflow_read_guard
+                .as_ref()
+                .and_then(|guard| guard.boundary_paths()),
+            ctx.workflow_read_guard
+                .as_ref()
+                .is_some_and(|guard| guard.isolated_write_branch()),
+        );
+        if self.client.is_some() && self.launch_scope.as_ref() == Some(&scope) {
             return Ok(());
         }
-
+        if self.client.is_some() {
+            self.shutdown().await;
+        }
         let (binary, args) = self
             .detect_language_server()
             .ok_or(crate::lsp_client::LspError::NoServerDetected)?;
@@ -142,16 +171,18 @@ impl LspServerManager {
         let root_uri = lsp_types::Url::from_file_path(&self.project_root)
             .map_err(|_| crate::lsp_client::LspError::InvalidProjectRoot)?;
 
-        let client = LspClient::connect(
+        let client = LspClient::connect_with_context(
             &binary,
             &args.iter().map(String::as_str).collect::<Vec<_>>(),
             root_uri,
             std::time::Duration::from_secs(30),
             std::time::Duration::from_secs(10),
+            ctx,
         )
         .await?;
 
         self.client = Some(client);
+        self.launch_scope = Some(scope);
         Ok(())
     }
 

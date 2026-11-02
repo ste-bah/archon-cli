@@ -90,6 +90,38 @@ impl LspClient {
         init_timeout: Duration,
         request_timeout: Duration,
     ) -> Result<Self, LspError> {
+        Self::connect_with_context(
+            binary,
+            args,
+            root_uri,
+            init_timeout,
+            request_timeout,
+            &crate::tool::ToolContext::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn connect_with_context(
+        binary: &str,
+        args: &[&str],
+        root_uri: Url,
+        init_timeout: Duration,
+        request_timeout: Duration,
+        ctx: &crate::tool::ToolContext,
+    ) -> Result<Self, LspError> {
+        use crate::bash::bash_write_sandbox;
+        let mut env = crate::bash::host_env();
+        let boundary = bash_write_sandbox::for_call(ctx, &mut env, &[])
+            .map_err(|result| LspError::Protocol(result.content))?;
+        if matches!(
+            boundary.as_ref().map(|b| &b.applied),
+            Some(bash_write_sandbox::Applied::HostSnapshot(_))
+        ) {
+            return Err(LspError::Protocol(archon_shell::write_boundary::refusal(
+                "Persistent LSP server",
+                "a snapshot cannot confine a persistent server",
+            )));
+        }
         // Verify binary is on PATH before trying to spawn
         if which::which(binary).is_err() {
             return Err(LspError::BinaryNotFound(binary.to_string()));
@@ -129,7 +161,9 @@ impl LspClient {
         });
 
         // Spawn the server process
-        let mut child = archon_shell::spawn::tokio_command(binary)
+        let mut command = bash_write_sandbox::command(binary, boundary.as_ref());
+        archon_shell::spawn::replace_environment(command.as_std_mut(), env);
+        let mut child = command
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())

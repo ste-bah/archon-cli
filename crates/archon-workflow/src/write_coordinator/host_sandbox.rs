@@ -159,6 +159,9 @@ pub(crate) fn profile(sealed: &[PathBuf], writable: &[PathBuf]) -> Option<String
         }
         rules.push_str(&format!("(allow file-write* (subpath {}))\n", quoted(&dir)));
     }
+    rules.push_str(&archon_shell::read_boundary::macos_rules(
+        &archon_shell::read_boundary::operator_paths(),
+    ));
     Some(rules)
 }
 
@@ -272,9 +275,13 @@ fn sandbox_exec(
             String::from_utf8_lossy(&probe.stderr).trim()
         ));
     }
-    let mut command = environment.command(SANDBOX_EXEC);
-    command.arg("-p").arg(profile).arg(program);
-    Ok(command)
+    #[cfg(target_os = "macos")]
+    return Ok(environment.macos_sandbox_command(program.as_os_str(), &profile));
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (program, environment);
+        Err("sandbox-exec is only supported on macOS".into())
+    }
 }
 
 /// What a host-run verifier working in `cwd` for a branch may write: `cwd`

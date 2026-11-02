@@ -1,7 +1,7 @@
 //! Working with pseudo-terminals
 
 use crate::{Child, CommandBuilder, MasterPty, PtyPair, PtySize, PtySystem, SlavePty};
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use filedescriptor::FileDescriptor;
 use libc::{self, winsize};
 use std::cell::RefCell;
@@ -232,6 +232,57 @@ impl PtyFd {
         let configured_umask = builder.umask;
 
         let mut cmd = builder.as_command()?;
+        #[cfg(target_os = "linux")]
+        if let Some((protected, writable)) = builder.write_boundary() {
+            let boundary = archon_shell::write_boundary::landlock::LandlockSandbox::build(
+                protected,
+                writable,
+                &[],
+            )
+            .map_err(anyhow::Error::msg)?;
+            boundary.install_std(&mut cmd);
+            log::info!("agent PTY launch: kernel write boundary applied");
+        }
+        #[cfg(target_os = "linux")]
+        if builder.operator_reads_protected() {
+            match archon_shell::write_boundary::landlock::LandlockSandbox::build(
+                &[archon_shell::credential_paths::operator_grant_root()],
+                &[],
+                &[],
+            ) {
+                Ok(boundary) => boundary.install_std(&mut cmd),
+                Err(reason) if archon_shell::read_boundary::operator_grants_supported() => {
+                    archon_shell::read_boundary::require_grant_rule::<()>(Err(reason))?;
+                }
+                Err(reason) => {
+                    log::warn!(
+                        "agent PTY launch: operator environment grants disabled; kernel write containment unavailable: {reason}"
+                    )
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if builder.operator_reads_protected() {
+            match archon_shell::write_boundary::landlock::LandlockSandbox::build_read(
+                &archon_shell::read_boundary::operator_paths(),
+            ) {
+                Ok(boundary) => {
+                    boundary.install_std(&mut cmd);
+                    log::info!(
+                        "agent PTY: credential/profile reads denied; process read isolation unavailable"
+                    );
+                }
+                Err(_) => {
+                    log::warn!("agent PTY: filesystem/process read isolation unavailable")
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if !builder.operator_reads_protected() {
+            log::warn!(
+                "agent PTY: host client/default program has no filesystem/process read isolation"
+            );
+        }
         // Capture the complete bound before fork. The child uses syscalls only;
         // std's exec-error pipe must stay open until exec, so flag rather than close.
         let ceiling = archon_shell::process_tree::descriptor_ceiling()?;

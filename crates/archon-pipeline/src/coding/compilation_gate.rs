@@ -177,7 +177,8 @@ impl CleanupOutcome {
 }
 
 pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<CommandExecution> {
-    let mut command = archon_shell::spawn::tokio_command(&spec.program);
+    let boundary = archon_tools::PipelineBoundary::current(&spec.current_dir)?;
+    let mut command = boundary.command(&spec.program);
     command
         .args(&spec.args)
         .current_dir(&spec.current_dir)
@@ -217,7 +218,10 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
     .await;
 
     match completed {
-        Ok(output) => output.map(CommandExecution::Completed),
+        Ok(output) => {
+            boundary.settle()?;
+            output.map(CommandExecution::Completed)
+        }
         Err(_) => {
             // Windows: the bounded job termination starts first, so a direct
             // child whose termination hangs cannot hold it back (issue #242).
@@ -229,6 +233,7 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
             let tree = confirm_tree_terminated(group).await;
             #[cfg(windows)]
             let tree = job_outcome(job_confirmation.await);
+            boundary.settle()?;
             Ok(CommandExecution::TimedOut {
                 child: child_outcome,
                 tree,
@@ -402,3 +407,7 @@ where
 #[cfg(test)]
 #[path = "compilation_gate_tests.rs"]
 mod compilation_gate_tests;
+
+#[cfg(all(test, unix))]
+#[path = "agent_environment_tests.rs"]
+mod agent_environment_tests;

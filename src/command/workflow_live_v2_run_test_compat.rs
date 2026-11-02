@@ -74,8 +74,10 @@ pub(crate) async fn execute_generated_v2_run(
     adopt_accepted_cache: bool,
     executor_lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
 ) -> Result<String> {
+    let authority_run_id = run.id.clone();
     execute_generated_v2_run_with_limits(
         store,
+        &authority_run_id,
         run,
         plan,
         task,

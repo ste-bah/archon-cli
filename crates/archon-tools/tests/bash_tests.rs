@@ -3,7 +3,7 @@ use serde_json::json;
 use archon_tools::bash::BashTool;
 // Used only by `cfg(not(target_os = "windows"))` tests below. See #136.
 #[cfg(not(target_os = "windows"))]
-use archon_tools::provider_env::{ProviderEnvPolicy, resolve_provider_env};
+use archon_tools::provider_env::{ProviderEnvPolicy, resolve_operator_provider_env};
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext};
 
 #[cfg(not(target_os = "windows"))]
@@ -101,21 +101,45 @@ async fn resolved_provider_env_is_stable_across_multiple_subagent_shells() {
         profile_sources: vec![profile.display().to_string()],
         reason: Some("D47 regression".to_string()),
     };
-    let resolution = resolve_provider_env(&policy).await;
+    let resolution =
+        resolve_operator_provider_env(&policy, &policy.required_keys, &policy.profile_sources)
+            .await;
     std::fs::write(&profile, "unset ARCHON_TEST_PROVIDER_SNAPSHOT\n").expect("rewrite profile");
+    let grants_supported = archon_shell::read_boundary::operator_grants_supported();
+    if !grants_supported {
+        let mut bindings = Vec::new();
+        resolution.apply_to_env(&mut bindings);
+        assert!(bindings.is_empty());
+        assert!(resolution.proof.profile_sources_checked.is_empty());
+    }
     let tool = BashTool::default().with_provider_env_resolution(resolution);
+    let (command, expected) = if grants_supported {
+        (
+            "test -n \"${ARCHON_TEST_PROVIDER_SNAPSHOT:-}\" && echo present",
+            "present",
+        )
+    } else {
+        (
+            "test -z \"${ARCHON_TEST_PROVIDER_SNAPSHOT+x}\" && echo withheld",
+            "withheld",
+        )
+    };
 
     for _ in 0..2 {
         let result = tool
             .execute(
                 json!({
-                    "command": "test -n \"${ARCHON_TEST_PROVIDER_SNAPSHOT:-}\" && echo present"
+                    "command": command
                 }),
                 &test_ctx(),
             )
             .await;
-        assert!(!result.is_error, "snapshot missing: {}", result.content);
-        assert_eq!(result.content.trim(), "present");
+        assert!(
+            !result.is_error,
+            "snapshot check failed: {}",
+            result.content
+        );
+        assert_eq!(result.content.trim(), expected);
         assert!(!result.content.contains("first-value"));
     }
 }
