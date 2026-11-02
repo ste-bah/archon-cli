@@ -31,6 +31,12 @@ pub(crate) fn delay_next_removal(elapsed: Duration) -> ClockGuard {
     ClockGuard
 }
 
+/// Whether the delay armed by [`delay_next_removal`] was charged to a
+/// worktree removal on this thread.
+pub(crate) fn removal_charged() -> bool {
+    REMOVAL_WAIT.with(|wait| wait.get().is_none())
+}
+
 pub(super) fn after_spawn(args: &[&str]) {
     if args.starts_with(&["worktree", "remove"]) {
         REMOVAL_WAIT.with(|wait| {

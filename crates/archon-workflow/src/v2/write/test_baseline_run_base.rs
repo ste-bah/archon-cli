@@ -215,8 +215,6 @@ pub(crate) async fn host_verdicts(
         )
         .await;
         if run.error.is_some() || run.timed_out || !harness_reported(&run.output) {
-            #[cfg(test)]
-            eprintln!("baseline runner gave no verdict: {tree:?} {command}: {run:?}");
             continue;
         }
         let failing = failing_tests(&run.output);
