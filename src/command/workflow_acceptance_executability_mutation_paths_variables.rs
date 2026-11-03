@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+#[derive(Clone)]
 pub(super) enum VariableFlow {
     Branch {
         start: Option<PathBuf>,

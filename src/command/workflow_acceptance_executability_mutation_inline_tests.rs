@@ -215,3 +215,32 @@ fn inline_dynamic_paths_and_unknown_cwd_flows_are_unresolved() {
         );
     }
 }
+
+#[test]
+fn substitutions_and_subshells_preserve_probe_mechanics_policy() {
+    let project = tempfile::tempdir().unwrap();
+    for path in [
+        "scripts/check.py",
+        "data/input.txt",
+        "sub/run.sh",
+        "sub/data.txt",
+    ] {
+        let path = project.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "fixture").unwrap();
+    }
+    for (command, expected) in [
+        // Interpreter scripts run the check; moving them cannot prove its assertions.
+        ("out=$(python3 scripts/check.py)", Vec::<&str>::new()),
+        // Redirected input is data consumed by the command, including inside quotes.
+        ("n=\"$(wc -l < data/input.txt)\"", vec!["data/input.txt"]),
+        // The executable runs the check; its data operand is a movable input.
+        ("( cd sub && ./run.sh data.txt )", vec!["sub/data.txt"]),
+    ] {
+        assert_eq!(
+            named_inputs(&entry(command), project.path(), project.path()),
+            expected,
+            "{command}"
+        );
+    }
+}

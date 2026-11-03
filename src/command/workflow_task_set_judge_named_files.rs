@@ -2,6 +2,12 @@ use super::*;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
+#[path = "workflow_task_set_judge_named_files_repository.rs"]
+mod repository;
+#[path = "workflow_task_set_judge_named_files_text.rs"]
+mod text;
+use repository::{repository_regular_blob, repository_regular_blob_size, repository_tree_entry};
+
 #[derive(Default)]
 pub(super) struct PrefetchSourceCache {
     content: BTreeMap<(PathBuf, String), Vec<u8>>,
@@ -48,6 +54,10 @@ pub(super) fn named_files_for_inputs_with_budget_cached(
     resolve_named_files(criterion, roots, extra_inputs, cache, Some(*remaining))
         .into_iter()
         .map(|file| match file.bytes {
+            _ if file.status == "not_judgeable" => serde_json::json!({
+                "path": file.path, "status": file.status,
+                "detail": "The host found this file among the words of the check, but its first block contains NUL bytes. Its binary content is not judgeable text; if it decides the check, its assertions are unknown."
+            }),
             Some(bytes) => supplied(&file.path, &bytes, remaining),
             None if file.status == "over_budget" => over_budget(&file.path),
             // Discovery finds path-shaped text, not necessarily file operands.
@@ -69,6 +79,14 @@ struct ResolvedNamedFile {
 
 impl ResolvedNamedFile {
     fn supplied(path: String, bytes: Vec<u8>, remaining: &mut Option<usize>) -> Self {
+        if !text::is_text(&bytes) {
+            // Keep complete raw bytes for reuse identity, never for the prompt budget.
+            return Self {
+                path,
+                bytes: Some(bytes),
+                status: "not_judgeable",
+            };
+        }
         if let Some(left) = remaining {
             if bytes.len() > *left {
                 return Self::unavailable(path, "over_budget");
@@ -180,6 +198,13 @@ fn resolve_named_files(
                         );
                         return ResolvedNamedFile::unavailable(path_text, status);
                     };
+                    match text::repository_is_text(&repository, commit, &stored_path) {
+                        Ok(false) => {
+                            return ResolvedNamedFile::unavailable(path_text, "not_judgeable");
+                        }
+                        Err(_) => return ResolvedNamedFile::unavailable(path_text, "not_supplied"),
+                        Ok(true) => {}
+                    }
                     if size > left as u64 {
                         return ResolvedNamedFile::unavailable(path_text, "over_budget");
                     }
@@ -248,6 +273,13 @@ fn resolve_named_files(
             let Ok(metadata) = canonical.metadata() else {
                 return ResolvedNamedFile::unavailable(path_text, "not_supplied");
             };
+            if remaining.is_some() {
+                match text::file_is_text(&canonical) {
+                    Ok(false) => return ResolvedNamedFile::unavailable(path_text, "not_judgeable"),
+                    Err(_) => return ResolvedNamedFile::unavailable(path_text, "not_supplied"),
+                    Ok(true) => {}
+                }
+            }
             if remaining.is_some_and(|left| metadata.len() > left as u64) {
                 return ResolvedNamedFile::unavailable(path_text, "over_budget");
             }
@@ -341,8 +373,9 @@ pub(super) fn named_file_sizes(
     roots: &JudgeRoots,
 ) -> Vec<(String, usize)> {
     let mut cache = PrefetchSourceCache::default();
-    resolve_named_files(criterion, roots, &[], &mut cache, None)
+    resolve_named_files(criterion, roots, &[], &mut cache, Some(usize::MAX))
         .into_iter()
+        .filter(|file| file.status == "supplied")
         .filter_map(|file| Some((file.path, file.bytes?.len())))
         .collect()
 }
@@ -376,66 +409,6 @@ fn normalize_named_path(path: &Path) -> Option<PathBuf> {
         }
     }
     (!normalized.as_os_str().is_empty()).then_some(normalized)
-}
-
-fn repository_regular_blob_size(repository: &Path, commit: &str, path: &str) -> Option<u64> {
-    let entry = repository_tree_entry(repository, commit, path)?;
-    if !(entry.starts_with(b"100644 blob ") || entry.starts_with(b"100755 blob ")) {
-        return None;
-    }
-    std::str::from_utf8(&entry)
-        .ok()?
-        .split_whitespace()
-        .nth(3)?
-        .parse()
-        .ok()
-}
-
-fn repository_regular_blob(repository: &Path, commit: &str, path: &str) -> Option<Vec<u8>> {
-    let entry = repository_tree_entry(repository, commit, path)?;
-    // Git regular files are blobs with mode 100644 or 100755. In particular,
-    // mode 120000 is a symlink blob and must never be followed or shown.
-    if !(entry.starts_with(b"100644 blob ") || entry.starts_with(b"100755 blob ")) {
-        return None;
-    }
-    #[cfg(test)]
-    budget_tests::record_body_read();
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
-        .args(["cat-file", "blob", &format!("{commit}:{path}")])
-        .output()
-        .ok()?;
-    output.status.success().then_some(output.stdout)
-}
-
-fn repository_tree_entry(repository: &Path, commit: &str, path: &str) -> Option<Vec<u8>> {
-    let tree_entry = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
-        .args([
-            "ls-tree",
-            "-l",
-            "-z",
-            commit,
-            "--",
-            &format!(":(literal){path}"),
-        ])
-        .output()
-        .ok()?;
-    if !tree_entry.status.success() {
-        return None;
-    }
-    let entry = tree_entry
-        .stdout
-        .split(|byte| *byte == 0)
-        .find_map(|record| {
-            let separator = record.iter().position(|byte| *byte == b'\t')?;
-            let (metadata, entry_path_with_separator) = record.split_at(separator);
-            let entry_path = entry_path_with_separator.get(1..)?;
-            (entry_path == path.as_bytes()).then_some(metadata.to_vec())
-        })?;
-    Some(entry)
 }
 
 fn project_file_is_copied(project_root: &Path, relative: &Path) -> bool {
