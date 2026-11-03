@@ -21,7 +21,7 @@ mod bash_cargo_limits;
 #[path = "bash_process.rs"]
 mod bash_process;
 #[path = "bash_write_sandbox.rs"]
-mod bash_write_sandbox;
+pub(crate) mod bash_write_sandbox;
 
 /// Whether this platform can enforce the OS shell write boundary.
 pub fn shell_write_boundary_available() -> bool {
@@ -404,16 +404,9 @@ impl Tool for BashTool {
     }
 }
 
-async fn provider_env_overlay(source: Option<&ProviderEnvSource>) -> Option<ProviderEnvResolution> {
-    let source = source?;
-    if let Some(resolved) = source.resolution()
-        && source.policy().is_none_or(|policy| resolved.covers(policy))
-    {
-        return Some(resolved.clone());
-    }
-    let policy = source.policy()?;
-    Some(crate::provider_env::resolve_provider_env(policy).await)
-}
+#[path = "bash_provider_env.rs"]
+mod bash_provider_env;
+use bash_provider_env::provider_env_overlay;
 
 fn redact_provider_env_output(
     provider_env: Option<&ProviderEnvResolution>,

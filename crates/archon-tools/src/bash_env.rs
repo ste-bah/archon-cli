@@ -2,21 +2,9 @@
 //!
 //! Two different environments, because there are two different callers.
 //!
-//! **Agent shells** get the host environment minus Archon's own credentials.
-//! There is no allowlist of permitted names: an allowlist can only name what
-//! this crate's authors predicted, and everything else is dropped *silently* —
-//! invisible from inside the child, which reads `std::env::var`, sees nothing,
-//! and reports the honest but wrong conclusion that the operator never set the
-//! value. It cost a working data pipeline to learn that: a list naming `PATH`,
-//! `HOME` and thirty-odd OS variables stripped a downstream project's API key
-//! and service URL, its capability probe reported credentials missing, and its
-//! fail-closed guard correctly refused to write anything.
-//!
-//! What IS withheld is the short, knowable set of credentials belonging to
-//! Archon itself — [`ENGINE_CREDENTIAL_VARS`]. The engine owns those names by
-//! definition, so telling them apart from a downstream project's credentials
-//! needs no cleverness and no configuration. An agent has no business reading
-//! the key that pays for it, and `bash_sensitive_env_stripped` says so.
+//! **Agent shells** get the shared safe inherited-name allowlist. Provider
+//! values reach them only through an independently authorized operator overlay.
+//! Authored requirements and tool input cannot grant ambient credentials.
 //!
 //! **Hooks** get [`isolated_env`] instead: a strict allowlist of OS process
 //! variables and nothing else. A hook is user-configured and fires
@@ -31,12 +19,9 @@
 //! `Command::env_clear` makes the child's environment exactly what those layers
 //! computed, on every platform.
 
-/// Credentials belonging to Archon itself, withheld from every spawned child.
-///
-/// Not a general secret filter — a pattern rule over names like `*_KEY` would
-/// catch a downstream project's provider credentials too, which is the whole
-/// thing the passthrough exists to allow. These are only the names this engine
-/// authenticates with, matched case-insensitively.
+/// Engine credential names retained for callers that identify engine auth.
+/// The shared inherited-name allowlist withholds these and every other
+/// unapproved variable, including downstream provider credentials.
 pub const ENGINE_CREDENTIAL_VARS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -95,7 +80,7 @@ const HOOK_PASSTHROUGH_VARS: &[&str] = &[
     "RUSTUP_HOME",
 ];
 
-/// The host environment minus Archon's own credentials, for agent shells.
+/// Safe inherited process variables only, for agent shells.
 pub fn host_env() -> Vec<(String, String)> {
     collect_env(std::env::vars())
 }
@@ -110,14 +95,15 @@ where
     K: Into<String>,
     V: Into<String>,
 {
-    vars.into_iter()
-        .map(|(key, value)| (key.into(), value.into()))
-        .filter(|(key, _)| {
-            !ENGINE_CREDENTIAL_VARS
-                .iter()
-                .any(|owned| owned.eq_ignore_ascii_case(key))
-        })
-        .collect()
+    archon_shell::execution_environment::inherited(vars.into_iter().map(|(key, value)| {
+        (
+            std::ffi::OsString::from(key.into()),
+            std::ffi::OsString::from(value.into()),
+        )
+    }))
+    .into_iter()
+    .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+    .collect()
 }
 
 fn allowlist_env<K, V>(vars: impl IntoIterator<Item = (K, V)>) -> Vec<(String, String)>
@@ -172,11 +158,9 @@ pub(crate) fn set_env_override(env: &mut Vec<(String, String)>, key: &str, value
 mod tests {
     use super::{allowlist_env, collect_env};
 
-    /// The regression the agent-shell path exists to prevent: variables the
-    /// engine's authors never predicted must reach the child. Every one of
-    /// these was silently dropped by the allowlist that used to apply here.
+    /// Unapproved host variables are withheld, including noncredential names.
     #[test]
-    fn unpredicted_host_variables_reach_the_agent_shell() {
+    fn unapproved_host_variables_are_withheld_from_agent_shell() {
         let host = [
             ("PATH", "/usr/bin"),
             ("POLYGON_API_KEY", "provider-credential"),
@@ -188,30 +172,27 @@ mod tests {
         let env = collect_env(host);
         for (key, value) in host {
             assert!(
-                env.iter().any(|(k, v)| k == key && v == value),
-                "{key} must reach the agent shell: {env:?}"
+                env.iter().any(|(k, v)| k == key && v == value) == (key == "PATH"),
+                "{key} must obey the shared inherited-name policy"
             );
         }
     }
 
-    /// The engine's own credentials never do — an agent has no business
-    /// reading the key that pays for it. Matched case-insensitively so a
-    /// casing variant cannot slip through.
+    /// Provider credentials require an independent operator grant. Matched
+    /// case-insensitively so a casing variant cannot slip through.
     #[test]
-    fn engine_credentials_are_withheld_from_the_agent_shell() {
+    fn provider_credentials_are_withheld_case_insensitively() {
         let env = collect_env([
             ("ANTHROPIC_API_KEY", "sk-secret"),
             ("anthropic_api_key", "sk-secret-lowercase"),
             ("ARCHON_OAUTH_TOKEN", "tok"),
             ("POLYGON_API_KEY", "provider-credential"),
+            ("polygon_api_key", "synthetic-lowercase"),
         ]);
         assert_eq!(
             env,
-            vec![(
-                "POLYGON_API_KEY".to_string(),
-                "provider-credential".to_string()
-            )],
-            "only the non-engine credential survives"
+            Vec::<(String, String)>::new(),
+            "all unapproved provider credentials are withheld"
         );
     }
 
@@ -253,3 +234,34 @@ mod tests {
         );
     }
 }
+
+/*
+Historical rationale retained from the previous environment policy.
+The current policy and authorization boundary are documented above.
+//! **Agent shells** get the host environment minus Archon's own credentials.
+//! There is no allowlist of permitted names: an allowlist can only name what
+//! this crate's authors predicted, and everything else is dropped *silently* —
+//! invisible from inside the child, which reads `std::env::var`, sees nothing,
+//! and reports the honest but wrong conclusion that the operator never set the
+//! value. It cost a working data pipeline to learn that: a list naming `PATH`,
+//! `HOME` and thirty-odd OS variables stripped a downstream project's API key
+//! and service URL, its capability probe reported credentials missing, and its
+//! fail-closed guard correctly refused to write anything.
+//! What IS withheld is the short, knowable set of credentials belonging to
+//! Archon itself — [`ENGINE_CREDENTIAL_VARS`]. The engine owns those names by
+//! definition, so telling them apart from a downstream project's credentials
+//! needs no cleverness and no configuration. An agent has no business reading
+//! the key that pays for it, and `bash_sensitive_env_stripped` says so.
+/// Credentials belonging to Archon itself, withheld from every spawned child.
+/// Not a general secret filter — a pattern rule over names like `*_KEY` would
+/// catch a downstream project's provider credentials too, which is the whole
+/// thing the passthrough exists to allow. These are only the names this engine
+/// authenticates with, matched case-insensitively.
+/// The host environment minus Archon's own credentials, for agent shells.
+/// The regression the agent-shell path exists to prevent: variables the
+/// engine's authors never predicted must reach the child. Every one of
+/// these was silently dropped by the allowlist that used to apply here.
+/// The engine's own credentials never do — an agent has no business
+/// reading the key that pays for it. Matched case-insensitively so a
+/// casing variant cannot slip through.
+*/

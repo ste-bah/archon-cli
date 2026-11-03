@@ -112,7 +112,9 @@ async fn run_unwatched(
         .kill_on_drop(true);
     #[cfg(unix)]
     process.process_group(0);
-    let mut child = match process.spawn() {
+    let mut child = match archon_shell::read_boundary::prepare_spawn(process.as_std())
+        .and_then(|()| process.spawn())
+    {
         Ok(child) => child,
         Err(error) => {
             return CommandRun {

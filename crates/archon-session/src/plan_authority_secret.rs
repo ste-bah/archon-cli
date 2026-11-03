@@ -10,6 +10,7 @@ use std::path::Path;
 /// The secret is never serialized into plans or the database. Callers must keep
 /// the returned bytes process-private and pass them directly to PlanStore.
 pub fn load_or_create_approval_secret(path: &Path) -> Result<[u8; 32], std::io::Error> {
+    archon_shell::credential_paths::register_store(path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

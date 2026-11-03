@@ -224,7 +224,12 @@ async fn d47_markerless_final_gate_receives_run_scoped_provider_env() {
         profile_sources: Vec::new(),
         reason: Some("final gate regression".into()),
     };
-    let resolution = archon_tools::provider_env::resolve_provider_env(&policy).await;
+    let resolution = archon_tools::provider_env::resolve_operator_provider_env(
+        &policy,
+        &policy.required_keys,
+        &policy.profile_sources,
+    )
+    .await;
     let mut request = request(ToolAccessLevel::Full);
     request.pipeline_type = PipelineType::Workflow;
     request.disable_auto_background = true;

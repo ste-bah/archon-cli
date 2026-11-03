@@ -348,26 +348,12 @@ fn jwt_account_id(payload: &serde_json::Value) -> Option<String> {
 /// Falls back to `~/.claude/.credentials.json` if the new path doesn't exist
 /// (backward compatibility).
 pub fn default_credentials_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let new_path = home.join(".archon").join(".credentials.json");
-    if new_path.exists() {
-        return new_path;
-    }
-    let old_path = home.join(".claude").join(".credentials.json");
-    if old_path.exists() {
-        tracing::warn!(
-            "Loading from deprecated path {}. Rename to {} to suppress this warning.",
-            old_path.display(),
-            new_path.display()
-        );
-        return old_path;
-    }
-    // Neither exists — return the new path (callers check existence)
-    new_path
+    archon_shell::credential_paths::default_provider_store()
 }
 
 /// Load OAuth credentials from a file path.
 pub fn load_credentials_file(path: &std::path::Path) -> Result<OAuthCredentials, AuthError> {
+    archon_shell::credential_paths::register_store(path);
     // Check file permissions (advisory)
     #[cfg(unix)]
     {

@@ -9,6 +9,9 @@ use crate::run::WorkflowRun;
 use crate::spec::{StageKind, StageSpec, WorkflowSpec};
 use crate::store::WorkflowStore;
 
+#[path = "bundle_operator_env.rs"]
+mod operator_env;
+
 pub const MANIFEST_FILE: &str = "manifest.toml";
 pub const HARNESS_FILE: &str = "workflow.js";
 /// The decomposed-PRD plan record.
@@ -116,25 +119,7 @@ impl WorkflowBundle {
         harness_source: &str,
         origin: WorkflowBundleOrigin,
     ) -> WorkflowResult<Self> {
-        let compiled = run.spec.to_yaml()?;
-        let manifest =
-            manifest_for_run(run, harness_source.as_bytes(), compiled.as_bytes(), origin);
-        store.write_run_file(
-            &run.id,
-            WorkflowRecordKind::of_source(harness_source).file_name(),
-            harness_source.as_bytes(),
-        )?;
-        store.write_run_file(&run.id, COMPILED_SPEC_FILE, compiled.as_bytes())?;
-        store.write_run_file(
-            &run.id,
-            MANIFEST_FILE,
-            toml::to_string_pretty(&manifest)?.as_bytes(),
-        )?;
-        Ok(Self {
-            run_id: run.id.clone(),
-            run_dir: store.run_dir(&run.id),
-            manifest,
-        })
+        Self::write_for_run_with_operator_grants(store, run, harness_source, origin, &[])
     }
 
     pub fn synthesize_for_imported_spec(

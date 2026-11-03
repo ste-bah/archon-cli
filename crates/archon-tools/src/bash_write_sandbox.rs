@@ -60,13 +60,12 @@
 //! (Issue-213). On macOS and Linux, failure to apply the kernel boundary
 //! refuses the call; the snapshot is not a fallback there.
 
-use std::path::PathBuf;
-
 use crate::tool::{ToolContext, ToolResult};
 use crate::workflow_read_guard::{BoundaryPaths, checkout_common_dir, spellings};
 use archon_shell::paths::path_starts_with;
 use archon_shell::write_boundary::landlock::LandlockSandbox;
 use archon_shell::write_boundary::{Mechanism, SnapshotBoundary, refusal};
+use std::path::PathBuf;
 
 /// The host temp variables a private temp directory replaces (Linux).
 const TEMP_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
@@ -88,12 +87,12 @@ const HOST_DIR_ENV_KEYS: &[&str] = &[
 ];
 
 /// The start of the bounded command's refusal note; pinned by tests.
-pub(super) const WRITE_BOUNDARY_NOTE_MARKER: &str = "[write boundary]";
+pub(crate) const WRITE_BOUNDARY_NOTE_MARKER: &str = "[write boundary]";
 
 /// What one command may and may not write, as absolute paths under every
 /// spelling known (given and canonical).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct WriteBoundary {
+pub(crate) struct WriteBoundary {
     protected: Vec<PathBuf>,
     /// Drawn around a read-only call or isolated write branch.
     read_only: bool,
@@ -108,7 +107,7 @@ pub(super) struct WriteBoundary {
 
 /// How one command's boundary is applied.
 #[derive(Debug)]
-pub(super) enum Applied {
+pub(crate) enum Applied {
     /// The `sandbox-exec` profile (macOS).
     SandboxExec(String),
     /// A ruleset applied before exec (Linux; never built elsewhere).
@@ -121,15 +120,15 @@ pub(super) enum Applied {
 
 /// One bounded command: what it may write, and how that is enforced.
 #[derive(Debug)]
-pub(super) struct ShellBoundary {
-    pub(super) boundary: WriteBoundary,
-    pub(super) applied: Applied,
+pub(crate) struct ShellBoundary {
+    pub(crate) boundary: WriteBoundary,
+    pub(crate) applied: Applied,
 }
 
 /// Builds this command's boundary. Calls are refused when no boundary can be
 /// applied or when boundary construction fails.
 /// Landlock's private temp directory is written into `env`.
-pub(super) fn for_call(
+pub(crate) fn for_call(
     ctx: &ToolContext,
     env: &mut Vec<(String, String)>,
     extra_env_keys: &[String],
@@ -190,12 +189,16 @@ pub(super) fn for_call(
 }
 
 /// The guard's sets widened by what a shell needs; see the module docs.
-pub(super) fn for_shell(
+pub(crate) fn for_shell(
     mut paths: BoundaryPaths,
     env: &[(String, String)],
     extra_env_keys: &[String],
     git_mutation: bool,
 ) -> WriteBoundary {
+    // Host authority is sealed independently of project stamps or cache grants.
+    for root in spellings(&archon_shell::credential_paths::operator_grant_root()) {
+        push_unique(&mut paths.protected, root);
+    }
     for dir in env_dirs(env, extra_env_keys) {
         paths.allow(&dir);
     }
@@ -244,7 +247,7 @@ pub(super) fn for_shell(
 impl WriteBoundary {
     /// Allows writes generally, denies protected roots, then re-allows writable
     /// paths. Empty clauses are omitted because an empty clause matches all.
-    pub(super) fn profile(&self) -> String {
+    pub(crate) fn profile(&self) -> String {
         let clause = |kind: &str, paths: &[PathBuf]| {
             paths
                 .iter()
@@ -270,11 +273,14 @@ impl WriteBoundary {
         if !writable.is_empty() {
             profile.push_str(&format!("(allow file-write*{writable})\n"));
         }
+        profile.push_str(&archon_shell::read_boundary::macos_rules(
+            &archon_shell::read_boundary::operator_paths(),
+        ));
         profile
     }
 
     /// Add boundary guidance when a failed command reports an OS denial.
-    pub(super) fn annotate(&self, mut result: ToolResult) -> ToolResult {
+    pub(crate) fn annotate(&self, mut result: ToolResult) -> ToolResult {
         // `sandbox-exec` refuses with EPERM, Landlock with EACCES (and EXDEV
         // for a link or rename across its rules).
         // Output text alone is not an outcome: a successful command may print
@@ -345,7 +351,7 @@ const DENIALS: [&str; 3] = [
 /// boundary (Issue-234, Windows) the writes were not refused, so this restores
 /// every change the command made under a sealed root and, if there was one,
 /// returns an ordinary tool error naming it.
-pub(super) fn annotate(boundary: Option<&ShellBoundary>, result: ToolResult) -> ToolResult {
+pub(crate) fn annotate(boundary: Option<&ShellBoundary>, result: ToolResult) -> ToolResult {
     let Some(bounded) = boundary else {
         return result;
     };
@@ -367,7 +373,7 @@ thread_local! {
 /// Tests of a host with no boundary run their commands on this thread as if
 /// none could be applied.
 #[cfg(test)]
-pub(super) fn unavailable_for_tests(unavailable: bool) {
+pub(crate) fn unavailable_for_tests(unavailable: bool) {
     UNAVAILABLE_FOR_TESTS.with(|cell| cell.set(unavailable));
 }
 
@@ -375,7 +381,7 @@ pub(super) fn unavailable_for_tests(unavailable: bool) {
 /// thread as if the only mechanism were the snapshot — the Windows path — even
 /// on a host that has a kernel boundary.
 #[cfg(test)]
-pub(super) fn force_snapshot_for_tests(force: bool) {
+pub(crate) fn force_snapshot_for_tests(force: bool) {
     FORCE_SNAPSHOT_FOR_TESTS.with(|cell| cell.set(force));
 }
 
@@ -392,30 +398,8 @@ fn mechanism() -> Result<Mechanism, String> {
 }
 
 /// Whether a command can be bounded in this process, asked once.
-pub(super) fn available() -> bool {
+pub(crate) fn available() -> bool {
     mechanism().is_ok()
-}
-
-/// Absolute directory values of the host-selected environment variables.
-fn env_dirs(env: &[(String, String)], extra: &[String]) -> Vec<PathBuf> {
-    let mut keys: Vec<&str> = extra.iter().map(String::as_str).collect();
-    for key in HOST_DIR_ENV_KEYS
-        .iter()
-        .copied()
-        .chain(crate::build_cache_env::toolchain_cache_env_keys())
-    {
-        keys.push(key);
-    }
-    let mut dirs = Vec::new();
-    for key in keys {
-        if let Some((_, value)) = env.iter().rev().find(|(name, _)| name == key) {
-            let path = PathBuf::from(value.trim());
-            if path.is_absolute() {
-                push_unique(&mut dirs, path);
-            }
-        }
-    }
-    dirs
 }
 
 /// The worktree's own git directory and, with git mutation allowed, the
@@ -496,3 +480,9 @@ fn sbpl_escape(path: &str) -> String {
 #[cfg(test)]
 #[path = "bash_write_sandbox_outcome_tests.rs"]
 mod outcome_tests;
+
+#[path = "agent_launch_write_boundary.rs"]
+mod launch;
+pub use launch::PipelineBoundary;
+use launch::env_dirs;
+pub(crate) use launch::{apply_pty, command};

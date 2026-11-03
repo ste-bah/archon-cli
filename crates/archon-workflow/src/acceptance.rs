@@ -161,13 +161,11 @@ pub(crate) fn run_verify_command_capture(
     // POSIX mode a parse error after `trap ... EXIT` exits with the trap's 0.
     // The rule is unconditional (`acceptance_check_shell::PARSE_RULE`), and
     // it reads only the command, never a file it sources.
-    if let Ok(parsed) = environment
-        .command(shell_program())
-        .arg("-n")
-        .arg("-c")
-        .arg(command)
-        .current_dir(root)
-        .output()
+    let mut process = environment.command(shell_program());
+    process.arg("-n").arg("-c").arg(command).current_dir(root);
+    archon_shell::read_boundary::prepare_spawn(&process)
+        .map_err(|err| format!("verify_command failed to launch: {err}"))?;
+    if let Ok(parsed) = process.output()
         && !parsed.status.success()
     {
         let stderr = String::from_utf8_lossy(&parsed.stderr).trim().to_string();
@@ -184,12 +182,10 @@ pub(crate) fn run_verify_command_capture(
             environment_note: None,
         }));
     }
-    let output = environment
-        .command(shell_program())
-        .arg("-c")
-        .arg(command)
-        .current_dir(root)
-        .output()
+    let mut process = environment.command(shell_program());
+    process.arg("-c").arg(command).current_dir(root);
+    let output = archon_shell::read_boundary::prepare_spawn(&process)
+        .and_then(|()| process.output())
         .map_err(|err| format!("verify_command failed to launch: {err}"))?;
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let environment_note = (!output.status.success())

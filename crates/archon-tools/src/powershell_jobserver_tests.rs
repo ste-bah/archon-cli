@@ -21,7 +21,7 @@ fn launch_with_jobserver(flags: [&str; 3]) {
     let pwsh = fake.path().join("pwsh");
     std::fs::write(
         &pwsh,
-        "#!/bin/sh\n[ \"$1\" = -Command ] || exit 64\nexec /bin/sh -c \"$2\"\n",
+        "#!/bin/sh\n[ \"$1\" = -NoProfile ] || exit 64\nshift\n[ \"$1\" = -Command ] || exit 64\nexec /bin/sh -c \"$2\"\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;

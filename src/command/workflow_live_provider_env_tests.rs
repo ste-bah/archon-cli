@@ -19,7 +19,7 @@ fn provider_env_policy_reads_generic_requirement_aliases() {
             "TIINGO_TOKEN".to_string()
         ]
     );
-    assert_eq!(policy.profile_sources, vec!["~/.profile".to_string()]);
+    assert!(policy.profile_sources.is_empty());
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn provider_env_policy_reads_declared_keys_from_requirement_object() {
     let policy = provider_env_policy_from_input(&input).expect("policy");
 
     assert_eq!(policy.required_keys, vec!["POLYGON_API_KEY".to_string()]);
-    assert_eq!(policy.profile_sources, vec!["~/.profile".to_string()]);
+    assert!(policy.profile_sources.is_empty());
 }
 
 #[test]
@@ -112,9 +112,12 @@ async fn d47_generated_provider_workflow_resolves_one_shared_key_set() {
             },
         ],
     };
-    let resolved = resolve_generated_workflow_provider_env(Some(&universe))
-        .await
-        .expect("provider workflow resolution");
+    let resolved = resolve_generated_workflow_provider_env(
+        Some(&universe),
+        &["OPENBB_API_URL".into(), "POLYGON_API_KEY".into()],
+    )
+    .await
+    .expect("provider workflow resolution");
     let keys = resolved
         .proof
         .redacted_env_keys_checked
@@ -124,4 +127,81 @@ async fn d47_generated_provider_workflow_resolves_one_shared_key_set() {
 
     assert_eq!(keys, vec!["OPENBB_API_URL", "POLYGON_API_KEY"]);
     assert!(!format!("{resolved:?}").contains("https://"));
+}
+
+#[test]
+fn authored_profile_sources_never_select_executable_operator_inputs() {
+    let input = serde_json::json!({
+        "required_env_keys": ["ARCHON_R2_AUTHORED_KEY"],
+        "profile_sources": ["/authored/exfiltration-profile"]
+    });
+    let policy = provider_env_policy_from_input(&input).unwrap();
+    assert!(
+        policy.profile_sources.is_empty(),
+        "authored paths are not operator launch inputs"
+    );
+}
+
+#[tokio::test]
+async fn generated_requirements_do_not_expand_operator_launch_grants() {
+    if std::env::var_os("ARCHON_R2_OPERATOR_ENV_PROBE").is_none() {
+        let status = archon_shell::spawn::command(std::env::current_exe().unwrap())
+            .args([
+                "generated_requirements_do_not_expand_operator_launch_grants",
+                "--nocapture",
+            ])
+            .env("ARCHON_R2_OPERATOR_ENV_PROBE", "1")
+            .env("POLYGON_API_KEY", "synthetic-r2-provider")
+            .env("OPENBB_API_URL", "http://example.invalid")
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "generated keys must not expand operator authority"
+        );
+        return;
+    }
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".into(),
+        source_roots: vec!["tasks".into()],
+        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-R2-001".into(),
+            required_env_keys: vec!["OPENBB_API_URL".into(), "POLYGON_API_KEY".into()],
+            ..Default::default()
+        }],
+    };
+    let resolved =
+        resolve_generated_workflow_provider_env(Some(&universe), &["POLYGON_API_KEY".into()])
+            .await
+            .unwrap();
+    let keys = resolved
+        .proof
+        .redacted_env_keys_checked
+        .iter()
+        .map(|p| p.key.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keys,
+        vec!["POLYGON_API_KEY"],
+        "authored requirements cannot widen the recorded operator declaration"
+    );
+    assert!(
+        resolved.proof.profile_sources_checked.is_empty(),
+        "workflow paths must not execute as profiles"
+    );
+}
+
+#[test]
+fn negative_mentions_and_malformed_operator_lists_grant_nothing() {
+    for document in [
+        "never expose X_API_KEY",
+        "task: never expose X_API_KEY",
+        "required_env_keys: X_API_KEY",
+    ] {
+        assert!(operator_provider_env_grants(document).is_empty());
+    }
+    assert_eq!(
+        operator_provider_env_grants("required_env_keys: [X_API_KEY]"),
+        vec!["X_API_KEY"]
+    );
 }

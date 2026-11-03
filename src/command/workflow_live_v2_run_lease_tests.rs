@@ -288,3 +288,76 @@ async fn a_launch_holds_the_lease_while_it_executes() {
         "the launch holds the lease: {observed:?}"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn r6_no_grant_launch_succeeds_with_unwritable_grant_directory() {
+    if std::env::var_os("ARCHON_R6_NO_GRANT_PROBE").is_none() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join(".archon/operator-env-grants");
+        fs::create_dir_all(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o500)).unwrap();
+        assert!(fs::write(root.join("write-probe"), b"probe").is_err());
+        let output = archon_shell::spawn::command(std::env::current_exe().unwrap())
+            .args([
+                "r6_no_grant_launch_succeeds_with_unwritable_grant_directory",
+                "--nocapture",
+            ])
+            .env("ARCHON_R6_NO_GRANT_PROBE", "1")
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .output()
+            .unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_dir(root).unwrap().count(), 0);
+        return;
+    }
+    for origin in [
+        WorkflowBundleOrigin::GeneratedHarness,
+        WorkflowBundleOrigin::SavedCommand,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::project(temp.path());
+        let plan = WorkflowScriptPlan::generated(
+            "probe the executor lease",
+            SCRIPT,
+            Vec::new(),
+            None,
+            GeneratedWorkflowConfig::default(),
+            &archon_core::config::LearningConfig::default(),
+        )
+        .unwrap();
+        let probe = LeaseProbeLlm::new(&store);
+        let (ui, rx) = default_workflow_ui_sink();
+        std::mem::forget(rx);
+        super::super::run_v2_workflow_with_origin(
+            temp.path(),
+            &store,
+            plan,
+            "probe the executor lease".into(),
+            probe.clone(),
+            ui,
+            Vec::new(),
+            LiveApprovalMode::CliYes,
+            true,
+            origin,
+            false,
+            &archon_core::config::LearningConfig::default(),
+            archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+            Arc::new(archon_core::config::ArchonConfig::default()),
+        )
+        .await
+        .expect("no-grant launch with read-only host grant directory");
+        assert!(
+            !probe.observed().is_empty(),
+            "the launch must execute its agent"
+        );
+    }
+}

@@ -50,13 +50,10 @@ impl AgentSubagentExecutor {
         });
         if let Some(source) = source {
             let resolution = match source.resolution() {
-                Some(resolution)
-                    if source
-                        .policy()
-                        .is_none_or(|policy| resolution.covers(policy)) =>
-                {
-                    resolution.clone()
-                }
+                Some(resolution) => source.policy().map_or_else(
+                    || resolution.clone(),
+                    |policy| resolution.restricted_to(policy),
+                ),
                 _ => {
                     archon_tools::provider_env::resolve_provider_env(
                         source.policy().expect("unresolved source has a policy"),

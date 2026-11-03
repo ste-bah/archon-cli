@@ -993,6 +993,7 @@ name = "archon-pty"
 version = "1.9.3"
 dependencies = [
  "anyhow",
+ "archon-shell",
  "libc",
  "portable-pty",
  "tokio",
@@ -1085,6 +1086,7 @@ name = "archon-shell"
 version = "1.9.3"
 dependencies = [
  "archon-test-support",
+ "dirs",
  "libc",
  "tempfile",
  "tokio",

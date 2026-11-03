@@ -246,3 +246,8 @@ pub mod tool_trace_input;
 pub mod audit_landing;
 
 pub mod provider_recovery;
+
+#[cfg(test)]
+mod agent_environment_tests;
+
+pub use bash::bash_write_sandbox::PipelineBoundary;

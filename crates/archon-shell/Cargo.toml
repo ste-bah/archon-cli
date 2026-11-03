@@ -11,6 +11,8 @@ description = "Shell discovery for archon-cli: resolves the program and command 
 # subprocess in src/command/posix_shell.rs, which cost a process launch per
 # resolution for information `which` reads straight off PATH.
 which.workspace = true
+# Resolve credential stores exactly as the host authentication code does.
+dirs.workspace = true
 # Issue-227: the OS write boundary under a bounded child (`write_boundary`):
 # Landlock's raw syscalls on Linux, and the log line a caller without one
 # leaves.

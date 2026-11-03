@@ -128,8 +128,13 @@ pub(crate) fn create(
         ));
     }
 
-    let session = PtySession::spawn_headless(program, TERMINAL_SIZE)
-        .map_err(|error| format!("could not open a terminal: {error}"))?;
+    // A backend launch is a host transport; its payload policy is backend-owned.
+    let session = if sandboxed {
+        PtySession::spawn_host_transport(program, TERMINAL_SIZE)
+    } else {
+        PtySession::spawn_agent_headless(program, TERMINAL_SIZE)
+    }
+    .map_err(|error| format!("could not open a terminal: {error}"))?;
     let (control, mut output) = session.split();
 
     let terminal = Arc::new(Terminal {

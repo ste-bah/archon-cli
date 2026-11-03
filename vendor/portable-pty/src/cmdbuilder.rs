@@ -144,7 +144,7 @@ fn get_base_env() -> BTreeMap<OsString, EnvEntry> {
                         continue;
                     }
                     if let Ok(value) = reg_value_to_string(&value) {
-                        log::trace!("adding SYS env: {:?} {:?}", name, value);
+                        log::trace!("adding SYS env: {:?}", name);
                         env.insert(
                             EnvEntry::map_key(name.clone().into()),
                             EnvEntry {
@@ -178,7 +178,7 @@ fn get_base_env() -> BTreeMap<OsString, EnvEntry> {
                             value
                         };
 
-                        log::trace!("adding USER env: {:?} {:?}", name, value);
+                        log::trace!("adding USER env: {:?}", name);
                         env.insert(
                             EnvEntry::map_key(name.clone().into()),
                             EnvEntry {
@@ -215,9 +215,40 @@ pub struct CommandBuilder {
     #[cfg(unix)]
     pub(crate) umask: Option<libc::mode_t>,
     controlling_tty: bool,
+    // Internal launch metadata, never a serialized configuration key.
+    #[cfg_attr(feature = "serde_support", serde(skip))]
+    agent_read_boundary: bool,
+    #[cfg_attr(feature = "serde_support", serde(skip))]
+    agent_write_boundary: Option<(Vec<std::path::PathBuf>, Vec<std::path::PathBuf>)>,
 }
 
 impl CommandBuilder {
+    /// Require the available operator-credential read boundary for a host shell.
+    /// Local transport clients leave this off so host authentication still works.
+    pub fn protect_operator_reads(&mut self) {
+        self.agent_read_boundary = true;
+    }
+
+    pub fn operator_reads_protected(&self) -> bool {
+        self.agent_read_boundary
+    }
+
+    /// Internal host boundary metadata; never supplied by the agent payload.
+    pub fn protect_writes(
+        &mut self,
+        protected: Vec<std::path::PathBuf>,
+        writable: Vec<std::path::PathBuf>,
+    ) {
+        self.agent_write_boundary = Some((protected, writable));
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn write_boundary(
+        &self,
+    ) -> Option<&(Vec<std::path::PathBuf>, Vec<std::path::PathBuf>)> {
+        self.agent_write_boundary.as_ref()
+    }
+
     /// Create a new builder instance with argv\[0\] set to the specified
     /// program.
     pub fn new<S: AsRef<OsStr>>(program: S) -> Self {
@@ -228,6 +259,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            agent_read_boundary: false,
+            agent_write_boundary: None,
         }
     }
 
@@ -240,6 +273,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            agent_read_boundary: false,
+            agent_write_boundary: None,
         }
     }
 
@@ -267,6 +302,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            agent_read_boundary: false,
+            agent_write_boundary: None,
         }
     }
 

@@ -441,10 +441,7 @@ impl TestsRunGate {
             Language::TypeScript => ("npm", vec!["test"]),
         };
 
-        let output = archon_shell::spawn::command(cmd)
-            .args(&args)
-            .current_dir(project_root)
-            .output();
+        let output = pipeline_output(cmd, &args, project_root);
 
         match output {
             Ok(out) => {
@@ -534,10 +531,7 @@ impl E2ESmokeTestGate {
             };
         }
 
-        let output = archon_shell::spawn::command(parts[0])
-            .args(&parts[1..])
-            .current_dir(project_root)
-            .output();
+        let output = pipeline_output(parts[0], &parts[1..], project_root);
 
         match output {
             Ok(out) => {
@@ -678,4 +672,18 @@ fn now_iso8601() -> String {
         .unwrap_or_default();
     // Simple ISO 8601-ish timestamp
     format!("{}Z", dur.as_secs())
+}
+
+fn pipeline_output(
+    program: &str,
+    args: &[&str],
+    project_root: &Path,
+) -> std::io::Result<std::process::Output> {
+    let boundary = archon_tools::PipelineBoundary::current(project_root)?;
+    let mut command = boundary.command(program).into_std();
+    command.args(args).current_dir(project_root);
+    archon_shell::read_boundary::prepare_spawn(&command)?;
+    let output = command.output();
+    boundary.settle()?;
+    output
 }

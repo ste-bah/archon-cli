@@ -48,9 +48,12 @@ pub struct DockerDoctorReport {
 }
 
 pub fn probe_docker(binary: &str) -> DockerProbe {
-    match archon_shell::spawn::command(binary)
-        .arg("--version")
-        .output()
+    match archon_shell::execution_environment::transport_command(
+        binary,
+        archon_shell::execution_environment::DOCKER_CLIENT_BINDINGS,
+    )
+    .arg("--version")
+    .output()
     {
         Ok(output) => {
             let version = crate::sandbox::first_non_empty_line(&output.stdout)

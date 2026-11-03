@@ -29,6 +29,19 @@ impl std::fmt::Debug for ProviderEnvResolution {
 }
 
 impl ProviderEnvResolution {
+    /// Narrow an existing operator capability without resolving new names.
+    pub fn restricted_to(&self, policy: &ProviderEnvPolicy) -> Self {
+        let mut result = self.clone();
+        result
+            .env
+            .retain(|(key, _)| policy.required_keys.contains(key));
+        result
+            .proof
+            .redacted_env_keys_checked
+            .retain(|proof| policy.required_keys.contains(&proof.key));
+        result
+    }
+
     pub fn covers(&self, policy: &ProviderEnvPolicy) -> bool {
         let checked = self
             .proof

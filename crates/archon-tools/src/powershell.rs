@@ -59,13 +59,19 @@ impl Tool for PowerShellTool {
         let shell = if which_pwsh() { "pwsh" } else { "powershell" };
 
         // Build sanitized environment (same as BashTool)
-        let env_vars = crate::bash::host_env();
+        use crate::bash::bash_write_sandbox;
+        let mut env_vars = crate::bash::host_env();
+        let boundary = match bash_write_sandbox::for_call(ctx, &mut env_vars, &[]) {
+            Ok(boundary) => boundary,
+            Err(result) => return result,
+        };
 
-        let mut cmd = archon_shell::spawn::tokio_command(shell);
+        let mut cmd = bash_write_sandbox::command(shell, boundary.as_ref());
         // The host overlay copies raw jobserver flags; the helper sanitizes
         // them after the overlay, as for the Bash tool.
         archon_shell::spawn::replace_environment(cmd.as_std_mut(), env_vars);
-        cmd.arg("-Command")
+        cmd.arg("-NoProfile")
+            .arg("-Command")
             .arg(command)
             .current_dir(&ctx.working_dir)
             .stdout(Stdio::piped())
@@ -73,7 +79,9 @@ impl Tool for PowerShellTool {
             .stdin(Stdio::null());
         #[cfg(unix)]
         cmd.process_group(0);
-        let mut child = match cmd.spawn() {
+        let mut child = match archon_shell::read_boundary::prepare_spawn(cmd.as_std())
+            .and_then(|()| cmd.spawn())
+        {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("PowerShell not available ({shell}): {e}")),
         };
@@ -97,7 +105,7 @@ impl Tool for PowerShellTool {
         })
         .await;
 
-        match result {
+        let result = match result {
             Ok((stdout_buf, stderr_buf, status)) => {
                 let exit_code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
                 let mut output = String::from_utf8_lossy(&stdout_buf).to_string();
@@ -124,7 +132,9 @@ impl Tool for PowerShellTool {
                 let _ = child.kill().await;
                 ToolResult::error("PowerShell command timed out")
             }
-        }
+        };
+        drop(_live);
+        bash_write_sandbox::annotate(boundary.as_ref(), result)
     }
 
     fn working_tree_effect(&self) -> WorkingTreeEffect {
@@ -142,13 +152,7 @@ impl Tool for PowerShellTool {
 }
 
 fn which_pwsh() -> bool {
-    archon_shell::spawn::command("which")
-        .arg("pwsh")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    which::which("pwsh").is_ok()
 }
 
 #[cfg(all(test, unix))]

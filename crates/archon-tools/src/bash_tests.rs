@@ -157,7 +157,14 @@ async fn provider_env_overlay_is_scoped_and_redacted() {
         profile_sources: vec![profile.display().to_string()],
         reason: Some("test".to_string()),
     };
-    let tool = BashTool::default().with_provider_env(policy);
+    let resolution = crate::provider_env::resolve_operator_provider_env(
+        &policy,
+        &policy.required_keys,
+        &policy.profile_sources,
+    )
+    .await;
+    let tool =
+        BashTool::default().with_provider_env_source(ProviderEnvSource::Resolution(resolution));
 
     let result = tool
         .execute(
@@ -167,7 +174,14 @@ async fn provider_env_overlay_is_scoped_and_redacted() {
         .await;
 
     assert!(!result.is_error, "{}", result.content);
-    assert_eq!(result.content, "<redacted:ARCHON_TEST_PROVIDER_SCOPED_KEY>");
+    assert_eq!(
+        result.content,
+        if archon_shell::read_boundary::operator_grants_supported() {
+            "<redacted:ARCHON_TEST_PROVIDER_SCOPED_KEY>"
+        } else {
+            ""
+        }
+    );
     assert!(!result.content.contains(secret));
 
     let ordinary = BashTool::default()

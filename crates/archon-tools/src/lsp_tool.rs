@@ -124,9 +124,7 @@ impl Tool for LspTool {
         let mut guard = self.manager.lock().await;
 
         // Lazy init on first use
-        if !guard.is_connected()
-            && let Err(e) = guard.ensure_connected().await
-        {
+        if let Err(e) = guard.ensure_connected_with_context(ctx).await {
             return ToolResult::error(format!("LSP not available: {e}"));
         }
 

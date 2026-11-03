@@ -427,10 +427,7 @@ fn allowed_env_args(env: &[(String, String)], allowlist: &[String]) -> Vec<Strin
 }
 
 fn sensitive_env_name(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    ["TOKEN", "SECRET", "KEY", "PASSWORD", "CREDENTIAL"]
-        .iter()
-        .any(|needle| upper.contains(needle))
+    archon_shell::execution_environment::credential_name(name)
 }
 
 fn docker_network_mode(network: &str) -> &'static str {

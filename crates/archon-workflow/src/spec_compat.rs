@@ -90,6 +90,12 @@ struct WorkflowSpecDe {
     )]
     learning_hooks: Vec<String>,
 
+    // Internal compiled-bundle metadata. Loading an authored spec or state must
+    // never turn this field into authority; only the bundle verifier reads it.
+    #[serde(default)]
+    #[allow(dead_code)]
+    operator_env_grants: Vec<String>,
+
     // Accepted and discarded. See the doc comment above. Never read by
     // construction — the point is to consume the key, not the value.
     #[serde(default)]
@@ -118,6 +124,7 @@ impl<'de> Deserialize<'de> for WorkflowSpec {
             stages,
             permissions,
             learning_hooks,
+            operator_env_grants: _,
             provider_tiers: _,
             artifact_policy: _,
             quality_gates: _,

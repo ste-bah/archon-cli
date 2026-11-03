@@ -292,6 +292,10 @@ impl DockerSandboxBackend {
         request: &SandboxCommandRequest,
     ) -> SandboxCommandResult {
         let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
+        archon_shell::execution_environment::transport_environment(
+            cmd.as_std_mut(),
+            archon_shell::execution_environment::DOCKER_CLIENT_BINDINGS,
+        );
         cmd.args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

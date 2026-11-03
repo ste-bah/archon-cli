@@ -3,10 +3,11 @@ name = "archon-pty"
 version.workspace = true
 edition.workspace = true
 publish = false
-description = "A pseudo-terminal and the child running inside it, for archon-cli. Deliberately a leaf — no archon-* dependencies — so both the web terminal pane in archon-sdk and the persistent shell tools in archon-tools run on one PTY lifecycle instead of two."
+description = "A pseudo-terminal and the child running inside it, for archon-cli. Shared by both the web terminal pane in archon-sdk and the persistent shell tools in archon-tools, with one PTY lifecycle and the shared agent environment policy."
 
 # Dependency discipline: every dep MUST come from [workspace.dependencies].
 [dependencies]
+archon-shell = { path = "../archon-shell" }
 # ConPTY on Windows, openpty elsewhere, behind one API. Already a workspace
 # dependency for the browser terminal pane; this crate is where it now lives.
 portable-pty.workspace = true

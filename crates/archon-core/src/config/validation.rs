@@ -4,10 +4,7 @@ use super::*;
 
 /// Returns the default config file path: `~/.config/archon/config.toml`
 pub fn default_config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("archon")
-        .join("config.toml")
+    archon_shell::credential_paths::host_config()
 }
 
 /// Validate an `ArchonConfig`, returning `ConfigError::ValidationError` on

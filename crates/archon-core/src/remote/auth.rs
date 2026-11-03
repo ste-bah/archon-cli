@@ -25,10 +25,7 @@ pub fn validate_token(expected: &str, provided: &str) -> bool {
 /// Returns the default path for the remote token file:
 /// `~/.config/archon/remote-token`
 pub fn token_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("archon")
-        .join("remote-token")
+    archon_shell::credential_paths::remote_token()
 }
 
 /// Load the remote bearer token from disk. If the file does not exist,

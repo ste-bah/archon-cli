@@ -119,9 +119,15 @@ impl Tool for MonitorTool {
 /// Spawn the shell command with piped stdout, read lines until the
 /// timeout fires or the child exits, then assemble the JSON report.
 async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolResult {
+    use crate::bash::bash_write_sandbox;
+    let mut env = crate::bash::host_env();
+    let boundary = match bash_write_sandbox::for_call(ctx, &mut env, &[]) {
+        Ok(boundary) => boundary,
+        Err(result) => return result,
+    };
     #[cfg(unix)]
     let mut cmd = {
-        let mut c = archon_shell::spawn::tokio_command("/bin/sh");
+        let mut c = bash_write_sandbox::command("/bin/sh", boundary.as_ref());
         c.arg("-c").arg(command);
         c
     };
@@ -130,11 +136,12 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
         // Fall back to the system shell on non-unix; the tool's tests
         // are #[cfg(unix)] so this branch is exercised only in prod
         // builds on Windows.
-        let mut c = archon_shell::spawn::tokio_command("cmd");
-        c.arg("/C").arg(command);
+        let mut c = bash_write_sandbox::command("cmd", boundary.as_ref());
+        c.args(["/D", "/C"]).arg(command);
         c
     };
 
+    archon_shell::spawn::replace_environment(cmd.as_std_mut(), env);
     cmd.current_dir(&ctx.working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -142,18 +149,19 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
     #[cfg(unix)]
     cmd.process_group(0);
 
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return ToolResult::success(format_report(
-                "error",
-                -1,
-                &[],
-                false,
-                Some(&e.to_string()),
-            ));
-        }
-    };
+    let mut child =
+        match archon_shell::read_boundary::prepare_spawn(cmd.as_std()).and_then(|()| cmd.spawn()) {
+            Ok(c) => c,
+            Err(e) => {
+                return ToolResult::success(format_report(
+                    "error",
+                    -1,
+                    &[],
+                    false,
+                    Some(&e.to_string()),
+                ));
+            }
+        };
 
     // Issue-134: the whole group ends with this call, however it ends.
     let _live = crate::bash::LiveGroup::arm(child.id(), &ctx.session_id);
@@ -216,7 +224,7 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
         ("exited", code)
     };
 
-    match tokio::time::timeout(timeout, collect).await {
+    let result = match tokio::time::timeout(timeout, collect).await {
         Ok((exit, code)) => {
             ToolResult::success(format_report(exit, code, &events, truncated, None))
         }
@@ -225,7 +233,9 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
             let _ = child.wait().await;
             ToolResult::success(format_report("timeout", -1, &events, truncated, None))
         }
-    }
+    };
+    drop(_live);
+    bash_write_sandbox::annotate(boundary.as_ref(), result)
 }
 
 /// Serialize the monitor result as pretty-printed JSON.

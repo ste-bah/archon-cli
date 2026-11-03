@@ -1,5 +1,5 @@
 /// Environment override for the Archon credentials file path.
-pub const CREDENTIALS_FILE_ENV: &str = "ARCHON_CREDENTIALS_FILE";
+pub const CREDENTIALS_FILE_ENV: &str = archon_shell::credential_paths::CREDENTIALS_FILE_ENV;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -202,36 +202,7 @@ pub fn credentials_path() -> PathBuf {
         }
     }
 
-    // Explicit override, honoured in real binaries as well as tests.
-    //
-    // Everything below resolves from `dirs::home_dir()`, which on Windows comes
-    // from the shell known-folder API rather than an environment variable. A
-    // spawned `archon` therefore ignored `HOME` entirely, so integration tests
-    // could not point it at a scratch profile -- and users had no way to move
-    // the credential file at all. The `#[cfg(test)]` hook above only ever
-    // helped in-process unit tests.
-    if let Some(path) = std::env::var_os(CREDENTIALS_FILE_ENV)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-    {
-        return path;
-    }
-
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let new_path = home.join(".archon").join(".credentials.json");
-    if new_path.exists() {
-        return new_path;
-    }
-    let old_path = home.join(".claude").join(".credentials.json");
-    if old_path.exists() {
-        tracing::warn!(
-            "Loading from deprecated path {}. Rename to {} to suppress this warning.",
-            old_path.display(),
-            new_path.display()
-        );
-        return old_path;
-    }
-    new_path
+    archon_shell::credential_paths::provider_store()
 }
 
 /// Read the credential file with an advisory file lock.
@@ -275,10 +246,11 @@ enum Decision {
 }
 
 pub fn write_credentials_atomic(path: &Path, creds: &OAuthCredentials) -> Result<(), AuthError> {
+    archon_shell::credential_paths::register_store(path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp_path = path.with_extension("json.tmp");
+    let tmp_path = archon_shell::credential_paths::atomic_sibling(path);
 
     // Merge-preserve sibling credentials such as Codex OAuth and Google API
     // keys. Users can authenticate all providers without each login clobbering
