@@ -80,7 +80,9 @@ async fn case(id: &str, mode: u8) {
         );
         return;
     }
-    let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    // Keep the workspace below HOME: Linux seals creation directly in the
+    // ancestors of the host's operator grant store, including HOME itself.
+    let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("project");
     std::fs::create_dir_all(root.join(".archon")).unwrap();
     let user = root.join("user.toml");
     write_policy(&user, &config(&root, false));
