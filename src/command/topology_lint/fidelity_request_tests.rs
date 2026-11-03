@@ -143,10 +143,12 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 562: fewer open findings and a subject's advance to a later gate stage are progress; gate findings carry their stage.
     // Issue 560: the decomposition entry author's absent-path rule matches the re-author's: absence means behaviour not implemented yet only for a path established to name a deciding file.
     // Issue 563: the decomposition entry author prompt states the check site PATH when the launcher passes it.
+    // Issue 568: a skeleton re-author prompt names the previous candidate in a host-written context file (path and sha256), never inline.
+    // Issue 569: the skeleton prompt states the obligation rule and the host-listed obligation ids, and its shape shows the record-binding fields.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "a83c0826cd0f9af3a623c45271c2a62965f03338d87a565afb6c2090f44eac4d"
+        "5d664611c6d2211e5174570b5ee0c53840bf8b29e7fe04dc17f4ce4ee265dca3"
     );
 }
