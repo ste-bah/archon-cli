@@ -95,6 +95,44 @@ fn landlock_is_refused_off_linux() {
 mod linux {
     use super::*;
 
+    #[test]
+    fn read_boundary_preserves_rename_and_hard_link_in_readable_trees() {
+        const ROOT: &str = "ARCHON_LANDLOCK_READ_RENAME_ROOT";
+        if let Some(root) = std::env::var_os(ROOT) {
+            let root = PathBuf::from(root);
+            assert!(std::fs::read(root.join("secret/key")).is_err());
+            assert!(std::fs::write(root.join("secret/key"), "forged").is_err());
+            assert_eq!(std::fs::read(root.join("source/file")).unwrap(), b"public");
+            // Use the syscalls directly: mv can hide EXDEV with copy/unlink.
+            std::fs::rename(root.join("source/file"), root.join("target/file")).unwrap();
+            std::fs::hard_link(root.join("target/file"), root.join("source/link")).unwrap();
+            assert_eq!(std::fs::read(root.join("source/link")).unwrap(), b"public");
+            return;
+        }
+        if probe().is_err() {
+            assert!(std::env::var_os("CI").is_none(), "CI requires Landlock");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for name in ["source", "target", "secret"] {
+            std::fs::create_dir(root.join(name)).unwrap();
+        }
+        std::fs::write(root.join("source/file"), "public").unwrap();
+        std::fs::write(root.join("secret/key"), "private").unwrap();
+        let sandbox = LandlockSandbox::build_read(&[root.join("secret")]).unwrap();
+        let writes = LandlockSandbox::build(&[root.join("secret")], &[], &[]).unwrap();
+        let mut command = crate::spawn::command(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", "write_boundary::landlock::tests::linux::read_boundary_preserves_rename_and_hard_link_in_readable_trees", "--nocapture"])
+            .env(ROOT, &root);
+        sandbox.install_std(&mut command);
+        writes.install_std(&mut command);
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(root.join("target/file").exists(), "probe must execute");
+    }
+
     /// The CI runner's kernel must have it: a skip there would prove nothing.
     #[test]
     fn landlock_is_available_on_ci() {

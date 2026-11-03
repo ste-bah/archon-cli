@@ -158,6 +158,36 @@ pub(crate) fn set_env_override(env: &mut Vec<(String, String)>, key: &str, value
 mod tests {
     use super::{allowlist_env, collect_env};
 
+    #[test]
+    fn agent_environment_covers_hook_process_variables() {
+        // Color, desktop-session, and editor preferences are not needed for
+        // process startup. All other hook names belong in the shared policy.
+        let preferences = [
+            "FORCE_COLOR",
+            "DISPLAY",
+            "WAYLAND_DISPLAY",
+            "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "EDITOR",
+            "VISUAL",
+        ];
+        let vars = super::HOOK_PASSTHROUGH_VARS
+            .iter()
+            .filter(|name| !preferences.contains(name))
+            .map(|name| (*name, "synthetic"))
+            .collect::<Vec<_>>();
+        assert_eq!(collect_env(vars.clone()), allowlist_env(vars));
+    }
+
+    #[test]
+    fn agent_environment_preserves_windows_module_path_case_and_value() {
+        let vars = [(
+            "PSModulePath",
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules;C:\Modules",
+        )];
+        assert_eq!(collect_env(vars), allowlist_env(vars));
+    }
+
     /// Unapproved host variables are withheld, including noncredential names.
     #[test]
     fn unapproved_host_variables_are_withheld_from_agent_shell() {

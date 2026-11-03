@@ -267,7 +267,10 @@ impl LandlockSandbox {
             return Ok(Self {
                 ruleset: std::sync::Arc::new(sys::ruleset_rights(
                     &grants,
-                    READ_FILE | READ_DIR,
+                    // REFER is denied even when omitted from handled rights.
+                    // Preserve renames/hard links within readable trees; the
+                    // separate write ruleset still judges every write.
+                    READ_FILE | READ_DIR | REFER,
                     READ_FILE,
                 )?),
                 private_temp: None,

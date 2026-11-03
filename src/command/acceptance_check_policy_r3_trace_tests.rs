@@ -21,7 +21,7 @@ pub(super) fn execute(root: &Path, user: &Path, resolved: ArchonConfig, expected
     )
     .unwrap();
     std::fs::write(root.join("tasks/TASK-AB-001.md"), "```yaml\ntask_id: TASK-AB-001\nimplements: [REQ-AB-001]\nrequired_tools: []\n```\n\n## Files Expected to Change\n\n- `src/fixture.rs`\n\n## Focused Tests\n\n- `sh verify-fixture.sh`\n").unwrap();
-    std::fs::write(root.join("verify-fixture.sh"), "test -n \"${FIXTURE_API_KEY-}\" || { echo 'FIXTURE_API_KEY environment variable is not set'; exit 1; }\ntest -z \"${OPENAI_API_KEY-}\" || exit 2\ntouch forwarded-marker\ngrep -q 'archon falsification probe' src/fixture.rs && exit 3\nexit 0\n").unwrap();
+    std::fs::write(root.join("verify-fixture.sh"), "set -e\ntest -n \"${FIXTURE_API_KEY-}\" || { echo 'FIXTURE_API_KEY environment variable is not set'; exit 1; }\ntest -z \"${OPENAI_API_KEY-}\" || exit 2\ntouch forwarded-marker\ngrep -q 'archon falsification probe' src/fixture.rs && exit 3\nexit 0\n").unwrap();
     for args in [
         vec!["init", "-q"],
         vec!["add", "src/fixture.rs"],
