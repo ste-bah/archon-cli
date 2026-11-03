@@ -29,11 +29,14 @@ async fn monitor_write_boundary_blocks_sealed_create_and_modify() {
 fn monitor_host_grant_directory_is_write_protected_in_shared_profile() {
     let root = archon_shell::credential_paths::home().join(".archon/operator-env-grants");
     let rules = archon_shell::read_boundary::macos_rules(&[]);
+    // The profile escapes '\' and '"' in paths (read_boundary::quoted), so a
+    // Windows home path appears with doubled backslashes.
+    let escaped = root
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     assert!(
-        rules.contains(&format!(
-            "(deny file-write* (subpath \"{}\"))",
-            root.display()
-        )),
+        rules.contains(&format!("(deny file-write* (subpath \"{escaped}\"))")),
         "host authority must be sealed after all writable allowances"
     );
 }
