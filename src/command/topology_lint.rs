@@ -423,13 +423,17 @@ pub(crate) fn evaluate_lint(
         coverage::policy_findings(coverage_root.as_deref())
             .into_iter()
             .map(|finding| {
-                crate::command::workflow_gate::GateFinding::new(
+                let mut gate = crate::command::workflow_gate::GateFinding::new(
                     gate_id,
                     finding.text,
                     finding.subject,
                     Some(finding.source_path),
                     finding.remediation_scope,
-                )
+                );
+                if let Some(identity) = finding.identity {
+                    gate = gate.with_defect(identity);
+                }
+                gate
             }),
     );
     let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);

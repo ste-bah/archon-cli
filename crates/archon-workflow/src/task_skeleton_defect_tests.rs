@@ -267,26 +267,29 @@ fn a_contradiction_does_not_hide_an_independent_cycle() {
 }
 
 #[test]
-fn unknown_obligation_explains_why_a_defined_prd_id_is_not_an_obligation() {
-    let prd = "- REQ-X-001: required work\n\n## Engineering Constraints\n- NFR-X-001: constraint\n\n| ID | Goal |\n| --- | --- |\n| G-X-001 | goal |\n\n## Done Definition\n1. Complete work.\n";
+fn unknown_id_message_lists_all_host_sources() {
+    let prd = "- REQ-X-001: required work\n\n## Limits\n- QX-001: constraint\n\n| ID | Goal |\n| --- | --- |\n| G-X-001 | goal |\n\n## Done Definition\n1. Complete work.\n";
     let mut task = graph_task(1, &[], &[]);
     task.implements = vec![
         "REQ-X-001".into(),
         "G-X-001".into(),
         "DONE-1".into(),
-        "NFR-X-001".into(),
+        "QX-001".into(),
+        "QX-404".into(),
     ];
     let skeleton = TaskSkeleton {
         schema_version: 1,
         acceptance_digest: "d".into(),
         tasks: vec![task],
     };
-    let findings = validate_skeleton_set(&skeleton, &crate::obligation_ids::obligation_ids(prd));
+    let mut allowed = crate::obligation_ids::obligation_ids(prd);
+    allowed.extend(crate::obligation_ids::constraint_ids(prd));
+    let findings = validate_skeleton_set(&skeleton, &allowed);
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert_eq!(findings[0].identity.code, "unknown_obligation");
-    assert_eq!(findings[0].identity.location, "implements/3");
+    assert_eq!(findings[0].identity.location, "implements/4");
     assert_eq!(
         findings[0].message,
-        "task 'TASK-X-001' claims id 'NFR-X-001' that is not a PRD obligation id; remove it or use a host-listed id from requirement bullets, obligation table rows, or numbered done-definition items"
+        "task 'TASK-X-001' claims id 'QX-404' that is not a host-listed PRD obligation or constraint id; remove it or use a host-listed id from requirement bullets, obligation table rows, numbered done-definition items, or PRD constraint list items"
     );
 }

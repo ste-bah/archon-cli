@@ -434,3 +434,25 @@ fn a_malformed_task_file_is_the_authors_finding_not_a_host_failure() {
     assert!(finding.text.contains("TASK-X-001.md"), "{finding:?}");
     assert!(finding.text.contains("flow sequence"), "{finding:?}");
 }
+
+#[test]
+fn constraint_ids_are_defined_without_creating_requirement_proof_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let prd = write_prd(
+        dir.path(),
+        &[
+            "- REQ-X-001: work",
+            "- QX-001: restriction",
+            "- QX-002: other work",
+        ],
+    );
+    let tasks = write_trace_task(
+        dir.path(),
+        "```yaml\ntask_id: TASK-X-001\nimplements: [REQ-X-001, QX-001]\n```\n",
+    );
+    let report = build_report(dir.path(), &TraceOptions::new(prd, tasks)).unwrap();
+    assert!(report.coverage.phantom.is_empty());
+    assert!(report.coverage.unclaimed.is_empty());
+    assert_eq!(report.coverage.requirements_total, 3);
+    assert_eq!(report.rows.len(), 1);
+}

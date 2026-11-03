@@ -29,6 +29,7 @@ pub fn requirement_inventory(
     universe: &WorkflowV2TaskUniverse,
     contract: Option<&AcceptanceContract>,
 ) -> Value {
+    let constraints = crate::obligation_ids::constraint_ids(prd_text);
     let mut texts = obligation_texts(prd_text);
     for (id, criterion) in acceptance_criteria(prd_text) {
         texts.entry(id).or_insert(criterion);
@@ -48,6 +49,7 @@ pub fn requirement_inventory(
                 Some(claimants) => {
                     claimants.insert(task.canonical_task_id.clone());
                 }
+                None if constraints.contains(id.trim()) => {}
                 None => phantom.push(json!({"task_id": task.canonical_task_id, "id": id})),
             }
         }

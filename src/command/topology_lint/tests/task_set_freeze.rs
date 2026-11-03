@@ -1,6 +1,108 @@
 use super::*;
 
 #[test]
+fn draft_and_pending_skeletons_accept_constraints_without_obligation_ownership_findings() {
+    use archon_workflow::task_set_contract::{
+        ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceContract, AcceptanceLock,
+        AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest,
+    };
+    use archon_workflow::task_skeleton::{TaskSkeleton, TaskSkeletonLock};
+
+    for pending in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let task = write_task_file_lint_fixture(temp.path());
+        let tasks = task.parent().unwrap();
+        let prd_path = temp.path().join("prds/PRD-X.md");
+        let prd = format!(
+            "{}\n- QX-001: restrict work\n- QX-002: restrict other work\n",
+            std::fs::read_to_string(&prd_path).unwrap()
+        );
+        std::fs::write(&prd_path, &prd).unwrap();
+        let contract_path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
+        let mut contract: AcceptanceContract =
+            serde_json::from_slice(&std::fs::read(&contract_path).unwrap()).unwrap();
+        contract.prd.digest = content_digest(prd.as_bytes());
+        let bytes = serde_json::to_vec_pretty(&contract).unwrap();
+        std::fs::write(&contract_path, &bytes).unwrap();
+        let digest = content_digest(&bytes);
+        let lock_path = tasks.join(ACCEPTANCE_LOCK_FILE);
+        let mut lock: AcceptanceLock =
+            serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+        lock.digest = digest.clone();
+        std::fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+        let pin_path = crate::command::workflow_task_set::acceptance_pin_path(temp.path(), tasks);
+        let mut pin: AcceptancePin =
+            serde_json::from_slice(&std::fs::read(&pin_path).unwrap()).unwrap();
+        pin.acceptance_digest = digest.clone();
+        pin.skeleton_digest = None;
+        pin.skeleton_gate = None;
+        std::fs::write(&pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
+        let skeleton_path = tasks.join(TASK_SKELETON_FILE);
+        let mut skeleton: TaskSkeleton =
+            serde_json::from_slice(&std::fs::read(&skeleton_path).unwrap()).unwrap();
+        skeleton.tasks[0]
+            .implements
+            .extend(["QX-001".into(), "QX-404".into()]);
+        if !pending {
+            skeleton.acceptance_digest = digest;
+        }
+        let bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
+        std::fs::write(&skeleton_path, &bytes).unwrap();
+        let lock_path = tasks.join(TASK_SKELETON_LOCK_FILE);
+        if pending {
+            let mut lock: TaskSkeletonLock =
+                serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+            lock.digest = content_digest(&bytes);
+            std::fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+        } else {
+            std::fs::remove_file(&lock_path).unwrap();
+        }
+        if pending {
+            let lint =
+                task_file::inspect(temp.path(), &task, archon_core::config::GateMode::Enforce);
+            assert!(lint.report.contains("unfrozen draft"));
+            let defects: Vec<_> = lint
+                .deterministic
+                .values()
+                .flatten()
+                .filter(|defect| {
+                    matches!(
+                        defect.code.as_str(),
+                        "unknown_obligation" | "unowned_obligation"
+                    )
+                })
+                .collect();
+            assert_eq!(defects.len(), 1, "{:?}", lint.blockers);
+            assert_eq!(defects[0].code, "unknown_obligation");
+            assert!(
+                !lint
+                    .blockers
+                    .iter()
+                    .any(|text| text.contains("QX-001") || text.contains("QX-002"))
+            );
+        }
+        let lint =
+            task_set::inspect(temp.path(), tasks, archon_core::config::GateMode::Enforce).unwrap();
+        assert!(lint.report.contains(if pending {
+            "unfrozen draft"
+        } else {
+            "draft skeleton"
+        }));
+        let defects: Vec<_> = lint.deterministic.values().flatten().collect();
+        assert_eq!(defects.len(), 1, "{:?}", lint.blockers);
+        assert_eq!(defects[0].code, "unknown_obligation");
+        assert_eq!(defects[0].subject, "TASK-X-010");
+        assert!(lint.blockers[0].contains("QX-404"));
+        assert!(
+            !lint
+                .blockers
+                .iter()
+                .any(|text| text.contains("QX-001") || text.contains("QX-002"))
+        );
+    }
+}
+
+#[test]
 fn directory_lint_renders_kind_mismatch_as_information_only() {
     use archon_workflow::task_set_contract::{TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE};
 

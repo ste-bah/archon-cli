@@ -3,10 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use archon_workflow::obligation_ids::acceptance_ids;
 use archon_workflow::task_set_contract::{
-    ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, AcceptancePin, TASK_SKELETON_FILE,
-    TASK_SKELETON_LOCK_FILE, content_digest, validate_acceptance_bundle,
+    AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, validate_acceptance_bundle,
 };
 use archon_workflow::task_skeleton::{compare_frozen_task, validate_full_chain};
 use archon_workflow::task_universe::parsing::parse_task_file;
@@ -16,7 +14,7 @@ use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_c
 use archon_workflow::defect::{DefectStage, DeterministicDefect, ValidationDefect};
 #[path = "support.rs"]
 mod support;
-use support::{absolute, read_json, shown};
+use support::{absolute, read_json, shown, validate_prd_identity};
 
 /// Identities for the blockers, keyed by blocker text in report order.
 type Identities = BTreeMap<String, VecDeque<DeterministicDefect>>;
@@ -224,7 +222,9 @@ pub(super) fn inspect_raw(
                 return finish(report, blockers, inherited_blockers, deterministic);
             }
         };
-        if let Err(error) = validate_acceptance_bundle(tasks_root, Some(&pin), &expected_ids) {
+        if let Err(error) =
+            validate_acceptance_bundle(tasks_root, Some(&pin), &expected_ids.acceptance)
+        {
             let fallback = ("invalid_acceptance_bundle", error.to_string());
             block_predecessor(&mut blockers, &mut deterministic, &error.defects, fallback);
             return finish(report, blockers, inherited_blockers, deterministic);
@@ -281,8 +281,10 @@ pub(super) fn inspect_raw(
                     );
                     return finish(report, blockers, inherited_blockers, deterministic);
                 }
-                blockers.extend(archon_workflow::task_skeleton::validate_skeleton_set(&draft, &expected_ids)
+                blockers.extend(archon_workflow::task_skeleton::validate_skeleton_set(&draft, &expected_ids.implements)
                     .into_iter()
+                    .filter(|finding| !(finding.identity.code == "unowned_obligation"
+                        && expected_ids.constraints.contains(&finding.identity.subject)))
                     .map(|finding| {
                         let text = format!("{}: {}", finding.field, finding.message);
                         deterministic.entry(text.clone()).or_default().push_back(finding.identity);
@@ -421,35 +423,6 @@ fn validate_declared_shape(
             "\n## task shape\n  headings, status, implements, and focused test shape pass\n",
         );
     }
-}
-
-fn validate_prd_identity(cwd: &Path, tasks_root: &Path) -> Result<BTreeSet<String>, String> {
-    let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
-    let contract: AcceptanceContract =
-        read_json(&contract_path, "acceptance contract", "freeze-acceptance")?;
-    let prd_path = absolute(cwd, Path::new(&contract.prd.path));
-    let bytes = std::fs::read(&prd_path).map_err(|error| {
-        format!(
-            "PRD {} could not be read: {error}; restore it or re-run `workflow freeze-acceptance`",
-            shown(&prd_path)
-        )
-    })?;
-    let actual = content_digest(&bytes);
-    if actual != contract.prd.digest {
-        return Err(format!(
-            "PRD digest mismatch for {}: expected {}, actual {}; restore the frozen PRD or re-run `workflow freeze-acceptance`",
-            shown(&prd_path),
-            contract.prd.digest,
-            actual
-        ));
-    }
-    let text = String::from_utf8(bytes).map_err(|error| {
-        format!(
-            "PRD {} is not UTF-8: {error}; restore UTF-8 content and re-run `workflow freeze-acceptance`",
-            shown(&prd_path)
-        )
-    })?;
-    Ok(acceptance_ids(&text))
 }
 
 fn append_predecessor_finding(

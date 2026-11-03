@@ -4,6 +4,7 @@ use super::{is_list_item, is_setext_underline};
 
 /// Append lazy or indented prose, plus prose from ordinary nested sub-bullets.
 /// A sub-bullet with its own obligation ID stays an independent obligation.
+/// Generic ids require definition form; ordinary id-shaped prose stays nested.
 pub(super) fn append(
     lines: &[&str],
     start: usize,
@@ -70,12 +71,13 @@ fn is_block_start(line: &str) -> bool {
 
 fn starts_with_obligation_id(line: &str) -> bool {
     let body = list_item_body(line);
-    ["REQ-", "AC-", "G-", "DONE-"]
-        .iter()
-        .any(|prefix| body.starts_with(prefix))
+    super::constraints::leading_id(body).is_some()
+        || ["REQ-", "AC-", "G-", "DONE-"]
+            .iter()
+            .any(|prefix| body.starts_with(prefix))
 }
 
-fn list_item_body(line: &str) -> &str {
+pub(super) fn list_item_body(line: &str) -> &str {
     let line = line.trim_start();
     if let Some(rest) = line.strip_prefix(['-', '*', '+']) {
         return rest.trim_start();

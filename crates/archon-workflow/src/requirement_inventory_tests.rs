@@ -91,3 +91,18 @@ fn without_a_contract_every_requirement_is_unchecked() {
     std::fs::write(dir.path().join(ACCEPTANCE_CONTRACT_FILE), "{").unwrap();
     assert!(requirement_inventory_from_files(&prd, dir.path(), &universe()).is_err());
 }
+
+#[test]
+fn constraint_claims_are_defined_without_owing_requirement_checks() {
+    let prd = format!("{PRD}\n- QX-001: restrict work\n");
+    let mut tasks = universe();
+    tasks.tasks[0].implements.push("QX-001".into());
+    tasks.tasks[0].implements.push("QX-404".into());
+    let inventory = requirement_inventory(&prd, &tasks, Some(&contract()));
+    let mut expected = requirement_inventory(PRD, &universe(), Some(&contract()));
+    expected["phantom_claims"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, json!({"task_id": "TASK-WS-001", "id": "QX-404"}));
+    assert_eq!(inventory, expected);
+}

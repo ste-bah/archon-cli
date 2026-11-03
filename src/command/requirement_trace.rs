@@ -221,7 +221,9 @@ fn build_report_with_input_findings(
     let prd = std::fs::read_to_string(&prd_path)
         .with_context(|| format!("reading PRD at {}", prd_path.display()))?;
     let requirements = requirements::extract_requirements(&prd);
-    let obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
+    let mut obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
+    let constraints = archon_workflow::obligation_ids::constraint_ids(&prd);
+    obligations.extend(constraints.iter().cloned());
     let mut prd_findings = archon_workflow::obligation_ids::malformed_obligation_ids(&prd)
         .into_iter()
         .map(|id| archon_workflow::obligation_ids::malformed_obligation_finding(&id))
@@ -236,7 +238,9 @@ fn build_report_with_input_findings(
 
     let task_dir = absolute(cwd, &options.tasks);
     let (bindings, input_findings) = load_bindings_with_findings(&task_dir)?;
-    let coverage = coverage::check_coverage(&obligations, &bindings);
+    let mut coverage = coverage::check_coverage(&obligations, &bindings);
+    // Constraint ownership is repaired by task-set-lint, once per id.
+    coverage.unclaimed.retain(|id| !constraints.contains(id));
     if !input_findings.is_empty() {
         return Ok((
             TraceReport {

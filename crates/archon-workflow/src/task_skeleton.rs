@@ -149,7 +149,7 @@ pub fn validate_skeleton_set(
             identity: crate::defect::DeterministicDefect::new("unknown_obligation", skeleton_subject(&task.task_id, slot), format!("implements/{index}")),
                     field: "implements".into(),
                     message: format!(
-                        "task '{}' claims id '{}' that is not a PRD obligation id; remove it or use a host-listed id from requirement bullets, obligation table rows, or numbered done-definition items",
+                        "task '{}' claims id '{}' that is not a host-listed PRD obligation or constraint id; remove it or use a host-listed id from requirement bullets, obligation table rows, numbered done-definition items, or PRD constraint list items",
                         task.task_id, obligation
                     ),
                 });

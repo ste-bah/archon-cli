@@ -196,8 +196,8 @@ function skeletonPromptAndShape() {
   const prompt = ctx.skeletonPolicy([]).prompt();
   assert.ok(prompt.startsWith('Author one complete task-skeleton JSON artifact'));
   for (const line of [
-    'Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only those ids.',
-    'Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). Other id-bearing PRD bullets are not obligations.',
+    'Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids.',
+    'Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items that restrict work.',
     `Exact PRD obligation ids extracted by the host: ${JSON.stringify(ids)}`,
     'The consumes record-binding fields are optional: omit unused fields.',
     "For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path.",
