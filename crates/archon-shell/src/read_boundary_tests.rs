@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+#[cfg(target_os = "linux")]
+fn failed_read_boundary_refuses_launch_only_when_landlock_is_active() {
+    for active in [true, false] {
+        let mut command = crate::spawn::command("/bin/true");
+        let reads = install_linux_boundary(
+            &mut command,
+            Err("injected read ruleset construction failure".into()),
+            active,
+            "named-paths-denied",
+        );
+        if active {
+            assert_eq!(reads, "launch-refused");
+            let error = command
+                .status()
+                .expect_err("read failure must prevent exec");
+            assert_eq!(error.raw_os_error(), Some(libc::EPERM));
+        } else {
+            assert_eq!(reads, "not-contained");
+            assert!(command.status().unwrap().success());
+        }
+    }
+}
+
+#[test]
 fn unavailable_boundary_does_not_claim_enforcement_for_a_program_name() {
     if crate::write_boundary::mechanism().is_ok() {
         return;

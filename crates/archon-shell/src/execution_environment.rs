@@ -63,19 +63,96 @@ pub fn inherited(
             let build_flags = ["MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "CARGO_MAKEFLAGS"]
                 .iter()
                 .any(|name| key.to_string_lossy().eq_ignore_ascii_case(name));
-            if build_flags
-                && value.to_string_lossy().split_whitespace().any(|word| {
-                    word.split_once('=').is_some_and(|(name, _)| {
-                        credential_name(name) || name.to_ascii_uppercase().ends_with("_AUTH")
-                    })
-                })
-            {
-                return None;
-            }
+            let value = if build_flags {
+                option_flags(&value)?
+            } else {
+                value
+            };
             let value = crate::jobserver::sanitize_variable(&key, value);
-            Some((key, value))
+            (!build_flags || !value.is_empty()).then_some((key, value))
         })
         .collect()
+}
+
+/// MAKEFLAGS starts with bare flag letters, then options, then `--` and
+/// variable definitions. No inherited variable definition belongs in a payload.
+fn option_flags(value: &OsStr) -> Option<OsString> {
+    let value = value.to_str()?;
+    // Make escapes whitespace with backslashes in variable values. Keep each
+    // such value together so its fragments cannot become apparent options.
+    let mut escaped = false;
+    let words = value.split(|ch: char| {
+        if escaped {
+            escaped = false;
+            false
+        } else if ch == '\\' {
+            escaped = true;
+            false
+        } else {
+            ch.is_whitespace()
+        }
+    });
+    let mut kept = Vec::new();
+    let mut numeric_argument = false;
+    let mut eval_argument = false;
+    for (index, word) in words.filter(|word| !word.is_empty()).enumerate() {
+        if eval_argument {
+            eval_argument = false;
+            continue;
+        }
+        // Eval executes make code. Consume its separate argument even if that
+        // argument looks like an otherwise permitted option.
+        if word == "--eval"
+            || (word.starts_with('-') && !word.starts_with("--") && word.contains('E'))
+        {
+            eval_argument = word == "--eval" || word.ends_with('E');
+            numeric_argument = false;
+            continue;
+        }
+        if word.starts_with("--eval=") {
+            numeric_argument = false;
+            continue;
+        }
+        if word == "--" {
+            break;
+        }
+        let numeric = numeric_argument
+            && !word.is_empty()
+            && word
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || byte == b'.')
+            && word.bytes().any(|byte| byte.is_ascii_digit());
+        let cluster = index == 0
+            && word
+                .bytes()
+                .all(|byte| b"bBdeikLmnpqrRsStvw".contains(&byte));
+        // Only these value options may carry '=': jobserver endpoints, job
+        // counts, load limits, debug selectors and output synchronization.
+        // Other assignment-shaped options may smuggle credentials or make code.
+        let option = word.starts_with('-')
+            && word.split_once('=').is_none_or(|(name, _)| {
+                matches!(
+                    name,
+                    "--jobserver-auth"
+                        | "--jobserver-fds"
+                        | "-j"
+                        | "--jobs"
+                        | "-l"
+                        | "--load-average"
+                        | "--debug"
+                        | "--output-sync"
+                        | "-O"
+                )
+            });
+        if option || cluster || numeric {
+            kept.push(word);
+        }
+        numeric_argument = matches!(
+            word,
+            "-j" | "--jobs" | "-l" | "--load-average" | "--max-load"
+        );
+    }
+    (!kept.is_empty()).then(|| kept.join(" ").into())
 }
 
 /// The environment before launch-owned bindings are added. Never log values.
@@ -185,7 +262,55 @@ mod tests {
                 .any(|(key, value)| key == "MFLAGS" && value == "--silent")
         );
         assert!(vars.iter().any(|(key, value)| key == "GNUMAKEFLAGS"
-            && value == "--jobserver-auth=fifo:/tmp/archon-jobserver -- X=keep"));
+            && value == "--jobserver-auth=fifo:/tmp/archon-jobserver"));
+    }
+
+    #[test]
+    fn build_flags_keep_options_and_drop_all_assignments() {
+        for (input, expected) in [
+            (
+                "-j4 --jobserver-auth=3,4 -- FOO=bar SECRET_X=y",
+                Some("-j4 --jobserver-auth=3,4"),
+            ),
+            ("ks -- FOO=bar", Some("ks")),
+            ("ks -- ", Some("ks")),
+            ("-j 4 -k -s --silent -w", Some("-j 4 -k -s --silent -w")),
+            (
+                "-j8 FOO=bar SECRET_X=y SERVICE_AUTH=z --jobserver-fds=3,4",
+                Some("-j8 --jobserver-fds=3,4"),
+            ),
+            ("--eval=TOKEN=abc -k", Some("-k")),
+            ("--eval TOKEN=abc -s", Some("-s")),
+            ("-E TOKEN=abc -s", Some("-s")),
+            ("-E -k -s", Some("-s")),
+            ("-ETOKEN=abc -kE TOKEN=abc -s", Some("-s")),
+            ("--unknown=TOKEN=abc -x=abc --silent", Some("--silent")),
+            ("--eval=TOKEN=abc -E TOKEN=abc", None),
+            (
+                "--jobserver-auth=3,4 --jobserver-fds=5,6 -j4 -j 8 --jobs=2 -l2.5 -l 3 --load-average=4 --debug=a --output-sync=target -Oline -O=target",
+                Some(
+                    "--jobserver-auth=3,4 --jobserver-fds=5,6 -j4 -j 8 --jobs=2 -l2.5 -l 3 --load-average=4 --debug=a --output-sync=target -Oline -O=target",
+                ),
+            ),
+            ("FOO=bar SECRET_X=y SERVICE_AUTH=z", None),
+            ("-- FOO=bar SECRET_X=y", None),
+            ("FOO=bar\\ -secret -k", Some("-k")),
+            ("unexpected words -s", Some("-s")),
+            ("", None),
+        ] {
+            assert_eq!(
+                option_flags(OsStr::new(input)),
+                expected.map(OsString::from),
+                "{input}"
+            );
+        }
+        for key in ["MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "CARGO_MAKEFLAGS"] {
+            assert_eq!(
+                inherited([(key.into(), "-k FOO=bar SECRET_X=y SERVICE_AUTH=z".into())]),
+                vec![(OsString::from(key), OsString::from("-k"))],
+            );
+            assert!(inherited([(key.into(), "--jobserver-auth=3,4 -- FOO=bar".into())]).is_empty());
+        }
     }
 
     #[test]

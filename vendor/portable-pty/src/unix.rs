@@ -245,34 +245,38 @@ impl PtyFd {
         }
         #[cfg(target_os = "linux")]
         if builder.operator_reads_protected() {
-            match archon_shell::write_boundary::landlock::LandlockSandbox::build(
-                &[archon_shell::credential_paths::operator_grant_root()],
-                &[],
-                &[],
-            ) {
-                Ok(boundary) => boundary.install_std(&mut cmd),
-                Err(reason) if archon_shell::read_boundary::operator_grants_supported() => {
-                    archon_shell::read_boundary::require_grant_rule::<()>(Err(reason))?;
-                }
-                Err(reason) => {
+            let active = matches!(
+                archon_shell::write_boundary::mechanism(),
+                Ok(archon_shell::write_boundary::Mechanism::Landlock { .. })
+            );
+            match require_operator_boundary(
+                archon_shell::write_boundary::landlock::LandlockSandbox::build(
+                    &[archon_shell::credential_paths::operator_grant_root()],
+                    &[],
+                    &[],
+                ),
+                active,
+            )? {
+                Some(boundary) => boundary.install_std(&mut cmd),
+                None => {
                     log::warn!(
-                        "agent PTY launch: operator environment grants disabled; kernel write containment unavailable: {reason}"
+                        "agent PTY launch: operator environment grants disabled; kernel write containment unavailable"
                     )
                 }
             }
-        }
-        #[cfg(target_os = "linux")]
-        if builder.operator_reads_protected() {
-            match archon_shell::write_boundary::landlock::LandlockSandbox::build_read(
-                &archon_shell::read_boundary::operator_paths(),
-            ) {
-                Ok(boundary) => {
+            match require_operator_boundary(
+                archon_shell::write_boundary::landlock::LandlockSandbox::build_read(
+                    &archon_shell::read_boundary::operator_paths(),
+                ),
+                active,
+            )? {
+                Some(boundary) => {
                     boundary.install_std(&mut cmd);
                     log::info!(
                         "agent PTY: credential/profile reads denied; process read isolation unavailable"
                     );
                 }
-                Err(_) => {
+                None => {
                     log::warn!("agent PTY: filesystem/process read isolation unavailable")
                 }
             }
@@ -470,3 +474,20 @@ impl Write for UnixMasterWriter {
         self.fd.flush()
     }
 }
+
+// The active mechanism, not grant availability, decides whether setup may fail open.
+#[cfg(target_os = "linux")]
+fn require_operator_boundary<T>(
+    boundary: Result<T, String>,
+    active: bool,
+) -> io::Result<Option<T>> {
+    match boundary {
+        Ok(boundary) => Ok(Some(boundary)),
+        Err(reason) if active => archon_shell::read_boundary::require_grant_rule(Err(reason)),
+        Err(_) => Ok(None),
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "unix_tests.rs"]
+mod tests;
