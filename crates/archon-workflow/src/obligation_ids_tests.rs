@@ -142,6 +142,24 @@ fn obligation_ids_and_texts_are_identical_for_crlf_prds() {
 }
 
 #[test]
+fn tab_indented_requirement_bullet_is_an_obligation() {
+    let prd = "\t- REQ-AB-001: text";
+    assert!(obligation_ids(prd).contains("REQ-AB-001"));
+}
+
+#[test]
+fn tab_after_requirement_bullet_is_an_obligation() {
+    let prd = "-\tREQ-AB-002: text";
+    assert!(obligation_ids(prd).contains("REQ-AB-002"));
+}
+
+#[test]
+fn letter_t_before_requirement_bullet_is_not_an_obligation() {
+    let prd = "t- REQ-AB-003: text";
+    assert!(obligation_ids(prd).is_empty());
+}
+
+#[test]
 fn wrapped_requirement_text_stops_at_the_next_list_item() {
     let prd = "## Requirements\n\n- REQ-X-001: The first line\n  continues here\n- REQ-X-002: The sibling\n";
     let texts = obligation_texts(prd);

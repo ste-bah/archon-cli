@@ -114,7 +114,7 @@ fn valid_table_obligation_id(id: &str) -> bool {
 fn requirement_candidate_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r"(?m)^[ \\t]*[-*][ \\t]+(REQ-[A-Za-z0-9-]+)")
+        Regex::new(r"(?m)^[ \t]*[-*][ \t]+(REQ-[A-Za-z0-9-]+)")
             .expect("requirement candidate regex is literal")
     })
 }
