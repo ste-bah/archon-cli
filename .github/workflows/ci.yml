@@ -656,6 +656,14 @@ jobs:
       # watched go red is indistinguishable from a gate that cannot.
       - name: R0 entry gate self-test (prove it can go red)
         run: bash scripts/check-r0-entry-gate.sh --self-test
+      # This proves the version guard, not execution under an actual Bash 3.
+      - name: R0 entry gate rejects unsupported Bash (test-only override)
+        run: |
+          rc=0
+          R0_GATE_FAKE_BASH_MAJOR=3 bash scripts/check-r0-entry-gate.sh --self-test 2>r0-version-error.txt || rc=$?
+          cat r0-version-error.txt
+          test "$rc" -eq 2
+          grep -F 'bash 4 or later is required' r0-version-error.txt
       - name: R0 entry gate is wired (no uncalled artefacts)
         run: bash scripts/tests/r0-entry-gate-wired.sh
 

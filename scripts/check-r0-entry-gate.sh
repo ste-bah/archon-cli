@@ -28,6 +28,19 @@
 
 set -uo pipefail
 
+GATE_BASH_MAJOR="${BASH_VERSINFO[0]}"
+GATE_BASH_VERSION="$BASH_VERSION"
+# Test-only rejection hook for CI hosts without a Bash 3 binary; cannot bypass
+# the real version check or simulate a supported version.
+if [[ "${R0_GATE_FAKE_BASH_MAJOR:-}" == 3 ]]; then
+    GATE_BASH_MAJOR=3
+    GATE_BASH_VERSION="3 (test-only override; running $BASH_VERSION)"
+fi
+if (( BASH_VERSINFO[0] < 4 || GATE_BASH_MAJOR < 4 )); then
+    echo "ERROR: found Bash $GATE_BASH_VERSION; bash 4 or later is required" >&2
+    exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -53,6 +66,21 @@ while [[ $# -gt 0 ]]; do
         *)                 echo "ERROR: unknown flag: $1" >&2; exit 2 ;;
     esac
 done
+
+# Help exits above intentionally; checks may exit zero only after printing PASS.
+PASS_PRINTED=0
+tmp=""
+finish() {
+    local rc=$?
+    if [[ -n "${tmp:-}" ]]; then
+        rm -rf "$tmp"
+    fi
+    if (( rc == 0 && ! PASS_PRINTED )); then
+        rc=2
+    fi
+    exit "$rc"
+}
+trap finish EXIT
 
 FAILED=0
 CURRENT=""
@@ -192,6 +220,11 @@ split_two() {
 }
 
 run_checks() {
+    # Test-only abort injection, enabled exclusively by --self-test.
+    if (( SELF_TEST )) && [[ "${R0_GATE_SELF_TEST_ABORT:-}" == run_checks ]]; then
+        unset R0_GATE_UNBOUND
+        : "$R0_GATE_UNBOUND"
+    fi
     local seen_findings="" line key value
     declare -A VERDICT COUNT_COMMIT COUNT_ANCHOR COUNT_WIRED COUNT_TEST COUNT_SOT VERIFICATION ATTESTOR
 
@@ -348,7 +381,12 @@ self_test() {
     # Deliberately not `local`: the EXIT trap below runs after this function
     # has returned, so a local would already be out of scope by then.
     tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
+    # finish combines the original temporary-directory cleanup with exit checking.
+    trap finish EXIT
+    # Simulate an abnormal zero-status end before the PASS line.
+    if [[ "${R0_GATE_SELF_TEST_ABORT:-}" == self_test ]]; then
+        exit 0
+    fi
 
     mkdir -p "$tmp/src"
     cat > "$tmp/src/subject.rs" <<'EOF'
@@ -447,13 +485,29 @@ EOF
     REQUIRED_FINDINGS="SELFTEST"
     expect 1 "sort-after-truncate order inversion fails"
 
+    # Child processes must fail closed even when a function never returns.
+    local abort_at
+    for abort_at in run_checks self_test; do
+        R0_GATE_SELF_TEST_ABORT="$abort_at" "$BASH" "$0" --self-test >"$tmp/out.txt" 2>&1
+        rc=$?
+        if [[ "$rc" -ne 0 ]] && ! grep -q '^SELF-TEST PASS$' "$tmp/out.txt"; then
+            echo "  ok   $abort_at abort fails closed (exit $rc)"
+            pass=$((pass + 1))
+        else
+            echo "  BAD  $abort_at abort did not fail closed (exit $rc)"
+            sed 's/^/         /' "$tmp/out.txt"
+            fail_count=$((fail_count + 1))
+        fi
+    done
+
     echo "SELF-TEST: $pass passed, $fail_count failed"
     [[ "$fail_count" -eq 0 ]]
 }
 
 if (( SELF_TEST )); then
     if self_test; then
-        echo "SELF-TEST PASS"
+        echo "SELF-TEST PASS" || exit 2
+        PASS_PRINTED=1
         exit 0
     fi
     echo "SELF-TEST FAIL: the R0 gate did not go red where it must"
@@ -463,10 +517,11 @@ fi
 echo "R0 entry gate — re-verifying ${MANIFEST#"$REPO_ROOT/"}"
 if run_checks; then
     echo ""
-    echo "R0 ENTRY GATE: PASS — findings 9, 11, 17, 40-43 and slice-1 shadow"
+    echo "R0 ENTRY GATE: PASS — findings 9, 11, 17, 40-43 and slice-1 shadow" || exit 2
     echo "containment re-verified against source, tests and git history."
     echo "Behaviour-changing roadmap slices may be promoted subject to their own"
     echo "quantitative gates (learning-roadmap-r1-r8-w5-w6.md line 294)."
+    PASS_PRINTED=1
     exit 0
 fi
 
