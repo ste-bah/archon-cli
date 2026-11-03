@@ -223,7 +223,7 @@ async fn an_oversize_check_goes_to_its_author_unjudged_549() {
     assert_eq!(
         *note,
         format!(
-            "check 'AC-X-002' names {} bytes of source (huge {} bytes), more than the judge can read ({BUDGET} bytes); name only the files whose content decides the criterion, or decide it with a command that does not need those files judged",
+            "for check 'AC-X-002', the host found {} bytes of text source among the words of the check (huge {} bytes), more than the judge can read ({BUDGET} bytes); use only file words whose content decides the criterion, or decide it with a command that does not need those files judged",
             BUDGET + 1,
             BUDGET + 1
         )

@@ -80,7 +80,7 @@ fn mark_not_judged(entry: &mut AcceptanceCriterion, roots: &JudgeRoots) {
     entry.judgment.counterexample =
         "none: the host did not ask the judge about this check".to_string();
     entry.judgment.reason = format!(
-        "check '{}' names {total} bytes of source ({listed}), more than the judge can read ({} bytes); name only the files whose content decides the criterion, or decide it with a command that does not need those files judged",
+        "for check '{}', the host found {total} bytes of text source among the words of the check ({listed}), more than the judge can read ({} bytes); use only file words whose content decides the criterion, or decide it with a command that does not need those files judged",
         entry.id,
         archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES
     );

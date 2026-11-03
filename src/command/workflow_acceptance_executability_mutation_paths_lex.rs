@@ -61,7 +61,42 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
         Vec<(String, bool, usize)>,
     ) = (String::new(), None, false, Vec::new());
     let mut lines = text.lines();
-    let finish = |word: &mut String, commands: &mut Vec<Vec<String>>| {
+    let mut scopes = Vec::new();
+    let mut quoted_word = false;
+    // Case header (0/1), pattern (2), or body (3), scoped to its shell.
+    let mut cases: Vec<(usize, usize)> = Vec::new();
+    let finish = |word: &mut String,
+                  commands: &mut Vec<Vec<String>>,
+                  cases: &mut Vec<(usize, usize)>,
+                  depth: usize,
+                  quoted_word: &mut bool| {
+        let keyword = !std::mem::take(quoted_word);
+        let at_start = commands.last().is_none_or(|words| {
+            words.iter().all(|word| {
+                word.starts_with('\0') || matches!(word.as_str(), "then" | "do" | "else" | "!")
+            })
+        });
+        if !word.is_empty() {
+            if keyword
+                && word == "case"
+                && at_start
+                && !cases
+                    .last()
+                    .is_some_and(|(case_depth, phase)| *case_depth == depth && *phase == 2)
+            {
+                cases.push((depth, 0));
+            } else if let Some((case_depth, phase)) = cases.last_mut()
+                && *case_depth == depth
+            {
+                if keyword && word == "esac" && (at_start || *phase == 2) {
+                    cases.pop();
+                } else if *phase == 0 {
+                    *phase = 1;
+                } else if keyword && *phase == 1 && word == "in" {
+                    *phase = 2;
+                }
+            }
+        }
         if !word.is_empty() {
             commands
                 .last_mut()
@@ -75,6 +110,7 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
         while i < chars.len() {
             let c = chars[i];
             if escaped {
+                quoted_word = true;
                 word.push(c);
                 escaped = false;
                 i += 1;
@@ -85,12 +121,80 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
                 i += 1;
                 continue;
             }
+            // Substitutions inherit this shell's cwd, but their changes stay inside.
+            if quote != Some('\'') && c == '$' && chars.get(i + 1) == Some(&'(') {
+                finish(
+                    &mut word,
+                    &mut commands,
+                    &mut cases,
+                    scopes.len(),
+                    &mut quoted_word,
+                );
+                // A substitution is a subject word even without literal characters.
+                if let Some((depth, phase)) = cases.last_mut()
+                    && *depth == scopes.len()
+                    && *phase == 0
+                {
+                    *phase = 1;
+                }
+                commands.push(vec![SUBSHELL_OPEN.to_string()]);
+                commands.push(Vec::new());
+                scopes.push(quote.take());
+                i += 2;
+                continue;
+            }
+            if quote.is_none() && matches!(c, '(' | ')') {
+                finish(
+                    &mut word,
+                    &mut commands,
+                    &mut cases,
+                    scopes.len(),
+                    &mut quoted_word,
+                );
+                if let Some((depth, phase)) = cases.last_mut()
+                    && *depth == scopes.len()
+                    && *phase == 2
+                {
+                    // A pattern's optional '(' and closing ')' are not shell scopes.
+                    if c == ')' {
+                        *phase = 3;
+                        commands.push(Vec::new());
+                    }
+                    i += 1;
+                    continue;
+                }
+                commands.push(vec![
+                    if c == '(' {
+                        SUBSHELL_OPEN
+                    } else {
+                        SUBSHELL_CLOSE
+                    }
+                    .to_string(),
+                ]);
+                commands.push(Vec::new());
+                if c == '(' {
+                    scopes.push(None);
+                } else if let Some(saved_quote) = scopes.pop() {
+                    quote = saved_quote;
+                }
+                i += 1;
+                continue;
+            }
             match quote {
                 Some(q) if c == q => quote = None,
                 Some(_) => word.push(c),
-                None if c == '\'' || c == '"' => quote = Some(c),
+                None if c == '\'' || c == '"' => {
+                    quoted_word = true;
+                    quote = Some(c);
+                }
                 None if c == '<' && chars.get(i + 1) == Some(&'<') => {
-                    finish(&mut word, &mut commands);
+                    finish(
+                        &mut word,
+                        &mut commands,
+                        &mut cases,
+                        scopes.len(),
+                        &mut quoted_word,
+                    );
                     i += 2;
                     let strip_tabs = chars.get(i) == Some(&'-');
                     if strip_tabs {
@@ -133,7 +237,13 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
                     i = i.saturating_sub(1);
                 }
                 None if matches!(c, '>' | '<') => {
-                    finish(&mut word, &mut commands);
+                    finish(
+                        &mut word,
+                        &mut commands,
+                        &mut cases,
+                        scopes.len(),
+                        &mut quoted_word,
+                    );
                     let operator = if chars.get(i + 1) == Some(&c) {
                         i += 1;
                         format!("{c}{c}")
@@ -151,9 +261,21 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
                 {
                     break;
                 }
-                None if c.is_whitespace() => finish(&mut word, &mut commands),
+                None if c.is_whitespace() => finish(
+                    &mut word,
+                    &mut commands,
+                    &mut cases,
+                    scopes.len(),
+                    &mut quoted_word,
+                ),
                 None if c == '{' => {
-                    finish(&mut word, &mut commands);
+                    finish(
+                        &mut word,
+                        &mut commands,
+                        &mut cases,
+                        scopes.len(),
+                        &mut quoted_word,
+                    );
                     let carried = commands
                         .last_mut()
                         .filter(|words| {
@@ -170,7 +292,13 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
                         .push(GROUP_OPEN.to_string());
                 }
                 None if c == '}' => {
-                    finish(&mut word, &mut commands);
+                    finish(
+                        &mut word,
+                        &mut commands,
+                        &mut cases,
+                        scopes.len(),
+                        &mut quoted_word,
+                    );
                     commands
                         .last_mut()
                         .expect("one command")
@@ -178,23 +306,32 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
                     commands.push(Vec::new());
                 }
                 None if matches!(c, ';' | '&' | '|' | '(' | ')' | '{' | '}' | '`') => {
-                    finish(&mut word, &mut commands);
+                    finish(
+                        &mut word,
+                        &mut commands,
+                        &mut cases,
+                        scopes.len(),
+                        &mut quoted_word,
+                    );
+                    if c == ';' && matches!(chars.get(i + 1), Some(';' | '&')) {
+                        if let Some((depth, phase)) = cases.last_mut()
+                            && *depth == scopes.len()
+                            && *phase == 3
+                        {
+                            *phase = 2;
+                        }
+                        // Consume the complete case-arm terminator: ;;, ;&, or ;;&.
+                        i += 1;
+                        if chars[i] == ';' && chars.get(i + 1) == Some(&'&') {
+                            i += 1;
+                        }
+                    }
                     let conditional = if matches!(c, '&' | '|') && chars.get(i + 1) == Some(&c) {
                         i += 1;
                         Some(if c == '&' { "\0and" } else { "\0or" })
                     } else {
                         None
                     };
-                    if c == '(' || c == ')' {
-                        commands.last_mut().expect("one command").push(
-                            if c == '(' {
-                                SUBSHELL_OPEN
-                            } else {
-                                SUBSHELL_CLOSE
-                            }
-                            .to_string(),
-                        );
-                    }
                     commands.push(Vec::new());
                     if let Some(marker) = conditional {
                         commands
@@ -202,11 +339,6 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
                             .expect("new command")
                             .push(marker.to_string());
                     }
-                }
-                None if c == '$' && chars.get(i + 1) == Some(&'(') => {
-                    finish(&mut word, &mut commands);
-                    commands.push(Vec::new());
-                    i += 1;
                 }
                 None => word.push(c),
             }
@@ -218,7 +350,13 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
             }
             continue;
         }
-        finish(&mut word, &mut commands);
+        finish(
+            &mut word,
+            &mut commands,
+            &mut cases,
+            scopes.len(),
+            &mut quoted_word,
+        );
         commands.push(Vec::new());
         for (tag, strip_tabs, command_index) in std::mem::take(&mut pending_tags) {
             let mut body = String::new();
@@ -237,6 +375,12 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
             bodies.push((command_index, body));
         }
     }
-    finish(&mut word, &mut commands);
+    finish(
+        &mut word,
+        &mut commands,
+        &mut cases,
+        scopes.len(),
+        &mut quoted_word,
+    );
     (commands, bodies)
 }

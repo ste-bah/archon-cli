@@ -463,3 +463,6 @@ fn project_copy_exclusions_are_omitted_and_named_content_is_redacted() {
     assert!(prompt.contains("REDACTED"), "{prompt}");
     assert!(!prompt.contains("password=abc123"), "{prompt}");
 }
+
+#[path = "workflow_task_set_judge_named_files_binary_tests.rs"]
+mod binary_tests;

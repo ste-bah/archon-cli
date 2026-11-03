@@ -24,9 +24,9 @@ fn inputs_of(command: &str) -> Vec<String> {
     let project = tempfile::tempdir().unwrap();
     for path in [
         "data/state.txt",
-        "data/in.txt",
-        "data/b.txt",
-        "data/c.txt",
+        "sub/data/in.txt",
+        "sub/data/b.txt",
+        "sub/data/c.txt",
         "data/d.txt",
         "notes.md",
         "present",
@@ -87,7 +87,7 @@ fn a_check_never_names_its_own_script_program_cd_target_or_manifest() {
     ] {
         assert!(!names.contains(&never.to_string()), "{never}: {names:?}");
     }
-    for data in ["data/in.txt", "data/b.txt", "data/c.txt"] {
+    for data in ["sub/data/in.txt", "sub/data/b.txt", "sub/data/c.txt"] {
         assert!(names.contains(&data.to_string()), "{data}: {names:?}");
     }
     let inline = inputs_of("python3 -c 'print(open(\"data/d.txt\").read())'");

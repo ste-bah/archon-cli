@@ -51,16 +51,22 @@ const SKELETON_SHAPE = JSON.stringify({
       depends_on: [
         {
           task_id: "<canonical id of the task depended on>",
-          consumes: [{ artifact_path: "<path this task reads from that one>" }],
+          consumes: [{
+            artifact_path: "<path this task reads from that one>",
+            instance_source_records_field: "<optional: exact instance_source_records_field value from the named producer contract>",
+            registry_records_field: "<optional: exact registry_records_field value from the named producer contract>"
+          }],
           ordering_only: false
         }
       ],
       blocks: ["<canonical id of a task that waits on this one>"],
-      implements: ["<requirement id defined by the PRD>"],
+      implements: ["<obligation id the host lists>"],
       deliverable_contracts: [
         {
           kind: "<short stable name for what this task produces>",
           artifact_path: "<path this task produces, exactly as its dependents consume it>",
+          instance_source_records_field: "<optional: name of the records field in the instance source>",
+          registry_records_field: "<optional: name of the records field in the registry>",
           min_instances: 1
         }
       ]
@@ -214,6 +220,7 @@ async function authorCandidate(w, policy) {
     : null;
   if (seeded) [feedback, lastFindings, openFindings] = [seeded.feedback.slice(), seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
+  let previousCandidate = seeded ? seeded.previousCandidate : policy.previousCandidate;
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
@@ -267,10 +274,10 @@ async function authorCandidate(w, policy) {
     const group = repairRung === 3 && !policy.author ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : "";
     let authored;
     try {
-      const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
+        const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
+        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
         // Context writes are not journaled. Reserve no ordinal until the
         // complete prompt is ready, so recovery and replay dispatch identically.
         const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
@@ -339,6 +346,7 @@ async function authorCandidate(w, policy) {
       stdin: authored.content,
       ...(policy.target ? { target: policy.target } : {})
     });
+    if (policy.phase === "skeleton") previousCandidate = authored.content;
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     // #554: a check the host could not prove, on an entry this loop
