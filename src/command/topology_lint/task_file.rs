@@ -290,6 +290,12 @@ pub(super) fn inspect_raw(
                         deterministic.entry(text.clone()).or_default().push_back(finding.identity);
                         text
                     }));
+                for finding in archon_workflow::obligation_ids::section_citation_findings(
+                    &expected_ids.prd_text,
+                    draft.tasks.iter().map(|task| (task.task_id.as_str(), task.source_sections.as_slice())),
+                ) {
+                    block(&mut blockers, &mut deterministic, finding.message, finding.identity);
+                }
                 report.push_str("\n## frozen skeleton\n  stale intact skeleton is linted as an unfrozen draft; skeleton equality is NOT frozen until `workflow freeze-skeleton` publishes its lock and pin\n");
             }
             (false, false, false, false) => report.push_str(

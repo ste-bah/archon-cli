@@ -51,9 +51,8 @@ mod task_set;
 mod tool_obligations;
 mod unowned_obligations;
 
-use std::path::{Path, PathBuf};
-
 use anyhow::{Result, anyhow};
+use std::path::{Path, PathBuf};
 
 pub(crate) use candidate::evaluate_task_file_candidate;
 pub(crate) use fences::{
@@ -364,6 +363,18 @@ pub(crate) fn evaluate_lint(
                 source_path.clone(),
                 remediation_scope,
             );
+            if identity
+                .as_ref()
+                .is_some_and(|id| matches!(id.code.as_str(), "uncited_section" | "unknown_section"))
+            {
+                finding.remediation_scope = archon_workflow::RemediationScope::Skeleton;
+                let root = source_path.as_deref().map(|path| match source {
+                    LintSource::TaskFile(_) => path.parent().unwrap_or(cwd),
+                    _ => path,
+                });
+                finding.source_path = root
+                    .map(|path| path.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE));
+            }
             finding.deterministic_defect = identity;
             finding
         })

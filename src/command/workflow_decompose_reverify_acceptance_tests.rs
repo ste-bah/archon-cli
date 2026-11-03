@@ -130,6 +130,7 @@ fn a_failed_check_without_an_implementing_task_keeps_the_check_as_subject() {
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec!["REQ-X-OTHER".into()],
+            source_sections: Vec::new(),
             deliverable_contracts: Vec::new(),
         }],
     };
@@ -151,6 +152,7 @@ fn only_checks_needing_remediation_produce_task_subjects() {
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec!["REQ-X-001".into()],
+            source_sections: Vec::new(),
             deliverable_contracts: Vec::new(),
         }],
     };

@@ -18,6 +18,7 @@ fn frozen_with_owned_fields() -> archon_workflow::task_skeleton::FrozenTask {
         }],
         blocks: vec!["TASK-X-011".into()],
         implements: vec!["AC-X-001".into()],
+        source_sections: Vec::new(),
         deliverable_contracts: Vec::new(),
     }
 }
@@ -441,4 +442,25 @@ async fn a_non_frozen_example_is_skipped_and_one_frozen_subject_binds() {
     );
     assert_eq!(bind_two(answer).await.unwrap(), "TASK-X-011");
     assert_eq!(bind_two(whole("TASK-X-010")).await.unwrap(), "TASK-X-010");
+}
+
+#[test]
+fn frozen_source_sections_are_stamped_parsed_and_compared() {
+    let mut frozen = frozen_with_owned_fields();
+    frozen.source_sections = vec!["7".into(), "7.2".into()];
+    let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\n```\n";
+    let (stamped, notes) =
+        super::workflow_host_command_binding::stamp_frozen_frontmatter(candidate, &frozen).unwrap();
+    assert!(notes.contains(&"source_sections".to_string()));
+    let task = archon_workflow::task_universe::parsing::parse_task_file(
+        std::path::Path::new("TASK-X-010.md"),
+        &stamped,
+    )
+    .unwrap();
+    assert_eq!(task.source_sections, frozen.source_sections);
+    assert!(archon_workflow::task_skeleton::compare_frozen_task(&task, &frozen).is_empty());
+    frozen.source_sections.pop();
+    let findings = archon_workflow::task_skeleton::compare_frozen_task(&task, &frozen);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].field, "source_sections");
 }

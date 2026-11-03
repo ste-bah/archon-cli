@@ -76,6 +76,7 @@ fn skeleton(acceptance_digest: &str) -> TaskSkeleton {
             }],
             blocks: Vec::new(),
             implements: vec!["AC-X-001".into()],
+            source_sections: Vec::new(),
             deliverable_contracts: Vec::new(),
         }],
     }
@@ -182,6 +183,7 @@ fn skeleton_set_validation_refuses_unowned_and_dangling_ids() {
         depends_on: Vec::new(),
         blocks: vec!["TASK-X-010".into()],
         implements: vec!["REQ-X-001".into()],
+        source_sections: Vec::new(),
         deliverable_contracts: Vec::new(),
     });
     assert!(validate_skeleton_set(&value, &obligations).is_empty());
@@ -201,6 +203,7 @@ fn skeleton_set_validation_refuses_unknown_claims_but_allows_shared_ownership() 
         depends_on: Vec::new(),
         blocks: Vec::new(),
         implements: vec!["AC-X-001".into()],
+        source_sections: Vec::new(),
         deliverable_contracts: Vec::new(),
     });
     let obligations: BTreeSet<_> = ["AC-X-001".into()].into_iter().collect();
@@ -258,6 +261,7 @@ fn skeleton_set_validation_refuses_cycles_and_contradictory_ordering() {
                 }],
                 blocks: Vec::new(),
                 implements: vec!["AC-X-001".into()],
+                source_sections: Vec::new(),
                 deliverable_contracts: Vec::new(),
             },
             FrozenTask {
@@ -270,6 +274,7 @@ fn skeleton_set_validation_refuses_cycles_and_contradictory_ordering() {
                 }],
                 blocks: Vec::new(),
                 implements: Vec::new(),
+                source_sections: Vec::new(),
                 deliverable_contracts: Vec::new(),
             },
         ],
@@ -343,6 +348,7 @@ fn dangling_reference_does_not_hide_an_independent_cycle() {
                 depends_on: Vec::new(),
                 blocks: vec!["TASK-X-999".into()],
                 implements: vec!["AC-X-001".into()],
+                source_sections: Vec::new(),
                 deliverable_contracts: Vec::new(),
             },
             FrozenTask {
@@ -355,6 +361,7 @@ fn dangling_reference_does_not_hide_an_independent_cycle() {
                 }],
                 blocks: Vec::new(),
                 implements: Vec::new(),
+                source_sections: Vec::new(),
                 deliverable_contracts: Vec::new(),
             },
             FrozenTask {
@@ -367,6 +374,7 @@ fn dangling_reference_does_not_hide_an_independent_cycle() {
                 }],
                 blocks: Vec::new(),
                 implements: Vec::new(),
+                source_sections: Vec::new(),
                 deliverable_contracts: Vec::new(),
             },
         ],

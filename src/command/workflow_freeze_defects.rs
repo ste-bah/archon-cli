@@ -322,6 +322,7 @@ mod tests {
                     depends_on: vec![],
                     blocks: vec![],
                     implements: vec![],
+                    source_sections: Vec::new(),
                     deliverable_contracts: vec![],
                 })
                 .collect(),

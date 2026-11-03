@@ -56,6 +56,8 @@ pub struct FrozenTask {
     pub blocks: Vec<String>,
     #[serde(default)]
     pub implements: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_sections: Vec<String>,
     #[serde(default)]
     pub deliverable_contracts: Vec<WorkflowV2DeliverableContract>,
 }
@@ -149,7 +151,7 @@ pub fn validate_skeleton_set(
             identity: crate::defect::DeterministicDefect::new("unknown_obligation", skeleton_subject(&task.task_id, slot), format!("implements/{index}")),
                     field: "implements".into(),
                     message: format!(
-                        "task '{}' claims id '{}' that is not a host-listed PRD obligation or constraint id; remove it or use a host-listed id from requirement bullets, obligation table rows, numbered done-definition items, or PRD constraint list items",
+                        "task '{}' claims id '{}' that is not a host-listed PRD obligation or constraint id; remove it or use a host-listed id from requirement bullets, obligation table rows, numbered done-definition items, or PRD constraint list items or table rows",
                         task.task_id, obligation
                     ),
                 });
@@ -307,6 +309,12 @@ pub fn compare_frozen_task(
         "implements",
         task.implements.clone(),
         frozen.implements.clone(),
+    );
+    compare_set(
+        &mut findings,
+        "source_sections",
+        task.source_sections.clone(),
+        frozen.source_sections.clone(),
     );
     compare_set(
         &mut findings,

@@ -172,6 +172,7 @@ pub(crate) struct TaskRequirementClaims {
     pub(crate) task_id: String,
     pub(crate) source_path: String,
     pub(crate) implements: Vec<String>,
+    pub(crate) source_sections: Vec<String>,
 }
 
 /// Every task file's `implements:` claims, skipping the files that will not
@@ -207,6 +208,7 @@ pub(crate) fn task_requirement_claims_tolerant(
                 task_id: task.canonical_task_id,
                 source_path: task.source_path,
                 implements: task.implements,
+                source_sections: task.source_sections,
             }),
             Err(error) => skipped.push(format!("{name}: {error}")),
         }

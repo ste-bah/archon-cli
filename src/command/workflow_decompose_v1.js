@@ -64,6 +64,7 @@ const SKELETON_SHAPE = JSON.stringify({
       ],
       blocks: ["<canonical id of a task that waits on this one>"],
       implements: ["<obligation id the host lists>"],
+      source_sections: ["<PRD section key the host lists>"],
       deliverable_contracts: [
         {
           kind: "<short stable name for what this task produces>",
@@ -88,6 +89,7 @@ const BODY_SHAPE = [
   "depends_on: <host stamps frozen value>",
   "blocks: <host stamps frozen value>",
   "implements: <host stamps frozen value>",
+  "source_sections: <host stamps frozen value>",
   "required_env_keys: []",
   "required_tools: <exact tools this task must exercise; [] only when no tool invocation is required>",
   "deliverable_contracts: <host stamps frozen value>",
@@ -170,6 +172,7 @@ function bodyPolicy(subject, initialFeedback) {
       "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.",
       "Copy the frozen implements array exactly, preserving every value and its order.",
       ...constraintContext("body"),
+      ...sectionContext(subject),
       `Read the project MCP configuration at ${args.projectRoot}/.mcp.json and match this task's PRD obligations to its exact permitted tool names.`,
       "Declare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.",
       "An MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.",

@@ -222,6 +222,7 @@ pub(crate) fn write_chain(
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec![entry.id.clone()],
+            source_sections: Vec::new(),
             deliverable_contracts: Vec::new(),
         })
         .collect::<Vec<_>>();

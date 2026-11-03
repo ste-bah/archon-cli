@@ -107,6 +107,7 @@ pub(super) const TASK: ObjectShape = ObjectShape {
         defaulted("depends_on", List(&Object(&DEPENDENCY))),
         defaulted("blocks", STRINGS),
         defaulted("implements", STRINGS),
+        defaulted("source_sections", STRINGS),
         defaulted("deliverable_contracts", List(&Object(&DELIVERABLE))),
     ],
 };

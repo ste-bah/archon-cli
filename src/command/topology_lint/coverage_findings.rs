@@ -81,13 +81,43 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
     );
     findings.extend(constraints.iter().filter(|id| !claimed.contains_key(*id)).map(|id| {
         CoveragePolicyFinding {
-            text: format!("PRD constraint '{id}' is stated as a list item that restricts work, but no task names it; add it to the implements of every task whose work it restricts (all tasks if it restricts all work)"),
+            text: format!("PRD constraint '{id}' is stated as a PRD list item or table row that restricts work, but no task names it; add it to the implements of every task whose work it restricts (all tasks if it restricts all work)"),
             subject: id.clone(),
             source_path: root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
             identity: Some(archon_workflow::defect::DeterministicDefect::new("unowned_constraint", id, "implements")),
             remediation_scope: archon_workflow::RemediationScope::Skeleton,
         }
     }));
+    // A draft/pending skeleton is authoritative before TASK bodies exist.
+    // Body equality is checked separately, so a stale body cannot erase a
+    // citation the current skeleton already assigns.
+    let skeleton = std::fs::read(root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE))
+        .ok()
+        .and_then(|bytes| {
+            serde_json::from_slice::<archon_workflow::task_skeleton::TaskSkeleton>(&bytes).ok()
+        });
+    let citations: Vec<_> = match &skeleton {
+        Some(skeleton) => skeleton
+            .tasks
+            .iter()
+            .map(|task| (task.task_id.as_str(), task.source_sections.as_slice()))
+            .collect(),
+        None => claims
+            .iter()
+            .map(|task| (task.task_id.as_str(), task.source_sections.as_slice()))
+            .collect(),
+    };
+    findings.extend(
+        archon_workflow::obligation_ids::section_citation_findings(&prd, citations)
+            .into_iter()
+            .map(|finding| CoveragePolicyFinding {
+                text: finding.message,
+                subject: finding.identity.subject.clone(),
+                source_path: root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
+                identity: Some(finding.identity),
+                remediation_scope: archon_workflow::RemediationScope::Skeleton,
+            }),
+    );
     for claim in &claims {
         for cited in &claim.implements {
             if !defined.contains(cited) {

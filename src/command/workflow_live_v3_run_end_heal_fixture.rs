@@ -118,6 +118,7 @@ pub(super) fn fixture() -> Fixture {
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec!["REQ-1".into()],
+            source_sections: Vec::new(),
             deliverable_contracts: Vec::new(),
         }],
     };

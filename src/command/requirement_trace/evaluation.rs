@@ -88,6 +88,28 @@ fn evaluate(
         persist(cwd, store_path, &report)?;
     }
     let mut policy_findings = verdict::policy_findings(&report, prd_findings);
+    // Numbered section citations share the task parser and coverage rule. They
+    // are not obligation ids and never enter acceptance `covers` or proof rows.
+    let task_dir = super::absolute(cwd, &options.tasks);
+    let (claims, _) =
+        crate::command::topology_task_graph::task_requirement_claims_tolerant(&task_dir)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let prd = std::fs::read_to_string(&report.prd_path)?;
+    policy_findings.extend(
+        archon_workflow::obligation_ids::section_citation_findings(
+            &prd,
+            claims
+                .iter()
+                .map(|task| (task.task_id.as_str(), task.source_sections.as_slice())),
+        )
+        .into_iter()
+        .map(|finding| verdict::TracePolicyFinding {
+            text: finding.message,
+            subject: finding.identity.subject,
+            source_path: task_dir.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
+            remediation_scope: archon_workflow::RemediationScope::Skeleton,
+        }),
+    );
     // PLAN-2: published bodies are a decomposition's, and at decomposition
     // there is no code index for the mutation experiments to anchor in. Every
     // claim is tested instead against the repository the task set records;

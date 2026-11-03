@@ -242,6 +242,7 @@ pub(crate) fn stamp_frozen_frontmatter(
     )?;
     stamp_typed_field::<Vec<String>>(map, "blocks", &frozen.blocks, &mut notes)?;
     stamp_typed_field::<Vec<String>>(map, "implements", &frozen.implements, &mut notes)?;
+    stamp_typed_field::<Vec<String>>(map, "source_sections", &frozen.source_sections, &mut notes)?;
     stamp_typed_field::<Vec<archon_workflow::task_universe::WorkflowV2DeliverableContract>>(
         map,
         "deliverable_contracts",

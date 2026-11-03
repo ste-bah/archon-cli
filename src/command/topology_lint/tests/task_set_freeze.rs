@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn draft_and_pending_skeletons_accept_constraints_without_obligation_ownership_findings() {
+fn draft_and_pending_skeletons_accept_constraints_and_numbered_sections() {
     use archon_workflow::task_set_contract::{
         ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceContract, AcceptanceLock,
         AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest,
@@ -14,7 +14,7 @@ fn draft_and_pending_skeletons_accept_constraints_without_obligation_ownership_f
         let tasks = task.parent().unwrap();
         let prd_path = temp.path().join("prds/PRD-X.md");
         let prd = format!(
-            "{}\n- QX-001: restrict work\n- QX-002: restrict other work\n",
+            "{}\n- QX-001: restrict work\n- QX-002: restrict other work\n## 7. Widgets\n### 7.1 Small\nRequired small widgets.\n## 8 Empty leaf\n---\n## 9 Non-goals\nExcluded.\n",
             std::fs::read_to_string(&prd_path).unwrap()
         );
         std::fs::write(&prd_path, &prd).unwrap();
@@ -40,6 +40,7 @@ fn draft_and_pending_skeletons_accept_constraints_without_obligation_ownership_f
         let skeleton_path = tasks.join(TASK_SKELETON_FILE);
         let mut skeleton: TaskSkeleton =
             serde_json::from_slice(&std::fs::read(&skeleton_path).unwrap()).unwrap();
+        skeleton.tasks[0].source_sections = vec!["0".into(), "7.1".into(), "8".into()];
         skeleton.tasks[0]
             .implements
             .extend(["QX-001".into(), "QX-404".into()]);
@@ -99,6 +100,36 @@ fn draft_and_pending_skeletons_accept_constraints_without_obligation_ownership_f
                 .iter()
                 .any(|text| text.contains("QX-001") || text.contains("QX-002"))
         );
+        // Exercise the complete gate: section coverage must not also be
+        // appended by task_set::inspect for this same draft/pending skeleton.
+        skeleton.tasks[0].source_sections = vec!["0".into(), "7.1".into(), "404".into()];
+        let bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
+        std::fs::write(&skeleton_path, &bytes).unwrap();
+        if pending {
+            let mut lock: TaskSkeletonLock =
+                serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+            lock.digest = content_digest(&bytes);
+            std::fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+        }
+        let evaluation = evaluate_lint(
+            temp.path(),
+            &LintSource::Tasks(tasks.to_path_buf()),
+            archon_core::config::GateMode::Enforce,
+        )
+        .unwrap();
+        for code in ["uncited_section", "unknown_section"] {
+            let findings: Vec<_> = evaluation
+                .findings
+                .iter()
+                .filter(|finding| {
+                    finding
+                        .deterministic_defect
+                        .as_ref()
+                        .is_some_and(|defect| defect.code == code)
+                })
+                .collect();
+            assert_eq!(findings.len(), 1, "{code}: {:?}", evaluation.findings);
+        }
     }
 }
 
@@ -120,6 +151,7 @@ fn directory_lint_renders_kind_mismatch_as_information_only() {
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: Vec::new(),
+            source_sections: Vec::new(),
             deliverable_contracts: vec![
                 archon_workflow::task_universe::WorkflowV2DeliverableContract {
                     kind: "producer_label".into(),

@@ -21,6 +21,7 @@ fn frozen() -> FrozenTask {
         depends_on: Vec::new(),
         blocks: Vec::new(),
         implements: Vec::new(),
+        source_sections: Vec::new(),
         deliverable_contracts: Vec::new(),
     }
 }

@@ -75,3 +75,28 @@ fn nested_id_shaped_prose_stays_in_done_text() {
     );
     assert!(constraint_texts(prd).is_empty());
 }
+
+#[test]
+fn table_constraints_join_cells_and_leave_obligations_byte_identical() {
+    let existing = "## Widgets\n| ID | Requirement |\n|---|---|\n| QX-003 | Must keep this. | extra |\n\n## Done Definition\n1. Preserve exactly.\n";
+    let added = "## Limits\n| ID | Size | Rule |\n|---|---|---|\n| QX-001 | small | Use native widgets. |\n| AC-X-001 | ignored | acceptance elsewhere |\n\n## Non-goals\n| ID | Size |\n|---|---|\n| QX-002 | excluded |\n### Child\n| QX-004 | still excluded |\n\n## Other\n| ID | Non-goal |\n|---|---|\n| QX-005 | excluded by header |\n";
+    let prd = format!("{existing}{added}");
+    assert_eq!(
+        constraint_texts(&prd),
+        BTreeMap::from([("QX-001".into(), "small | Use native widgets.".into())])
+    );
+    assert_eq!(
+        serde_json::to_vec(&obligation_texts(existing)).unwrap(),
+        serde_json::to_vec(&obligation_texts(&prd)).unwrap()
+    );
+    assert_eq!(obligation_texts(&prd)["QX-003"], "Must keep this.");
+}
+
+#[test]
+fn exclusion_words_in_table_data_do_not_exclude_rows() {
+    let prd = "| ID | Rule |\n|---|---|\n| QX-001 | No deviation is allowed |\n| QX-002 | Must be fast |\n| QX-003 | Only excluded inputs are rejected |\n| QX-004 | Non-goal labels never override this rule |\n";
+    let texts = constraint_texts(prd);
+    assert_eq!(texts.len(), 4);
+    assert_eq!(texts["QX-001"], "No deviation is allowed");
+    assert_eq!(texts["QX-002"], "Must be fast");
+}

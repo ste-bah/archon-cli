@@ -299,6 +299,7 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
 // from them (BODY_SHAPE). Kept beside the outcome, never on it, so the
 // evidence the run reports is the host's alone.
 const SKELETON_TASKS = new WeakMap();
+let CURRENT_SKELETON_TASKS = null;
 const SKELETON_CANDIDATES = new WeakMap();
 
 // Verification reports are snapshots or diagnostics, never authored candidates.
@@ -309,7 +310,10 @@ function skeletonCandidateContent(outcome) {
 function recordSkeletonTasks(outcome, content) {
   SKELETON_CANDIDATES.set(outcome, content);
   const tasks = skeletonCandidateTasks(content);
-  if (tasks) SKELETON_TASKS.set(outcome, tasks);
+  if (tasks) {
+    SKELETON_TASKS.set(outcome, tasks);
+    CURRENT_SKELETON_TASKS = tasks;
+  }
 }
 
 // `taskId -> canonical JSON of its frozen entry`, or null when `content`

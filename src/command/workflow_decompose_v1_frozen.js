@@ -62,7 +62,10 @@ async function verifyFrozenStage(w, capability) {
             }
           }
         } catch (_) { /* Older verification reports retain their launch-bound entries. */ }
-        if (tasks) SKELETON_TASKS.set(outcome, tasks);
+        if (tasks) {
+          SKELETON_TASKS.set(outcome, tasks);
+          CURRENT_SKELETON_TASKS = tasks;
+        }
       }
       return outcome;
     }
@@ -129,6 +132,32 @@ function constraintContext(author = "skeleton") {
     `Exact PRD constraint text extracted by the host: ${listed}`];
 }
 
+// Exact section texts use the same host-written context mechanism as constraints.
+// An empty section map adds no context bytes; the skeleton shape still declares
+// source_sections so future PRD sections have a frozen carrier.
+function sectionContext(subject) {
+  const sections = args.prdSections || {};
+  if (Object.keys(sections).length === 0) return [];
+  if (!subject) {
+    const listed = Object.entries(sections).filter(([, section]) => section.requires_citation)
+      .map(([number, section]) => `${JSON.stringify(number)}: ${section.title}`).join("\n");
+    const compact = utf8Bytes(listed) <= 4096 ? listed
+      : `Read ${contextFile("txt", listed).path} (host-written context for this call: read it by its exact path).`;
+    return ["Cite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). Every host-listed qualifying PRD section must be cited by source_sections of at least one task whose work it justifies; a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.",
+      `Qualifying PRD sections (key: title):\n${compact}`,
+      `Full PRD section texts: Read ${contextFile("json", JSON.stringify(sections)).path} (host-written context for this call: read it by its exact path).`];
+  }
+  const entry = CURRENT_SKELETON_TASKS?.get(subject.taskId) || frozenChain().tasks?.get(subject.taskId);
+  // Host outcomes supply the current frozen entry after a repair, not the
+  // launch snapshot. Older hosts expose only the task root: read it explicitly.
+  if (!entry) return ["Read this task's frozen source_sections in task-skeleton.json; the task body must carry out what those sections require for this task's work."];
+  const numbers = JSON.parse(entry).source_sections || [];
+  const cited = Object.fromEntries(numbers.filter(number => sections[number]).map(number => [number, sections[number]]));
+  return ["The task body must carry out what its frozen source_sections require for this task's work.",
+    `Frozen source_sections: ${JSON.stringify(numbers)}`,
+    `Cited PRD section texts: Read ${contextFile("json", JSON.stringify(cited)).path} (host-written context for this call: read it by its exact path).`];
+}
+
 // The skeleton's author policy, whether it authors the skeleton first or
 // re-authors it because the set gate found an obligation no task claims or
 // a claim the PRD does not define (Batch O). `initialFeedback` carries the
@@ -147,9 +176,10 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       groundingRules(),
       "Stop reading once you can name what your entries assert.",
       "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
-      "Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
+      "Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
       skeletonObligationContext(),
       ...constraintContext(),
+      ...sectionContext(),
       "The document must deserialize into this exact shape:",
       SKELETON_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",

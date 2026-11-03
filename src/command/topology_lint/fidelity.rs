@@ -232,6 +232,7 @@ async fn audit_scoped(
             task_id: task.canonical_task_id.clone(),
             source_path,
             implements: task.implements,
+            source_sections: task.source_sections,
         });
         candidate_text = Some((task.canonical_task_id, text.to_string()));
     }

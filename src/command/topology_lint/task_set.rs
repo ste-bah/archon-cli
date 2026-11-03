@@ -203,6 +203,8 @@ pub(super) fn inspect(
         }
     };
 
+    // Section citation coverage is emitted once by coverage::policy_findings,
+    // including for draft and pending skeletons.
     append_edge_analysis(&skeleton, &mut report, &mut blockers, &mut deterministic);
     let mut result = finish(report, blockers, inherited_blockers);
     result.deterministic = deterministic;
@@ -280,6 +282,7 @@ fn skeleton_from_tasks(
                 depends_on: task.dependencies.clone(),
                 blocks: task.blocks_ids.clone(),
                 implements: task.implements.clone(),
+                source_sections: task.source_sections.clone(),
                 deliverable_contracts: task.deliverable_contracts.clone(),
             })
             .collect(),

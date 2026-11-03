@@ -115,6 +115,9 @@ pub struct WorkflowV2TaskUniverseTask {
     /// because the author declared them so; see `parsing` for why absent differs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub implements: Vec<String>,
+    /// Numbered PRD sections justifying this task, frozen with its skeleton.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_sections: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_append_target_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -456,3 +456,23 @@ fn constraint_ids_are_defined_without_creating_requirement_proof_rows() {
     assert_eq!(report.coverage.requirements_total, 3);
     assert_eq!(report.rows.len(), 1);
 }
+
+#[test]
+fn numbered_section_citations_do_not_become_unknown_obligations() {
+    let dir = tempfile::tempdir().unwrap();
+    let prd = write_prd(dir.path(), &["## 7. Widgets", "- REQ-X-001: work"]);
+    let tasks = write_trace_task(
+        dir.path(),
+        "```yaml\ntask_id: TASK-X-001\ntitle: Widgets\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [REQ-X-001]\nsource_sections: ['7']\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n",
+    );
+    let evaluation = evaluate_trace(dir.path(), &TraceOptions::new(prd, tasks)).unwrap();
+    assert!(
+        !evaluation
+            .findings
+            .iter()
+            .any(|finding| finding.text.contains("section")
+                || finding.text.contains("unknown obligation")),
+        "{:?}",
+        evaluation.findings
+    );
+}

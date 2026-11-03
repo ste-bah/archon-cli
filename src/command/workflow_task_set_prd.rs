@@ -22,6 +22,8 @@ pub(crate) fn script_arguments_with_prd_requirement_texts(
         serde_json::json!(archon_workflow::obligation_ids::obligation_ids(prd_text));
     script_arguments["prdConstraintTexts"] =
         serde_json::json!(archon_workflow::obligation_ids::constraint_texts(prd_text));
+    script_arguments["prdSections"] =
+        serde_json::json!(archon_workflow::obligation_ids::numbered_sections(prd_text));
     script_arguments
 }
 
@@ -91,5 +93,16 @@ mod tests {
             serde_json::json!({"QX-001": "constraint"})
         );
         assert_eq!(arguments, serde_json::json!({"prdPath": "prd.md"}));
+    }
+    #[test]
+    fn section_host_map_keeps_own_text_and_parent_citation_status() {
+        let prd = "## 7. Widgets\n### 7.1 Small\nRequired shapes.\n";
+        let args = script_arguments_with_prd_requirement_texts(&serde_json::json!({}), prd);
+        assert_eq!(args["prdSections"]["7"]["requires_citation"], false);
+        assert_eq!(
+            args["prdSections"]["7.1"]["text"],
+            "### 7.1 Small\nRequired shapes."
+        );
+        assert_eq!(args["prdConstraintTexts"], serde_json::json!({}));
     }
 }

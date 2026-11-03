@@ -202,6 +202,26 @@ pub(super) fn skeleton_findings(
                 .with_defect(finding.identity)
             }),
     );
+    findings.extend(
+        archon_workflow::obligation_ids::section_citation_findings(
+            prd_text,
+            skeleton
+                .tasks
+                .iter()
+                .map(|task| (task.task_id.as_str(), task.source_sections.as_slice())),
+        )
+        .into_iter()
+        .map(|finding| {
+            GateFinding::new(
+                GateId::FreezeSkeleton,
+                finding.message,
+                finding.identity.subject.clone(),
+                Some(skeleton_path.clone()),
+                archon_workflow::RemediationScope::Skeleton,
+            )
+            .with_defect(finding.identity)
+        }),
+    );
     let edge_analysis = analyze_task_set_edges(skeleton);
     findings.extend(edge_analysis.blockers.into_iter().map(|finding| {
         GateFinding::new(

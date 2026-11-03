@@ -44,6 +44,7 @@ fn skeleton(acceptance_digest: &str) -> TaskSkeleton {
             }],
             blocks: Vec::new(),
             implements: vec!["AC-X-001".into()],
+            source_sections: Vec::new(),
             deliverable_contracts: Vec::new(),
         }],
     }

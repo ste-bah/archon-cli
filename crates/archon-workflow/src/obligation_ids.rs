@@ -32,6 +32,11 @@ mod continuations;
 mod constraints;
 pub use constraints::{constraint_ids, constraint_texts};
 
+#[path = "prd_sections.rs"]
+mod prd_sections;
+use constraints::HeadingExclusion;
+pub use prd_sections::{PrdSection, numbered_sections, section_citation_findings};
+
 const EXCLUDED_HEADINGS: [&str; 5] = [
     "non-goal",
     "out of scope",

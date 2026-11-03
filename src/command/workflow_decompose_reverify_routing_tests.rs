@@ -12,6 +12,7 @@ fn remediation_routes_check_defects_and_behavioral_failures_separately() {
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec!["REQ-X-001".into()],
+            source_sections: Vec::new(),
             deliverable_contracts: Vec::new(),
         }],
     };

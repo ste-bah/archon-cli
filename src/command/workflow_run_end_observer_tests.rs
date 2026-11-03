@@ -116,6 +116,7 @@ fn frozen_fixture_with_permitted(
             file_name: "TASK-EX-001.md".into(),
             depends_on: Vec::new(),
             blocks: Vec::new(),
+            source_sections: Vec::new(),
             implements: contract
                 .acceptance
                 .iter()
@@ -495,6 +496,5 @@ fn read_events(store: &WorkflowStore, run_id: &str) -> Vec<WorkflowEvent> {
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
 }
-
 #[path = "workflow_run_end_native_tests.rs"]
 mod native_tests;

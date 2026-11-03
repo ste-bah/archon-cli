@@ -49,7 +49,7 @@ async function resumedFrozenSetRepairsWithoutPause() {
   vm.runInContext('SKELETON_TASKS.set(__old, frozenChain().tasks)', Object.assign(ctx, {__old:old}));
   const chain = {outcome:old,subjects:[subject]}, bodies = new Map();
   let lint = 0, repairs = 0;
-  const finding = {text:"PRD constraint 'QX-001' is stated as a list item that restricts work, but no task names it; add it to the implements of every task whose work it restricts (all tasks if it restricts all work)",
+  const finding = {text:"PRD constraint 'QX-001' is stated as a PRD list item or table row that restricts work, but no task names it; add it to the implements of every task whose work it restricts (all tasks if it restricts all work)",
     subject:'QX-001',source_path:'/tasks/task-skeleton.json',remediation_scope:'skeleton',
     deterministic_defect:{provenance:'host_validator',code:'unowned_constraint',subject:'QX-001',location:'implements',stage:'contracts'}};
   const clean = () => ({publicationReceipt:{call_id:'ok'},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}});

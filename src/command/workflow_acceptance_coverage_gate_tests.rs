@@ -110,6 +110,7 @@ fn a_task_no_check_answers_for_goes_back_to_the_skeleton() {
         depends_on: Vec::new(),
         blocks: Vec::new(),
         implements: implements.iter().map(|s| s.to_string()).collect(),
+        source_sections: Vec::new(),
         deliverable_contracts: Vec::new(),
     };
     let skeleton = TaskSkeleton {

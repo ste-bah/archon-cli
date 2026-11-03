@@ -77,6 +77,7 @@ pub(super) fn task() -> Value {
         depends_on: vec![dependency.clone(), dependency],
         blocks: vec!["TASK-X-003".into(), "TASK-X-004".into()],
         implements: vec!["REQ-1".into(), "REQ-2".into()],
+        source_sections: Vec::new(),
         deliverable_contracts: vec![contract(), contract()],
     })
     .unwrap()

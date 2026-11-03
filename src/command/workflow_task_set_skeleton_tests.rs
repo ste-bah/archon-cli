@@ -438,6 +438,7 @@ fn skeleton_accepts_host_constraints_and_leaves_missing_constraint_ownership_to_
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010-body.md".into(),
             implements: vec!["AC-X-001".into(), "QX-001".into()],
+            source_sections: Vec::new(),
             depends_on: Vec::new(),
             blocks: Vec::new(),
             deliverable_contracts: Vec::new(),

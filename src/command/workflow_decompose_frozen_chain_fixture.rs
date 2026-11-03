@@ -124,6 +124,7 @@ pub(crate) fn freeze_skeleton(project: &Path, tasks: &Path, acceptance_digest: &
                 depends_on: Vec::new(),
                 blocks: Vec::new(),
                 implements: vec!["AC-X-001".into()],
+                source_sections: Vec::new(),
                 deliverable_contracts: Vec::new(),
             })
             .collect(),

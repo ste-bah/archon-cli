@@ -37,6 +37,7 @@ fn skeleton() -> TaskSkeleton {
         depends_on: Vec::new(),
         blocks: Vec::new(),
         implements: Vec::new(),
+        source_sections: Vec::new(),
         deliverable_contracts: Vec::new(),
     };
     let mut first = task("TASK-WS-005");

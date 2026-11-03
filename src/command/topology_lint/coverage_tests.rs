@@ -300,6 +300,7 @@ fn obligations_are_reported_on_the_clean_branch_too() {
         task_id: "TASK-A".to_string(),
         source_path: "TASK-A.md".to_string(),
         implements: vec!["REQ-DL-010".to_string()],
+        source_sections: Vec::new(),
     }];
     let rendered = super::render(std::path::Path::new("PRD.md"), prd, &claims);
     assert!(

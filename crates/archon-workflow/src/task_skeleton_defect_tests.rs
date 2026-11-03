@@ -12,6 +12,7 @@ fn all_seventy_invalid_filenames_are_reported_before_any_repair() {
                 depends_on: vec![],
                 blocks: vec![],
                 implements: vec![],
+                source_sections: Vec::new(),
                 deliverable_contracts: vec![],
             })
             .collect(),
@@ -43,6 +44,7 @@ fn independent_skeleton_header_and_task_defects_are_reported_together() {
             depends_on: vec![],
             blocks: vec![],
             implements: vec![],
+            source_sections: Vec::new(),
             deliverable_contracts: vec![],
         }],
     };
@@ -102,6 +104,7 @@ fn independent_graph_cycles_are_all_reported() {
             }],
             blocks: vec![],
             implements: vec![],
+            source_sections: Vec::new(),
             deliverable_contracts: vec![],
         })
         .collect();
@@ -178,6 +181,7 @@ fn graph_task(n: u32, depends_on: &[u32], blocks: &[u32]) -> FrozenTask {
             .collect(),
         blocks: blocks.iter().map(id).collect(),
         implements: vec![],
+        source_sections: Vec::new(),
         deliverable_contracts: vec![],
     }
 }
@@ -290,6 +294,6 @@ fn unknown_id_message_lists_all_host_sources() {
     assert_eq!(findings[0].identity.location, "implements/4");
     assert_eq!(
         findings[0].message,
-        "task 'TASK-X-001' claims id 'QX-404' that is not a host-listed PRD obligation or constraint id; remove it or use a host-listed id from requirement bullets, obligation table rows, numbered done-definition items, or PRD constraint list items"
+        "task 'TASK-X-001' claims id 'QX-404' that is not a host-listed PRD obligation or constraint id; remove it or use a host-listed id from requirement bullets, obligation table rows, numbered done-definition items, or PRD constraint list items or table rows"
     );
 }

@@ -139,6 +139,7 @@ pub(super) fn seed_frozen_subjects(
                 depends_on: Vec::new(),
                 blocks: Vec::new(),
                 implements: Vec::new(),
+                source_sections: Vec::new(),
                 deliverable_contracts: Vec::new(),
             })
             .collect(),

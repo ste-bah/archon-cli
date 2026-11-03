@@ -42,6 +42,7 @@ pub(super) struct PrdIds {
     pub(super) acceptance: BTreeSet<String>,
     pub(super) implements: BTreeSet<String>,
     pub(super) constraints: BTreeSet<String>,
+    pub(super) prd_text: String,
 }
 
 pub(super) fn validate_prd_identity(cwd: &Path, tasks_root: &Path) -> Result<PrdIds, String> {
@@ -77,5 +78,6 @@ pub(super) fn validate_prd_identity(cwd: &Path, tasks_root: &Path) -> Result<Prd
         acceptance: acceptance_ids(&text),
         implements,
         constraints,
+        prd_text: text,
     })
 }

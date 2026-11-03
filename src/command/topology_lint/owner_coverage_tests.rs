@@ -64,6 +64,7 @@ fn skeleton(owned: &[&str]) -> TaskSkeleton {
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec!["AC-X-001".into()],
+            source_sections: Vec::new(),
             deliverable_contracts: owned
                 .iter()
                 .map(|path| WorkflowV2DeliverableContract {
