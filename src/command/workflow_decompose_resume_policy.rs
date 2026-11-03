@@ -44,9 +44,14 @@ pub(crate) fn canonical_resume_metadata(
     metadata: &serde_json::Value,
 ) -> serde_json::Value {
     let comparable = comparable_metadata(metadata);
-    let enriched = crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
-        arguments, prd_text,
-    );
+    let mut enriched =
+        crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
+            arguments, prd_text,
+        );
+    // Runs launched before the obligation list carried requirement text alone.
+    if comparable["script_args"].get("prdObligationIds").is_none() {
+        enriched.as_object_mut().unwrap().remove("prdObligationIds");
+    }
     let script_arguments = if comparable.get("script_args") == Some(arguments) {
         arguments
     } else {

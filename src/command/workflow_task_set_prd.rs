@@ -18,6 +18,8 @@ pub(crate) fn script_arguments_with_prd_requirement_texts(
     script_arguments["prdRequirementTexts"] = serde_json::json!(
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text)
     );
+    script_arguments["prdObligationIds"] =
+        serde_json::json!(archon_workflow::obligation_ids::obligation_ids(prd_text));
     script_arguments
 }
 
@@ -63,4 +65,25 @@ pub(crate) fn validate_prd_input(
         ));
     }
     Ok((bytes.clone(), content_digest(&bytes), criteria))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_arguments_include_the_exact_obligation_union_without_changing_launch_arguments() {
+        let prd = "- REQ-X-001: work\n- NFR-X-001: constraint\n\n| ID | Goal |\n| --- | --- |\n| G-X-001 | goal |\n\n## Done Definition\n1. Complete.\n";
+        let arguments = serde_json::json!({"prdPath": "prd.md"});
+        let enriched = script_arguments_with_prd_requirement_texts(&arguments, prd);
+        assert_eq!(
+            enriched["prdObligationIds"],
+            serde_json::json!(["DONE-1", "G-X-001", "REQ-X-001"])
+        );
+        assert_eq!(
+            enriched["prdRequirementTexts"],
+            serde_json::json!({"REQ-X-001": "work"})
+        );
+        assert_eq!(arguments, serde_json::json!({"prdPath": "prd.md"}));
+    }
 }

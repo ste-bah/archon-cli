@@ -188,7 +188,42 @@ async function refutedLoop() {
   assert.deepEqual(out.steps(0), [judged(true),...episode,judged(false),...episode,judged(false),...episode,judged(false)]);
 }
 
+function skeletonPromptAndShape() {
+  const ids = ['AC-X-001', 'DONE-1', 'G-X-001', 'REQ-X-001'];
+  const ctx = withAuthorContext({args:{prdPath:'prd.md', taskRoot:'tasks',
+    repositoryRoot:'/repo', projectRoot:'/project', prdObligationIds:ids}});
+  vm.createContext(ctx); vm.runInContext(source, ctx);
+  const prompt = ctx.skeletonPolicy([]).prompt();
+  assert.ok(prompt.startsWith('Author one complete task-skeleton JSON artifact'));
+  for (const line of [
+    'Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only those ids.',
+    'Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). Other id-bearing PRD bullets are not obligations.',
+    `Exact PRD obligation ids extracted by the host: ${JSON.stringify(ids)}`,
+    'The consumes record-binding fields are optional: omit unused fields.',
+    "For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path.",
+    "Use instance_source_records_field when the producer declares it; otherwise use registry_records_field.",
+    "These values name the producer's records field, not a task id or artifact path.",
+  ]) assert.ok(prompt.includes(line), `skeleton prompt lacks: ${line}`);
+  assert.ok(!prompt.includes('ids the PRD defines'));
+  const shape = JSON.parse(vm.runInContext('SKELETON_SHAPE', ctx));
+  assert.deepEqual(shape.tasks[0].implements, ['<obligation id the host lists>']);
+  assert.deepEqual(shape.tasks[0].depends_on[0].consumes[0], {
+    artifact_path:'<path this task reads from that one>',
+    instance_source_records_field:'<optional: exact instance_source_records_field value from the named producer contract>',
+    registry_records_field:'<optional: exact registry_records_field value from the named producer contract>',
+  });
+  ctx.args.prdObligationIds = Array.from({length:2000}, (_, n) => `G-X-${n}`);
+  const large = ctx.skeletonObligationContext();
+  assert.ok(large.length < 512, 'large id lists must use bounded context');
+  const path = large.match(/at (\S+) \(host-written/)[1];
+  assert.deepEqual(JSON.parse(ctx.__archonAuthorContext.files.get(path)), ctx.args.prdObligationIds);
+  assert.equal(ctx.skeletonObligationContext(), large, 'context references are deterministic for replay');
+  delete ctx.args.prdObligationIds;
+  assert.equal(ctx.skeletonObligationContext(), 'Use only PRD obligation ids extracted by the host.');
+}
+
 const tests = [
+  ['skeleton prompt lists obligations and optional record bindings',skeletonPromptAndShape],
   ['shape repairs decrease 5 to 0',()=>shrinking()],
   ['wrapped shape repairs decrease 5 to 0',()=>shrinking({wrapper:true})],
   ['supplementary repairs decrease with retained sibling',()=>shrinking({supplementary:true})],
