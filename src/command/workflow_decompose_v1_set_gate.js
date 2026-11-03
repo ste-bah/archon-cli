@@ -263,7 +263,7 @@ async function runSetGateLoop(w, chain, bodies) {
 async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repairRung) {
   const prior = SKELETON_TASKS.get(chain.outcome);
   const outcome = await authorCandidate(w, skeletonPolicy(
-    findings.map((finding) => findingText(finding)), repairRung));
+    findings.map((finding) => findingText(finding)), repairRung, skeletonCandidateContent(chain.outcome)));
   if (!Array.isArray(outcome.subjects) || outcome.subjects.length === 0) {
     throw new Error("re-frozen skeleton returned zero host-read task subjects");
   }
@@ -299,8 +299,15 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
 // from them (BODY_SHAPE). Kept beside the outcome, never on it, so the
 // evidence the run reports is the host's alone.
 const SKELETON_TASKS = new WeakMap();
+const SKELETON_CANDIDATES = new WeakMap();
+
+// Verification reports are snapshots or diagnostics, never authored candidates.
+function skeletonCandidateContent(outcome) {
+  return SKELETON_CANDIDATES.get(outcome);
+}
 
 function recordSkeletonTasks(outcome, content) {
+  SKELETON_CANDIDATES.set(outcome, content);
   const tasks = skeletonCandidateTasks(content);
   if (tasks) SKELETON_TASKS.set(outcome, tasks);
 }

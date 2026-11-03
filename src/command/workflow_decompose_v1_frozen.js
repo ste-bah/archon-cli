@@ -109,14 +109,15 @@ function acceptanceStagePolicy(findings = []) {
 // re-authors it because the set gate found an obligation no task claims or
 // a claim the PRD does not define (Batch O). `initialFeedback` carries the
 // set gate's exact findings into the first attempt.
-function skeletonPolicy(initialFeedback, initialRung) {
+function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
   return {
     phase: "skeleton",
+    previousCandidate,
     capability: "freeze-skeleton",
     retryScopes: new Set(["candidate_artifact", "skeleton"]),
     initialFeedback,
     ...(Number.isInteger(initialRung) ? { initialRung } : {}),
-    prompt: () => [
+    prompt: (previous) => [
       "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
       `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
       groundingRules(),
@@ -135,8 +136,17 @@ function skeletonPolicy(initialFeedback, initialRung) {
       "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
       "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
       "Do not run commands or write files."
-    ].join("\n")
+    ].join("\n") + previousSkeletonContext(previous)
   };
+}
+
+// #568: carry exact candidate bytes through the existing host-written context
+// binding. No content means no extra line, including on a first attempt.
+function previousSkeletonContext(content) {
+  if (typeof content !== "string" || content.length === 0) return "";
+  const file = contextFile("json", content);
+  return `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
+    + "\nWhatever you restructure, keep every task, implements id, deliverable and edge of the previous candidate that no current finding names. Return the whole document.";
 }
 
 // #554: the operational findings of a freeze outcome whose subject is an
@@ -222,7 +232,7 @@ async function repairFrozenStage(w, verified, findings) {
     return await repairFrozenStage(w, verified, findings.filter((finding) => frozenFindingOwner(finding) === "acceptance"));
   }
   if (owner === "skeleton") {
-    const repaired = await authorCandidate(w, skeletonPolicy(findings.map(findingText)));
+    const repaired = await authorCandidate(w, skeletonPolicy(findings.map(findingText), undefined, skeletonCandidateContent(verified)));
     FROZEN_REPAIRS.set(repaired, { owner });
     return repaired;
   }
