@@ -18,14 +18,17 @@ pub fn require_grant_rule<T>(rule: Result<T, String>) -> std::io::Result<T> {
     })
 }
 
-/// Grants require kernel write containment for every agent command class.
+/// Grants require kernel read and write containment for every agent command class.
 /// A snapshot can restore data, but cannot authenticate authority while a child runs.
 pub fn operator_grants_supported() -> bool {
-    matches!(
-        crate::write_boundary::mechanism(),
-        Ok(crate::write_boundary::Mechanism::SandboxExec
-            | crate::write_boundary::Mechanism::Landlock { .. })
-    )
+    match crate::write_boundary::mechanism() {
+        Ok(crate::write_boundary::Mechanism::SandboxExec) => true,
+        #[cfg(target_os = "linux")]
+        Ok(crate::write_boundary::Mechanism::Landlock { .. }) => {
+            crate::write_boundary::landlock::LandlockSandbox::build_read(&operator_paths()).is_ok()
+        }
+        _ => false,
+    }
 }
 
 /// Operator stores, including shell startup files that could restore secrets.
@@ -245,42 +248,34 @@ pub fn command(program: &OsStr) -> Command {
     let mut command = crate::spawn::command(program);
     #[cfg(target_os = "linux")]
     {
-        let reads =
-            match crate::write_boundary::landlock::LandlockSandbox::build_read(&operator_paths()) {
-                Ok(boundary) => {
-                    boundary.install_std(&mut command);
-                    "named-paths-denied"
-                }
-                Err(_) => "not-contained",
-            };
-        let writes = match crate::write_boundary::landlock::LandlockSandbox::build(
-            &[crate::credential_paths::operator_grant_root()],
-            &[],
-            &[],
-        ) {
-            Ok(boundary) => {
-                boundary.install_std(&mut command);
-                "denied"
-            }
-            Err(reason) if operator_grants_supported() => {
-                crate::write_boundary::refusal("Agent launch", &reason);
-                use std::os::unix::process::CommandExt;
-                // SAFETY: fail the child before exec without allocating or touching host state.
-                unsafe {
-                    command.pre_exec(|| Err(std::io::Error::from_raw_os_error(libc::EPERM)));
-                }
-                "launch-refused"
-            }
-            Err(_) => "not-contained",
-        };
+        let active = matches!(
+            crate::write_boundary::mechanism(),
+            Ok(crate::write_boundary::Mechanism::Landlock { .. })
+        );
+        let reads = install_linux_boundary(
+            &mut command,
+            crate::write_boundary::landlock::LandlockSandbox::build_read(&operator_paths()),
+            active,
+            "named-paths-denied",
+        );
+        let writes = install_linux_boundary(
+            &mut command,
+            crate::write_boundary::landlock::LandlockSandbox::build(
+                &[crate::credential_paths::operator_grant_root()],
+                &[],
+                &[],
+            ),
+            active,
+            "denied",
+        );
         tracing::warn!(
             credential_reads = reads,
             host_grant_writes = writes,
             process_reads = "not-contained",
-            operator_env_grants = if operator_grants_supported() {
+            operator_env_grants = if active && reads == "named-paths-denied" && writes == "denied" {
                 "enabled"
             } else {
-                "disabled: kernel write containment unavailable"
+                "disabled: kernel read/write containment unavailable"
             },
             "agent command launch: process read isolation unavailable"
         );
@@ -292,10 +287,35 @@ pub fn command(program: &OsStr) -> Command {
             host_grant_writes = "not-contained",
             credential_reads = "not-contained",
             process_reads = "not-contained",
-            operator_env_grants = "disabled: kernel write containment unavailable",
+            operator_env_grants = "disabled: kernel read/write containment unavailable",
             "agent command launch: filesystem/process read isolation unavailable on this host"
         );
         command
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_boundary(
+    command: &mut Command,
+    boundary: Result<crate::write_boundary::landlock::LandlockSandbox, String>,
+    active: bool,
+    contained: &'static str,
+) -> &'static str {
+    match boundary {
+        Ok(boundary) => {
+            boundary.install_std(command);
+            contained
+        }
+        Err(reason) if active => {
+            crate::write_boundary::refusal("Agent launch", &reason);
+            use std::os::unix::process::CommandExt;
+            // SAFETY: fail the child before exec without allocating or touching host state.
+            unsafe {
+                command.pre_exec(|| Err(std::io::Error::from_raw_os_error(libc::EPERM)));
+            }
+            "launch-refused"
+        }
+        Err(_) => "not-contained",
     }
 }
 
