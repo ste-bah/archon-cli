@@ -53,8 +53,8 @@ test('skeleton retries reference the latest judged candidate; the first prompt i
   const {ctx, files} = context();
   const replies = [candidate(1), candidate(2), candidate(3)];
   const out = await run(ctx, replies, [refused(), refused(), clean()]);
-  // SHA-256 of the dispatched first prompt without #568 (main plus #569 and the #572 obligation sentence), with these exact args.
-  assert.equal(digest(out.prompts[0]), '461667763b4154d59298571686e1b392e716b4e480d6a19a46a864a8fe076449');
+  // SHA-256 of the dispatched first prompt without #568 (main plus #569, the #572 obligation sentence, the #574 table-row constraint wording and the #575 source_sections shape field), with these exact args.
+  assert.equal(digest(out.prompts[0]), 'c5f9f5aa94dab4a99c5e5ae7b665baecf1704df86c05dd11127c4a7117308b40');
   assert(!out.prompts[0].includes('The previous candidate is in'));
   assert.equal(files.size, 2);
   assertPrevious(out.prompts[1], files, replies[0]);

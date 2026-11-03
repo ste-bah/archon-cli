@@ -16,6 +16,7 @@ fn skeleton_freeze_binds_acceptance_and_extends_the_existing_pin() {
         "depends_on":[],
         "blocks":[],
         "implements":["AC-X-001"],
+        "source_sections":["0"],
         "deliverable_contracts":[]
       }]
     }"#;
@@ -236,6 +237,7 @@ fn skeleton_candidate_prepares_exact_staged_bytes_without_reading_or_writing_liv
         "depends_on":[],
         "blocks":[],
         "implements":["AC-X-001"],
+        "source_sections":["0"],
         "deliverable_contracts":[]
       }]
     }"#
@@ -438,7 +440,7 @@ fn skeleton_accepts_host_constraints_and_leaves_missing_constraint_ownership_to_
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010-body.md".into(),
             implements: vec!["AC-X-001".into(), "QX-001".into()],
-            source_sections: Vec::new(),
+            source_sections: vec!["0".into()],
             depends_on: Vec::new(),
             blocks: Vec::new(),
             deliverable_contracts: Vec::new(),

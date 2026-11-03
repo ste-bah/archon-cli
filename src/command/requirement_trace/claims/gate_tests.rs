@@ -14,8 +14,11 @@ fn staged_envelope(dir: &std::path::Path) -> archon_workflow::GateEnvelopeV1 {
     let root = dir.join("repo");
     std::fs::create_dir_all(&root).unwrap();
     let base = repository(&root);
-    let good = task("TASK-X-010", "REQ-X-001", GOOD);
-    let bad = task("TASK-X-020", "REQ-X-002", FALSE);
+    // Both tasks cite the PRD's only section (its preamble, "0"), so the
+    // trace raises no uncited_section finding beside the refutation.
+    let cite = |text: String| text.replace("\nrequired_env_keys:", "\nsource_sections: [\"0\"]\nrequired_env_keys:");
+    let good = cite(task("TASK-X-010", "REQ-X-001", GOOD));
+    let bad = cite(task("TASK-X-020", "REQ-X-002", FALSE));
     let tasks = task_set(
         dir,
         &root,

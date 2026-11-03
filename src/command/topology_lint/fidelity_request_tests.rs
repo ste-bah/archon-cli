@@ -147,10 +147,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 569: the skeleton prompt states the obligation rule and the host-listed obligation ids, and its shape shows the record-binding fields.
     // Issue 571: the acceptance shape and covers rule name the REQ- requirement prefix.
     // Issue 572: the skeleton and body authors get the host-listed PRD constraint texts and their placement and keep rules.
+    // Issue 574/575: constraint wording names table rows; the skeleton shape gains source_sections, the skeleton author gets the qualifying PRD section keys and texts, and the body author its frozen source_sections and their texts.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c"
+        "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20"
     );
 }

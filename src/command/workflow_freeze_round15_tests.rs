@@ -84,7 +84,7 @@ fn sites() -> Vec<(&'static str, String, bool)> {
         ),
         (
             "extra positional field",
-            format!(r#"{{{HEAD},"tasks":[["T","f",[],[],[],[],@]]}}"#),
+            format!(r#"{{{HEAD},"tasks":[["T","f",[],[],[],[],[],@]]}}"#),
             false,
         ),
         ("read list", format!(r#"{{{HEAD},"tasks":@}}"#), false),

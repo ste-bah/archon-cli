@@ -87,7 +87,8 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 // #497 W3 merge with main and review fixes, version unchanged: the gate evaluation travels with an incomplete lint and host faults keep their typed cause; no question, verdict assertion or acceptance rule changed.
 // #527 re-pin only: the sources-digest env name became a named constant; no verdict meaning changed.
 // #572/#573 re-pin, version unchanged: obligation_constraints.rs (a module of obligation_ids.rs) is listed; PRD constraint extraction, a definition-form sub-bullet ending a parent obligation's text, and tab-indented REQ- bullets change which obligation ids and texts are asked, and every record is keyed by its obligation id and text, so no stored verdict means something else.
-pub const SOURCES_DIGEST: &str = "a659b7542e7b6187e021ec237ebf84df6edecc3c93c7409cb9beddac2d94921f";
+// #574/#575 re-pin, version unchanged: prd_sections.rs (a module of obligation_ids.rs) is listed; id-keyed table-row constraints and PRD section keys are not obligations, so the obligation ids and texts the critic is asked, and every stored verdict's meaning, are unchanged.
+pub const SOURCES_DIGEST: &str = "ba9fbfe829980cd377f51dd7ee4e648fd837f86bcdc306a532d2da6be49acefc";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.
@@ -102,6 +103,7 @@ pub const FILES: &[&str] = &[
     "crates/archon-workflow/src/obligation_continuations.rs",
     "crates/archon-workflow/src/obligation_ids.rs",
     "crates/archon-workflow/src/obligation_source_sections.rs",
+    "crates/archon-workflow/src/prd_sections.rs",
     "src/command/topology_lint/fidelity_candidate_fallback.rs",
     "src/command/topology_lint/fidelity_critic.rs",
     "src/command/topology_lint/fidelity_set_helpers.rs",

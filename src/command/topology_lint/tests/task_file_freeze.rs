@@ -50,7 +50,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
     let task_path = tasks.join("TASK-X-010-body.md");
     std::fs::write(
         &task_path,
-        "```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [AC-X-001]\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n# Body\n\n## Acceptance Criteria\n- Output is valid.\n\n## Files Expected to Change\n- `out/report.txt` — absent\n\n## Focused Tests\n- `sh -c 'grep -q Body TASK-X-010-body.md'`\n",
+        "```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [AC-X-001]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n# Body\n\n## Acceptance Criteria\n- Output is valid.\n\n## Files Expected to Change\n- `out/report.txt` — absent\n\n## Focused Tests\n- `sh -c 'grep -q Body TASK-X-010-body.md'`\n",
     )
     .unwrap();
     let skeleton = TaskSkeleton {
@@ -62,7 +62,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec!["AC-X-001".into()],
-            source_sections: Vec::new(),
+            source_sections: vec!["0".into()],
             deliverable_contracts: Vec::new(),
         }],
     };

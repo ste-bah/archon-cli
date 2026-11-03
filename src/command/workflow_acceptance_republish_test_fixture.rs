@@ -222,7 +222,8 @@ pub(crate) fn write_chain(
             depends_on: Vec::new(),
             blocks: Vec::new(),
             implements: vec![entry.id.clone()],
-            source_sections: Vec::new(),
+            // Every fixture PRD is unnumbered, so all of it is section "0".
+            source_sections: vec!["0".into()],
             deliverable_contracts: Vec::new(),
         })
         .collect::<Vec<_>>();
@@ -230,7 +231,7 @@ pub(crate) fn write_chain(
         std::fs::write(
             tasks.join(&task.file_name),
             format!(
-                "# {}\n\n```yaml\ntask_id: {}\ntitle: Test task\ncomplexity: low\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [{}]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n",
+                "# {}\n\n```yaml\ntask_id: {}\ntitle: Test task\ncomplexity: low\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [{}]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n",
                 task.task_id,
                 task.task_id,
                 task.implements.join(", "),

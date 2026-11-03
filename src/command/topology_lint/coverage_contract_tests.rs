@@ -35,7 +35,7 @@ fn corpus(declare_prd: bool) -> (tempfile::TempDir, PathBuf, PathBuf) {
     fs::write(
         tasks.join("TASK-LG-001.md"),
         format!(
-            "# TASK-LG-001 — Post\n\n```yaml\ntask_id: TASK-LG-001\n{prd_line}title: Post\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"G-LG-001\", \"AC-LG-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\nPost each line exactly once.\n"
+            "# TASK-LG-001 — Post\n\n```yaml\ntask_id: TASK-LG-001\n{prd_line}title: Post\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"G-LG-001\", \"AC-LG-001\"]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\nPost each line exactly once.\n"
         ),
     )
     .expect("task");

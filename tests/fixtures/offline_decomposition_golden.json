@@ -16,8 +16,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              77,
-              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+              78,
+              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -68,8 +68,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              77,
-              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+              78,
+              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -99,8 +99,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              77,
-              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+              78,
+              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -170,7 +170,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -230,7 +230,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -290,7 +290,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -309,7 +309,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author the complete TASK body for host-frozen task_id TASK-X-010.\nThe exact frozen file_name is TASK-X-010.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nCopy the frozen implements array exactly, preserving every value and its order.\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nFor each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nPreserve every frozen tuple field exactly.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Author the complete TASK body for host-frozen task_id TASK-X-010.\nThe exact frozen file_name is TASK-X-010.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nsource_sections: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nCopy the frozen implements array exactly, preserving every value and its order.\nThe task body must carry out what its frozen source_sections require for this task's work.\nFrozen source_sections: [\"0\"]\nCited PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nFor each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nPreserve every frozen tuple field exactly.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -319,7 +319,7 @@
           "artifacts": [],
           "commands_run": [],
           "data": {
-            "content": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
+            "content": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
             "stopReason": "end_turn",
             "tokensIn": 1,
             "tokensInUnknownReason": null,
@@ -350,7 +350,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -369,7 +369,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author the complete TASK body for host-frozen task_id TASK-X-020.\nThe exact frozen file_name is TASK-X-020.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nCopy the frozen implements array exactly, preserving every value and its order.\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nFor each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nPreserve every frozen tuple field exactly.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Author the complete TASK body for host-frozen task_id TASK-X-020.\nThe exact frozen file_name is TASK-X-020.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nsource_sections: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nCopy the frozen implements array exactly, preserving every value and its order.\nThe task body must carry out what its frozen source_sections require for this task's work.\nFrozen source_sections: [\"0\"]\nCited PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nFor each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nPreserve every frozen tuple field exactly.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -379,7 +379,7 @@
           "artifacts": [],
           "commands_run": [],
           "data": {
-            "content": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
+            "content": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
             "stopReason": "end_turn",
             "tokensIn": 1,
             "tokensInUnknownReason": null,
@@ -410,7 +410,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -431,7 +431,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nThe document must deserialize into this exact shape:\n{\"schema_version\":1,\"acceptance_digest\":\"\",\"tasks\":[{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation id the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"instance_source_records_field\":\"<optional: name of the records field in the instance source>\",\"registry_records_field\":\"<optional: name of the records field in the registry>\",\"min_instances\":1}]}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nThe host overwrites acceptance_digest: send the placeholder shown.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.\nEmit no prose, no explanation, no headings and no Markdown code fences before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nCite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). Every host-listed qualifying PRD section must be cited by source_sections of at least one task whose work it justifies; a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.\nQualifying PRD sections (key: title):\n\"0\": Artifact Preparation\nFull PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nThe document must deserialize into this exact shape:\n{\"schema_version\":1,\"acceptance_digest\":\"\",\"tasks\":[{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation id the host lists>\"],\"source_sections\":[\"<PRD section key the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"instance_source_records_field\":\"<optional: name of the records field in the instance source>\",\"registry_records_field\":\"<optional: name of the records field in the registry>\",\"min_instances\":1}]}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nThe host overwrites acceptance_digest: send the placeholder shown.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.\nEmit no prose, no explanation, no headings and no Markdown code fences before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -441,7 +441,7 @@
           "artifacts": [],
           "commands_run": [],
           "data": {
-            "content": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"task_id\":\"TASK-X-020\"}]}",
+            "content": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}",
             "stopReason": "end_turn",
             "tokensIn": 1,
             "tokensInUnknownReason": null,
@@ -472,7 +472,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -554,8 +554,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
-            "logicVersion": 77,
+            "logicDigest": "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
+            "logicVersion": 78,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -565,7 +565,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "31f009ff52e5c1f44dc8b7278093932efe02caad1f485fae12fd236b57765386",
+                  "blake3": "eb08d2791c43023a76366b930e83ccc8468bd690d1b732907f3acd0f5ec663af",
                   "content": {
                     "acceptance": [
                       {
@@ -583,8 +583,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              77,
-                              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+                              78,
+                              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -636,8 +636,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              77,
-                              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+                              78,
+                              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -667,8 +667,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              77,
-                              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+                              78,
+                              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -686,11 +686,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "8302210535518f98889184285c1f6e976061931701c148b140e114148343c89e",
+                  "blake3": "6726171543d88f30ccc43bee6a5e730f7d81455a6cd7e4fcc53e874bc2afc0e3",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+                    "digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -702,18 +702,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285",
+                  "blake3": "ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4",
                   "content": {
-                    "acceptance_digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+                    "acceptance_digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-b1ba2f5af3d1",
+                    "freeze_event_id": "acceptance-freeze-d4b4633d0396",
                     "lineage_recording": 1,
-                    "skeleton_digest": "f594a2ac62846611d5d25ca4fc5d9a3032863ce08a7b44657d76b8df5f56d410",
+                    "skeleton_digest": "35dda0e87c9c461f117c6a66a469354582e8604cbeb7feb9206962ca5f0e2013",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -787,7 +787,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -842,8 +842,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
-            "logicVersion": 77,
+            "logicDigest": "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
+            "logicVersion": 78,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -853,7 +853,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "31f009ff52e5c1f44dc8b7278093932efe02caad1f485fae12fd236b57765386",
+                  "blake3": "eb08d2791c43023a76366b930e83ccc8468bd690d1b732907f3acd0f5ec663af",
                   "content": {
                     "acceptance": [
                       {
@@ -871,8 +871,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              77,
-                              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+                              78,
+                              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -924,8 +924,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              77,
-                              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+                              78,
+                              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -955,8 +955,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              77,
-                              "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
+                              78,
+                              "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -975,11 +975,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "8302210535518f98889184285c1f6e976061931701c148b140e114148343c89e",
+                  "blake3": "6726171543d88f30ccc43bee6a5e730f7d81455a6cd7e4fcc53e874bc2afc0e3",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+                    "digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -992,18 +992,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285",
+                  "blake3": "ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4",
                   "content": {
-                    "acceptance_digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+                    "acceptance_digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-b1ba2f5af3d1",
+                    "freeze_event_id": "acceptance-freeze-d4b4633d0396",
                     "lineage_recording": 1,
-                    "skeleton_digest": "f594a2ac62846611d5d25ca4fc5d9a3032863ce08a7b44657d76b8df5f56d410",
+                    "skeleton_digest": "35dda0e87c9c461f117c6a66a469354582e8604cbeb7feb9206962ca5f0e2013",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1032,7 +1032,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
             "stderrBytes": 647,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"31f009ff52e5c1f44dc8b7278093932efe02caad1f485fae12fd236b57765386\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"8302210535518f98889184285c1f6e976061931701c148b140e114148343c89e\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a2a8d4788243d71ae9cfed38b08d8a6b25ced4ed2668a8cd9a7d6b06f61d438a\",\"exists\":true},\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"eb08d2791c43023a76366b930e83ccc8468bd690d1b732907f3acd0f5ec663af\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"6726171543d88f30ccc43bee6a5e730f7d81455a6cd7e4fcc53e874bc2afc0e3\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"9769f9869c02159f4510fecbe9309ebc03028be5886e925752f5ff64a3cfb6cd\",\"exists\":true},\"schema_version\":1}",
             "stdoutBytes": 799,
             "stdoutTruncated": false,
             "timedOut": false
@@ -1051,7 +1051,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1066,11 +1066,11 @@
           "options": {
             "extra": {
               "commandId": "freeze-skeleton",
-              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"task_id\":\"TASK-X-020\"}]}"
+              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}"
             },
             "host_command": {
               "commandId": "freeze-skeleton",
-              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"task_id\":\"TASK-X-020\"}]}"
+              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}"
             },
             "target_files": [],
             "target_files_from_item": false
@@ -1106,8 +1106,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
-            "logicVersion": 8,
+            "logicDigest": "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
+            "logicVersion": 9,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative frozen skeleton chain evaluated"
@@ -1117,18 +1117,18 @@
               "command_id": "freeze-skeleton",
               "entries": [
                 {
-                  "blake3": "7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285",
+                  "blake3": "ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4",
                   "content": {
-                    "acceptance_digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+                    "acceptance_digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-b1ba2f5af3d1",
+                    "freeze_event_id": "acceptance-freeze-d4b4633d0396",
                     "lineage_recording": 1,
-                    "skeleton_digest": "f594a2ac62846611d5d25ca4fc5d9a3032863ce08a7b44657d76b8df5f56d410",
+                    "skeleton_digest": "35dda0e87c9c461f117c6a66a469354582e8604cbeb7feb9206962ca5f0e2013",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1152,9 +1152,9 @@
                   "relative_path": "gate-envelope.json"
                 },
                 {
-                  "blake3": "20ef04d4989828d9bcf60aa88bbf12a2f8a35087e336f6e465c97ff95f54bb25",
+                  "blake3": "f97222f78335e86219a92a89b8da7a68db6a536eb1ca16aacee6d15c8d98658f",
                   "content": {
-                    "acceptance_digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+                    "acceptance_digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
                     "schema_version": 1,
                     "tasks": [
                       {
@@ -1190,6 +1190,9 @@
                           "REQ-X-001",
                           "AC-X-001"
                         ],
+                        "source_sections": [
+                          "0"
+                        ],
                         "task_id": "TASK-X-010"
                       },
                       {
@@ -1223,6 +1226,9 @@
                         "implements": [
                           "REQ-X-002"
                         ],
+                        "source_sections": [
+                          "0"
+                        ],
                         "task_id": "TASK-X-020"
                       }
                     ]
@@ -1231,11 +1237,11 @@
                   "relative_path": "task-skeleton.json"
                 },
                 {
-                  "blake3": "5f77283284def6c39d69d1d60820858a0e97a151ffe7e4242f6f211a61aece5d",
+                  "blake3": "872bcfb35bf504ffa542c3507e2cd66bf46bfb81dba5448f3825109308a1313f",
                   "content": {
-                    "acceptance_digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+                    "acceptance_digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
                     "algorithm": "blake3",
-                    "digest": "f594a2ac62846611d5d25ca4fc5d9a3032863ce08a7b44657d76b8df5f56d410",
+                    "digest": "35dda0e87c9c461f117c6a66a469354582e8604cbeb7feb9206962ca5f0e2013",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1252,7 +1258,7 @@
             "stderr": "",
             "stderrBytes": 0,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"20ef04d4989828d9bcf60aa88bbf12a2f8a35087e336f6e465c97ff95f54bb25\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"5f77283284def6c39d69d1d60820858a0e97a151ffe7e4242f6f211a61aece5d\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"f97222f78335e86219a92a89b8da7a68db6a536eb1ca16aacee6d15c8d98658f\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"872bcfb35bf504ffa542c3507e2cd66bf46bfb81dba5448f3825109308a1313f\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
             "stdoutBytes": 662,
             "stdoutTruncated": false,
             "subjects": [
@@ -1281,7 +1287,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1296,7 +1302,7 @@
           "options": {
             "extra": {
               "commandId": "land-task-body",
-              "stdin": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
+              "stdin": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
               "target": {
                 "fileName": "TASK-X-010.md",
                 "taskId": "TASK-X-010"
@@ -1304,7 +1310,7 @@
             },
             "host_command": {
               "commandId": "land-task-body",
-              "stdin": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
+              "stdin": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
               "target": {
                 "fileName": "TASK-X-010.md",
                 "taskId": "TASK-X-010"
@@ -1344,8 +1350,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-            "logicVersion": 30,
+            "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+            "logicVersion": 31,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1355,8 +1361,8 @@
               "command_id": "land-task-body",
               "entries": [
                 {
-                  "blake3": "cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d",
-                  "content": "```yaml\nblocks:\n- TASK-X-020\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: text\n  artifact_path: src/alpha.txt\n  kind: alpha_text\n  min_instances: 1\n  registry_minimum_count: 0\n  required_universe: false\n  series_overlap_min_rows: 0\n- artifact_format: json\n  artifact_path: .archon/proof/outcome.json\n  kind: generic_outcome\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on: []\nimplements:\n- REQ-X-001\n- AC-X-001\nrequired_env_keys: []\nrequired_tools:\n- test\n- python3\nstatus: ready\ntask_id: TASK-X-010\ntitle: Create alpha data\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
+                  "blake3": "56dd9dccd6108e0cfcc5b9b62bf30070a587f3ca9b266b154d59cbaeb0701d80",
+                  "content": "```yaml\nblocks:\n- TASK-X-020\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: text\n  artifact_path: src/alpha.txt\n  kind: alpha_text\n  min_instances: 1\n  registry_minimum_count: 0\n  required_universe: false\n  series_overlap_min_rows: 0\n- artifact_format: json\n  artifact_path: .archon/proof/outcome.json\n  kind: generic_outcome\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on: []\nimplements:\n- REQ-X-001\n- AC-X-001\nrequired_env_keys: []\nrequired_tools:\n- test\n- python3\nsource_sections:\n- '0'\nstatus: ready\ntask_id: TASK-X-010\ntitle: Create alpha data\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
                   "destination_path": "<project-root>/tasks/PRD-X/TASK-X-010.md",
                   "relative_path": "TASK-X-010.md"
                 },
@@ -1376,7 +1382,7 @@
             "stderr": "archon-host-activity: child making progress\n",
             "stderrBytes": 44,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"56dd9dccd6108e0cfcc5b9b62bf30070a587f3ca9b266b154d59cbaeb0701d80\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 397,
             "stdoutTruncated": false,
             "subjects": [
@@ -1401,7 +1407,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1416,7 +1422,7 @@
           "options": {
             "extra": {
               "commandId": "land-task-body",
-              "stdin": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
+              "stdin": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
               "target": {
                 "fileName": "TASK-X-020.md",
                 "taskId": "TASK-X-020"
@@ -1424,7 +1430,7 @@
             },
             "host_command": {
               "commandId": "land-task-body",
-              "stdin": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
+              "stdin": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
               "target": {
                 "fileName": "TASK-X-020.md",
                 "taskId": "TASK-X-020"
@@ -1464,8 +1470,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-            "logicVersion": 30,
+            "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+            "logicVersion": 31,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1475,8 +1481,8 @@
               "command_id": "land-task-body",
               "entries": [
                 {
-                  "blake3": "13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a",
-                  "content": "```yaml\nblocks: []\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: json\n  artifact_path: src/beta.json\n  kind: beta_json\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on:\n- consumes:\n  - artifact_path: src/alpha.txt\n  ordering_only: false\n  task_id: TASK-X-010\nimplements:\n- REQ-X-002\nrequired_env_keys: []\nrequired_tools:\n- python3\nstatus: ready\ntask_id: TASK-X-020\ntitle: Create beta data\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
+                  "blake3": "63b9664f696d37d8bd1298f41b8d247f1d3c0a75c5295dd1fffd2c6cd7ef9e1a",
+                  "content": "```yaml\nblocks: []\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: json\n  artifact_path: src/beta.json\n  kind: beta_json\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on:\n- consumes:\n  - artifact_path: src/alpha.txt\n  ordering_only: false\n  task_id: TASK-X-010\nimplements:\n- REQ-X-002\nrequired_env_keys: []\nrequired_tools:\n- python3\nsource_sections:\n- '0'\nstatus: ready\ntask_id: TASK-X-020\ntitle: Create beta data\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
                   "destination_path": "<project-root>/tasks/PRD-X/TASK-X-020.md",
                   "relative_path": "TASK-X-020.md"
                 },
@@ -1496,7 +1502,7 @@
             "stderr": "archon-host-activity: child making progress\n",
             "stderrBytes": 44,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"63b9664f696d37d8bd1298f41b8d247f1d3c0a75c5295dd1fffd2c6cd7ef9e1a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 396,
             "stdoutTruncated": false,
             "subjects": [
@@ -1521,7 +1527,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1575,8 +1581,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "19d24187f336d2cae49ccf65b2d389206f7b1c4066fe9f79a80b24d122552229",
-            "logicVersion": 9,
+            "logicDigest": "adfd0a2c0eed937d1edad46cecc73a20ef112446644db2bce6814d3b4f841a7a",
+            "logicVersion": 10,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative requirements-trace postcondition evaluated"
@@ -1630,7 +1636,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1684,8 +1690,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-            "logicVersion": 25,
+            "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+            "logicVersion": 26,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative task-set-lint postcondition evaluated"
@@ -1739,7 +1745,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1770,8 +1776,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
-                  "logicVersion": 77,
+                  "logicDigest": "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
+                  "logicVersion": 78,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1781,13 +1787,13 @@
                     "command_id": "freeze-acceptance",
                     "entries": [
                       {
-                        "blake3": "31f009ff52e5c1f44dc8b7278093932efe02caad1f485fae12fd236b57765386",
+                        "blake3": "eb08d2791c43023a76366b930e83ccc8468bd690d1b732907f3acd0f5ec663af",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.json"
                       },
                       {
-                        "blake3": "8302210535518f98889184285c1f6e976061931701c148b140e114148343c89e",
+                        "blake3": "6726171543d88f30ccc43bee6a5e730f7d81455a6cd7e4fcc53e874bc2afc0e3",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.lock"
@@ -1833,8 +1839,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
-                      "logicVersion": 77,
+                      "logicDigest": "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
+                      "logicVersion": 78,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1844,13 +1850,13 @@
                         "command_id": "freeze-acceptance",
                         "entries": [
                           {
-                            "blake3": "31f009ff52e5c1f44dc8b7278093932efe02caad1f485fae12fd236b57765386",
+                            "blake3": "eb08d2791c43023a76366b930e83ccc8468bd690d1b732907f3acd0f5ec663af",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.json"
                           },
                           {
-                            "blake3": "8302210535518f98889184285c1f6e976061931701c148b140e114148343c89e",
+                            "blake3": "6726171543d88f30ccc43bee6a5e730f7d81455a6cd7e4fcc53e874bc2afc0e3",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.lock"
@@ -1872,7 +1878,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                       "stderrBytes": 647,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"31f009ff52e5c1f44dc8b7278093932efe02caad1f485fae12fd236b57765386\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"8302210535518f98889184285c1f6e976061931701c148b140e114148343c89e\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a2a8d4788243d71ae9cfed38b08d8a6b25ced4ed2668a8cd9a7d6b06f61d438a\",\"exists\":true},\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"eb08d2791c43023a76366b930e83ccc8468bd690d1b732907f3acd0f5ec663af\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"6726171543d88f30ccc43bee6a5e730f7d81455a6cd7e4fcc53e874bc2afc0e3\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"9769f9869c02159f4510fecbe9309ebc03028be5886e925752f5ff64a3cfb6cd\",\"exists\":true},\"schema_version\":1}",
                       "stdoutBytes": 799,
                       "stdoutTruncated": false,
                       "timedOut": false
@@ -1894,7 +1900,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                   "stderrBytes": 647,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"31f009ff52e5c1f44dc8b7278093932efe02caad1f485fae12fd236b57765386\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"8302210535518f98889184285c1f6e976061931701c148b140e114148343c89e\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"a2a8d4788243d71ae9cfed38b08d8a6b25ced4ed2668a8cd9a7d6b06f61d438a\",\"exists\":true},\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"eb08d2791c43023a76366b930e83ccc8468bd690d1b732907f3acd0f5ec663af\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"6726171543d88f30ccc43bee6a5e730f7d81455a6cd7e4fcc53e874bc2afc0e3\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"9769f9869c02159f4510fecbe9309ebc03028be5886e925752f5ff64a3cfb6cd\",\"exists\":true},\"schema_version\":1}",
                   "stdoutBytes": 799,
                   "stdoutTruncated": false,
                   "summary": "host command '<host-call-id>' completed with exit Some(0)",
@@ -1916,8 +1922,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
-                  "logicVersion": 8,
+                  "logicDigest": "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
+                  "logicVersion": 9,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative frozen skeleton chain evaluated"
@@ -1927,7 +1933,7 @@
                     "command_id": "freeze-skeleton",
                     "entries": [
                       {
-                        "blake3": "7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285",
+                        "blake3": "ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4",
                         "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                         "prior_blake3": "<receipt-digest-of-overwritten-content>",
                         "relative_path": "acceptance-pin.json"
@@ -1938,12 +1944,12 @@
                         "relative_path": "gate-envelope.json"
                       },
                       {
-                        "blake3": "20ef04d4989828d9bcf60aa88bbf12a2f8a35087e336f6e465c97ff95f54bb25",
+                        "blake3": "f97222f78335e86219a92a89b8da7a68db6a536eb1ca16aacee6d15c8d98658f",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                         "relative_path": "task-skeleton.json"
                       },
                       {
-                        "blake3": "5f77283284def6c39d69d1d60820858a0e97a151ffe7e4242f6f211a61aece5d",
+                        "blake3": "872bcfb35bf504ffa542c3507e2cd66bf46bfb81dba5448f3825109308a1313f",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                         "relative_path": "task-skeleton.lock"
                       }
@@ -1977,8 +1983,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "c1b5eafa88a3a8fe3a78c3d5b07d6caf35e4cfe11ece802dc9e45a526da2523e",
-                      "logicVersion": 8,
+                      "logicDigest": "f73d089cb985cade4be89da99159f74aee09a5888178e73818c086178d6b8855",
+                      "logicVersion": 9,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative frozen skeleton chain evaluated"
@@ -1988,7 +1994,7 @@
                         "command_id": "freeze-skeleton",
                         "entries": [
                           {
-                            "blake3": "7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285",
+                            "blake3": "ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4",
                             "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                             "prior_blake3": "<receipt-digest-of-overwritten-content>",
                             "relative_path": "acceptance-pin.json"
@@ -1999,12 +2005,12 @@
                             "relative_path": "gate-envelope.json"
                           },
                           {
-                            "blake3": "20ef04d4989828d9bcf60aa88bbf12a2f8a35087e336f6e465c97ff95f54bb25",
+                            "blake3": "f97222f78335e86219a92a89b8da7a68db6a536eb1ca16aacee6d15c8d98658f",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                             "relative_path": "task-skeleton.json"
                           },
                           {
-                            "blake3": "5f77283284def6c39d69d1d60820858a0e97a151ffe7e4242f6f211a61aece5d",
+                            "blake3": "872bcfb35bf504ffa542c3507e2cd66bf46bfb81dba5448f3825109308a1313f",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                             "relative_path": "task-skeleton.lock"
                           }
@@ -2014,7 +2020,7 @@
                       "stderr": "",
                       "stderrBytes": 0,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"20ef04d4989828d9bcf60aa88bbf12a2f8a35087e336f6e465c97ff95f54bb25\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"5f77283284def6c39d69d1d60820858a0e97a151ffe7e4242f6f211a61aece5d\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"f97222f78335e86219a92a89b8da7a68db6a536eb1ca16aacee6d15c8d98658f\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"872bcfb35bf504ffa542c3507e2cd66bf46bfb81dba5448f3825109308a1313f\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                       "stdoutBytes": 662,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2046,7 +2052,7 @@
                   "stderr": "",
                   "stderrBytes": 0,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"7ff7688567cd5b06936ce1bf23ce13fc750e77f1fe06bdf7b446cac44cbd6285\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"20ef04d4989828d9bcf60aa88bbf12a2f8a35087e336f6e465c97ff95f54bb25\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"5f77283284def6c39d69d1d60820858a0e97a151ffe7e4242f6f211a61aece5d\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"ff4952cb30a3b996348f4ecd51a2fc2c6faa864713f188a1ff745f51b28bbea4\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"f97222f78335e86219a92a89b8da7a68db6a536eb1ca16aacee6d15c8d98658f\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"872bcfb35bf504ffa542c3507e2cd66bf46bfb81dba5448f3825109308a1313f\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                   "stdoutBytes": 662,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2078,8 +2084,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-                  "logicVersion": 30,
+                  "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+                  "logicVersion": 31,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2089,7 +2095,7 @@
                     "command_id": "land-task-body",
                     "entries": [
                       {
-                        "blake3": "cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d",
+                        "blake3": "56dd9dccd6108e0cfcc5b9b62bf30070a587f3ca9b266b154d59cbaeb0701d80",
                         "destination_path": "<project-root>/tasks/PRD-X/TASK-X-010.md",
                         "relative_path": "TASK-X-010.md"
                       },
@@ -2128,8 +2134,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-                      "logicVersion": 30,
+                      "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+                      "logicVersion": 31,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2139,7 +2145,7 @@
                         "command_id": "land-task-body",
                         "entries": [
                           {
-                            "blake3": "cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d",
+                            "blake3": "56dd9dccd6108e0cfcc5b9b62bf30070a587f3ca9b266b154d59cbaeb0701d80",
                             "destination_path": "<project-root>/tasks/PRD-X/TASK-X-010.md",
                             "relative_path": "TASK-X-010.md"
                           },
@@ -2154,7 +2160,7 @@
                       "stderr": "archon-host-activity: child making progress\n",
                       "stderrBytes": 44,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"56dd9dccd6108e0cfcc5b9b62bf30070a587f3ca9b266b154d59cbaeb0701d80\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 397,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2182,7 +2188,7 @@
                   "stderr": "archon-host-activity: child making progress\n",
                   "stderrBytes": 44,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"56dd9dccd6108e0cfcc5b9b62bf30070a587f3ca9b266b154d59cbaeb0701d80\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 397,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2210,8 +2216,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-                  "logicVersion": 30,
+                  "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+                  "logicVersion": 31,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2221,7 +2227,7 @@
                     "command_id": "land-task-body",
                     "entries": [
                       {
-                        "blake3": "13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a",
+                        "blake3": "63b9664f696d37d8bd1298f41b8d247f1d3c0a75c5295dd1fffd2c6cd7ef9e1a",
                         "destination_path": "<project-root>/tasks/PRD-X/TASK-X-020.md",
                         "relative_path": "TASK-X-020.md"
                       },
@@ -2260,8 +2266,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-                      "logicVersion": 30,
+                      "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+                      "logicVersion": 31,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2271,7 +2277,7 @@
                         "command_id": "land-task-body",
                         "entries": [
                           {
-                            "blake3": "13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a",
+                            "blake3": "63b9664f696d37d8bd1298f41b8d247f1d3c0a75c5295dd1fffd2c6cd7ef9e1a",
                             "destination_path": "<project-root>/tasks/PRD-X/TASK-X-020.md",
                             "relative_path": "TASK-X-020.md"
                           },
@@ -2286,7 +2292,7 @@
                       "stderr": "archon-host-activity: child making progress\n",
                       "stderrBytes": 44,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"63b9664f696d37d8bd1298f41b8d247f1d3c0a75c5295dd1fffd2c6cd7ef9e1a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 396,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2314,7 +2320,7 @@
                   "stderr": "archon-host-activity: child making progress\n",
                   "stderrBytes": 44,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"63b9664f696d37d8bd1298f41b8d247f1d3c0a75c5295dd1fffd2c6cd7ef9e1a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 396,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2342,8 +2348,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-                  "logicVersion": 25,
+                  "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+                  "logicVersion": 26,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2387,8 +2393,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "28c97de6e818215e0cf2e64a0f06e5391dffafc9de7f99b849cbab719921e0a8",
-                      "logicVersion": 25,
+                      "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+                      "logicVersion": 26,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2472,8 +2478,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "19d24187f336d2cae49ccf65b2d389206f7b1c4066fe9f79a80b24d122552229",
-                  "logicVersion": 9,
+                  "logicDigest": "adfd0a2c0eed937d1edad46cecc73a20ef112446644db2bce6814d3b4f841a7a",
+                  "logicVersion": 10,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2517,8 +2523,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "19d24187f336d2cae49ccf65b2d389206f7b1c4066fe9f79a80b24d122552229",
-                      "logicVersion": 9,
+                      "logicDigest": "adfd0a2c0eed937d1edad46cecc73a20ef112446644db2bce6814d3b4f841a7a",
+                      "logicVersion": 10,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2686,7 +2692,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -2734,14 +2740,14 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c",
+        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
     ]
   ],
   "skeleton": {
-    "acceptance_digest": "b1ba2f5af3d1b37fb3b12dfbc9ed8650d9bce33902b0773c01b830be50dfb4e3",
+    "acceptance_digest": "d4b4633d03962cc4ea403b1955a4ded1d7879eaddf282ef9099c83d5895a1cf4",
     "schema_version": 1,
     "tasks": [
       {
@@ -2777,6 +2783,9 @@
           "REQ-X-001",
           "AC-X-001"
         ],
+        "source_sections": [
+          "0"
+        ],
         "task_id": "TASK-X-010"
       },
       {
@@ -2810,6 +2819,9 @@
         "implements": [
           "REQ-X-002"
         ],
+        "source_sections": [
+          "0"
+        ],
         "task_id": "TASK-X-020"
       }
     ]
@@ -2817,11 +2829,11 @@
   "task_bodies": [
     [
       "TASK-X-010.md",
-      "```yaml\nblocks:\n- TASK-X-020\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: text\n  artifact_path: src/alpha.txt\n  kind: alpha_text\n  min_instances: 1\n  registry_minimum_count: 0\n  required_universe: false\n  series_overlap_min_rows: 0\n- artifact_format: json\n  artifact_path: .archon/proof/outcome.json\n  kind: generic_outcome\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on: []\nimplements:\n- REQ-X-001\n- AC-X-001\nrequired_env_keys: []\nrequired_tools:\n- test\n- python3\nstatus: ready\ntask_id: TASK-X-010\ntitle: Create alpha data\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n"
+      "```yaml\nblocks:\n- TASK-X-020\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: text\n  artifact_path: src/alpha.txt\n  kind: alpha_text\n  min_instances: 1\n  registry_minimum_count: 0\n  required_universe: false\n  series_overlap_min_rows: 0\n- artifact_format: json\n  artifact_path: .archon/proof/outcome.json\n  kind: generic_outcome\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on: []\nimplements:\n- REQ-X-001\n- AC-X-001\nrequired_env_keys: []\nrequired_tools:\n- test\n- python3\nsource_sections:\n- '0'\nstatus: ready\ntask_id: TASK-X-010\ntitle: Create alpha data\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n"
     ],
     [
       "TASK-X-020.md",
-      "```yaml\nblocks: []\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: json\n  artifact_path: src/beta.json\n  kind: beta_json\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on:\n- consumes:\n  - artifact_path: src/alpha.txt\n  ordering_only: false\n  task_id: TASK-X-010\nimplements:\n- REQ-X-002\nrequired_env_keys: []\nrequired_tools:\n- python3\nstatus: ready\ntask_id: TASK-X-020\ntitle: Create beta data\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n"
+      "```yaml\nblocks: []\ncomplexity: low\ndeliverable_contracts:\n- artifact_format: json\n  artifact_path: src/beta.json\n  kind: beta_json\n  min_instances: 1\n  registry_minimum_count: 0\n  required_true_fields:\n  - ready\n  required_universe: false\n  series_overlap_min_rows: 0\ndepends_on:\n- consumes:\n  - artifact_path: src/alpha.txt\n  ordering_only: false\n  task_id: TASK-X-010\nimplements:\n- REQ-X-002\nrequired_env_keys: []\nrequired_tools:\n- python3\nsource_sections:\n- '0'\nstatus: ready\ntask_id: TASK-X-020\ntitle: Create beta data\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n"
     ]
   ]
 }

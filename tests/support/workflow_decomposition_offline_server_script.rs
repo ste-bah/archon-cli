@@ -121,14 +121,14 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "acceptance_digest": "",
                 "tasks": [
                     {
-                        "task_id": "TASK-X-010", "file_name": "TASK-X-010.md", "depends_on": [], "blocks": ["TASK-X-020"], "implements": ["REQ-X-001", "AC-X-001"],
+                        "task_id": "TASK-X-010", "file_name": "TASK-X-010.md", "depends_on": [], "blocks": ["TASK-X-020"], "implements": ["REQ-X-001", "AC-X-001"], "source_sections": ["0"],
                         "deliverable_contracts": [
                             {"kind": "alpha_text", "artifact_path": "src/alpha.txt", "artifact_format": "text", "min_instances": 1},
                             {"kind": "generic_outcome", "artifact_path": ".archon/proof/outcome.json", "artifact_format": "json", "required_true_fields": ["ready"], "min_instances": 1}
                         ]
                     },
                     {
-                        "task_id": "TASK-X-020", "file_name": "TASK-X-020.md", "depends_on": [{"task_id": "TASK-X-010", "consumes": [{"artifact_path": "src/alpha.txt"}], "ordering_only": false}], "blocks": [], "implements": ["REQ-X-002"],
+                        "task_id": "TASK-X-020", "file_name": "TASK-X-020.md", "depends_on": [{"task_id": "TASK-X-010", "consumes": [{"artifact_path": "src/alpha.txt"}], "ordering_only": false}], "blocks": [], "implements": ["REQ-X-002"], "source_sections": ["0"],
                         "deliverable_contracts": [{"kind": "beta_json", "artifact_path": "src/beta.json", "artifact_format": "json", "required_true_fields": ["ready"], "min_instances": 1}]
                     }
                 ]
@@ -186,7 +186,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
         return (
             "body",
             format!(
-                "```yaml\ntask_id: {id}\ntitle: {title}\ncomplexity: low\nstatus: ready\ndepends_on: {dep}\nblocks: {blocks}\nimplements: [{req}]\nrequired_env_keys: []\nrequired_tools: {}\ndeliverable_contracts:\n  {contracts}\n```\n\n## Objective\n{text}\n\n## Files Expected to Change\n{observations}\n\n## Focused Tests\n{focused_tests}\n",
+                "```yaml\ntask_id: {id}\ntitle: {title}\ncomplexity: low\nstatus: ready\ndepends_on: {dep}\nblocks: {blocks}\nimplements: [{req}]\nsource_sections: [\"0\"]\nrequired_env_keys: []\nrequired_tools: {}\ndeliverable_contracts:\n  {contracts}\n```\n\n## Objective\n{text}\n\n## Files Expected to Change\n{observations}\n\n## Focused Tests\n{focused_tests}\n",
                 if second {
                     "[python3]"
                 } else {

@@ -228,6 +228,7 @@ pub(super) fn positional_samples() -> Vec<(bool, Value)> {
         [dependency.clone(), dependency],
         ["TASK-X-003", "TASK-X-004"],
         ["REQ-1", "REQ-2"],
+        ["7", "7.1"],
         [positional_contract(), positional_contract()]
     ]);
     let judgment = json!(["accepted", "none", "reason", "call", {"arbitrary":[0,null,false]}]);

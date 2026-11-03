@@ -7,7 +7,7 @@ use archon_workflow::task_set_contract::TASK_SKELETON_FILE;
 
 fn skeleton(task: &str) -> String {
     format!(
-        r#"{{"schema_version":1,"acceptance_digest":"untrusted-draft-link","tasks":[{{"task_id":"{task}","file_name":"{task}-body.md","depends_on":[],"blocks":[],"implements":["AC-X-001"],"deliverable_contracts":[]}}]}}"#
+        r#"{{"schema_version":1,"acceptance_digest":"untrusted-draft-link","tasks":[{{"task_id":"{task}","file_name":"{task}-body.md","depends_on":[],"blocks":[],"implements":["AC-X-001"],"source_sections":["0"],"deliverable_contracts":[]}}]}}"#
     )
 }
 
@@ -47,7 +47,7 @@ fn a_candidate_that_drops_a_frozen_task_is_refused_before_publication() {
     );
 
     // Keeping the frozen task and adding one is a re-author it may make.
-    let kept = r#"{"schema_version":1,"acceptance_digest":"x","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010-body.md","depends_on":[],"blocks":[],"implements":["AC-X-001"],"deliverable_contracts":[]},{"task_id":"TASK-X-020","file_name":"TASK-X-020-body.md","depends_on":[],"blocks":[],"implements":["AC-X-001"],"deliverable_contracts":[]}]}"#;
+    let kept = r#"{"schema_version":1,"acceptance_digest":"x","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010-body.md","depends_on":[],"blocks":[],"implements":["AC-X-001"],"source_sections":["0"],"deliverable_contracts":[]},{"task_id":"TASK-X-020","file_name":"TASK-X-020-body.md","depends_on":[],"blocks":[],"implements":["AC-X-001"],"source_sections":["0"],"deliverable_contracts":[]}]}"#;
     let kept = prepare_skeleton_freeze_from_candidate(
         temp.path(),
         &tasks,
