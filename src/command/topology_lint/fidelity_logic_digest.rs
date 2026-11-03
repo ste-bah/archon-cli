@@ -86,7 +86,8 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 // Typed idle recovery preserves the question, reply validation and stored verdict meaning.
 // #497 W3 merge with main and review fixes, version unchanged: the gate evaluation travels with an incomplete lint and host faults keep their typed cause; no question, verdict assertion or acceptance rule changed.
 // #527 re-pin only: the sources-digest env name became a named constant; no verdict meaning changed.
-pub const SOURCES_DIGEST: &str = "88fdc3f6a259b7cc4b4c2a7d0151315f8ec057d5c3268155485b95b4a42708a7";
+// #572/#573 re-pin, version unchanged: obligation_constraints.rs (a module of obligation_ids.rs) is listed; PRD constraint extraction, a definition-form sub-bullet ending a parent obligation's text, and tab-indented REQ- bullets change which obligation ids and texts are asked, and every record is keyed by its obligation id and text, so no stored verdict means something else.
+pub const SOURCES_DIGEST: &str = "a659b7542e7b6187e021ec237ebf84df6edecc3c93c7409cb9beddac2d94921f";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.
@@ -97,6 +98,7 @@ pub const FILES: &[&str] = &[
     "crates/archon-workflow/src/fidelity_audit_context.rs",
     "crates/archon-workflow/src/fidelity_audit_normalize.rs",
     "crates/archon-workflow/src/fidelity_audit_reply.rs",
+    "crates/archon-workflow/src/obligation_constraints.rs",
     "crates/archon-workflow/src/obligation_continuations.rs",
     "crates/archon-workflow/src/obligation_ids.rs",
     "crates/archon-workflow/src/obligation_source_sections.rs",

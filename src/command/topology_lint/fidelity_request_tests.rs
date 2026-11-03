@@ -146,10 +146,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 568: a skeleton re-author prompt names the previous candidate in a host-written context file (path and sha256), never inline.
     // Issue 569: the skeleton prompt states the obligation rule and the host-listed obligation ids, and its shape shows the record-binding fields.
     // Issue 571: the acceptance shape and covers rule name the REQ- requirement prefix.
+    // Issue 572: the skeleton and body authors get the host-listed PRD constraint texts and their placement and keep rules.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "defc95672bf4f63ee809083fe3b4d3613c6fb015d9863422730a317f6987f50f"
+        "ff100bc81649c872de146ad28dfd57c89906e5e6feb50069959b263c623af51c"
     );
 }

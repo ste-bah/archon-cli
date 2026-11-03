@@ -10,7 +10,7 @@ fn each_unowned_constraint_is_a_skeleton_repair_and_owned_constraints_are_known(
     let write_task = |ids: &str| {
         fs::write(
             &task,
-            format!("```yaml\ntask_id: TASK-X-001\nprd: PRD-X\nimplements: [{ids}]\n```\n"),
+            format!("# TASK-X-001\n\n```yaml\ntask_id: TASK-X-001\nprd: PRD-X\ntitle: \"t\"\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [{ids}]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n"),
         )
         .unwrap()
     };
