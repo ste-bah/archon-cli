@@ -214,6 +214,7 @@ async function authorCandidate(w, policy) {
     : null;
   if (seeded) [feedback, lastFindings, openFindings] = [seeded.feedback.slice(), seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
+  let previousCandidate = seeded ? seeded.previousCandidate : policy.previousCandidate;
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
@@ -267,10 +268,10 @@ async function authorCandidate(w, policy) {
     const group = repairRung === 3 && !policy.author ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : "";
     let authored;
     try {
-      const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-      const prompt = authorPrompt(`${policy.prompt()}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
+        const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
+        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
         // Context writes are not journaled. Reserve no ordinal until the
         // complete prompt is ready, so recovery and replay dispatch identically.
         const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
@@ -339,6 +340,7 @@ async function authorCandidate(w, policy) {
       stdin: authored.content,
       ...(policy.target ? { target: policy.target } : {})
     });
+    if (policy.phase === "skeleton") previousCandidate = authored.content;
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     // #554: a check the host could not prove, on an entry this loop
