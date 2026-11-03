@@ -30,6 +30,20 @@ async function author(ctx, state, reply, round = 1) {
 }
 const state = () => ({entries:new Map(), retryIds:null});
 
+test('entry shapes name the requirement prefix and match the Rust re-author bytes', () => {
+  const ctx = context();
+  const prefix = vm.runInContext('REQUIREMENT_PREFIX', ctx);
+  const rustCoverage = fs.readFileSync(`${root}/../../crates/archon-workflow/src/v2/acceptance_coverage.rs`, 'utf8');
+  assert.equal(prefix, rustCoverage.match(/pub const REQUIREMENT_PREFIX: &str = "([^"]+)";/)[1]);
+  const shapes = vm.runInContext('ENTRY_SHAPES', ctx);
+  const expected = `<${prefix} requirement id from the PRD whose violation makes this check fail>`;
+  for (const shape of JSON.parse(shapes)) assert.deepEqual(shape.covers, [expected]);
+  const rust = fs.readFileSync(`${root}/workflow_acceptance_reauthor.rs`, 'utf8');
+  const template = rust.match(/static ENTRY_SHAPES:[\s\S]*?r#"([\s\S]*?)"#/)[1];
+  assert.equal(shapes, template.replaceAll('{REQUIREMENT_PREFIX}', prefix));
+  assert.ok(ctx.acceptanceAuthorPrompt().includes(`covers lists every one of the PRD's ${prefix} requirement ids (requirement bullets or obligation-table rows that start with ${prefix})`));
+});
+
 test('reply format includes covers between gap_permitted and judgment', () => {
   const format = context().acceptanceReplyFormat();
   const example = JSON.parse(format.split('\n').find(line => line.startsWith('{')));

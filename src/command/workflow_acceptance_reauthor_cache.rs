@@ -96,6 +96,10 @@ pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
         include_bytes!("workflow_acceptance_reauthor_author.rs"),
     ),
     (
+        "acceptance_coverage.rs",
+        include_bytes!("../../crates/archon-workflow/src/v2/acceptance_coverage.rs"),
+    ),
+    (
         "workflow_acceptance_reauthor.rs",
         include_bytes!("workflow_acceptance_reauthor.rs"),
     ),

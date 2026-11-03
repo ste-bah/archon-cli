@@ -1,6 +1,6 @@
 //! Whole-set freeze findings for what the acceptance checks exercise (H4,
-//! A12): a requirement no check covers, a covered id the PRD does not
-//! define, and a task no check answers for.
+//! A12): a requirement no check covers, a covered id outside the PRD
+//! requirement inventory, and a task no check answers for.
 //!
 //! Each finding goes back to the author that can close it: an uncovered
 //! requirement names the supplementary check it is owed (`SUP-<id>`, which
@@ -14,12 +14,12 @@
 
 use super::*;
 use archon_workflow::v2::acceptance_stage::coverage::{
-    prd_requirement_texts, supplementary_id, tasks_without_checks, uncovered_requirements,
-    unknown_covers,
+    REQUIREMENT_PREFIX, prd_requirement_texts, supplementary_id, tasks_without_checks,
+    uncovered_requirements, unknown_covers,
 };
 
 /// Findings for every PRD requirement no check of `contract` covers and
-/// every covered id the PRD does not define.
+/// every covered id outside the PRD requirement inventory.
 pub(super) fn acceptance_coverage_findings(
     prd_text: &str,
     contract_path: &Path,
@@ -58,7 +58,7 @@ pub(super) fn acceptance_coverage_findings(
             .map(|(check, covered)| {
                 finding(
                     format!(
-                        "check '{check}': covers names {covered}, which the PRD does not define as a requirement; list only PRD requirement ids the check fails on"
+                        "check '{check}': covers names {covered}; covers takes only the PRD's {REQUIREMENT_PREFIX} requirement ids (requirement bullets or obligation-table rows that start with {REQUIREMENT_PREFIX}); remove it or replace it with a {REQUIREMENT_PREFIX} id whose violation makes this check fail"
                     ),
                     check.clone(),
                     "unknown_covered_requirement", format!("covers/{}", contract.acceptance.iter().chain(&contract.supplementary)

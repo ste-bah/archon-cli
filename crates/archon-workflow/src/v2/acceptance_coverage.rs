@@ -77,8 +77,8 @@ pub fn supplementary_requirement(id: &str) -> Option<&str> {
         .filter(|requirement| requirement.starts_with(REQUIREMENT_PREFIX))
 }
 
-/// `(check id, covered id)` for every covered id the PRD does not define:
-/// a check claiming a requirement that does not exist answers for nothing.
+/// `(check id, covered id)` for every covered id outside the PRD requirement
+/// inventory: only obligation ids starting with `REQUIREMENT_PREFIX` qualify.
 pub fn unknown_covers(
     prd_requirement_ids: &BTreeSet<String>,
     contract: &AcceptanceContract,

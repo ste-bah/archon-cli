@@ -75,6 +75,33 @@ fn every_uncovered_requirement_names_the_supplementary_check_it_is_owed() {
 }
 
 #[test]
+fn a_defined_non_requirement_obligation_gets_the_prefix_rule() {
+    use archon_workflow::v2::acceptance_stage::coverage::REQUIREMENT_PREFIX;
+
+    let prd = "# PRD\n\n| ID | Requirement |\n|---|---|\n| NFR-001 | Persist review evidence. |\n";
+    assert!(archon_workflow::obligation_ids::obligation_texts(prd).contains_key("NFR-001"));
+    let contract = contract(vec![entry("AC-AB-001", &["NFR-001"])]);
+    let findings =
+        acceptance_coverage_findings(prd, Path::new("acceptance-contract.json"), &contract);
+    assert_eq!(findings.len(), 1);
+    let text = &findings[0].text;
+    assert!(text.contains("covers names NFR-001"), "{text}");
+    assert!(
+        text.contains(&format!("PRD's {REQUIREMENT_PREFIX} requirement ids")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "requirement bullets or obligation-table rows that start with {REQUIREMENT_PREFIX}"
+        )),
+        "{text}"
+    );
+    assert!(text.contains(&format!("remove it or replace it with a {REQUIREMENT_PREFIX} id whose violation makes this check fail")), "{text}");
+    assert!(!text.contains("does not define"), "{text}");
+    assert_eq!(findings[0].subject, "AC-AB-001");
+}
+
+#[test]
 fn a_task_no_check_answers_for_goes_back_to_the_skeleton() {
     let contract = contract(vec![entry("AC-AB-001", &["REQ-AB-001"])]);
     let task = |id: &str, implements: &[&str]| FrozenTask {

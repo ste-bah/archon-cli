@@ -6,6 +6,9 @@
 //! acceptance shapes and grounding rules.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
+use archon_workflow::v2::acceptance_stage::coverage::REQUIREMENT_PREFIX;
 
 use archon_core::agents::harness::HOST_READ_ONLY_TOOLS;
 #[cfg(test)]
@@ -45,7 +48,9 @@ const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
 const AUTHOR_TOOLS: [&str; 3] = HOST_READ_ONLY_TOOLS;
 
 /// The two entry shapes the decomposition author is shown.
-const ENTRY_SHAPES: &str = r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#;
+static ENTRY_SHAPES: LazyLock<String> = LazyLock::new(|| {
+    r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<{REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<{REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#.replace("{REQUIREMENT_PREFIX}", REQUIREMENT_PREFIX)
+});
 
 fn entry<'a>(contract: &'a AcceptanceContract, id: &str) -> Option<&'a AcceptanceCriterion> {
     contract
