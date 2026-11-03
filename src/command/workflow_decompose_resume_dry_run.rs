@@ -238,6 +238,10 @@ pub(crate) async fn dry_run_fixed_decomposition(
             (&expected_arguments, prd_text),
             true,
         )?;
+    let reply_leaked_markers =
+        crate::command::workflow_live::load_reply_leaked_markers_for_fixed(&project_root)?;
+    script_arguments =
+        super::script_arguments_with_reply_markers(&script_arguments, &reply_leaked_markers);
     let ledger = crate::command::workflow_decompose_remediation::prepare(
         &store,
         run_id,

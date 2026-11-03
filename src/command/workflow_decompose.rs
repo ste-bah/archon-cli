@@ -149,12 +149,9 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         &repository.root,
         frozen_chain.to_argument(),
     );
-    let mut script_arguments = script_arguments_with_reply_markers(
-        &super::workflow_task_set::script_arguments_with_prd_requirement_texts(
-            &arguments, prd_text,
-        ),
-        &reply_leaked_markers,
-    );
+    let mut script_arguments =
+        super::workflow_task_set::script_arguments_with_prd_requirement_texts(&arguments, prd_text);
+    script_arguments["replyLeakedMarkers"] = serde_json::json!(reply_leaked_markers);
     let log_path = task_root.join(".decompose.log");
     let identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -242,14 +239,15 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
                     &catalog,
                 )?;
             arguments["frozenChain"] = frozen_chain.to_argument();
-            script_arguments = script_arguments_with_reply_markers(
-                &super::workflow_task_set::script_arguments_with_prd_requirement_texts(
-                    &arguments, prd_text,
-                ),
-                &reply_leaked_markers,
-            );
-            plan.script_args = Some(script_arguments.clone());
         }
+        // The claim creates fresh task roots before site policy capture canonicalizes them.
+        script_arguments = script_arguments_with_reply_markers(
+            &super::workflow_task_set::script_arguments_with_prd_requirement_texts(
+                &arguments, prd_text,
+            ),
+            &reply_leaked_markers,
+        );
+        plan.script_args = Some(script_arguments.clone());
         if let Some(slot) = persisted_run_id {
             *slot
                 .lock()

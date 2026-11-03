@@ -188,3 +188,32 @@ pub(crate) fn record_final_source(
     updated["source_commit"] = record["commit"].clone();
     Ok(updated)
 }
+
+/// The PATH resolved by the freeze probe's site policy; no fact on capture failure.
+pub(crate) fn check_site_path(project: &Path, tasks: &Path) -> Option<String> {
+    use archon_workflow::acceptance_check_environment::CheckPolicy;
+    match capture(project, tasks) {
+        Ok(Some(binding)) => CheckPolicy::configured(&binding.policy).toolchain_path,
+        Ok(None) => {
+            CheckPolicy::default_for(
+                &archon_workflow::acceptance_check_environment::host_environment(),
+            )
+            .toolchain_path
+        }
+        Err(error) => {
+            let reason = error
+                .to_string()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            tracing::warn!(%reason, "acceptance check site PATH capture failed");
+            None
+        }
+    }
+}
+
+pub(crate) fn check_site_path_line(path: &str) -> String {
+    format!(
+        "Checks run at the check site with PATH={path}. A program named without a path, or a subcommand that its tool runs as a separate program, is absent there unless it is found on that path."
+    )
+}

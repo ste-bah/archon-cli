@@ -25,9 +25,52 @@ pub(super) fn root_paths_with_forward_slashes(text: &str) -> String {
     out
 }
 
+// The inherited/default site PATH varies by test host. Author shape tests
+// verify this fact; lifecycle snapshots compare all the other prompt bytes.
+fn site_path_template() -> &'static str {
+    include_str!("../../src/command/acceptance_scratch_policy.rs")
+        .lines()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix('"')
+                .and_then(|line| line.strip_suffix('"'))
+                .filter(|line| line.contains("PATH={path}"))
+        })
+        .expect("host site PATH sentence")
+}
+
+pub(super) fn without_site_path_fact(text: &str) -> String {
+    let (prefix, suffix) = site_path_template().split_once("{path}").unwrap();
+    text.split_inclusive('\n')
+        .filter(|line| {
+            let line = line.strip_suffix('\n').unwrap_or(line);
+            !(line.starts_with(prefix) && line.ends_with(suffix))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::root_paths_with_forward_slashes;
+    use super::{root_paths_with_forward_slashes, without_site_path_fact};
+
+    #[test]
+    fn only_the_complete_host_path_fact_is_excluded_from_lifecycle_snapshots() {
+        let fact = super::site_path_template().replace("{path}", "/fixture/bin");
+        assert_eq!(
+            without_site_path_fact(&format!("before\n{fact}\nafter")),
+            "before\nafter"
+        );
+        assert_eq!(
+            without_site_path_fact(
+                "Checks run at the check site with PATH=other instructions\nafter"
+            ),
+            "Checks run at the check site with PATH=other instructions\nafter"
+        );
+        assert_eq!(
+            without_site_path_fact(&format!("quoted: {fact}")),
+            format!("quoted: {fact}")
+        );
+    }
 
     #[test]
     fn windows_paths_under_the_root_use_forward_slashes_and_nothing_else_changes() {

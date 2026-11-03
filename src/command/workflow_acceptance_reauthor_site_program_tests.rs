@@ -172,6 +172,15 @@ async fn reauthor(
     .await;
     HOST_PATH.with(|path| *path.borrow_mut() = None);
     let prompts = client.prompts.lock().unwrap().clone();
+    let line = crate::command::acceptance_scratch_policy::check_site_path_line(&format!(
+        "{}:/usr/bin:/bin",
+        fixture.site_bin.display()
+    ));
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.lines().any(|text| text == line))
+    );
     (result, prompts)
 }
 
@@ -228,3 +237,6 @@ async fn a_subcommand_neither_site_nor_host_has_goes_to_its_author() {
     assert!(result.unproven.is_empty(), "{:?}", result.unproven);
     assert!(result.published);
 }
+
+#[path = "workflow_acceptance_reauthor_site_path_tests.rs"]
+mod site_path_tests;

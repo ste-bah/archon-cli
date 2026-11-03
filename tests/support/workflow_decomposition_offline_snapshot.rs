@@ -6,7 +6,7 @@ mod lifecycle;
 #[path = "workflow_decomposition_offline_snapshot_paths.rs"]
 mod paths;
 use lifecycle::normalize_lifecycle_metadata;
-use paths::root_paths_with_forward_slashes;
+use paths::{root_paths_with_forward_slashes, without_site_path_fact};
 
 pub fn golden_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -65,7 +65,7 @@ pub fn normalize_values(value: &mut serde_json::Value, replacements: &[(&str, &s
             for (from, to) in replacements {
                 *text = text.replace(from, to);
             }
-            *text = root_paths_with_forward_slashes(text);
+            *text = without_site_path_fact(&root_paths_with_forward_slashes(text));
         }
         serde_json::Value::Object(map) => {
             for nested in map.values_mut() {
