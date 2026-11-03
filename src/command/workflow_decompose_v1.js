@@ -51,16 +51,22 @@ const SKELETON_SHAPE = JSON.stringify({
       depends_on: [
         {
           task_id: "<canonical id of the task depended on>",
-          consumes: [{ artifact_path: "<path this task reads from that one>" }],
+          consumes: [{
+            artifact_path: "<path this task reads from that one>",
+            instance_source_records_field: "<optional: exact instance_source_records_field value from the named producer contract>",
+            registry_records_field: "<optional: exact registry_records_field value from the named producer contract>"
+          }],
           ordering_only: false
         }
       ],
       blocks: ["<canonical id of a task that waits on this one>"],
-      implements: ["<requirement id defined by the PRD>"],
+      implements: ["<obligation id the host lists>"],
       deliverable_contracts: [
         {
           kind: "<short stable name for what this task produces>",
           artifact_path: "<path this task produces, exactly as its dependents consume it>",
+          instance_source_records_field: "<optional: name of the records field in the instance source>",
+          registry_records_field: "<optional: name of the records field in the registry>",
           min_instances: 1
         }
       ]

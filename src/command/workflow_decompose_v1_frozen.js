@@ -105,6 +105,14 @@ function acceptanceStagePolicy(findings = []) {
   };
 }
 
+function skeletonObligationContext() {
+  if (!Array.isArray(args.prdObligationIds)) return "Use only PRD obligation ids extracted by the host.";
+  const ids = JSON.stringify(args.prdObligationIds);
+  return ids.length <= 4096
+    ? `Exact PRD obligation ids extracted by the host: ${ids}`
+    : `Exact PRD obligation ids extracted by the host: Read the JSON array at ${contextFile("json", ids).path} (host-written context for this call: read it by its exact path).`;
+}
+
 // The skeleton's author policy, whether it authors the skeleton first or
 // re-authors it because the set gate found an obligation no task claims or
 // a claim the PRD does not define (Batch O). `initialFeedback` carries the
@@ -123,7 +131,8 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       groundingRules(),
       "Stop reading once you can name what your entries assert.",
       "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
-      "Every obligation id the PRD defines is in the implements of at least one task, and implements names only ids the PRD defines. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
+      "Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only those ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). Other id-bearing PRD bullets are not obligations. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
+      skeletonObligationContext(),
       "The document must deserialize into this exact shape:",
       SKELETON_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
@@ -131,6 +140,8 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.",
       "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
       "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
+      "The consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.",
+      "The deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.",
       "The host overwrites acceptance_digest: send the placeholder shown.",
       "Generate large or repetitive fixture data with code rather than writing it literally.",
       "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
