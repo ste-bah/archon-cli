@@ -72,7 +72,7 @@ async fn an_oversize_check_is_its_authors_finding_at_freeze_549() {
     assert_eq!(
         author.text,
         format!(
-            "check 'AC-X-001' names {size} bytes of source (out.json {size} bytes), more than the judge can read ({BUDGET} bytes); name only the files whose content decides the criterion, or decide it with a command that does not need those files judged"
+            "for check 'AC-X-001', the host found {size} bytes of text source among the words of the check (out.json {size} bytes), more than the judge can read ({BUDGET} bytes); use only file words whose content decides the criterion, or decide it with a command that does not need those files judged"
         )
     );
     assert!(

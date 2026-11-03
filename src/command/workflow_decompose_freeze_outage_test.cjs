@@ -271,7 +271,7 @@ const unpublished = (id, text) => () => ({postcondition:{satisfied:false}, gateE
     source_path:'tasks/acceptance-contract.json'}]}});
 async function aNotJudgedFindingReauthorsOnlyItsEntry() {
   for (const text of [
-    "check 'B' names 300000 bytes of source (big 300000 bytes), more than the judge can read (262144 bytes); name only the files whose content decides the criterion",
+    "for check 'B', the host found 300000 bytes of text source among the words of the check (big 300000 bytes), more than the judge can read (262144 bytes); use only file words whose content decides the criterion",
     "the judge returned no usable verdict for check 'B': 4 replies; the last: no JSON; make the check smaller or split it so that one verdict decides it",
   ]) {
     const out = await run([unpublished('B', text), clean]);
