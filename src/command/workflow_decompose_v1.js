@@ -65,6 +65,8 @@ const SKELETON_SHAPE = JSON.stringify({
         {
           kind: "<short stable name for what this task produces>",
           artifact_path: "<path this task produces, exactly as its dependents consume it>",
+          instance_source_records_field: "<optional: name of the records field in the instance source>",
+          registry_records_field: "<optional: name of the records field in the registry>",
           min_instances: 1
         }
       ]
