@@ -2,6 +2,25 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::mutation;
 
+pub(crate) fn baseline_pass_finding_for_candidates(
+    id: &str,
+    short: &str,
+    candidates: &[mutation::CandidateDiagnostic],
+) -> String {
+    use mutation::ExclusionReason::*;
+
+    if candidates.iter().all(|candidate| {
+        matches!(
+            candidate.exclusion,
+            Some(CheckMechanics | RepositoryRoot | WholeDirectoryTree)
+        )
+    }) {
+        baseline_pass_finding_without_discovered_input(id, short)
+    } else {
+        baseline_pass_finding(id, short)
+    }
+}
+
 pub(crate) fn baseline_pass_finding(id: &str, short: &str) -> String {
     format!(
         "{}; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must fail whenever the deciding test fails",
@@ -11,7 +30,7 @@ pub(crate) fn baseline_pass_finding(id: &str, short: &str) -> String {
 
 pub(crate) fn baseline_pass_finding_without_discovered_input(id: &str, short: &str) -> String {
     format!(
-        "{}; the command names no existing file path under the selected root. A test, target or module name is not a file path. Put the relative path of the file that decides the criterion literally in the command text, so that moving that file aside makes the check fail",
+        "{}; the command names no file that the host can move aside under the selected root. A test, target or module name is not a file path. A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root. The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason",
         baseline_pass_lead(id, short)
     )
 }

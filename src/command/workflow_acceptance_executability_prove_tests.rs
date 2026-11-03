@@ -255,12 +255,59 @@ async fn prove_routes_a_passing_unknown_writer_reappearance_to_an_author_finding
 #[test]
 fn undiscovered_input_finding_uses_only_generic_path_repair_text() {
     let finding = baseline_pass_finding_without_discovered_input("check-id", "0123456789ab");
-    assert!(finding.contains("the command names no existing file path under the selected root"));
+    assert!(finding.contains(
+        "the command names no file that the host can move aside under the selected root"
+    ));
     assert!(finding.contains("A test, target or module name is not a file path"));
-    assert!(finding.contains("Put the relative path of the file that decides the criterion literally in the command text, so that moving that file aside makes the check fail"));
+    assert!(finding.contains("A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root."));
+    assert!(finding.contains("The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason"));
     assert!(!finding.contains("data the check writes itself is never evidence"));
     for implementation_name in ["cargo", "rust", "python", "node", "javascript", "provider"] {
         assert!(!finding.to_ascii_lowercase().contains(implementation_name));
+    }
+}
+
+#[test]
+fn literal_file_remedy_requires_every_candidate_to_have_no_movable_file() {
+    use mutation::ExclusionReason::*;
+
+    let candidate = |exclusion| mutation::CandidateDiagnostic {
+        path: "input".into(),
+        move_path: None,
+        move_root: None,
+        exclusion,
+    };
+    let exact = baseline_pass_finding_without_discovered_input("check-id", "0123456789ab");
+    let weak = baseline_pass_finding("check-id", "0123456789ab");
+    let mut candidates = Vec::new();
+    assert_eq!(
+        baseline_pass_finding_for_candidates("check-id", "0123456789ab", &candidates),
+        exact
+    );
+    for reason in [CheckMechanics, RepositoryRoot, WholeDirectoryTree] {
+        candidates.push(candidate(Some(reason)));
+        assert_eq!(
+            baseline_pass_finding_for_candidates("check-id", "0123456789ab", &candidates),
+            exact
+        );
+    }
+    for exclusion in [
+        None,
+        Some(MissingAtRoot),
+        Some(ManifestOrSetup),
+        Some(SiblingFromRoot),
+        Some(RepositoryCopyAlias),
+        Some(RepositoryAliasUnverified),
+        Some(CheckWritesPathInText),
+        Some(CheckRecreatedPathObserved),
+        Some(OutsideCopiedTree),
+    ] {
+        candidates.push(candidate(exclusion));
+        assert_eq!(
+            baseline_pass_finding_for_candidates("check-id", "0123456789ab", &candidates),
+            weak
+        );
+        candidates.pop();
     }
 }
 

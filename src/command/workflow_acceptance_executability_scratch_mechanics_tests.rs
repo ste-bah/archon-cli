@@ -186,6 +186,10 @@ async fn a_program_the_check_runs_is_never_moved() {
             "scripts/verify.sh".to_string(),
         ),
         (
+            "AC-PROG-INTERPRETER".to_string(),
+            "sh scripts/verify.sh".to_string(),
+        ),
+        (
             "AC-PROG-NAMED".to_string(),
             "test -f bin/tool && ./bin/tool --check".to_string(),
         ),
@@ -204,11 +208,17 @@ async fn a_program_the_check_runs_is_never_moved() {
         ("AC-PROG-TOOL", "bin/tool"),
         ("AC-PROG-SCRIPT", "scripts/verify.sh"),
         ("AC-PROG-NAMED", "bin/tool"),
+        ("AC-PROG-INTERPRETER", "scripts/verify.sh"),
     ] {
         assert!(!guards.contains_key(id), "{id}\n{seen}");
         let finding = findings
             .get(id)
             .unwrap_or_else(|| panic!("{id}: no movable input\n{seen}"));
+        assert!(
+            !finding.contains("the command names no existing file path under the selected root"),
+            "{id}: {finding}"
+        );
+        assert!(finding.contains("A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root."), "{id}: {finding}");
         assert!(
             finding.contains(&format!("check mechanics or command output: {program}")),
             "{id}: {finding}"
@@ -217,6 +227,41 @@ async fn a_program_the_check_runs_is_never_moved() {
             finding.contains("no movable input exists under the selected root"),
             "{id}: {finding}"
         );
+    }
+}
+
+#[tokio::test]
+async fn cd_only_and_printed_inputs_get_the_literal_file_remedy() {
+    let checks = vec![
+        ("AC-CD-ONLY".to_string(), "cd tests".to_string()),
+        (
+            "AC-PRINTED-INPUT".to_string(),
+            "echo checking tests/focused.rs && test -f tests/focused.rs".to_string(),
+        ),
+    ];
+    let (guards, findings, seen) = reverify_on_scratch(&checks).await;
+    for (id, considered) in [
+        ("AC-CD-ONLY", "check mechanics or command output: tests"),
+        (
+            "AC-PRINTED-INPUT",
+            "check mechanics or command output: tests/focused.rs",
+        ),
+    ] {
+        assert!(!guards.contains_key(id), "{id}\n{seen}");
+        let finding = findings.get(id).unwrap_or_else(|| panic!("{id}\n{seen}"));
+        assert!(
+            !finding.contains("the command names no existing file path under the selected root"),
+            "{id}: {finding}"
+        );
+        assert!(finding.contains("A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root."), "{id}: {finding}");
+        assert!(finding.contains("A test, target or module name is not a file path. A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root. The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason"), "{id}: {finding}");
+        assert!(
+            finding.contains(&format!(
+                "; considered inputs: {considered}; no movable input exists under the selected root"
+            )),
+            "{id}: {finding}"
+        );
+        assert!(!finding.contains("data the check writes itself is never evidence"));
     }
 }
 

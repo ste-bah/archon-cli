@@ -15,9 +15,13 @@ pub(super) fn baseline_escalation(
     if notes.len() != pending.len()
         || notes.iter().any(|line| {
             let legacy_route = route.iter().all(|fact| line.contains(fact));
-            let generic_path_route = line.contains("the command names no existing file path under the selected root")
-                && line.contains("A test, target or module name is not a file path")
-                && line.contains("Put the relative path of the file that decides the criterion literally in the command text");
+            let generic_path_route = (line
+            .contains("the command names no existing file path under the selected root")
+            || line.contains(
+                "the command names no file that the host can move aside under the selected root",
+            ))
+            && line.contains("A test, target or module name is not a file path")
+            && line.contains("Put the relative path of the file that decides the criterion");
             !line.contains(super::executability::CANNOT_FAIL)
                 || !line.contains("considered inputs:")
                 || !(legacy_route || generic_path_route)

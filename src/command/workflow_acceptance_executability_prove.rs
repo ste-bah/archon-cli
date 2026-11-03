@@ -27,8 +27,10 @@ pub(super) fn mutation_plan(
 
 #[path = "workflow_acceptance_executability_prove_diagnostics.rs"]
 mod diagnostics;
+#[cfg(test)]
+pub(super) use diagnostics::baseline_pass_finding_without_discovered_input;
 pub(super) use diagnostics::{
-    baseline_pass_finding, baseline_pass_finding_without_discovered_input, describe_candidates,
+    baseline_pass_finding, baseline_pass_finding_for_candidates, describe_candidates,
     describe_candidates_with_run_state,
 };
 
@@ -98,21 +100,14 @@ pub(super) async fn prove(
         let names = discovery.eligible.clone();
         let baseline_finding = format!(
             "{}; considered inputs: {}",
-            baseline_pass_finding(id, &short),
+            baseline_pass_finding_for_candidates(id, &short, &discovery.candidates),
             describe_candidates(&discovery.candidates)
         );
         if names.is_empty() {
             // Unresolvable inputs never count as moved; a check with no
             // resolvable input routes here so its author can make paths explicit.
-            let finding = if discovery.candidates.is_empty() {
-                format!(
-                    "{}; considered inputs: {}; no movable input exists under the selected root",
-                    baseline_pass_finding_without_discovered_input(id, &short),
-                    describe_candidates(&discovery.candidates)
-                )
-            } else {
-                format!("{baseline_finding}; no movable input exists under the selected root")
-            };
+            let finding =
+                format!("{baseline_finding}; no movable input exists under the selected root");
             findings.insert(id.clone(), finding);
             continue;
         }

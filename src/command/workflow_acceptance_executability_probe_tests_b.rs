@@ -114,6 +114,10 @@ async fn what_makes_a_check_run_never_proves_it_can_fail() {
         "{}",
         findings["AC-1-004"]
     );
+    let manifest = &findings["AC-1-003"];
+    assert!(manifest.contains("considered inputs: build manifest or setup file: Cargo.toml"));
+    assert!(manifest.contains("data the check writes itself is never evidence"));
+    assert!(!manifest.contains("A test, target or module name is not a file path"));
     trees.assert_live_untouched(copies.path());
 }
 

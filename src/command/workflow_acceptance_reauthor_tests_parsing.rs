@@ -28,6 +28,12 @@ fn escalation_requires_route_diagnostics_for_every_pending_check_and_reports_the
     assert!(!escalation.contains("restate"));
     assert!(!escalation.contains("drop it"));
 
+    let generic = vec![format!(
+        "{}; the command names no file that the host can move aside under the selected root. A test, target or module name is not a file path. A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root. The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason; considered inputs: check mechanics or command output: scripts/verify.sh",
+        super::super::executability::CANNOT_FAIL
+    )];
+    assert!(super::escalation::baseline_escalation(&ids(&["AC-F-001"]), &generic, 6).is_some());
+
     let incomplete = vec![
         lines[0].clone(),
         "check 'AC-F-002': it passed before implementation".into(),
