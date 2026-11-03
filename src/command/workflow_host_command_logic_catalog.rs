@@ -391,7 +391,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. Issue 569 re-pin only: the unknown obligation message text in task_skeleton.rs; requirements-trace does not produce it. #355 bump to 9 (see the version note): the falsify verifier launch passes the sandbox-exec spawn preflight. #355 forgery fix, same unreleased version 9: the host creates missing ancestors and every ancestor gets a full write denial; no verdict changes beyond the version 9 note. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only, same version 9.
-        sources_digest: "2287397025dd56b15f26b6c3043014a64b6e9726f72188b6c2cc9a1e7ba48f1b",
+        sources_digest: "3171c973a3c1f01e70034176dd530d95b003c58348d33675dc9c228098642360",
         build_bound: true,
     },
     CapabilityLogic {

@@ -93,66 +93,268 @@ fn option_flags(value: &OsStr) -> Option<OsString> {
         }
     });
     let mut kept = Vec::new();
-    let mut numeric_argument = false;
+    let mut numeric_argument = None;
+    let mut path_argument = false;
     let mut eval_argument = false;
     for (index, word) in words.filter(|word| !word.is_empty()).enumerate() {
         if eval_argument {
             eval_argument = false;
             continue;
         }
-        // Eval executes make code. Consume its separate argument even if that
-        // argument looks like an otherwise permitted option.
-        if word == "--eval"
-            || (word.starts_with('-') && !word.starts_with("--") && word.contains('E'))
-        {
-            eval_argument = word == "--eval" || word.ends_with('E');
-            numeric_argument = false;
+        // A leading '-' starts another option, leaving the bare -I intact.
+        // Otherwise consume one include path; discard -I too if it is unsafe.
+        let path = path_argument && !word.starts_with('-');
+        path_argument = false;
+        if path && !include_path(word) {
+            kept.pop();
             continue;
         }
-        if word.starts_with("--eval=") {
-            numeric_argument = false;
+        // Eval executes make code. Consume its separate argument even if that
+        // argument looks like an otherwise permitted option.
+        let name = word.split('=').next().unwrap_or(word);
+        let eval = name.len() >= 4 && "--eval".starts_with(name);
+        // Value options consume the rest of a short word, including any E in
+        // an include directory. Only the preceding flag letters can mean eval.
+        let short = if word.starts_with("--") {
+            None
+        } else {
+            word.strip_prefix('-').or((index == 0).then_some(word))
+        };
+        let eval_flags = short.map(|flags| {
+            let run = flags.split(['j', 'l', 'O', 'I']).next().unwrap_or(flags);
+            (
+                run.contains('E'),
+                run.len() == flags.len() && run.ends_with('E'),
+            )
+        });
+        if eval || eval_flags.is_some_and(|(eval, _)| eval) {
+            eval_argument = if eval {
+                !word.contains('=')
+            } else {
+                eval_flags.is_some_and(|(_, separate)| separate)
+            };
+            numeric_argument = None;
             continue;
         }
         if word == "--" {
             break;
         }
-        let numeric = numeric_argument
-            && !word.is_empty()
-            && word
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || byte == b'.')
-            && word.bytes().any(|byte| byte.is_ascii_digit());
-        let cluster = index == 0
-            && word
-                .bytes()
-                .all(|byte| b"bBdeikLmnpqrRsStvw".contains(&byte));
-        // Only these value options may carry '=': jobserver endpoints, job
-        // counts, load limits, debug selectors and output synchronization.
-        // Other assignment-shaped options may smuggle credentials or make code.
-        let option = word.starts_with('-')
-            && word.split_once('=').is_none_or(|(name, _)| {
-                matches!(
-                    name,
-                    "--jobserver-auth"
-                        | "--jobserver-fds"
-                        | "-j"
-                        | "--jobs"
-                        | "-l"
-                        | "--load-average"
-                        | "--debug"
-                        | "--output-sync"
-                        | "-O"
-                )
-            });
-        if option || cluster || numeric {
+        let numeric = numeric_argument.is_some_and(|load| numeric_value(word, load));
+        let cluster = index == 0 && short_flags(word, true).is_some();
+        let option = word.starts_with('-') && safe_option(word);
+        // Retain the credential-shape check even for validated option values.
+        let credential = word.split('=').take(word.matches('=').count()).any(|name| {
+            !value_option(name)
+                && (credential_name(name) || name.to_ascii_uppercase().ends_with("_AUTH"))
+        });
+        let keep = (option || cluster || numeric || path) && !word.contains('\\') && !credential;
+        numeric_argument = if keep {
+            match word {
+                "--jobs" => Some(false),
+                "--load-average" | "--max-load" => Some(true),
+                _ if cluster => short_flags(word, true).flatten(),
+                _ => word
+                    .strip_prefix('-')
+                    .and_then(|s| short_flags(s, false))
+                    .flatten(),
+            }
+        } else {
+            None
+        };
+        if keep {
+            path_argument = (cluster || option)
+                && !word.contains('=')
+                && !word.starts_with("--")
+                && word
+                    .trim_start_matches('-')
+                    .strip_suffix('I')
+                    .is_some_and(|flags| flags.chars().all(|ch| "bBdeikLmnpqrRsStvw".contains(ch)));
             kept.push(word);
         }
-        numeric_argument = matches!(
-            word,
-            "-j" | "--jobs" | "-l" | "--load-average" | "--max-load"
-        );
     }
     (!kept.is_empty()).then(|| kept.join(" ").into())
+}
+
+// Only these exact value options may carry '='. Validate their values before
+// retaining them; unknown assignment-shaped options can carry credentials/code.
+fn value_option(name: &str) -> bool {
+    matches!(
+        name,
+        "--jobserver-auth"
+            | "--jobserver-fds"
+            | "-j"
+            | "--jobs"
+            | "-l"
+            | "--load-average"
+            | "--max-load"
+            | "--debug"
+            | "--output-sync"
+            | "-O"
+            | "--shuffle"
+            | "--sync-mutex"
+    )
+}
+
+fn numeric_value(value: &str, load: bool) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|byte| byte.is_ascii_digit());
+    if load && let Some((whole, fraction)) = value.split_once('.') {
+        digits(whole) && digits(fraction)
+    } else {
+        digits(value)
+    }
+}
+
+// Short options consist of flags followed by at most one value option. A bare
+// first-word cluster may end in j/l or I to consume a numeric word or path.
+fn short_flags(word: &str, bare: bool) -> Option<Option<bool>> {
+    let offset = word.find(|ch| !"bBdeikLmnpqrRsStvw".contains(ch));
+    let Some(offset) = offset else {
+        return (!word.is_empty()).then_some(None);
+    };
+    if !b"jlOI".contains(&word.as_bytes()[offset]) {
+        return None;
+    }
+    let (name, value) = word[offset..].split_at(1);
+    if matches!(name, "j" | "l") && value.is_empty() {
+        return Some(Some(name == "l"));
+    }
+    if name == "I" && value.is_empty() {
+        return Some(None);
+    }
+    if bare {
+        return None;
+    }
+    let valid = match name {
+        "j" | "l" => numeric_value(value, name == "l"),
+        "O" => value.is_empty() || output_sync(value),
+        "I" => include_path(value),
+        _ => false,
+    };
+    valid.then_some(None)
+}
+
+fn safe_path(path: &str) -> bool {
+    !path.is_empty()
+        && path
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/._-".contains(&byte))
+}
+
+// Drive prefixes belong only to include directories, never FIFO/mutex paths.
+fn include_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    let path = if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        &path[2..]
+    } else {
+        path
+    };
+    !path.is_empty()
+        && path
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/._-+~@,".contains(&byte))
+}
+
+fn output_sync(value: &str) -> bool {
+    matches!(value, "none" | "line" | "target" | "recurse")
+}
+
+fn safe_option(word: &str) -> bool {
+    let Some((name, value)) = word.split_once('=') else {
+        return if word.starts_with("--") {
+            // Exact no-argument and optional-argument GNU make options only.
+            matches!(
+                word,
+                "--always-make"
+                    | "--environment-overrides"
+                    | "--ignore-errors"
+                    | "--keep-going"
+                    | "--no-keep-going"
+                    | "--stop"
+                    | "--just-print"
+                    | "--dry-run"
+                    | "--recon"
+                    | "--print-data-base"
+                    | "--question"
+                    | "--no-builtin-rules"
+                    | "--no-builtin-variables"
+                    | "--silent"
+                    | "--quiet"
+                    | "--no-silent"
+                    | "--touch"
+                    | "--trace"
+                    | "--print-directory"
+                    | "--no-print-directory"
+                    | "--warn-undefined-variables"
+                    | "--check-symlink-times"
+                    | "--debug"
+                    | "--jobs"
+                    | "--load-average"
+                    | "--max-load"
+                    | "--output-sync"
+                    | "--shuffle"
+            )
+        } else {
+            word.strip_prefix('-')
+                .is_some_and(|s| short_flags(s, false).is_some())
+        };
+    };
+    // Only exact allowlisted names can carry values; abbreviations are rejected.
+    if !value_option(name) {
+        return false;
+    }
+    match name {
+        "-j" | "--jobs" => numeric_value(value, false),
+        "-l" | "--load-average" | "--max-load" => numeric_value(value, true),
+        "--jobserver-auth" | "--jobserver-fds" => {
+            if let Some(path) = value.strip_prefix("fifo:") {
+                path.starts_with('/') && safe_path(path)
+            } else if let Some(pid) = value.strip_prefix("gmake_semaphore_") {
+                numeric_value(pid, false)
+            } else {
+                value.split_once(',').is_some_and(|(read, write)| {
+                    numeric_value(read, false) && numeric_value(write, false)
+                })
+            }
+        }
+        "--sync-mutex" => {
+            if let Some(path) = value.strip_prefix("fnm:") {
+                path.starts_with('/') && safe_path(path)
+            } else {
+                value.strip_prefix("0x").is_some_and(|hex| {
+                    !hex.is_empty() && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+            }
+        }
+        "--debug" => value.split(',').all(|token| {
+            matches!(
+                token.to_ascii_lowercase().as_str(),
+                "all"
+                    | "a"
+                    | "b"
+                    | "v"
+                    | "i"
+                    | "j"
+                    | "m"
+                    | "n"
+                    | "p"
+                    | "w"
+                    | "basic"
+                    | "verbose"
+                    | "implicit"
+                    | "jobs"
+                    | "makefile"
+                    | "none"
+                    | "print"
+                    | "why"
+            )
+        }),
+        "--output-sync" | "-O" => output_sync(value) || (name == "-O" && value.is_empty()),
+        "--shuffle" => {
+            matches!(value, "random" | "reverse" | "none" | "identity")
+                || numeric_value(value, false)
+        }
+        _ => false,
+    }
 }
 
 /// The environment before launch-owned bindings are added. Never log values.
@@ -241,117 +443,5 @@ pub fn transport_command(program: impl AsRef<OsStr>, bindings: &[&str]) -> Comma
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn jobserver_flags_survive_without_descriptors_or_credential_assignments() {
-        let vars = inherited([
-            (
-                "MAKEFLAGS".into(),
-                "-- ARCHON_TEST_SECRET=sk-test-355".into(),
-            ),
-            ("MFLAGS".into(), "--jobserver-auth=3,4 --silent".into()),
-            (
-                "GNUMAKEFLAGS".into(),
-                "--jobserver-auth=fifo:/tmp/archon-jobserver -- X=keep".into(),
-            ),
-        ]);
-        assert!(!vars.iter().any(|(key, _)| key == "MAKEFLAGS"));
-        assert!(
-            vars.iter()
-                .any(|(key, value)| key == "MFLAGS" && value == "--silent")
-        );
-        assert!(vars.iter().any(|(key, value)| key == "GNUMAKEFLAGS"
-            && value == "--jobserver-auth=fifo:/tmp/archon-jobserver"));
-    }
-
-    #[test]
-    fn build_flags_keep_options_and_drop_all_assignments() {
-        for (input, expected) in [
-            (
-                "-j4 --jobserver-auth=3,4 -- FOO=bar SECRET_X=y",
-                Some("-j4 --jobserver-auth=3,4"),
-            ),
-            ("ks -- FOO=bar", Some("ks")),
-            ("ks -- ", Some("ks")),
-            ("-j 4 -k -s --silent -w", Some("-j 4 -k -s --silent -w")),
-            (
-                "-j8 FOO=bar SECRET_X=y SERVICE_AUTH=z --jobserver-fds=3,4",
-                Some("-j8 --jobserver-fds=3,4"),
-            ),
-            ("--eval=TOKEN=abc -k", Some("-k")),
-            ("--eval TOKEN=abc -s", Some("-s")),
-            ("-E TOKEN=abc -s", Some("-s")),
-            ("-E -k -s", Some("-s")),
-            ("-ETOKEN=abc -kE TOKEN=abc -s", Some("-s")),
-            ("--unknown=TOKEN=abc -x=abc --silent", Some("--silent")),
-            ("--eval=TOKEN=abc -E TOKEN=abc", None),
-            (
-                "--jobserver-auth=3,4 --jobserver-fds=5,6 -j4 -j 8 --jobs=2 -l2.5 -l 3 --load-average=4 --debug=a --output-sync=target -Oline -O=target",
-                Some(
-                    "--jobserver-auth=3,4 --jobserver-fds=5,6 -j4 -j 8 --jobs=2 -l2.5 -l 3 --load-average=4 --debug=a --output-sync=target -Oline -O=target",
-                ),
-            ),
-            ("FOO=bar SECRET_X=y SERVICE_AUTH=z", None),
-            ("-- FOO=bar SECRET_X=y", None),
-            ("FOO=bar\\ -secret -k", Some("-k")),
-            ("unexpected words -s", Some("-s")),
-            ("", None),
-        ] {
-            assert_eq!(
-                option_flags(OsStr::new(input)),
-                expected.map(OsString::from),
-                "{input}"
-            );
-        }
-        for key in ["MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "CARGO_MAKEFLAGS"] {
-            assert_eq!(
-                inherited([(key.into(), "-k FOO=bar SECRET_X=y SERVICE_AUTH=z".into())]),
-                vec![(OsString::from(key), OsString::from("-k"))],
-            );
-            assert!(inherited([(key.into(), "--jobserver-auth=3,4 -- FOO=bar".into())]).is_empty());
-        }
-    }
-
-    #[test]
-    fn exact_environment_preserves_site_bindings_without_ambient_defaults() {
-        let site = std::collections::BTreeMap::from([
-            ("PATH".into(), "/site/bin".into()),
-            ("HOME".into(), "/site/home".into()),
-            ("CARGO_HOME".into(), "/site/cargo".into()),
-        ]);
-        let command = command_with_mode("site-check", Mode::Exact(&site));
-        let actual = command
-            .get_envs()
-            .map(|(key, value)| {
-                (
-                    key.to_string_lossy().into_owned(),
-                    value.unwrap().to_string_lossy().into_owned(),
-                )
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(actual, site);
-    }
-
-    #[test]
-    fn only_safe_names_inherit() {
-        let vars = [
-            "Path",
-            "HOME",
-            "LANG",
-            "TMPDIR",
-            "ARCHON_TEST_SECRET",
-            "OPENAI_API_KEY",
-            "BASH_ENV",
-            "LD_PRELOAD",
-        ];
-        let result = inherited(vars.map(|key| (key.into(), "synthetic".into())));
-        assert_eq!(
-            result
-                .iter()
-                .map(|(key, _)| key.to_str().unwrap())
-                .collect::<Vec<_>>(),
-            vec!["Path", "HOME", "LANG", "TMPDIR"]
-        );
-    }
-}
+#[path = "execution_environment_tests.rs"]
+mod tests;
