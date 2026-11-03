@@ -145,10 +145,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 563: the decomposition entry author prompt states the check site PATH when the launcher passes it.
     // Issue 568: a skeleton re-author prompt names the previous candidate in a host-written context file (path and sha256), never inline.
     // Issue 569: the skeleton prompt states the obligation rule and the host-listed obligation ids, and its shape shows the record-binding fields.
+    // Issue 571: the acceptance shape and covers rule name the REQ- requirement prefix.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "5d664611c6d2211e5174570b5ee0c53840bf8b29e7fe04dc17f4ce4ee265dca3"
+        "defc95672bf4f63ee809083fe3b4d3613c6fb015d9863422730a317f6987f50f"
     );
 }

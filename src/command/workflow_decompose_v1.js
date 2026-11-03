@@ -1,3 +1,6 @@
+// Keep in sync with Rust acceptance_stage::coverage::REQUIREMENT_PREFIX.
+const REQUIREMENT_PREFIX = "REQ-";
+
 const ACCEPTANCE_SHAPE = JSON.stringify({
   schema_version: 1,
   prd: { path: "", digest: "" },
@@ -17,7 +20,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         }
       },
       gap_permitted: false,
-      covers: ["<requirement id defined by the PRD whose violation makes this check fail>"],
+      covers: [`<${REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>`],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     },
     {
@@ -30,7 +33,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         cwd: "project_root"
       },
       gap_permitted: false,
-      covers: ["<requirement id defined by the PRD whose violation makes this check fail>"],
+      covers: [`<${REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>`],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     }
   ],

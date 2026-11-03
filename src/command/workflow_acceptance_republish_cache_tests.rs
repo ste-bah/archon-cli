@@ -21,9 +21,10 @@ fn prompt_and_judge_digest_covers_every_static_source_contributor() {
     // These references are the non-inline static contributors to the author
     // prompt. Keep their defining sources in the digest closure.
     assert!(author.contains("ENTRY_SHAPES.to_string()"));
-    assert!(reauthor.contains("const ENTRY_SHAPES:"));
+    assert!(reauthor.contains("static ENTRY_SHAPES:"));
     assert!(listed.contains("workflow_acceptance_reauthor_author.rs"));
     assert!(listed.contains("workflow_acceptance_reauthor.rs"));
+    assert!(listed.contains("acceptance_coverage.rs"));
     assert!(author.contains("live_root::check_path_rule("));
     assert!(live_root.contains("pub(crate) fn check_path_rule("));
     assert!(listed.contains("workflow_acceptance_live_root.rs"));
