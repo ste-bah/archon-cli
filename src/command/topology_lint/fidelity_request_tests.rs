@@ -142,10 +142,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 559 guard: the entry author reads the current entry with state.entries?.get.
     // Issue 562: fewer open findings and a subject's advance to a later gate stage are progress; gate findings carry their stage.
     // Issue 560: the decomposition entry author's absent-path rule matches the re-author's: absence means behaviour not implemented yet only for a path established to name a deciding file.
+    // Issue 563: the decomposition entry author prompt states the check site PATH when the launcher passes it.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "c243cb00df53abe5666b3ce0e69f0b4e8f6d982588c767e81719f6d37476bc71"
+        "a83c0826cd0f9af3a623c45271c2a62965f03338d87a565afb6c2090f44eac4d"
     );
 }
