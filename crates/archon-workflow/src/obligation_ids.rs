@@ -28,6 +28,10 @@ use regex::Regex;
 #[path = "obligation_continuations.rs"]
 mod continuations;
 
+#[path = "obligation_constraints.rs"]
+mod constraints;
+pub use constraints::{constraint_ids, constraint_texts};
+
 const EXCLUDED_HEADINGS: [&str; 5] = [
     "non-goal",
     "out of scope",
@@ -103,8 +107,12 @@ fn generic_table_obligation_pattern() -> &'static Regex {
     })
 }
 
+fn is_req_or_ac_id(id: &str) -> bool {
+    id.starts_with("REQ-") || id.starts_with("AC-")
+}
+
 fn valid_table_obligation_id(id: &str) -> bool {
-    if id.starts_with("REQ-") || id.starts_with("AC-") {
+    if is_req_or_ac_id(id) {
         exact_req_or_ac_pattern().is_match(id)
     } else {
         generic_table_obligation_pattern().is_match(id)

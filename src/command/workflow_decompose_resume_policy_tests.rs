@@ -127,13 +127,18 @@ fn resume_metadata_accepts_each_launch_obligation_context_shape() {
     let run = RunCopy::new();
     let state: archon_workflow::FixedDecompositionStateV1 = run.json("decomposition/state.json");
     let arguments: serde_json::Value = run.json("decomposition/arguments.json");
-    let prd = "- REQ-X-001: work\n\n## Done Definition\n1. Complete.\n";
+    let prd = "- REQ-X-001: work\n- QX-001: restriction\n\n## Done Definition\n1. Complete.\n";
     let enriched = crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
         &arguments, prd,
     );
-    let mut older = enriched.clone();
+    let mut previous = enriched.clone();
+    previous
+        .as_object_mut()
+        .unwrap()
+        .remove("prdConstraintTexts");
+    let mut older = previous.clone();
     older.as_object_mut().unwrap().remove("prdObligationIds");
-    for launch_arguments in [&arguments, &older, &enriched] {
+    for launch_arguments in [&arguments, &older, &previous, &enriched] {
         let metadata = canonical_metadata(&state.identity, "script".into(), launch_arguments);
         assert_eq!(
             canonical_resume_metadata(&state.identity, "script".into(), &arguments, prd, &metadata),

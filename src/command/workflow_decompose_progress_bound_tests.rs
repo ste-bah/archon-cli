@@ -209,6 +209,11 @@ fn shape_progress_regression_suite_passes() {
     node_suite_passes("workflow_decompose_shape_progress_test.cjs");
 }
 
+#[test]
+fn constraint_prompt_and_resumed_repair_suite_passes() {
+    node_suite_passes("workflow_decompose_constraints_test.cjs");
+}
+
 /// Issue 366: the author is told where a check runs and that its paths are
 /// relative, and the author step gives the entry validator the live roots.
 #[test]

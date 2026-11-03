@@ -78,7 +78,7 @@ pub(super) fn inspect(
             ));
         }
         let pin = read_pin(&pin_path)?;
-        let (_contract, expected_obligations) =
+        let (_contract, expected_obligations, constraints) =
             validate_acceptance_phase(project_root, tasks_root, &contract_path, &pin)?;
         append_predecessor_finding(
             mode,
@@ -109,6 +109,10 @@ pub(super) fn inspect(
                 blockers.extend(
                     validate_skeleton_set(&draft, &expected_obligations)
                         .into_iter()
+                        .filter(|finding| {
+                            !(finding.identity.code == "unowned_obligation"
+                                && constraints.contains(&finding.identity.subject))
+                        })
                         .map(|finding| {
                             let text = format!("{}: {}", finding.field, finding.message);
                             deterministic
@@ -163,6 +167,10 @@ pub(super) fn inspect(
                 blockers.extend(
                     validate_skeleton_set(&draft, &expected_obligations)
                         .into_iter()
+                        .filter(|finding| {
+                            !(finding.identity.code == "unowned_obligation"
+                                && constraints.contains(&finding.identity.subject))
+                        })
                         .map(|finding| {
                             let text = format!("{}: {}", finding.field, finding.message);
                             deterministic
@@ -283,7 +291,11 @@ fn validate_acceptance_phase(
     tasks_root: &Path,
     contract_path: &Path,
     pin: &AcceptancePin,
-) -> Result<(AcceptanceContract, std::collections::BTreeSet<String>)> {
+) -> Result<(
+    AcceptanceContract,
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+)> {
     let contract: AcceptanceContract = serde_json::from_slice(
         &std::fs::read(contract_path)
             .with_context(|| format!("reading acceptance contract {}", contract_path.display()))?,
@@ -318,8 +330,10 @@ fn validate_acceptance_phase(
     let expected = archon_workflow::obligation_ids::acceptance_ids(&prd);
     let validated = validate_acceptance_bundle(tasks_root, Some(pin), &expected)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
-    Ok((validated, obligations))
+    let mut obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
+    let constraints = archon_workflow::obligation_ids::constraint_ids(&prd);
+    obligations.extend(constraints.iter().cloned());
+    Ok((validated, obligations, constraints))
 }
 
 pub(super) fn read_draft_skeleton(path: &Path) -> Result<TaskSkeleton> {

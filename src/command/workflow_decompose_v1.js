@@ -166,6 +166,7 @@ function bodyPolicy(subject, initialFeedback) {
       "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
       "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.",
       "Copy the frozen implements array exactly, preserving every value and its order.",
+      ...constraintContext("body"),
       `Read the project MCP configuration at ${args.projectRoot}/.mcp.json and match this task's PRD obligations to its exact permitted tool names.`,
       "Declare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.",
       "An MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.",

@@ -113,6 +113,22 @@ function skeletonObligationContext() {
     : `Exact PRD obligation ids extracted by the host: Read the JSON array at ${contextFile("json", ids).path} (host-written context for this call: read it by its exact path).`;
 }
 
+// The host supplies the map; authors assign applicability, never re-extract ids.
+function constraintContext(author = "skeleton") {
+  const texts = args.prdConstraintTexts || {};
+  if (Object.keys(texts).length === 0) return [];
+  const json = JSON.stringify(texts);
+  const listed = json.length <= 4096 ? json
+    : `Read the JSON object at ${contextFile("json", json).path} (host-written context for this call: read it by its exact path).`;
+  const rule = author === "skeleton"
+    ? "Each host-listed PRD constraint applies to the tasks whose work it restricts (all tasks if it restricts all work); name each applicable constraint id in the task's implements."
+    : author === "body"
+      ? "Read the host-listed PRD constraint texts; this task's work must keep every listed constraint its frozen implements names."
+      : null;
+  return [...(rule ? [rule] : []),
+    `Exact PRD constraint text extracted by the host: ${listed}`];
+}
+
 // The skeleton's author policy, whether it authors the skeleton first or
 // re-authors it because the set gate found an obligation no task claims or
 // a claim the PRD does not define (Batch O). `initialFeedback` carries the
@@ -131,8 +147,9 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       groundingRules(),
       "Stop reading once you can name what your entries assert.",
       "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
-      "Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only those ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). Other id-bearing PRD bullets are not obligations. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
+      "Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
       skeletonObligationContext(),
+      ...constraintContext(),
       "The document must deserialize into this exact shape:",
       SKELETON_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",

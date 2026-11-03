@@ -52,6 +52,15 @@ pub(crate) fn canonical_resume_metadata(
     if comparable["script_args"].get("prdObligationIds").is_none() {
         enriched.as_object_mut().unwrap().remove("prdObligationIds");
     }
+    if comparable["script_args"]
+        .get("prdConstraintTexts")
+        .is_none()
+    {
+        enriched
+            .as_object_mut()
+            .unwrap()
+            .remove("prdConstraintTexts");
+    }
     let script_arguments = if comparable.get("script_args") == Some(arguments) {
         arguments
     } else {

@@ -182,9 +182,15 @@ pub(super) fn skeleton_findings(
     }));
     predecessor_findings(pin, pin_path, &mut findings);
     let expected_obligations = archon_workflow::obligation_ids::obligation_ids(prd_text);
+    let constraints = archon_workflow::obligation_ids::constraint_ids(prd_text);
+    let allowed = expected_obligations.union(&constraints).cloned().collect();
     findings.extend(
-        validate_skeleton_set(skeleton, &expected_obligations)
+        validate_skeleton_set(skeleton, &allowed)
             .into_iter()
+            .filter(|finding| {
+                !(finding.identity.code == "unowned_obligation"
+                    && constraints.contains(&finding.identity.subject))
+            })
             .map(|finding| {
                 GateFinding::new(
                     GateId::FreezeSkeleton,

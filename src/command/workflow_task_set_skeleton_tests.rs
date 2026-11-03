@@ -420,3 +420,37 @@ fn freeze_shape_a_marker_only_in_an_ignored_field_is_not_staged() {
         "{text}"
     );
 }
+
+#[test]
+fn skeleton_accepts_host_constraints_and_leaves_missing_constraint_ownership_to_set_lint() {
+    use archon_workflow::task_skeleton::{FrozenTask, TaskSkeleton};
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, pin) = seed_frozen_acceptance(&temp);
+    let prd_path = temp.path().join("prds/PRD-X.md");
+    let prd = format!(
+        "{}\n- QX-001: restrict work\n- QX-002: another restriction\n",
+        std::fs::read_to_string(&prd_path).unwrap()
+    );
+    let skeleton = TaskSkeleton {
+        schema_version: 1,
+        acceptance_digest: pin.acceptance_digest.clone(),
+        tasks: vec![FrozenTask {
+            task_id: "TASK-X-010".into(),
+            file_name: "TASK-X-010-body.md".into(),
+            implements: vec!["AC-X-001".into(), "QX-001".into()],
+            depends_on: Vec::new(),
+            blocks: Vec::new(),
+            deliverable_contracts: Vec::new(),
+        }],
+    };
+    let findings = crate::command::workflow_task_set::findings::skeleton_findings(
+        &tasks,
+        &prd_path,
+        &prd,
+        &pin,
+        &acceptance_pin_path(temp.path(), &tasks),
+        &skeleton,
+    )
+    .unwrap();
+    assert!(findings.is_empty(), "{findings:#?}");
+}
