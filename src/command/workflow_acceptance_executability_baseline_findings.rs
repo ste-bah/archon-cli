@@ -28,9 +28,21 @@ pub async fn cannot_fail_findings(
     }
     let short: String = baseline.commit.chars().take(12).collect();
     let run = tree_results(probe, baseline, contract, digest, refs, known, false).await;
+    findings.extend(
+        test_inventory::findings(
+            probe,
+            baseline,
+            contract,
+            &run.results.values().cloned().collect::<Vec<_>>(),
+        )
+        .await,
+    );
     let mut passing = Vec::new();
     for reference in refs {
         let id = &reference.acceptance_id;
+        if findings.contains_key(id) {
+            continue;
+        }
         let result = run.results.get(id);
         if result.is_some_and(|result| timed_out(&result.result)) {
             let diagnostic = run_text(baseline.origin, &short, RunText::Timeout);
@@ -166,6 +178,21 @@ pub async fn newly_passing_findings(
     for reference in &held {
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
+        if result.is_some_and(|result| timed_out(&result.result)) {
+            let diagnostic =
+                format!("CHECK_TIMED_OUT on the tree its original failed on ({short})");
+            if let Some(finding) = silent::settle_timed_out_with_diagnostics(
+                probe,
+                BaselineOrigin::ProbedTree,
+                tree.commit.as_deref().unwrap_or(&short),
+                contract,
+                id,
+                &diagnostic,
+            ) {
+                findings.insert(id.clone(), finding);
+            }
+            continue;
+        }
         if let Some(reason) = run.unrun(id) {
             let fault = if result.is_none() {
                 check_fault::Fault::Availability(run.fault_class)
@@ -181,6 +208,12 @@ pub async fn newly_passing_findings(
                 findings.insert(id.clone(), finding);
             }
         } else if let Some(result) = result {
+            silent::ran(
+                probe,
+                tree.commit.as_deref().unwrap_or(&short),
+                contract,
+                id,
+            );
             let at = silent::baseline_context(probe, contract, result.copy_layout.as_ref());
             if let Some((reason, cause)) =
                 silent::silent_failure_off_thread(contract, result, &at).await

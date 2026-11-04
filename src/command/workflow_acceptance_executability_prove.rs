@@ -275,9 +275,11 @@ pub(super) async fn prove(
         }
         let setup_failure = match result {
             Some(result) if result.operational_error.is_none() => {
+                // The wrapper forwards the authored script's status; classify
+                // that script's setup, not the host's later status bookkeeping.
                 let at =
-                    super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
-                match super::silent::setup_path_failure_off_thread(&mutated, result, &at).await {
+                    super::silent::baseline_context(probe, contract, result.copy_layout.as_ref());
+                match super::silent::setup_path_failure_off_thread(contract, result, &at).await {
                     Ok(finding) => {
                         finding.map(|reason| setup_reason_with_repairs(reason, run.repairs()))
                     }

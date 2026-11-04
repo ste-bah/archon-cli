@@ -22,6 +22,7 @@ impl HostProbe {
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
             baseline_failures: Mutex::new(BTreeMap::new()),
+            test_inventories: Mutex::new(BTreeMap::new()),
             reuse_audit: Mutex::new(BTreeMap::new()),
             failed_tree: Mutex::new(None),
             #[cfg(test)]

@@ -5,7 +5,7 @@ mod argv;
 #[path = "task_set_contract_policy_paths_program.rs"]
 mod program;
 
-pub(super) fn path_command(paths: &[PathBuf]) -> String {
+pub(crate) fn path_command(paths: &[PathBuf]) -> String {
     paths
         .iter()
         .map(|path| quote(&path.to_string_lossy()))
@@ -17,7 +17,7 @@ fn quote(word: &str) -> String {
     format!("'{}'", word.replace('\'', "'\\''"))
 }
 
-pub(super) fn parent_paths(command: &str, root: &Path) -> Vec<PathBuf> {
+pub(crate) fn parent_paths(command: &str, root: &Path) -> Vec<PathBuf> {
     let mut found = program_paths(command, root, Some(PathBuf::new()));
     found.retain(|path| path.components().any(|part| part == Component::ParentDir));
     found.sort();
@@ -25,7 +25,20 @@ pub(super) fn parent_paths(command: &str, root: &Path) -> Vec<PathBuf> {
     found
 }
 
-fn program_paths(command: &str, root: &Path, mut directory: Option<PathBuf>) -> Vec<PathBuf> {
+pub(crate) fn missing_root_paths(command: &str, root: &Path) -> Vec<PathBuf> {
+    scoped_paths(command, root, Some(PathBuf::new()), true)
+}
+
+fn program_paths(command: &str, root: &Path, directory: Option<PathBuf>) -> Vec<PathBuf> {
+    scoped_paths(command, root, directory, false)
+}
+
+fn scoped_paths(
+    command: &str,
+    root: &Path,
+    mut directory: Option<PathBuf>,
+    missing_root: bool,
+) -> Vec<PathBuf> {
     let (shell, heredoc_flag) = crate::check_source_resolve::with_heredoc_programs(command);
     let shell = crate::acceptance_sibling_paths::without_comments(&shell);
     let (mut words, mut literal, mut operators) = (Vec::new(), Vec::new(), Vec::new());
@@ -69,7 +82,7 @@ fn program_paths(command: &str, root: &Path, mut directory: Option<PathBuf>) -> 
         // the change can make subsequent relative operands unknown.
         if !compound_syntax(&outside)
             && !certain.contains(&false)
-            && !next.is_some_and(unknown_operator)
+            && (!next.is_some_and(unknown_operator) || (missing_root && next == Some("||")))
             && directory_target(&outside).is_some()
             && let Some(base) = directory.as_deref()
         {
@@ -85,6 +98,13 @@ fn program_paths(command: &str, root: &Path, mut directory: Option<PathBuf>) -> 
             })
         {
             directory = None;
+        }
+        if let Some(base) = directory.as_deref() {
+            found.extend(
+                argv::setup_targets(&outside)
+                    .into_iter()
+                    .map(|path| base.join(path)),
+            );
         }
         let visible = argv::operands(&outside, root, directory.as_deref());
         found.extend(nested_paths(
@@ -109,7 +129,7 @@ fn program_paths(command: &str, root: &Path, mut directory: Option<PathBuf>) -> 
                 directory = Some(target);
             }
         }
-        if next.is_some_and(unknown_operator) {
+        if next.is_some_and(unknown_operator) && !(next == Some("||") && !changes_directory) {
             directory = None;
         }
         start = end + 1;
@@ -306,9 +326,14 @@ fn plain_directory(segment: &[String]) -> Option<&Path> {
 }
 
 fn directory_target(segment: &[String]) -> Option<&Path> {
-    let [command, operand] = segment else {
+    let command = segment.first()?;
+    let mut operands = segment[1..]
+        .iter()
+        .skip_while(|word| matches!(word.as_str(), "-P" | "-L" | "--"));
+    let operand = operands.next()?;
+    if operands.next().is_some() {
         return None;
-    };
+    }
     let path = Path::new(operand);
     (matches!(command.as_str(), "cd" | "pushd")
         && !operand.starts_with(['-', '~'])

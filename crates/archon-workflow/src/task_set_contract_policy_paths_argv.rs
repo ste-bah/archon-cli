@@ -52,6 +52,39 @@ pub(super) fn operands<'a>(
     segment
 }
 
+/// Setup options name inputs in the invoking directory; only the child's
+/// remaining operands become unknown when such an option changes its root.
+pub(super) fn setup_targets(segment: &[String]) -> Vec<String> {
+    let Some(command) = target(segment) else {
+        return Vec::new();
+    };
+    let Some(program) = command.first() else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    let mut words = command[1..].iter();
+    while let Some(word) = words.next() {
+        if word == "--" {
+            break;
+        }
+        let (option, value) = word.split_once('=').unwrap_or((word, ""));
+        let setup = (option == "--manifest-path" && program == "cargo")
+            || (option == "-C"
+                && matches!(
+                    program.as_str(),
+                    "git" | "make" | "gmake" | "ninja" | "cargo"
+                ));
+        if setup {
+            if value.is_empty() {
+                paths.extend(words.next().cloned());
+            } else {
+                paths.push(value.to_owned());
+            }
+        }
+    }
+    paths
+}
+
 fn directory_option(word: &str) -> bool {
     word.starts_with("-C")
         || matches!(word, "-execdir" | "-okdir")
@@ -200,10 +233,14 @@ pub(super) fn path_operands(segment: &[String], operators: &[bool]) -> Vec<Strin
     let name = program.as_str();
     let arguments = &command[1..];
     if matches!(name, "cd" | "pushd") {
-        if let [operand] = arguments
+        let operands: Vec<_> = arguments
+            .iter()
+            .skip_while(|word| matches!(word.as_str(), "-P" | "-L" | "--"))
+            .collect();
+        if let [operand] = operands.as_slice()
             && !operand.starts_with('-')
         {
-            paths.push(operand.clone());
+            paths.push((*operand).clone());
         }
         return paths;
     }

@@ -37,7 +37,7 @@ pub(in super::super) fn settle_as(
         // sends it there): no host action makes it available.
         UnprovenCause::ProgramAbsent => {
             return Some(format!(
-                "check '{id}': it cannot be proven on the {tree} at {short}: {why}. Neither the check's site nor the host has that program, and no host action makes it available, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides: make it fail by its own assertion on the pre-implementation tree, or prove it a regression guard, never by starting a program that neither the site nor the host has"
+                "check '{id}': it cannot be proven on the {tree} at {short}: {why}. Neither the check's site nor the host has that program, and no host action makes it available, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides: make it fail by its own assertion on the pre-implementation tree, or prove it a regression guard."
             ));
         }
         UnprovenCause::Host | UnprovenCause::PermanentHost => {

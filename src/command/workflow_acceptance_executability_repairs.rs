@@ -77,7 +77,7 @@ impl TreeRun {
             return Some(error);
         }
         Some(format!(
-            "{error}; it still gave no verdict after the host repaired its environment: {}",
+            "{error}; the host could not prove it after repairing its own environment: {}",
             self.repairs.join("; then ")
         ))
     }
@@ -242,4 +242,11 @@ pub(super) async fn tree_results_with_save_predicates(
         }
     }
     run
+}
+
+#[cfg(test)]
+pub(crate) fn test_unproven_after_repairs(cause: &str, repairs: Vec<String>) -> String {
+    let mut run = TreeRun::known(&[], cause);
+    run.repairs = repairs;
+    HostUnproven([("check".into(), run.unrun("check").unwrap())].into()).to_string()
 }

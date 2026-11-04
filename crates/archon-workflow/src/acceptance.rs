@@ -334,15 +334,8 @@ fn command_is_discovery_only(command: &str) -> bool {
 /// phrases match only as whole numbers: `0 examples`, never `10 examples`,
 /// and `0 passed; 0 failed`, never `10 passed; 0 failed`.
 pub fn output_reports_zero_work(stdout: &str, stderr: &str) -> bool {
-    use std::sync::OnceLock;
-    static RUNNING: OnceLock<regex::Regex> = OnceLock::new();
     let text = format!("{stdout}\n{stderr}").to_ascii_lowercase();
-    let running = RUNNING
-        .get_or_init(|| regex::Regex::new(r"\brunning (\d+) tests?\b").expect("static regex"));
-    let counts: Vec<u64> = running
-        .captures_iter(&text)
-        .filter_map(|caps| caps.get(1)?.as_str().parse().ok())
-        .collect();
+    let counts = test_work_counts(&text);
     if !counts.is_empty() {
         return counts.iter().all(|count| *count == 0);
     }
@@ -478,4 +471,15 @@ mod tests {
             Some("expected_target_files missing after implementation: src/new.rs")
         );
     }
+}
+
+/// Runner blocks, in capture order, for host inventory diagnostics. A mixed
+/// capture is not globally zero-work; each invocation still needs its inventory.
+pub fn test_work_counts(text: &str) -> Vec<u64> {
+    static RUNNING: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RUNNING
+        .get_or_init(|| regex::Regex::new(r"\brunning (\d+) tests?\b").expect("static regex"))
+        .captures_iter(text)
+        .filter_map(|caps| caps.get(1)?.as_str().parse().ok())
+        .collect()
 }

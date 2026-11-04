@@ -261,7 +261,8 @@ pub(crate) enum Original {
     /// It passed.
     Passed,
     /// It crashed in its own code, could not be run, or never ran: no
-    /// verdict on that tree.
+    /// verdict on that tree. A parser-usage failure or a passability refutation
+    /// is also a defect, never an assertion the repair must keep failing.
     Defect,
 }
 
@@ -334,7 +335,22 @@ fn originals_at<'a>(
             // Issue 328: a run that gave no verdict (a program that could
             // not start, a tree that did not build) failed no assertion.
             let silent = silent::silent_failure(contract, result, at).is_some();
+            let entry = contract
+                .acceptance
+                .iter()
+                .chain(&contract.supplementary)
+                .find(|entry| entry.id == id);
+            let refuted = entry.is_some_and(|entry| {
+                entry.judgment.verdict == JudgeDecision::Refuted
+                    && super::super::passability::is_passability_call(&entry.judgment.host_call_id)
+            });
+            let usage = !passed(result)
+                && entry
+                    .and_then(executed_text)
+                    .is_some_and(|(_, command)| at.original_usage_error(result, command));
             let original = if placeholder
+                || refuted
+                || usage
                 || crashed.contains_key(&id)
                 || result.operational_error.is_some()
                 || silent

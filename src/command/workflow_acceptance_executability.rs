@@ -202,7 +202,7 @@ impl std::fmt::Display for HostUnproven {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{HOST_UNPROVEN} {} check(s) after repairing its own environment, so nothing was published and no author was asked to change them: {}",
+            "{HOST_UNPROVEN} {} check(s), so nothing was published and no author was asked to change them: {}",
             self.0.len(),
             (self.0.iter())
                 .map(|(id, why)| format!("{id}: {why}"))
@@ -249,6 +249,7 @@ pub(crate) struct HostProbe {
     /// The pre-implementation tree every probed check must fail on.
     baseline: Option<baseline::Baseline>,
     /// How each check that failed there failed (Issue 275).
+    test_inventories: Mutex<BTreeMap<String, Option<Vec<String>>>>,
     baseline_failures: Mutex<BTreeMap<String, hermetic::CheckEvidence>>,
     reuse_audit: Mutex<BTreeMap<String, ReuseAudit>>,
     /// The tree the checks being repaired ran on, and how each fared there.
@@ -309,6 +310,8 @@ mod probe;
 mod prove;
 #[path = "workflow_acceptance_executability_repairs.rs"]
 mod repairs;
+#[cfg(test)]
+pub(crate) use repairs::test_unproven_after_repairs;
 #[path = "workflow_acceptance_executability_resume.rs"]
 mod resume;
 #[path = "workflow_acceptance_executability_silent.rs"]
@@ -321,6 +324,9 @@ mod sites;
 mod verdict;
 #[path = "workflow_acceptance_executability_verdict_shell.rs"]
 mod verdict_shell;
+
+#[path = "workflow_acceptance_test_inventory.rs"]
+pub(crate) mod test_inventory;
 pub(crate) use mutation::CANNOT_FAIL;
 pub(crate) use sites::repository_tree_contains;
 #[cfg(test)]
@@ -395,7 +401,7 @@ pub(crate) fn crash_findings_at<'a>(
             {
                 let output = program_output(&result.stdout, &redactor, FINDING_TAIL_BYTES);
                 return Some((entry.id.clone(), format!(
-                    "check '{}' exited successfully but its output reports zero work, so it did not assert its criterion; correct the command or output convention so the intended test actually runs. Captured stdout:\n{output}", entry.id
+                    "check '{}' exited successfully but its output reports zero work, so it did not assert its criterion; correct the command or output convention so the intended test actually runs. If the work adds a test absent at base, the check must fail there when no test runs. Captured stdout:\n{output}", entry.id
                 )));
             }
             match classify_check_run(text, result) {

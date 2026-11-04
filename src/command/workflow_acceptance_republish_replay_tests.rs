@@ -1,4 +1,4 @@
-//! Replays two recorded author replies against a real repository/project
+//! Replays two genericized recorded author replies against a real repository/project
 //! sibling layout. The probe's hermetic copy deliberately renames the repo.
 
 use super::*;
@@ -11,22 +11,22 @@ use archon_workflow::task_set_contract::{
 };
 use std::path::{Path, PathBuf};
 
-const RESUME_19: &str = r#"{"id":"SUP-REQ-F-083","criterion":"A missing `native_interval` field means `false`.","check":{"kind":"command","command":"cargo test --quiet --release --manifest-path ../archon-cli/Cargo.toml -p archon-trading --lib data_lake::tests::missing_flags_deserialize_false_and_missing_quality_deserializes_degraded && cargo test --quiet --release --manifest-path ../archon-cli/Cargo.toml -p archon-trading --lib data_lake::tests::in_memory_v1_read_upgrade_leaves_disk_bytes_identical","cwd":"repo_root"},"gap_permitted":false,"covers":["REQ-F-083"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}"#;
+const RESUME_19: &str = r#"{"id":"SUP-REQ-F-083","criterion":"A missing `native_interval` field means `false`.","check":{"kind":"command","command":"cargo test --quiet --release --manifest-path ../repository/Cargo.toml -p sample-core --lib data_lake::tests::missing_flags_deserialize_false_and_missing_quality_deserializes_degraded && cargo test --quiet --release --manifest-path ../repository/Cargo.toml -p sample-core --lib data_lake::tests::in_memory_v1_read_upgrade_leaves_disk_bytes_identical","cwd":"repo_root"},"gap_permitted":false,"covers":["REQ-F-083"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}"#;
 
 const RESUME_20: &str = r#"{"id":"SUP-REQ-F-083","criterion":"A missing `native_interval` field means `false`.","check":{"kind":"command","command_block":true,"cwd":"repo_root"},"gap_permitted":false,"covers":["REQ-F-083"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}
 
 ```check
 set -e
-test -f crates/archon-trading/src/data_lake/tests.rs
-cp crates/archon-trading/src/data_lake/tests.rs /tmp/sup_req_dl_083_tests.rs.bak
-trap 'mv /tmp/sup_req_dl_083_tests.rs.bak crates/archon-trading/src/data_lake/tests.rs' EXIT
-mv crates/archon-trading/src/data_lake/tests.rs /tmp/sup_req_dl_083_absent.rs
-if cargo nextest run -p archon-trading --test-threads=1 2>/dev/null; then
+test -f crates/sample-core/src/data_lake/tests.rs
+cp crates/sample-core/src/data_lake/tests.rs /tmp/sup_req_dl_083_tests.rs.bak
+trap 'mv /tmp/sup_req_dl_083_tests.rs.bak crates/sample-core/src/data_lake/tests.rs' EXIT
+mv crates/sample-core/src/data_lake/tests.rs /tmp/sup_req_dl_083_absent.rs
+if cargo nextest run -p sample-core --test-threads=1 2>/dev/null; then
   echo "REGRESSION GUARD FAILED: criterion holds with tests.rs moved aside"
   exit 1
 fi
-mv /tmp/sup_req_dl_083_absent.rs crates/archon-trading/src/data_lake/tests.rs
-cargo nextest run -p archon-trading missing_flags_deserialize_false_and_missing_quality_deserializes_degraded req_dl_020_gate_rejects_via_new_constructor_with_dataset_id --test-threads=1
+mv /tmp/sup_req_dl_083_absent.rs crates/sample-core/src/data_lake/tests.rs
+cargo nextest run -p sample-core missing_flags_deserialize_false_and_missing_quality_deserializes_degraded req_dl_020_gate_rejects_via_new_constructor_with_dataset_id --test-threads=1
 ```"#;
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -57,7 +57,7 @@ struct ReplayFixture {
 fn replay_fixture() -> ReplayFixture {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("project");
-    let repository = temp.path().join("archon-cli");
+    let repository = temp.path().join("repository");
     let tool_bin = temp.path().join("site-bin");
     let scratch = temp.path().join("scratch");
     let tasks = project.join("tasks/PRD-F");
@@ -72,10 +72,25 @@ fn replay_fixture() -> ReplayFixture {
         &["config", "user.email", "test@example.invalid"],
     );
     git(&repository, &["config", "user.name", "test"]);
-    std::fs::write(repository.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
-    let test_file = repository.join("crates/archon-trading/src/data_lake/tests.rs");
+    std::fs::write(
+        repository.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/sample-core\"]\n",
+    )
+    .unwrap();
+    let test_file = repository.join("crates/sample-core/src/data_lake/tests.rs");
     std::fs::create_dir_all(test_file.parent().unwrap()).unwrap();
     std::fs::write(&test_file, "// replay fixture\n").unwrap();
+    // The replay targets a real package; only the plugin is unavailable.
+    std::fs::write(
+        repository.join("crates/sample-core/src/lib.rs"),
+        "// fixture\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repository.join("crates/sample-core/Cargo.toml"),
+        "[package]\nname = \"sample-core\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
     git(&repository, &["add", "."]);
     git(&repository, &["commit", "-qm", "baseline"]);
     let commit = git(&repository, &["rev-parse", "HEAD"]);
@@ -139,7 +154,7 @@ fn replay_fixture() -> ReplayFixture {
     let cargo = tool_bin.join("cargo");
     std::fs::write(
         &cargo,
-        "#!/bin/sh\ncase \"$*\" in\n  --list) printf 'Installed Commands:\\n    build\\n    test\\n' ;;\n  *--manifest-path*)\n    if [ -f ../archon-cli/Cargo.toml ]; then exit 0; fi\n    echo 'error: manifest path `../archon-cli/Cargo.toml` does not exist' >&2\n    exit 101\n    ;;\n  *nextest*) echo 'error: no such command: `nextest`' >&2; exit 101 ;;\n  *) exit 0 ;;\nesac\n",
+        "#!/bin/sh\ncase \"$*\" in\n  --list) printf 'Installed Commands:\\n    build\\n    test\\n' ;;\n  *--manifest-path*)\n    if [ -f ../repository/Cargo.toml ]; then exit 0; fi\n    echo 'error: manifest path `../repository/Cargo.toml` does not exist' >&2\n    exit 101\n    ;;\n  *nextest*) echo 'error: no such command: `nextest`' >&2; exit 101 ;;\n  *) exit 0 ;;\nesac\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -195,7 +210,7 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
             2 => RESUME_20.to_string(),
             _ => command_entry(
                 entry,
-                "grep -q 'replay fixture' crates/archon-trading/src/data_lake/tests.rs",
+                "grep -q 'replay fixture' crates/sample-core/src/data_lake/tests.rs",
             ),
         },
         |_, _| true,
@@ -226,7 +241,7 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
     let prompts = client.prompts.lock().unwrap();
     assert_eq!(prompts.len(), 3, "both drafts were shown back as findings");
     assert!(
-        prompts[1].contains("../archon-cli/Cargo.toml")
+        prompts[1].contains("../repository/Cargo.toml")
             && prompts[1].contains("which the site does not create"),
         "{}",
         prompts[1]
@@ -261,7 +276,7 @@ async fn recorded_resume_failures_become_author_findings_and_allow_only_the_vali
         result.unproven
     );
     assert!(result.published);
-    assert_eq!(fixture.repository.file_name().unwrap(), "archon-cli");
+    assert_eq!(fixture.repository.file_name().unwrap(), "repository");
     assert_eq!(
         fixture.repository.parent().unwrap(),
         fixture.project.parent().unwrap(),

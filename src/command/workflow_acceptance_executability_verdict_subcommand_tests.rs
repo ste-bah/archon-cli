@@ -71,6 +71,8 @@ impl Bin {
             pathext: None,
             windows: cfg!(windows),
             deliverables: Vec::new(),
+            requirements: Default::default(),
+            roots: None,
             environment: site,
             host_path: Some(self.host_path()),
             list_stall: LIST_STALL,
@@ -294,7 +296,7 @@ fn a_tool_not_known_to_dispatch_keeps_its_verdict() {
     let run = bin.run("archon331lister data");
     let why = no_verdict("archon331lister data", &run, &bin.context()).expect("its author's");
     assert!(
-        why.contains("passes only if the deliverable adds it"),
+        why.contains("neither the site nor the host has it"),
         "{why}"
     );
     // The host has `archon331cli-data`: the tool lists no commands, so the
@@ -313,3 +315,108 @@ fn a_tool_not_known_to_dispatch_keeps_its_verdict() {
         "{warned:?}"
     );
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_1_covered_command_offers_guard() {
+    let bin = Bin::new(
+        Path::new("/bin/sh"),
+        &[(
+            "tool",
+            "#!/bin/sh\nprintf 'Commands:\\n    test    built in\\n'\n",
+        )],
+    );
+    for requirement in ["Add tool feature", "Add the feature command"] {
+        let mut at = bin.context();
+        at.requirements
+            .insert("AC-331".into(), vec![requirement.into()]);
+        let why = no_verdict(
+            "tool feature",
+            &result(Some(1), b"", b"tool: unknown command 'feature'"),
+            &at,
+        )
+        .unwrap();
+        assert!(why.contains("tool --list | grep -qw feature"), "{why}");
+    }
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_2_uncovered_command_requires_replacement() {
+    let bin = Bin::new(
+        Path::new("/bin/sh"),
+        &[(
+            "tool",
+            "#!/bin/sh\nprintf 'Commands:\\n    test    built in\\n'\n",
+        )],
+    );
+    let mut at = bin.context();
+    at.requirements
+        .insert("another-check".into(), vec!["Add tool feature".into()]);
+    let why = no_verdict(
+        "tool feature",
+        &result(Some(1), b"", b"tool: unknown command 'feature'"),
+        &at,
+    )
+    .unwrap();
+    assert!(why.contains(
+        "replace `tool feature` with what the site provides; neither the site nor the host has it"
+    ));
+    assert!(!why.contains("grep -qw"));
+}
+
+fn attribution(command: &str, output: &str) -> Option<(String, super::UnprovenCause)> {
+    let tool = "#!/bin/sh\nprintf 'Commands:\n    run    built in\n    test    built in\n'\n";
+    let bin = Bin::new(Path::new("/bin/sh"), &[("tool", tool), ("other", tool)]);
+    super::missing(
+        &super::simple_commands(command),
+        output,
+        &bin.context(),
+        &[],
+    )
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_3_unlisted_or_scratch_unproven_without_host_program_is_unchanged() {
+    let bin = Bin::new(Path::new("/bin/sh"), &[("tool", "#!/bin/sh\nexit 0\n")]);
+    assert!(
+        super::missing(
+            &super::simple_commands("tool feature"),
+            "tool: unknown command 'feature'",
+            &bin.context(),
+            &[]
+        )
+        .is_none()
+    );
+    super::no_answer_tests::scratch_overrun(false);
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_4_named_tool_owns_rejection() {
+    assert!(attribution("tool run -- run", "tool: unknown command 'run'").is_some());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_5_other_program_owns_rejection() {
+    assert!(attribution("tool test && other run", "other: unknown command 'test'").is_none());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_6_unnamed_product_rejection_is_a_verdict() {
+    for command in ["tool run", "tool run -- run"] {
+        assert!(attribution(command, "error: unrecognized subcommand 'run'").is_none());
+    }
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_7_unnamed_first_positional_rejection_is_the_tools() {
+    assert!(attribution("tool feature", "error: unrecognized subcommand 'feature'").is_some());
+}
+
+#[path = "workflow_acceptance_executability_subcommand_review_tests.rs"]
+mod review;

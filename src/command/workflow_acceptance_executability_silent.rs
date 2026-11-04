@@ -42,7 +42,8 @@ pub(super) use mutation::{ran_mutation, settle_mutation_timeout, strike_mutation
 /// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
-    let at = Context::new(super::sites::listing_environment(probe), contract);
+    let at = Context::new(super::sites::listing_environment(probe), contract)
+        .with_requirements(probe, contract);
     match scratch_copy_tree(probe, contract, None) {
         Some((depth, roots)) => at.within(depth, &roots),
         None => at,
@@ -56,7 +57,8 @@ pub(super) fn baseline_context(
     contract: &AcceptanceContract,
     layout: Option<&super::hermetic::CopyLayout>,
 ) -> Context {
-    let at = Context::new(super::sites::listing_environment(probe), contract);
+    let at = Context::new(super::sites::listing_environment(probe), contract)
+        .with_requirements(probe, contract);
     let tree = match probe.site {
         Site::Direct | Site::Hermetic => layout.and_then(|layout| layout.site_tree()),
         Site::Scratch(_) => scratch_copy_tree(probe, contract, layout),

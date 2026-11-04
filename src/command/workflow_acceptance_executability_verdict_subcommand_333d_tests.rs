@@ -25,7 +25,7 @@ macro_rules! or_skip {
 }
 
 const PLAIN: &str = "#!/bin/sh\nexit 0\n";
-const NOWHERE: &str = "passes only if the deliverable adds it";
+const NOWHERE: &str = "the check must use an available program or the deliverable must add it";
 
 #[test]
 fn a_tree_alias_the_listing_cannot_see_goes_back_to_its_author() {
@@ -35,10 +35,13 @@ fn a_tree_alias_the_listing_cannot_see_goes_back_to_its_author() {
     // never reads the tree, cannot tell, so it is never a proof.
     let odd = result(Some(101), b"", b"error: no such command: `archon333tree`\n");
     let why = no_verdict("cargo archon333tree", &odd, &bin.context()).expect("never a proof");
-    assert!(why.contains(NOWHERE) && why.contains(guard), "{why}");
+    assert!(
+        why.contains("neither the site nor the host has it") && !why.contains(guard),
+        "{why}"
+    );
     let warned = bin.warned("cargo archon333tree");
     assert!(
-        warned.len() == 1 && warned[0].contains(NOWHERE) && warned[0].contains(guard),
+        warned.len() == 1 && warned[0].contains(NOWHERE) && !warned[0].contains(guard),
         "{warned:?}"
     );
     // When the host has a program of that name, it is an environment tool,
@@ -75,7 +78,8 @@ fn an_env_shebang_shim_is_listed_on_the_sites_search_path() {
     assert_eq!(run.exit_code, Some(2), "{run:?}");
     let why = no_verdict("archon333shim lint", &run, &bin.context()).expect("never a proof");
     assert!(
-        why.contains(NOWHERE) && why.contains("not a command built into"),
+        why.contains("neither the site nor the host has it")
+            && why.contains("not a command built into"),
         "it listed its commands: {why}"
     );
 }

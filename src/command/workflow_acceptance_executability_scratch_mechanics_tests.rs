@@ -48,6 +48,15 @@ async fn reverify_on_scratch_in(
         &trees.repo,
         &["commit", "-qm", "setup", "--allow-empty"],
     );
+    // These are environment/guard tests: all setup inputs belong to base.
+    let mut record = archon_workflow::repository_record::read_repository_record(&trees.set.tasks)
+        .unwrap()
+        .unwrap();
+    record.base_commit = crate::command::workflow_task_set::executability::probe_tests::git(
+        &trees.repo,
+        &["rev-parse", "HEAD"],
+    );
+    archon_workflow::repository_record::write_repository_record(&trees.set.tasks, &record).unwrap();
     let project = trees.set.project.path();
     std::fs::create_dir_all(project.join(".archon")).unwrap();
     let scratch_parent = trees.outside.path().join("scratch");
@@ -257,7 +266,9 @@ async fn cd_only_and_printed_inputs_get_the_literal_file_remedy() {
         );
         assert!(finding.contains("A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root."), "{id}: {finding}");
         assert!(
-            finding.contains("it passed on the probed tree at"),
+            // P2: reverify proves can-fail on the recorded base, which this
+            // helper records as the repository's HEAD.
+            finding.contains("it passed on the pre-implementation tree at"),
             "{id}: {finding}"
         );
         assert!(finding.contains("A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it."), "{id}: {finding}");
