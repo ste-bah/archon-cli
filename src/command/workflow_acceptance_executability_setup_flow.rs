@@ -59,25 +59,36 @@ pub(super) fn decisive(text: &str, word: &str, args: &[String]) -> bool {
             words.first().is_some_and(|word| {
                 matches!(
                     word.as_str(),
-                    "if" | "elif" | "else" | "while" | "until" | "for" | "case" | "function" | "{"
+                    "if" | "elif" | "else" | "while" | "until" | "for" | "case" | "function"
                 )
             })
         })
         || parts.iter().any(|(_, op)| op == "(");
-    let status_exit = super::super::super::verdict_shell::simple_commands(text)
-        .iter()
-        .any(|command| {
-            matches!(command.word.as_str(), "exit" | "return")
-                && command.args.iter().any(|arg| arg.contains('$'))
-        });
-    if compound || status_exit {
+    if compound {
         return true;
     }
+    let mut brace_depth = 0usize;
     for (index, (body, op)) in parts.iter().enumerate() {
+        // Only leading brace keywords affect the command's enclosing group.
+        for words in super::super::super::verdict_shell::lex(body) {
+            for word in words
+                .iter()
+                .take_while(|word| matches!(word.as_str(), "{" | "}"))
+            {
+                if word == "{" {
+                    brace_depth += 1;
+                } else {
+                    brace_depth = brace_depth.saturating_sub(1);
+                }
+            }
+        }
         let isolated = matches!(op.as_str(), "|" | "&");
         let guarded = isolated;
         for command in super::super::super::verdict_shell::simple_commands(body) {
             if command.word == word && command.args == args {
+                if brace_depth > 0 {
+                    return true;
+                }
                 if isolated {
                     return false;
                 }
@@ -118,7 +129,10 @@ pub(super) fn decisive(text: &str, word: &str, args: &[String]) -> bool {
                     // command decides the exit. Unknown fallbacks are not proof.
                     return !(next.starts_with("echo ") || next.starts_with("printf ")) || last;
                 }
-                return !guarded && (last || (errexit && !matches!(op.as_str(), "&&" | "||")));
+                return !guarded
+                    && (last
+                        || reads_list_status(&parts[end + 1..])
+                        || (errexit && !matches!(op.as_str(), "&&" | "||")));
             }
             if command.word == "set" && !guarded {
                 for arg in &command.args {
@@ -136,6 +150,46 @@ pub(super) fn decisive(text: &str, word: &str, args: &[String]) -> bool {
                     errexit = false;
                 }
             }
+        }
+    }
+    false
+}
+
+/// A later exit refers to setup only if its list status is read immediately.
+fn reads_list_status(parts: &[(String, String)]) -> bool {
+    let words = parts
+        .iter()
+        .flat_map(|(body, _)| super::super::super::verdict_shell::lex(body))
+        .collect::<Vec<_>>();
+    let Some(first) = words.first() else {
+        return false;
+    };
+    let exits_with = |words: &[String], value: &str| {
+        words
+            .first()
+            .is_some_and(|word| matches!(word.as_str(), "exit" | "return"))
+            && words.get(1).is_some_and(|arg| arg == value)
+    };
+    if exits_with(first, "$?") {
+        return true;
+    }
+    let Some(name) = first.first().and_then(|word| word.strip_suffix("=$?")) else {
+        return false;
+    };
+    // An assignment followed by a command reads that command's status instead.
+    if first.len() != 1 || name.is_empty() {
+        return false;
+    }
+    for command in &words[1..] {
+        if command
+            .iter()
+            .any(|word| word.starts_with(&format!("{name}=")))
+        {
+            return false;
+        }
+        if exits_with(command, &format!("${name}")) || exits_with(command, &format!("${{{name}}}"))
+        {
+            return true;
         }
     }
     false

@@ -381,7 +381,8 @@ pub(super) fn mutation_defect_reason(
             "{why}; check the criterion with what the site provides, without depending on that program or subcommand"
         ),
         Some((why, UnprovenCause::ProgramAbsent)) => format!(
-            "{why}; check the criterion with what the site provides: make it fail by its own assertion on the pre-implementation tree, or prove it a regression guard, never by starting a program that neither the site nor the host has"
+            "{why}; check the criterion with what the site provides: {}.",
+            super::super::silent::PROGRAM_ABSENT_REMEDY
         ),
         Some((why, _)) => format!("{why}; fix that defect"),
         None => format!("it crashed in its own script: {last_line}; fix that defect"),

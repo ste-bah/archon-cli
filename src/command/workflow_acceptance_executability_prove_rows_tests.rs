@@ -459,7 +459,7 @@ async fn P1_29_missing_program_has_cause_and_remedy() {
         ),
         (
             UnprovenCause::ProgramAbsent,
-            "never by starting a program that neither the site nor the host has",
+            "check the criterion with what the site provides: make it fail by its own assertion on the pre-implementation tree, or prove it a regression guard.",
         ),
     ] {
         let reason = super::super::helpers::mutation_defect_reason(

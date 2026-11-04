@@ -215,3 +215,27 @@ fn N1_redirections_pipelines_groups_and_saved_status_withhold_proof() {
     check_status(script, false);
     assert!(decisive(script, "cd", &["../absent".into()]));
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn R1_status_reads_and_braces_belong_to_the_setup_list() {
+    // Domain map: script -> whether setup can decide the real shell's exit.
+    for (script, decisive) in [
+        ("cd ../absent || true; test -f f; exit $?", false),
+        ("{ test -f f; }; cd ../absent || true; test -f g", false),
+        ("cd ../absent; test -f f; status=$?; exit $status", false),
+        ("cd ../absent; test -f f; exit $?", false),
+        ("cd ../absent && true 2>&1 | tail -1", true),
+        ("cd ../absent 2>&1 && true", true),
+        ("cd ../absent && true | cat", true),
+        ("{ cd ../absent && true; }", true),
+        ("cd ../absent && true; status=$?; exit $status", true),
+        ("cd ../absent && true; exit $?", true),
+        ("cd ../absent && true; status=$?; true; exit $status", true),
+        ("cd ../absent; status=$?; status=0; exit $status", false),
+        ("cd ../absent || exit 1; test -f file.txt", true),
+        ("cd ../absent || true; test -f file.txt", false),
+    ] {
+        check(script, decisive);
+    }
+}

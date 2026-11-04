@@ -35,6 +35,9 @@ use crate::command::workflow_task_set::passability::evidence::{Redactor, program
 
 /// Bytes of a silent failure's stderr kept as evidence.
 const EVIDENCE_BYTES: usize = 800;
+
+/// The same assertion remedy applies to baseline and mutation missing programs.
+pub(super) const PROGRAM_ABSENT_REMEDY: &str = "make it fail by its own assertion on the pre-implementation tree, or prove it a regression guard";
 #[path = "workflow_acceptance_executability_silent_mutation.rs"]
 mod mutation;
 pub(super) use mutation::{ran_mutation, settle_mutation_timeout, strike_mutation};
