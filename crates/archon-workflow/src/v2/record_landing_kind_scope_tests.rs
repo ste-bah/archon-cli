@@ -155,7 +155,10 @@ fn skeleton_hollow_or_absent_task_is_still_rejected() {
 fn only_the_skeleton_contract_shows_the_skeleton_entry() {
     let skeleton = schema_hint(RecordKind::Skeleton);
     assert!(
-        skeleton.contains("task (skeleton records only): {task_id:"),
+        skeleton.contains(&format!(
+            "task (skeleton records only): {}",
+            super::record_landing::task_schema()
+        )),
         "{skeleton}"
     );
     assert!(skeleton.contains("deliverable_contracts"), "{skeleton}");
@@ -186,7 +189,7 @@ fn the_landing_hint_carries_the_contract_for_its_own_kind() {
             "{hint}"
         );
         assert_eq!(
-            hint.contains(",task}"),
+            hint.contains("remove?: bool"),
             kind == RecordKind::Skeleton,
             "{hint}"
         );

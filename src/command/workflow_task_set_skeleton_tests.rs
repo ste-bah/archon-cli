@@ -424,7 +424,8 @@ fn freeze_shape_a_marker_only_in_an_ignored_field_is_not_staged() {
 }
 
 #[test]
-fn skeleton_accepts_host_constraints_and_leaves_missing_constraint_ownership_to_set_lint() {
+#[allow(non_snake_case)]
+fn P5_1_freeze_skeleton_reports_missing_constraint_owner() {
     use archon_workflow::task_skeleton::{FrozenTask, TaskSkeleton};
     let temp = tempfile::tempdir().unwrap();
     let (tasks, pin) = seed_frozen_acceptance(&temp);
@@ -455,5 +456,17 @@ fn skeleton_accepts_host_constraints_and_leaves_missing_constraint_ownership_to_
         &skeleton,
     )
     .unwrap();
-    assert!(findings.is_empty(), "{findings:#?}");
+    assert_eq!(findings.len(), 1, "{findings:#?}");
+    let finding = &findings[0];
+    assert_eq!(
+        finding.remediation_scope,
+        archon_workflow::RemediationScope::Skeleton
+    );
+    let identity = finding.deterministic_defect.as_ref().unwrap();
+    assert_eq!(identity.code, "unowned_constraint");
+    assert_eq!(identity.subject, "QX-002");
+    assert_eq!(identity.location, "implements");
 }
+
+#[path = "workflow_task_set_skeleton_p5_site_tests.rs"]
+mod p5_site_tests;

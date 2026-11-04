@@ -222,6 +222,23 @@ pub(super) fn skeleton_findings(
             .with_defect(finding.identity)
         }),
     );
+    findings.extend(
+        archon_workflow::task_skeleton::constraint_owner_findings(
+            skeleton,
+            &archon_workflow::obligation_ids::constraint_texts(prd_text),
+        )
+        .into_iter()
+        .map(|finding| {
+            GateFinding::new(
+                GateId::FreezeSkeleton,
+                finding.message,
+                finding.identity.subject.clone(),
+                Some(skeleton_path.clone()),
+                archon_workflow::RemediationScope::Skeleton,
+            )
+            .with_defect(finding.identity)
+        }),
+    );
     let edge_analysis = analyze_task_set_edges(skeleton);
     findings.extend(edge_analysis.blockers.into_iter().map(|finding| {
         GateFinding::new(

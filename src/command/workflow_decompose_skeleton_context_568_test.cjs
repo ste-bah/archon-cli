@@ -30,7 +30,7 @@ function assertPrevious(prompt, files, content) {
   assert(prompt.includes(`The previous candidate is in ${path} (sha256 ${sha256}; host-written context for this call: read it by its exact path).`));
   assert.equal(files.get(path), content);
   assert(!prompt.includes(content), 'candidate bytes never inline');
-  assert(prompt.includes('Whatever you restructure, keep every task, implements id, deliverable and edge of the previous candidate that no current finding names. Return the whole document.'));
+  assert(prompt.includes('Whatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Re-land only changed tasks; unlisted tasks are retained.'));
   assert(!prompt.includes('Repair the previous candidate.'));
   assert(!prompt.includes('Change only what the current findings name.'));
   assert(Buffer.byteLength(prompt) <= 262144);
@@ -49,12 +49,13 @@ async function run(ctx, replies, gates, policy = ctx.skeletonPolicy([]), onPause
   return {prompts, stdins, outcome};
 }
 
-test('skeleton retries reference the latest judged candidate; the first prompt is byte-identical', async () => {
+test('skeleton retries reference the latest judged candidate; the first prompt pins the incremental contract', async () => {
   const {ctx, files} = context();
   const replies = [candidate(1), candidate(2), candidate(3)];
   const out = await run(ctx, replies, [refused(), refused(), clean()]);
   // SHA-256 of the dispatched first prompt without #568 (main plus #569, the #572 obligation sentence, the #574 table-row constraint wording and the #575 source_sections shape field), with these exact args.
-  assert.equal(digest(out.prompts[0]), 'c5f9f5aa94dab4a99c5e5ae7b665baecf1704df86c05dd11127c4a7117308b40');
+  // P5 replaces the whole-document prompt with one-task landing and exact receipt wording.
+  assert.equal(digest(out.prompts[0]), 'b77df0c75c00a4e2ba35d9b5bced2c5222acc073280b0982324057e3d7c74967');
   assert(!out.prompts[0].includes('The previous candidate is in'));
   assert.equal(files.size, 2);
   assertPrevious(out.prompts[1], files, replies[0]);

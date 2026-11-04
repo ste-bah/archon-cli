@@ -2,13 +2,17 @@ use super::*;
 
 #[test]
 fn draft_and_pending_skeletons_accept_constraints_and_numbered_sections() {
+    check_draft_and_pending(&[false, true], true);
+}
+
+fn check_draft_and_pending(cases: &[bool], check_body: bool) {
     use archon_workflow::task_set_contract::{
         ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceContract, AcceptanceLock,
         AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest,
     };
     use archon_workflow::task_skeleton::{TaskSkeleton, TaskSkeletonLock};
 
-    for pending in [false, true] {
+    for &pending in cases {
         let temp = tempfile::tempdir().unwrap();
         let task = write_task_file_lint_fixture(temp.path());
         let tasks = task.parent().unwrap();
@@ -58,10 +62,42 @@ fn draft_and_pending_skeletons_accept_constraints_and_numbered_sections() {
         } else {
             std::fs::remove_file(&lock_path).unwrap();
         }
-        if pending {
+        if pending && check_body {
             let lint =
                 task_file::inspect(temp.path(), &task, archon_core::config::GateMode::Enforce);
             assert!(lint.report.contains("unfrozen draft"));
+            let gate = evaluate_lint(
+                temp.path(),
+                &LintSource::TaskFile(task.clone()),
+                archon_core::config::GateMode::Enforce,
+            )
+            .unwrap();
+            let finding = gate
+                .findings
+                .iter()
+                .find(|f| {
+                    f.deterministic_defect
+                        .as_ref()
+                        .is_some_and(|d| d.code == "unowned_constraint")
+                })
+                .unwrap();
+            assert_eq!(
+                finding.remediation_scope,
+                archon_workflow::RemediationScope::Skeleton
+            );
+            assert_eq!(
+                finding.source_path.as_deref(),
+                Some(skeleton_path.as_path())
+            );
+            assert_eq!(
+                finding.text,
+                archon_workflow::task_skeleton::constraint_owner_findings(
+                    &skeleton,
+                    &archon_workflow::obligation_ids::constraint_texts(&prd)
+                )[0]
+                .message
+            );
+            assert!(lint.deterministic.values().flatten().any(|defect| defect.code == "unowned_constraint" && defect.subject == "QX-002"));
             let defects: Vec<_> = lint
                 .deterministic
                 .values()
@@ -75,12 +111,45 @@ fn draft_and_pending_skeletons_accept_constraints_and_numbered_sections() {
                 .collect();
             assert_eq!(defects.len(), 1, "{:?}", lint.blockers);
             assert_eq!(defects[0].code, "unknown_obligation");
-            assert!(
-                !lint
-                    .blockers
+            assert!(!lint.blockers.iter().any(|text| text.contains("QX-001")));
+            let mut entries = skeleton.clone();
+            entries.tasks[0]
+                .source_sections
+                .extend(["7.1".into(), " 8".into()]);
+            let entry_bytes = serde_json::to_vec_pretty(&entries).unwrap();
+            std::fs::write(&skeleton_path, &entry_bytes).unwrap();
+            let mut entry_lock: TaskSkeletonLock =
+                serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
+            entry_lock.digest = content_digest(&entry_bytes);
+            std::fs::write(&lock_path, serde_json::to_vec_pretty(&entry_lock).unwrap()).unwrap();
+            let gate = evaluate_lint(
+                temp.path(),
+                &LintSource::TaskFile(task.clone()),
+                archon_core::config::GateMode::Enforce,
+            )
+            .unwrap();
+            for code in ["duplicate_entry", "untrimmed_entry"] {
+                let finding = gate
+                    .findings
                     .iter()
-                    .any(|text| text.contains("QX-001") || text.contains("QX-002"))
-            );
+                    .find(|f| {
+                        f.deterministic_defect
+                            .as_ref()
+                            .is_some_and(|d| d.code == code)
+                    })
+                    .unwrap();
+                assert_eq!(
+                    finding.remediation_scope,
+                    archon_workflow::RemediationScope::Skeleton
+                );
+                assert_eq!(
+                    finding.source_path.as_deref(),
+                    Some(skeleton_path.as_path())
+                );
+            }
+            std::fs::write(&skeleton_path, &bytes).unwrap();
+            entry_lock.digest = content_digest(&bytes);
+            std::fs::write(&lock_path, serde_json::to_vec_pretty(&entry_lock).unwrap()).unwrap();
         }
         let lint =
             task_set::inspect(temp.path(), tasks, archon_core::config::GateMode::Enforce).unwrap();
@@ -90,16 +159,15 @@ fn draft_and_pending_skeletons_accept_constraints_and_numbered_sections() {
             "draft skeleton"
         }));
         let defects: Vec<_> = lint.deterministic.values().flatten().collect();
-        assert_eq!(defects.len(), 1, "{:?}", lint.blockers);
-        assert_eq!(defects[0].code, "unknown_obligation");
-        assert_eq!(defects[0].subject, "TASK-X-010");
-        assert!(lint.blockers[0].contains("QX-404"));
+        assert_eq!(defects.len(), 2, "{:?}", lint.blockers);
+        assert!(defects.iter().any(|defect| defect.code == "unknown_obligation" && defect.subject == "TASK-X-010"));
         assert!(
-            !lint
-                .blockers
+            defects
                 .iter()
-                .any(|text| text.contains("QX-001") || text.contains("QX-002"))
+                .any(|defect| defect.code == "unowned_constraint" && defect.subject == "QX-002")
         );
+        assert!(lint.blockers.iter().any(|text| text.contains("QX-404")));
+        assert!(!lint.blockers.iter().any(|text| text.contains("QX-001")));
         // Exercise the complete gate: section coverage must not also be
         // appended by task_set::inspect for this same draft/pending skeleton.
         skeleton.tasks[0].source_sections = vec!["0".into(), "7.1".into(), "404".into()];
@@ -117,7 +185,7 @@ fn draft_and_pending_skeletons_accept_constraints_and_numbered_sections() {
             archon_core::config::GateMode::Enforce,
         )
         .unwrap();
-        for code in ["uncited_section", "unknown_section"] {
+        for code in ["uncited_section", "unknown_section", "unowned_constraint"] {
             let findings: Vec<_> = evaluation
                 .findings
                 .iter()
@@ -369,4 +437,15 @@ fn directory_lint_rejects_stale_prd_content_even_when_ids_are_unchanged() {
         error.contains("re-run workflow freeze-acceptance"),
         "{error}"
     );
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn P5_3_pending_body_landing_constraint_ownership() {
+    check_draft_and_pending(&[true], true);
+}
+#[test]
+#[allow(non_snake_case)]
+fn P5_4_draft_pending_constraint_identity_deduplicates() {
+    check_draft_and_pending(&[false, true], false);
 }

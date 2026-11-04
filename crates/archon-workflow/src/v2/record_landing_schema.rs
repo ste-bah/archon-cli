@@ -70,7 +70,9 @@ pub fn enum_names() -> EnumNames {
 /// The record field carrying one skeleton entry. Only the skeleton path reads it; every other kind discards it.
 const TASK: &str = "task";
 /// The skeleton entry clause, appended to the skeleton contract only so no other kind is invited to send a field its path would discard.
-const TASK_CLAUSE: &str = "task (skeleton records only): {task_id: TASK-<DOMAIN>-<NNN>, file_name: <task_id>.md, depends_on: [{task_id, consumes: [{artifact_path}], ordering_only: bool}]*, blocks: [task_id]*, implements: [PRD obligation id]*, deliverable_contracts: [{kind, artifact_path, min_instances: int}]*; implements and/or deliverable_contracts must be non-empty}, ";
+#[path = "record_landing_task_schema.rs"]
+mod task;
+pub use task::task_schema;
 /// The fields this kind never reads. Dropping them before deserialisation keeps a field the record would have discarded from failing the landing; every field the kind does read stays exactly as strict as it was.
 pub(super) fn ignored_fields(kind: RecordKind) -> &'static [&'static str] {
     match kind {
@@ -90,6 +92,11 @@ pub(super) fn prepare_payload(
     kind: RecordKind,
     object: &mut Map<String, Value>,
 ) -> WorkflowResult<()> {
+    if kind != RecordKind::Skeleton && object.contains_key("remove") {
+        return Err(WorkflowError::ArtifactInvalid(
+            "remove is only available for draft skeleton tasks".into(),
+        ));
+    }
     for field in ignored_fields(kind) {
         object.remove(*field);
     }
@@ -122,12 +129,17 @@ pub fn schema_hint(kind: RecordKind) -> &'static str {
 fn build(kind: RecordKind) -> String {
     let (names, bar) = (enum_names(), |v: &[String]| v.join("|"));
     let task = if kind == RecordKind::Skeleton {
-        TASK_CLAUSE
+        task::task_clause()
+    } else {
+        String::new()
+    };
+    let remove = if kind == RecordKind::Skeleton {
+        ", remove?: bool (draft skeleton only; omit task to remove subject)"
     } else {
         ""
     };
     format!(
-        "{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence; when the subject is not a task each finding must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false), evidence: [{{kind: {evidence}, summary: string, source?: string}}]+, commands_run: [{{kind: {commands}, command: string, status: {command_statuses}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {statuses}, summary: string, {task}replace?: bool}}",
+        "{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence; when the subject is not a task each finding must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false), evidence: [{{kind: {evidence}, summary: string, source?: string}}]+, commands_run: [{{kind: {commands}, command: string, status: {command_statuses}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {statuses}, summary: string, {task}replace?: bool{remove}}}",
         evidence = bar(&names.evidence_kinds),
         commands = bar(&names.command_kinds),
         command_statuses = bar(&names.command_statuses),
@@ -137,7 +149,9 @@ fn build(kind: RecordKind) -> String {
 /// The top-level field names this kind may send, for the prose hint that accompanies the schema.
 pub(super) fn field_list(kind: RecordKind) -> &'static str {
     match kind {
-        RecordKind::Skeleton => "{subject,evidence,commands_run,status,summary,task}",
+        RecordKind::Skeleton => {
+            "{subject,evidence,commands_run,status,summary,task,replace,remove}"
+        }
         RecordKind::Review | RecordKind::Verify => {
             "{subject,findings,evidence,commands_run,status,summary}"
         }

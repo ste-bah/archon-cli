@@ -325,7 +325,10 @@ fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema
 #[test]
 fn schema_hint_describes_the_skeleton_task_entry() {
     let hint = schema_hint(RecordKind::Skeleton);
-    assert!(hint.contains("task (skeleton records only): {task_id: TASK-<DOMAIN>-<NNN>, file_name: <task_id>.md, depends_on: [{task_id, consumes: [{artifact_path}], ordering_only: bool}]*, blocks: [task_id]*, implements: [PRD obligation id]*, deliverable_contracts: [{kind, artifact_path, min_instances: int}]*; implements and/or deliverable_contracts must be non-empty}"), "{hint}");
+    assert!(
+        hint.contains(&super::record_landing::task_schema().to_string()),
+        "{hint}"
+    );
     assert!(
         hint.contains("implements") && hint.contains("deliverable_contracts"),
         "{hint}"

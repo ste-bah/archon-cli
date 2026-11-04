@@ -74,3 +74,65 @@ pub fn validate_skeleton(skeleton: &TaskSkeleton, expected_digest: &str) -> Skel
         io_kind: None,
     })
 }
+
+/// New candidates must be canonical; frozen records remain readable for repair.
+pub(crate) fn entry_findings(skeleton: &TaskSkeleton) -> Vec<TaskSetFinding> {
+    let mut findings = Vec::new();
+    for (slot, task) in skeleton.tasks.iter().enumerate() {
+        for (field, values) in [
+            (
+                "implements",
+                task.implements
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "source_sections",
+                task.source_sections.iter().map(String::as_str).collect(),
+            ),
+            ("blocks", task.blocks.iter().map(String::as_str).collect()),
+            (
+                "depends_on",
+                task.depends_on
+                    .iter()
+                    .map(|edge| edge.task_id.as_str())
+                    .collect(),
+            ),
+        ] {
+            let mut seen = BTreeSet::new();
+            for value in values {
+                let code = if value.is_empty() || value.trim() != value {
+                    Some("untrimmed_entry")
+                } else if !seen.insert(value) {
+                    Some("duplicate_entry")
+                } else {
+                    None
+                };
+                if let Some(code) = code {
+                    let message = if code == "duplicate_entry" {
+                        format!(
+                            "task {} lists '{value}' twice in {field}; list each value once",
+                            task.task_id
+                        )
+                    } else {
+                        format!(
+                            "task {} lists an empty or untrimmed value '{value}' in {field}; use a non-empty value without leading or trailing whitespace",
+                            task.task_id
+                        )
+                    };
+                    findings.push(TaskSetFinding {
+                        identity: crate::defect::DeterministicDefect::new(
+                            code,
+                            skeleton_subject(&task.task_id, slot),
+                            format!("{field}/{value}"),
+                        ),
+                        field: field.into(),
+                        message,
+                    });
+                }
+            }
+        }
+    }
+    findings
+}

@@ -111,10 +111,14 @@ pub(super) fn inspect(
                         .into_iter()
                         .filter(|finding| {
                             !(finding.identity.code == "unowned_obligation"
-                                && constraints.contains(&finding.identity.subject))
+                                && constraints.contains_key(&finding.identity.subject))
                         })
+                        .chain(archon_workflow::task_skeleton::constraint_owner_findings(
+                            &draft,
+                            &constraints,
+                        ))
                         .map(|finding| {
-                            let text = format!("{}: {}", finding.field, finding.message);
+                            let text = finding.message;
                             deterministic
                                 .entry(text.clone())
                                 .or_default()
@@ -169,10 +173,14 @@ pub(super) fn inspect(
                         .into_iter()
                         .filter(|finding| {
                             !(finding.identity.code == "unowned_obligation"
-                                && constraints.contains(&finding.identity.subject))
+                                && constraints.contains_key(&finding.identity.subject))
                         })
+                        .chain(archon_workflow::task_skeleton::constraint_owner_findings(
+                            &draft,
+                            &constraints,
+                        ))
                         .map(|finding| {
-                            let text = format!("{}: {}", finding.field, finding.message);
+                            let text = finding.message;
                             deterministic
                                 .entry(text.clone())
                                 .or_default()
@@ -297,7 +305,7 @@ fn validate_acceptance_phase(
 ) -> Result<(
     AcceptanceContract,
     std::collections::BTreeSet<String>,
-    std::collections::BTreeSet<String>,
+    std::collections::BTreeMap<String, String>,
 )> {
     let contract: AcceptanceContract = serde_json::from_slice(
         &std::fs::read(contract_path)
@@ -334,8 +342,8 @@ fn validate_acceptance_phase(
     let validated = validate_acceptance_bundle(tasks_root, Some(pin), &expected)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
-    let constraints = archon_workflow::obligation_ids::constraint_ids(&prd);
-    obligations.extend(constraints.iter().cloned());
+    let constraints = archon_workflow::obligation_ids::constraint_texts(&prd);
+    obligations.extend(constraints.keys().cloned());
     Ok((validated, obligations, constraints))
 }
 

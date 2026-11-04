@@ -61,6 +61,21 @@ pub(super) fn prepare(
         subjects,
         subjects_are_tasks,
     )?);
+    if kind == RecordKind::Skeleton {
+        if let Some(previous) = extra
+            .get("previousSkeleton")
+            .filter(|value| !value.is_null())
+        {
+            let previous = match previous.as_str() {
+                Some(text) => serde_json::from_str(text).unwrap_or(Value::Null),
+                None => previous.clone(),
+            };
+            records.seed_skeleton(
+                &previous,
+                extra.get("frozenSkeleton").and_then(Value::as_bool) == Some(true),
+            )?;
+        }
+    }
     request.task.push_str(&format!("\n{}", records.hint()?));
     Ok(Some(records))
 }
@@ -78,7 +93,7 @@ impl archon_tools::audit_landing::LandingHost for Bridge {
         let required = match kind {
             RecordKind::Review => json!(["subject", "evidence", "summary"]),
             RecordKind::Verify => json!(["subject", "evidence", "summary", "status"]),
-            RecordKind::Skeleton => json!(["subject", "evidence", "summary", "task"]),
+            RecordKind::Skeleton => json!(["subject", "evidence", "summary"]),
         };
         let mut properties = json!({
             "subject":{"type":"string","description":"One of this call's subjects"},
@@ -99,11 +114,9 @@ impl archon_tools::audit_landing::LandingHost for Bridge {
         }
         // Issue-38: `FrozenTask` deserialises with serde defaults and accepts unknown keys, so `task` stays open; the listed properties are the fields the host reads.
         if kind == RecordKind::Skeleton {
-            properties["task"] = json!({"type":"object","description":"Skeleton records only: one full skeleton entry","required":["task_id","file_name"],"properties":{
-            "task_id":{"type":"string"},"file_name":{"type":"string"},
-            "depends_on":{"type":"array","items":{"type":"object","required":["task_id"],"properties":{"task_id":{"type":"string"},"consumes":{"type":"array","items":{"type":"object","required":["artifact_path"],"properties":{"artifact_path":{"type":"string"}}}},"ordering_only":{"type":"boolean"}}}},
-            "blocks":{"type":"array","items":{"type":"string"}},"implements":{"type":"array","items":{"type":"string","minLength":1}},
-            "deliverable_contracts":{"type":"array","items":{"type":"object","required":["kind","artifact_path"],"properties":{"kind":{"type":"string","minLength":1},"artifact_path":{"type":"string","minLength":1},"min_instances":{"type":"integer"}}}}}});
+            properties["task"] = archon_workflow::v2::record_landing::task_schema();
+            properties["remove"] =
+                json!({"type":"boolean","description":"Remove a draft task by subject; omit task"});
         }
         Some(
             json!({"type":"object","required":required,"additionalProperties":false,"description":archon_workflow::v2::record_landing::schema_hint(kind),"properties":properties}),
@@ -126,7 +139,7 @@ impl archon_tools::audit_landing::LandingHost for Bridge {
         self.0.retained_completion().ok().flatten()
     }
 }
-pub(super) async fn scope<T>(
+pub(crate) async fn scope<T>(
     records: Option<Arc<RecordLanding>>,
     work: impl std::future::Future<Output = T>,
 ) -> T {
@@ -294,7 +307,7 @@ mod tests {
             ),
             (
                 RecordKind::Skeleton,
-                json!(["subject", "evidence", "summary", "task"]),
+                json!(["subject", "evidence", "summary"]),
             ),
         ] {
             let schema = schema_for(kind);
@@ -379,3 +392,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_stage_landing_p5_tests.rs"]
+mod p5_tests;

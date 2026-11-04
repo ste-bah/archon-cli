@@ -1,6 +1,17 @@
+// Read the product marker's value rather than duplicating its prompt sentence.
+fn skeleton_author_marker() -> &'static str {
+    include_str!("../../src/command/workflow_decompose_v1_frozen.js")
+        .split_once("const SKELETON_AUTHOR_MARKER = \"")
+        .unwrap()
+        .1
+        .split_once('"')
+        .unwrap()
+        .0
+}
+
 pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
     let text = user_prompt_text(prompt).unwrap_or_default();
-    // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton/body src/command/workflow_decompose_v1.js:164/231;
+    // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton SKELETON_AUTHOR_MARKER in workflow_decompose_v1_frozen.js; body workflow_decompose_v1.js;
     // judge src/command/workflow_task_set_judge.rs:50; passability judge
     // src/command/workflow_acceptance_passability.rs:55; fidelity crates/archon-workflow/src/fidelity_audit.rs:200.
     if text.contains("You are auditing whether a task decomposition is faithful to its PRD.")
@@ -113,7 +124,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
             }).to_string(),
         );
     }
-    if text.contains("Author one complete task-skeleton JSON artifact") {
+    if text.contains(skeleton_author_marker()) {
         return (
             "skeleton",
             serde_json::json!({

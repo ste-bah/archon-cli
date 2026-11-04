@@ -7,6 +7,8 @@ use std::time::Duration;
 
 #[path = "workflow_decomposition_offline_server_http.rs"]
 mod http;
+#[path = "workflow_decomposition_offline_server_skeleton_reply.rs"]
+mod skeleton_reply;
 use http::next_request;
 
 #[derive(Clone, Debug, Default)]
@@ -286,6 +288,17 @@ fn serve_connection(
                 "application/json",
                 answer.clone(),
             )
+        } else if role == "skeleton" {
+            let message = skeleton_reply::skeleton_message(&body, &answer);
+            if body["stream"] == false {
+                ("200 OK", "application/json", message.to_string())
+            } else {
+                (
+                    "200 OK",
+                    "text/event-stream",
+                    skeleton_reply::stream_message(&message),
+                )
+            }
         } else if body["stream"] == false {
             (
                 "200 OK",
