@@ -47,7 +47,7 @@ fn missing(output: &str) -> Option<(Missing, String)> {
 }
 
 fn git(repository: &Path, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
         .args(args)
