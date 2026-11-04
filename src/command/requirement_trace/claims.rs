@@ -360,3 +360,6 @@ mod tests;
 
 #[cfg(test)]
 mod p6_tests;
+
+#[cfg(test)]
+mod root_tests;

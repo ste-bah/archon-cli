@@ -160,7 +160,8 @@ impl EvidenceIndex {
     }
 
     fn present(&self, path: &str) -> bool {
-        !path.is_empty() && (self.tree.exists_at_base(path) || self.tree.root().join(path).exists())
+        // An empty normalized path names the recorded repository root (#589).
+        path.is_empty() || self.tree.exists_at_base(path) || self.tree.root().join(path).exists()
     }
 
     fn owners(&self, matches: impl Fn(&str) -> bool) -> BTreeSet<String> {

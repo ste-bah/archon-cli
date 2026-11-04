@@ -151,3 +151,7 @@
 // #587/#588: task-set-lint 28 routes critic findings without verified body
 // evidence to Skeleton. Re-pin other changed closures only: landing completion
 // and repair hints change author sessions, not their gate verdict rules.
+
+// #589: requirements-trace 13 -> 14: the empty normalized repository-root
+// path is present, so a claim naming the root is no longer falsely refuted.
+// Re-pin other capabilities only: their verdict rules do not read this index.
