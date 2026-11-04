@@ -205,7 +205,7 @@ pub fn section_citation_findings<'a>(
             findings.push(TaskSetFinding {
                 identity: crate::defect::DeterministicDefect::new("uncited_section", &number, "source_sections"),
                 field: "source_sections".into(),
-                message: format!("PRD section '{number}' ({}) is cited by no task's source_sections; add it to the source_sections of every task whose work it justifies", section.title),
+                message: format!("PRD section '{number}' ({}) is cited by no task's source_sections; cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements)", section.title),
             });
         }
     }

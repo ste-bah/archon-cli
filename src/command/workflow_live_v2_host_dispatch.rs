@@ -10,6 +10,8 @@ mod local_tools;
 #[path = "workflow_stage_landing.rs"]
 mod stage_landing;
 pub(super) use local_tools::execute_declared_local_tool;
+#[cfg(test)]
+pub(crate) use stage_landing::scope as stage_landing_scope;
 #[path = "workflow_live_v2_host_call_records.rs"]
 mod call_records;
 #[path = "workflow_live_v3_regression_slot.rs"]

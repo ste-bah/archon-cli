@@ -174,3 +174,6 @@ fn issue39_skeleton_rejects_hollow_entries_by_path() {
             .is_empty()
     );
 }
+
+#[path = "../src/v2/record_landing_p5_tests.rs"]
+mod p5_tests;

@@ -178,7 +178,7 @@ fn run_lint_with_mode(
             load_graph(cwd, source).unwrap_err()
         ),
     };
-    out.push_str(&coverage::section(tasks_root.as_deref()));
+    out.push_str(&coverage::section_with_mode(tasks_root.as_deref(), mode));
     // Fifth section, and like coverage it is not a graph analysis: it asks
     // whether each task's frontmatter accounts for the commands that task
     // declares it will run. Advisory for the same reason the others are —
@@ -365,7 +365,7 @@ pub(crate) fn evaluate_lint(
             );
             if identity
                 .as_ref()
-                .is_some_and(|id| matches!(id.code.as_str(), "uncited_section" | "unknown_section"))
+                .is_some_and(task_file::skeleton_owned_defect)
             {
                 finding.remediation_scope = archon_workflow::RemediationScope::Skeleton;
                 let root = source_path.as_deref().map(|path| match source {
@@ -447,6 +447,7 @@ pub(crate) fn evaluate_lint(
                 gate
             }),
     );
+    coverage::deduplicate(&mut findings);
     let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);
     let operational = match (graph_error, repository_error) {
         (Some(graph), Some(repository)) => Some(format!("{graph}; {repository}")),
@@ -468,7 +469,6 @@ pub(crate) fn evaluate_lint(
         None => evaluation,
     })
 }
-
 fn describe(source: &LintSource) -> String {
     match source {
         LintSource::TaskFile(path) => {
@@ -483,7 +483,6 @@ fn describe(source: &LintSource) -> String {
         LintSource::Graph(id) => format!("recorded graph {id}"),
     }
 }
-
 fn absolute(cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()

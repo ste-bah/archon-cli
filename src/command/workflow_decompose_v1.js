@@ -47,12 +47,10 @@ const ENTRY_SHAPES = JSON.stringify(JSON.parse(ACCEPTANCE_SHAPE).acceptance);
 const SKELETON_SHAPE = JSON.stringify({
   schema_version: 1,
   acceptance_digest: "",
-  tasks: [
-    {
+  tasks: [{
       task_id: "<canonical task id>",
       file_name: "<canonical task id>.md",
-      depends_on: [
-        {
+      depends_on: [{
           task_id: "<canonical id of the task depended on>",
           consumes: [{
             artifact_path: "<path this task reads from that one>",
@@ -63,19 +61,16 @@ const SKELETON_SHAPE = JSON.stringify({
         }
       ],
       blocks: ["<canonical id of a task that waits on this one>"],
-      implements: ["<obligation id the host lists>"],
+      implements: ["<obligation or constraint id the host lists>"],
       source_sections: ["<PRD section key the host lists>"],
-      deliverable_contracts: [
-        {
+      deliverable_contracts: [{
           kind: "<short stable name for what this task produces>",
           artifact_path: "<path this task produces, exactly as its dependents consume it>",
           instance_source_records_field: "<optional: name of the records field in the instance source>",
           registry_records_field: "<optional: name of the records field in the registry>",
           min_instances: 1
-        }
-      ]
-    }
-  ]
+        }]
+    }]
 });
 
 // Frozen fields are host-stamped at landing; the body author supplies the
@@ -227,7 +222,7 @@ async function authorCandidate(w, policy) {
     : null;
   if (seeded) [feedback, lastFindings, openFindings] = [seeded.feedback.slice(), seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
-  let previousCandidate = seeded ? seeded.previousCandidate : policy.previousCandidate;
+  let previousCandidate = skeletonPreviousCandidate(policy, seeded ? seeded.previousCandidate : policy.previousCandidate, seeded);
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
@@ -300,7 +295,7 @@ async function authorCandidate(w, policy) {
           AUTHOR_CALLS.set(policy.phase, call);
           authored = await w.agent(`${policy.phase}-author-${call}`, {
             task, tier: "planner", resultMode: "rawOutcome",
-            ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
+            ...(policy.phase === "skeleton" ? { recordLanding: "skeleton", previousSkeleton: skeletonLandingSeed(previousCandidate), frozenSkeleton: frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null } : {})
           });
         }
       }
@@ -353,7 +348,7 @@ async function authorCandidate(w, policy) {
       stdin: authored.content,
       ...(policy.target ? { target: policy.target } : {})
     });
-    if (policy.phase === "skeleton") previousCandidate = authored.content;
+    if (policy.phase === "skeleton" && acceptedSkeletonCandidate(authored.content, outcome)) previousCandidate = authored.content;
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     // #554: a check the host could not prove, on an entry this loop

@@ -96,8 +96,12 @@ impl std::error::Error for TaskSkeletonError {}
 
 type SkeletonResult<T> = Result<T, TaskSkeletonError>;
 
+#[path = "task_skeleton_ownership.rs"]
+mod ownership;
 #[path = "task_skeleton_validate.rs"]
 mod validate;
+pub use ownership::constraint_owner_findings;
+pub(crate) use validate::entry_findings;
 pub use validate::{skeleton_defects, validate_skeleton};
 
 pub fn validate_skeleton_set(
@@ -109,7 +113,7 @@ pub fn validate_skeleton_set(
         .iter()
         .map(|task| task.task_id.as_str())
         .collect();
-    let mut findings = Vec::new();
+    let mut findings = validate::entry_findings(skeleton);
     for (slot, task) in skeleton.tasks.iter().enumerate() {
         for (index, dependency) in task.depends_on.iter().enumerate() {
             if !ids.contains(dependency.task_id.as_str()) {
@@ -298,19 +302,19 @@ pub fn compare_frozen_task(
         task.dependencies.clone(),
         frozen.depends_on.clone(),
     );
-    compare_set(
+    compare_strings(
         &mut findings,
         "blocks",
         task.blocks_ids.clone(),
         frozen.blocks.clone(),
     );
-    compare_set(
+    compare_strings(
         &mut findings,
         "implements",
         task.implements.clone(),
         frozen.implements.clone(),
     );
-    compare_set(
+    compare_strings(
         &mut findings,
         "source_sections",
         task.source_sections.clone(),
@@ -398,8 +402,29 @@ fn compare_set<T: Ord + fmt::Debug>(
     mut frozen: Vec<T>,
 ) {
     actual.sort();
+    actual.dedup();
     frozen.sort();
+    frozen.dedup();
     compare(findings, field, &actual, &frozen);
+}
+
+fn compare_strings(
+    findings: &mut Vec<TaskSetFinding>,
+    field: &str,
+    actual: Vec<String>,
+    frozen: Vec<String>,
+) {
+    // Match the task parser's sorted_unique: trim, discard empty, de-duplicate.
+    let normalize = |values: Vec<String>| {
+        values
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+    };
+    compare_set(findings, field, normalize(actual), normalize(frozen));
 }
 
 pub(crate) fn skeleton_subject(id: &str, slot: usize) -> String {
@@ -422,57 +447,14 @@ fn strict_task_id(value: &str) -> bool {
         && parts[2].chars().all(|ch| ch.is_ascii_digit())
 }
 
-fn require_blake3(algorithm: &str, file: &str) -> SkeletonResult<()> {
-    if algorithm == "blake3" {
-        Ok(())
-    } else {
-        invalid(format!(
-            "{file} algorithm must be 'blake3'; re-run `workflow freeze-skeleton`"
-        ))
-    }
-}
-
-fn read_required(path: &Path) -> SkeletonResult<Vec<u8>> {
-    std::fs::read(path).map_err(|read| {
-        let mut failure = io_error(&read, format!(
-            "required task-set artifact {} could not be read: {read}; restore it or run the named freeze command",
-            path.display()
-        ));
-        failure.io_kind = Some(read.kind());
-        failure
-    })
-}
-
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> SkeletonResult<T> {
-    let bytes = read_required(path)?;
-    serde_json::from_slice(&bytes).map_err(|parse| {
-        error(format!(
-            "{} is malformed JSON: {parse}; repair it or re-run the named freeze command",
-            path.display()
-        ))
-    })
-}
-
-fn invalid<T>(message: impl Into<String>) -> SkeletonResult<T> {
-    Err(error(message))
-}
-
-fn io_error(source: &std::io::Error, message: String) -> TaskSkeletonError {
-    let mut fault = error(message);
-    fault.io_cause = Some((source.kind(), source.raw_os_error()));
-    fault.io_kind = Some(source.kind());
-    fault
-}
-
-fn error(message: impl Into<String>) -> TaskSkeletonError {
-    TaskSkeletonError {
-        message: message.into(),
-        defects: Vec::new(),
-        io_cause: None,
-        io_kind: None,
-    }
-}
+#[path = "task_skeleton_io.rs"]
+mod io;
+use io::*;
 
 #[cfg(test)]
 #[path = "task_skeleton_defect_tests.rs"]
 mod defect_tests;
+
+#[cfg(test)]
+#[path = "task_skeleton_p5_tests.rs"]
+mod p5_tests;

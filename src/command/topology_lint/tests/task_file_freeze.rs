@@ -144,7 +144,7 @@ fn task_file_lint_uses_runtime_parser_and_frozen_structural_equality() {
         "{findings:?}"
     );
     assert!(
-        findings.iter().any(|finding| {
+        !findings.iter().any(|finding| {
             finding.contains("AC-X-001") && finding.contains("claimed by no task")
         }),
         "{findings:?}"

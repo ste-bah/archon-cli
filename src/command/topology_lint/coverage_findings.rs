@@ -18,7 +18,7 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
     let Some(root) = tasks_root else {
         return Vec::new();
     };
-    let Ok((claims, _skipped)) = task_requirement_claims_tolerant(root) else {
+    let Ok((mut claims, skipped)) = task_requirement_claims_tolerant(root) else {
         return Vec::new();
     };
     let prd_path = match resolve_prd(root, &claims) {
@@ -43,6 +43,34 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
     let constraints = archon_workflow::obligation_ids::constraint_ids(&prd);
     let mut defined = obligation_ids(&prd);
     defined.extend(constraints.iter().cloned());
+    let skeleton = std::fs::read(root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE))
+        .ok()
+        .and_then(|bytes| {
+            serde_json::from_slice::<archon_workflow::task_skeleton::TaskSkeleton>(&bytes).ok()
+        });
+    if skeleton.is_none()
+        && root
+            .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE)
+            .exists()
+    {
+        // An unreadable skeleton has its own finding, not body-derived coverage.
+        return Vec::new();
+    }
+    if let Some(skeleton) = &skeleton {
+        claims = skeleton
+            .tasks
+            .iter()
+            .map(|task| TaskRequirementClaims {
+                task_id: task.task_id.clone(),
+                source_path: root.join(&task.file_name).display().to_string(),
+                implements: task.implements.clone(),
+                source_sections: task.source_sections.clone(),
+            })
+            .collect();
+    }
+    // Missing parsed claims cannot prove a set-level coverage gap; defects
+    // directly evidenced by a parsed body or the PRD still apply.
+    let partial = skeleton.is_none() && !skipped.is_empty();
     let claimed = claimed_by_task(&claims);
     let mut findings = archon_workflow::obligation_ids::malformed_obligation_ids(&prd)
         .into_iter()
@@ -68,10 +96,10 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
     findings.extend(
         defined
             .iter()
-            .filter(|id| !claimed.contains_key(*id) && !constraints.contains(*id))
+            .filter(|id| !partial && !claimed.contains_key(*id) && !constraints.contains(*id))
             .map(|id| CoveragePolicyFinding {
                 text: format!(
-                    "{id}: defined in the PRD but claimed by no task — add it to at least one TASK file's implements list or remove/correct the PRD obligation"
+                    "{id}: defined in the PRD but claimed by no task — add it to the implements of at least one task in the skeleton"
                 ),
                 subject: id.clone(),
                 source_path: prd_path.clone(),
@@ -79,23 +107,42 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
                 remediation_scope: archon_workflow::RemediationScope::Skeleton,
             }),
     );
-    findings.extend(constraints.iter().filter(|id| !claimed.contains_key(*id)).map(|id| {
-        CoveragePolicyFinding {
-            text: format!("PRD constraint '{id}' is stated as a PRD list item or table row that restricts work, but no task names it; add it to the implements of every task whose work it restricts (all tasks if it restricts all work)"),
-            subject: id.clone(),
+    let owners = skeleton
+        .clone()
+        .unwrap_or_else(|| archon_workflow::task_skeleton::TaskSkeleton {
+            schema_version: 1,
+            acceptance_digest: String::new(),
+            tasks: claims
+                .iter()
+                .map(|claim| archon_workflow::task_skeleton::FrozenTask {
+                    task_id: claim.task_id.clone(),
+                    file_name: String::new(),
+                    depends_on: vec![],
+                    blocks: vec![],
+                    implements: claim.implements.clone(),
+                    source_sections: claim.source_sections.clone(),
+                    deliverable_contracts: vec![],
+                })
+                .collect(),
+        });
+    findings.extend(
+        archon_workflow::task_skeleton::constraint_owner_findings(
+            &owners,
+            &archon_workflow::obligation_ids::constraint_texts(&prd),
+        )
+        .into_iter()
+        .filter(|_| !partial)
+        .map(|finding| CoveragePolicyFinding {
+            text: finding.message,
+            subject: finding.identity.subject.clone(),
             source_path: root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
-            identity: Some(archon_workflow::defect::DeterministicDefect::new("unowned_constraint", id, "implements")),
+            identity: Some(finding.identity),
             remediation_scope: archon_workflow::RemediationScope::Skeleton,
-        }
-    }));
+        }),
+    );
     // A draft/pending skeleton is authoritative before TASK bodies exist.
     // Body equality is checked separately, so a stale body cannot erase a
     // citation the current skeleton already assigns.
-    let skeleton = std::fs::read(root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE))
-        .ok()
-        .and_then(|bytes| {
-            serde_json::from_slice::<archon_workflow::task_skeleton::TaskSkeleton>(&bytes).ok()
-        });
     let citations: Vec<_> = match &skeleton {
         Some(skeleton) => skeleton
             .tasks
@@ -110,6 +157,7 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
     findings.extend(
         archon_workflow::obligation_ids::section_citation_findings(&prd, citations)
             .into_iter()
+            .filter(|finding| !partial || finding.identity.code != "uncited_section")
             .map(|finding| CoveragePolicyFinding {
                 text: finding.message,
                 subject: finding.identity.subject.clone(),
@@ -123,7 +171,7 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
             if !defined.contains(cited) {
                 findings.push(CoveragePolicyFinding {
                     text: format!(
-                        "task '{}' cites unknown obligation '{}' in {}; remove it from that TASK file's implements list or correct it to an ID defined by the PRD",
+                        "task '{}' cites unknown obligation '{}' in {}; remove it from that task's skeleton implements or correct it to a host-listed id",
                         claim.task_id, cited, claim.source_path
                     ),
                     subject: claim.task_id.clone(),

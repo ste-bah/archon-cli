@@ -51,7 +51,7 @@ fn frozen_chain_authored_launch_repairs_through_real_host_and_keeps_unaffected_b
     let counts = project.provider.counts.snapshot();
     assert_eq!(
         counts.get("skeleton").copied().unwrap_or_default(),
-        1,
+        2, // One landing-tool response, then the exact receipt reply.
         "{counts:?}"
     );
     assert_eq!(
