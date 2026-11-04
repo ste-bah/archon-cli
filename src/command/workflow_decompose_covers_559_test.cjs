@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
+const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
   'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js',
   'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
@@ -30,7 +30,7 @@ async function author(ctx, state, reply, round = 1) {
 }
 const state = () => ({entries:new Map(), retryIds:null});
 
-test('entry shapes name the requirement prefix and match the Rust re-author bytes', () => {
+test('entry shapes name the requirement prefix and match Rust apart from the P4 cwd handoff', () => {
   const ctx = context();
   const prefix = vm.runInContext('REQUIREMENT_PREFIX', ctx);
   const rustCoverage = fs.readFileSync(`${root}/../../crates/archon-workflow/src/v2/acceptance_coverage.rs`, 'utf8');
@@ -40,7 +40,12 @@ test('entry shapes name the requirement prefix and match the Rust re-author byte
   for (const shape of JSON.parse(shapes)) assert.deepEqual(shape.covers, [expected]);
   const rust = fs.readFileSync(`${root}/workflow_acceptance_reauthor.rs`, 'utf8');
   const template = rust.match(/static ENTRY_SHAPES:[\s\S]*?r#"([\s\S]*?)"#/)[1];
-  assert.equal(shapes, template.replaceAll('{REQUIREMENT_PREFIX}', prefix));
+  // P4 updates the Rust prompt in its branch; P6 removes the single-root example here.
+  const rustShapes = JSON.parse(template.replaceAll('{REQUIREMENT_PREFIX}', prefix));
+  const command = JSON.parse(shapes).find(entry => entry.check.kind === 'command');
+  assert.equal(command.check.cwd, '<repo_root or project_root>');
+  rustShapes.find(entry => entry.check.kind === 'command').check.cwd = command.check.cwd;
+  assert.deepEqual(JSON.parse(shapes), rustShapes);
   assert.ok(ctx.acceptanceAuthorPrompt().includes(`covers lists every one of the PRD's ${prefix} requirement ids (requirement bullets or obligation-table rows that start with ${prefix})`));
 });
 

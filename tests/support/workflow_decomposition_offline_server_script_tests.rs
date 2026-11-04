@@ -359,3 +359,16 @@ fn M1_current_skeleton_author_and_reauthor_land_tasks_then_reply_with_receipt() 
         assert_eq!(done["content"][0]["text"], r#"{"records_landed":2}"#);
     }
 }
+
+#[test]
+fn current_body_author_marker_is_answered_for_authors_and_repairs() {
+    for feedback in [
+        "",
+        "\nRepair these exact authoritative findings:\n- body finding",
+    ] {
+        let prompt = format!("{}TASK-X-010.{feedback}", super::body_author_marker());
+        let (role, answer) = scripted_answer(&prompt);
+        assert_eq!(role, "body");
+        assert!(answer.contains("task_id: TASK-X-010"));
+    }
+}

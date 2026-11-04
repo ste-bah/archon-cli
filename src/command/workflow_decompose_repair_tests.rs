@@ -13,6 +13,7 @@ pub(super) fn script_source() -> std::borrow::Cow<'static, str> {
     };
     [
         "workflow_decompose_v1.js",
+        "workflow_decompose_v1_body.js",
         "workflow_decompose_reply_blocks.js",
         "workflow_decompose_v1_acceptance.js",
         "workflow_decompose_v1_set_gate.js",

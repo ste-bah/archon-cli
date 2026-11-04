@@ -35,6 +35,7 @@ mod fidelity;
 mod fidelity_candidate_fallback;
 mod fidelity_critic;
 mod fidelity_resume;
+mod finding_scope;
 pub(crate) use fidelity_resume::LintIncomplete;
 pub(crate) mod fidelity_store;
 mod fidelity_waivers;
@@ -45,7 +46,7 @@ mod preflight;
 mod render;
 mod repository_claims;
 mod repository_observations;
-mod scope_declarations;
+pub(crate) mod scope_declarations;
 mod task_file;
 mod task_set;
 mod tool_obligations;
@@ -363,19 +364,12 @@ pub(crate) fn evaluate_lint(
                 source_path.clone(),
                 remediation_scope,
             );
-            if identity
-                .as_ref()
-                .is_some_and(task_file::skeleton_owned_defect)
-            {
-                finding.remediation_scope = archon_workflow::RemediationScope::Skeleton;
-                let root = source_path.as_deref().map(|path| match source {
-                    LintSource::TaskFile(_) => path.parent().unwrap_or(cwd),
-                    _ => path,
-                });
-                finding.source_path = root
-                    .map(|path| path.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE));
-            }
             finding.deterministic_defect = identity;
+            let root = source_path.as_deref().map(|path| match source {
+                LintSource::TaskFile(_) => path.parent().unwrap_or(cwd),
+                _ => path,
+            });
+            finding_scope::route(&mut finding, root);
             finding
         })
         .collect::<Vec<_>>();

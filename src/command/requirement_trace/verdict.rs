@@ -46,7 +46,7 @@ pub(super) fn policy_findings(
     if report.coverage.citations_total == 0 {
         findings.push(TracePolicyFinding {
             text: format!(
-                "task directory {} cites zero obligations; add each owned PRD ID to at least one TASK file's implements list, then re-run the same trace command",
+                "task directory {} cites zero obligations; add each owned obligation ID to at least one frozen skeleton task's implements list, then re-run the same trace command",
                 report.task_dir
             ),
             subject: "task directory".into(),
@@ -57,7 +57,7 @@ pub(super) fn policy_findings(
     for phantom in &report.coverage.phantom {
         findings.push(TracePolicyFinding {
             text: format!(
-                "task '{}' cites unknown obligation '{}' in {}; remove it from that TASK file's implements list or correct it to an ID defined by the PRD",
+                "task '{}' cites unknown obligation '{}' in {}; remove it from that frozen skeleton task's implements list or correct it to a host-listed obligation or constraint ID",
                 phantom.task_id, phantom.cited_id, phantom.source_path
             ),
             subject: phantom.task_id.clone(),
@@ -68,7 +68,7 @@ pub(super) fn policy_findings(
     for obligation in &report.coverage.unclaimed {
         findings.push(TracePolicyFinding {
             text: format!(
-                "PRD obligation '{obligation}' is claimed by no task; add it to at least one TASK file's implements list or remove or correct the obligation in the PRD"
+                "PRD obligation '{obligation}' is claimed by no task; add it to at least one frozen skeleton task's implements list"
             ),
             subject: obligation.clone(),
             source_path: prd_path.clone(),
@@ -156,19 +156,19 @@ pub(super) fn blocking_findings(
     if task_population_complete {
         if report.coverage.citations_total == 0 {
             input_findings.push(format!(
-                "task directory {} cites zero obligations; add each owned PRD ID to at least one TASK file's implements list, then re-run the same trace command",
+                "task directory {} cites zero obligations; add each owned obligation ID to at least one frozen skeleton task's implements list, then re-run the same trace command",
                 report.task_dir
             ));
         }
         for phantom in &report.coverage.phantom {
             input_findings.push(format!(
-                "task '{}' cites unknown obligation '{}' in {}; remove it from that TASK file's implements list or correct it to an ID defined by the PRD",
+                "task '{}' cites unknown obligation '{}' in {}; remove it from that frozen skeleton task's implements list or correct it to a host-listed obligation or constraint ID",
                 phantom.task_id, phantom.cited_id, phantom.source_path
             ));
         }
         for obligation in &report.coverage.unclaimed {
             input_findings.push(format!(
-                "PRD obligation '{obligation}' is claimed by no task; add it to at least one TASK file's implements list or remove or correct the obligation in the PRD"
+                "PRD obligation '{obligation}' is claimed by no task; add it to at least one frozen skeleton task's implements list"
             ));
         }
     }

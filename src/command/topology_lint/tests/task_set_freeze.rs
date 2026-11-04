@@ -72,6 +72,35 @@ fn check_draft_and_pending(cases: &[bool], check_body: bool) {
                 archon_core::config::GateMode::Enforce,
             )
             .unwrap();
+            let candidate = crate::command::topology_lint::evaluate_task_file_candidate(
+                temp.path(),
+                &task,
+                &std::fs::read(&task).unwrap(),
+                archon_core::config::GateMode::Enforce,
+            )
+            .unwrap();
+            for finding in &candidate.findings {
+                if finding.deterministic_defect.as_ref().is_some_and(|d| {
+                    matches!(
+                        d.code.as_str(),
+                        "uncited_section" | "unknown_section" | "unowned_constraint"
+                    )
+                }) {
+                    assert_eq!(
+                        finding.remediation_scope,
+                        archon_workflow::RemediationScope::Skeleton
+                    );
+                    assert_eq!(
+                        finding.source_path.as_deref(),
+                        Some(skeleton_path.as_path())
+                    );
+                }
+            }
+            assert!(candidate.findings.iter().any(|f| {
+                f.deterministic_defect
+                    .as_ref()
+                    .is_some_and(|d| d.code == "unowned_constraint")
+            }));
             let finding = gate
                 .findings
                 .iter()

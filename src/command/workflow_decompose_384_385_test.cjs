@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
+const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
   'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const context = () => {
@@ -21,11 +21,11 @@ function promptRules() {
   const acceptance = ctx.acceptanceAuthorPrompt();
   for (const rule of [
     'unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.',
-    'Copy the frozen implements array exactly, preserving every value and its order.',
+    'The host stamps implements, source_sections, depends_on, blocks and deliverable_contracts from the frozen skeleton; read them there',
     'Every test file run by Focused Tests must be declared by an owning task',
     'Files Forbidden to Change entries must be literal paths, directories, basenames or globs',
     'Every MCP tool called by a Focused Tests command must appear in required_tools',
-    'For each claimed PRD obligation, decide whether it is necessarily true',
+    'Name every frozen implements id (obligation or constraint) in a body sentence outside the yaml block',
   ]) assert.ok(body.includes(rule), `body prompt lacks rule: ${rule}`);
   assert.ok(acceptance.includes('fail on the pre-implementation baseline'), 'acceptance prompt lacks baseline proof rule');
   assert.ok(acceptance.includes('moves aside every data file it names by a path relative to its working directory'), 'acceptance prompt lacks already-true proof rule');
@@ -44,7 +44,9 @@ async function replyFormatIsTheLastTaskSection() {
   await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 2, state);
   assert.equal(tasks.length, 2);
   assert.ok(tasks[0].includes('"command_block":true'), 'the acceptance entry shape uses a check block');
-  assert.ok(!tasks[0].includes('"command":"'), 'the acceptance entry shape has no inline command example');
+  const shapes = vm.runInContext('ENTRY_SHAPES', ctx);
+  assert.ok(!shapes.includes('"command":"'), 'the acceptance entry shape uses check blocks');
+  assert.ok(tasks[0].includes('Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.'), 'the P4 examples show both roots');
   const format = ctx.acceptanceReplyFormat();
   const formatLines = format.split('\n');
   assert.ok(formatLines.includes('```json'), 'the reply example opens a JSON fence on its own line');

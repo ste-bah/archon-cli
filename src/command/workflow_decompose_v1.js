@@ -1,6 +1,8 @@
 // Keep in sync with Rust acceptance_stage::coverage::REQUIREMENT_PREFIX.
 const REQUIREMENT_PREFIX = "REQ-";
 
+const COMMAND_EXAMPLES = 'Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.';
+
 const ACCEPTANCE_SHAPE = JSON.stringify({
   schema_version: 1,
   prd: { path: "", digest: "" },
@@ -30,7 +32,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         kind: "command",
         // Live replies put long scripts in check blocks; inline scripts break JSON parsing.
         command_block: true,
-        cwd: "project_root"
+        cwd: "<repo_root or project_root>"
       },
       gap_permitted: false,
       covers: [`<${REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>`],
@@ -115,11 +117,11 @@ async function workflow(w) {
     if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) continue;
     unauthored.push([subject, []]);
   }
-  await authorBodies(w, unauthored, bodies);
+  const chain = { outcome: skeleton, subjects: skeleton.subjects };
+  await authorBodies(w, unauthored, bodies, chain);
 
   // The skeleton the set gates stand on: re-frozen by the loop when a
   // finding only the skeleton can repair is open (Batch O).
-  const chain = { outcome: skeleton, subjects: skeleton.subjects };
   const gates = await runSetGateLoop(w, chain, bodies);
   const evidence = [acceptance, chain.outcome, ...bodyEvidence(chain.subjects, bodies), gates.taskSetLint, gates.requirementsTrace];
   reconcile(evidence, bodies.size);
@@ -141,50 +143,6 @@ function requireFixedArgs() {
   if (args.gateMode !== "observe" && args.gateMode !== "enforce") {
     throw new Error("fixed decomposition requires observe or enforce gate mode");
   }
-}
-
-// One body policy, whether the body is authored fresh after the skeleton or
-// re-authored because the set gate named it (Issue-46). `initialFeedback`
-// carries the set gate's exact finding texts into the first attempt.
-function bodyPolicy(subject, initialFeedback) {
-  return {
-    phase: `body-${subject.taskId}`,
-    capability: "land-task-body",
-    target: { taskId: subject.taskId, fileName: subject.fileName },
-    retryScopes: new Set(["candidate_artifact", "body"]),
-    initialFeedback,
-    prompt: () => [
-      `Author the complete TASK body for host-frozen task_id ${subject.taskId}.`,
-      `The exact frozen file_name is ${subject.fileName}.`,
-      `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and the repository source you need.`,
-      groundingRules(),
-      "Every path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.",
-      "Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.",
-      observationRule(),
-      "The file must open with a fenced yaml block carrying exactly these keys:",
-      BODY_SHAPE,
-      "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
-      "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.",
-      "Copy the frozen implements array exactly, preserving every value and its order.",
-      ...constraintContext("body"),
-      ...sectionContext(subject),
-      `Read the project MCP configuration at ${args.projectRoot}/.mcp.json and match this task's PRD obligations to its exact permitted tool names.`,
-      "Declare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.",
-      "An MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.",
-      "Every MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.",
-      "HTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.",
-      "For each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.",
-      "Every test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.",
-      "Files Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.",
-      "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
-      "Preserve every frozen tuple field exactly.",
-      "The yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.",
-      "Generate large or repetitive fixture data with code rather than writing it literally.",
-      "Your entire reply must be the TASK file itself, as raw UTF-8 Markdown.",
-      "Wrap the reply in no outer code fence, and add no commentary before or after it.",
-      "Do not run commands or write files."
-    ].join("\n")
-  };
 }
 
 // Author calls already made per phase. A body the set gate sends back keeps
@@ -351,6 +309,9 @@ async function authorCandidate(w, policy) {
     if (policy.phase === "skeleton" && acceptedSkeletonCandidate(authored.content, outcome)) previousCandidate = authored.content;
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
+    if (policy.capability === "land-task-body" && routed.shadow.length > 0 && routed.fatal.length === 0 && !routed.operational) {
+      return { ...outcome, skeletonFindings: routed.shadowFindings, bodyFindings: routed.retryFindings, shadowRung: repairRung };
+    }
     // #554: a check the host could not prove, on an entry this loop
     // authored, goes to its author once the next freeze reports it again on
     // the entry's unchanged text; until then the host probes it again.

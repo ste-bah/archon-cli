@@ -22,7 +22,7 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 /// Resolve declared paths against the repository grounded by this task set.
 /// Before repository records existed, each lint entry point supplied its own
 /// fallback root; keep that fallback for older task sets.
-pub(super) fn repository_root(fallback: &Path, tasks_root: &Path) -> PathBuf {
+pub(crate) fn repository_root(fallback: &Path, tasks_root: &Path) -> PathBuf {
     archon_workflow::repository_record::read_repository_record(tasks_root)
         .ok()
         .flatten()

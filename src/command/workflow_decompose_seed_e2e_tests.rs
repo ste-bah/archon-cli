@@ -30,7 +30,7 @@ fn earlier_script() -> String {
             "for the frozen acceptance contract (earlier wording).",
         )
         .replace(
-            "Preserve every frozen tuple field exactly.",
+            "The host stamps implements, source_sections, depends_on, blocks and deliverable_contracts from the frozen skeleton; read them there",
             "Preserve each frozen tuple field exactly.",
         );
     assert_eq!(earlier.matches("earlier wording").count(), 1);

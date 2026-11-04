@@ -4,7 +4,7 @@
 //! A variant changes one reply of the golden script and nothing else, so a
 //! cell's result differs from golden only where that reply reaches.
 
-use super::script::{scripted_answer, user_prompt_text};
+use super::script::{body_author_marker, scripted_answer, user_prompt_text};
 
 #[path = "workflow_decomposition_offline_server_large.rs"]
 pub mod large;
@@ -183,13 +183,7 @@ pub fn request_key(role: &str, prompt: &str) -> String {
                 '.'
             )
         ),
-        "body" => format!(
-            "body:{}",
-            after(
-                "Author the complete TASK body for host-frozen task_id ",
-                '.'
-            )
-        ),
+        "body" => format!("body:{}", after(body_author_marker(), '.')),
         "judge" => {
             let kind = if text
                 .starts_with("Each acceptance check below already ran on the evidence tree")

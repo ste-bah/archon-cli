@@ -9,9 +9,20 @@ fn skeleton_author_marker() -> &'static str {
         .0
 }
 
+// Read the product marker's value rather than duplicating its prompt sentence.
+pub(super) fn body_author_marker() -> &'static str {
+    include_str!("../../src/command/workflow_decompose_v1_body.js")
+        .split_once("const BODY_AUTHOR_MARKER = \"")
+        .unwrap()
+        .1
+        .split_once('"')
+        .unwrap()
+        .0
+}
+
 pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
     let text = user_prompt_text(prompt).unwrap_or_default();
-    // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton SKELETON_AUTHOR_MARKER in workflow_decompose_v1_frozen.js; body workflow_decompose_v1.js;
+    // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton SKELETON_AUTHOR_MARKER in workflow_decompose_v1_frozen.js; body BODY_AUTHOR_MARKER in workflow_decompose_v1_body.js;
     // judge src/command/workflow_task_set_judge.rs:50; passability judge
     // src/command/workflow_acceptance_passability.rs:55; fidelity crates/archon-workflow/src/fidelity_audit.rs:200.
     if text.contains("You are auditing whether a task decomposition is faithful to its PRD.")
@@ -146,9 +157,9 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
             }).to_string(),
         );
     }
-    if text.contains("Author the complete TASK body for host-frozen task_id ") {
+    if text.contains(body_author_marker()) {
         let Some(id) = text
-            .split_once("Author the complete TASK body for host-frozen task_id ")
+            .split_once(body_author_marker())
             .and_then(|(_, rest)| rest.split_once('.').map(|(id, _)| id.trim()))
         else {
             return unknown_prompt();

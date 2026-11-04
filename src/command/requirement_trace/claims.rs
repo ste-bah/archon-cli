@@ -24,9 +24,12 @@
 //! - **Tested**: every observable exists or is derived from a declaration in
 //!   the set. Reported per claim, with its counts.
 
+mod body;
 mod check;
 mod index;
 mod observe;
+pub(crate) use body::body_claim_findings;
+use body::untestable_claims;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -87,10 +90,14 @@ pub(super) fn falsify_claims(task_dir: &Path, bindings: Vec<TaskBinding>) -> Res
     })?;
     let mut index = EvidenceIndex::load(&record).context("loading the recorded repository")?;
     let mut tasks = Vec::with_capacity(bindings.len());
+    let root = crate::command::topology_lint::scope_declarations::repository_root(
+        Path::new(&index.root_text()),
+        task_dir,
+    );
     for binding in bindings {
         let raw = std::fs::read_to_string(&binding.source_path)
             .with_context(|| format!("reading task file {}", binding.source_path))?;
-        tasks.push(task_inputs(&index, binding, raw));
+        tasks.push(task_inputs(&root, binding, raw));
     }
     for task in &tasks {
         for path in &task.changeable {
@@ -99,6 +106,7 @@ pub(super) fn falsify_claims(task_dir: &Path, bindings: Vec<TaskBinding>) -> Res
     }
     let results: Vec<ClaimResult> = tasks
         .iter()
+        .filter(|task| task.unread.is_none())
         .flat_map(|task| {
             task.binding
                 .implements
@@ -107,13 +115,24 @@ pub(super) fn falsify_claims(task_dir: &Path, bindings: Vec<TaskBinding>) -> Res
                 .collect::<Vec<_>>()
         })
         .collect();
+    let mut policy_findings = findings(&index, &results);
+    for task in &tasks {
+        if let Some(error) = &task.unread {
+            policy_findings.push(TracePolicyFinding {
+                text: format!("{}: {error}; make the exact parser-required edit and re-run `workflow lint --task-file {}`", task.binding.source_path, task.binding.source_path),
+                subject: task.binding.task_id.clone(),
+                source_path: PathBuf::from(&task.binding.source_path),
+                remediation_scope: archon_workflow::RemediationScope::Body,
+            });
+        }
+    }
     Ok(ClaimTrace {
         report: render(&index, &results),
-        findings: findings(&index, &results),
+        findings: policy_findings,
     })
 }
 
-fn task_inputs(index: &EvidenceIndex, binding: TaskBinding, raw: String) -> TaskInputs {
+fn task_inputs(root: &Path, binding: TaskBinding, raw: String) -> TaskInputs {
     let path = Path::new(&binding.source_path);
     let universe = archon_workflow::task_universe::parsing::parse_task_file(path, &raw);
     let unread = universe.as_ref().err().map(ToString::to_string);
@@ -132,9 +151,8 @@ fn task_inputs(index: &EvidenceIndex, binding: TaskBinding, raw: String) -> Task
     let mut changeable = BTreeSet::new();
     let mut normalized_declared = Vec::new();
     let mut outside = Vec::new();
-    let root = PathBuf::from(index.root_text());
     for entry in declared {
-        match archon_write_plan::normalize_declared_path(entry.trim(), &root) {
+        match archon_write_plan::normalize_declared_path(entry.trim(), root) {
             Some(relative) => {
                 normalized_declared.push(relative.clone());
                 changeable.insert(relative);
@@ -187,11 +205,18 @@ fn test_claim(index: &EvidenceIndex, task: &TaskInputs, requirement: &str) -> Cl
             verdict: Verdict::Refuted(conflict.finding()),
         });
     }
-    if named.is_empty() {
+    if let Some((_, reason)) =
+        untestable_claims(&task.raw, std::slice::from_ref(&result.requirement))
+            .into_iter()
+            .next()
+    {
         result.checked = checked.into_iter().collect();
-        result.untestable = Some(format!(
-            "the body never names {requirement} outside its implements list, so no file, symbol or command it promises is tied to the claim"
-        ));
+        result.untestable = Some(reason);
+        return result;
+    }
+    if task.changeable.is_empty() && !task.outside.is_empty() {
+        result.checked = checked.into_iter().collect();
+        result.untestable = Some(body::outside_declarations_reason(&task.binding.task_id));
         return result;
     }
     for &at in &named {
@@ -206,10 +231,7 @@ fn test_claim(index: &EvidenceIndex, task: &TaskInputs, requirement: &str) -> Cl
         });
     } else if task.changeable.is_empty() && task.outside.is_empty() {
         let reason = if task.forbidden_conflicts.is_empty() {
-            format!(
-                "{} declares no file it may change (Files Expected to Change and deliverable_contracts name nothing outside its forbidden files), so no declared file can serve its claims",
-                task.binding.task_id
-            )
+            body::no_file_reason(&task.binding.task_id)
         } else {
             task.forbidden_conflicts
                 .iter()
@@ -249,9 +271,7 @@ fn test_claim(index: &EvidenceIndex, task: &TaskInputs, requirement: &str) -> Cl
         .any(|c| matches!(c.verdict, Verdict::Refuted(_)))
         && !result.checked.iter().any(|c| c.verdict.tested())
     {
-        result.untestable = Some(format!(
-            "nothing the body ties to {requirement} is inside the recorded repository, so the index cannot check it"
-        ));
+        result.untestable = Some(body::outside_reason(requirement));
     }
     result
 }
@@ -328,120 +348,8 @@ fn line_observables(
     }
 }
 
-fn short(index: &EvidenceIndex) -> String {
-    index.base().chars().take(12).collect()
-}
-
-fn findings(index: &EvidenceIndex, results: &[ClaimResult]) -> Vec<TracePolicyFinding> {
-    let base = short(index);
-    // (task, subject, reason) -> the claims that observable refutes.
-    let mut refuted: BTreeMap<(String, PathBuf, String, String), Vec<String>> = BTreeMap::new();
-    let mut out = Vec::new();
-    for result in results {
-        for checked in &result.checked {
-            if let Verdict::Refuted(reason) = &checked.verdict {
-                refuted
-                    .entry((
-                        result.task_id.clone(),
-                        result.source_path.clone(),
-                        checked.subject.clone(),
-                        reason.clone(),
-                    ))
-                    .or_default()
-                    .push(result.requirement.clone());
-            }
-        }
-        if let Some(reason) = &result.untestable {
-            out.push(TracePolicyFinding {
-                text: format!(
-                    "task {}: its claim of '{}' cannot be tested at base commit {base}: {reason}; re-author the task body so a sentence naming {} also names the file, symbol or verifier command that makes it observable",
-                    result.task_id, result.requirement, result.requirement
-                ),
-                subject: result.task_id.clone(),
-                source_path: result.source_path.clone(),
-                remediation_scope: archon_workflow::RemediationScope::Body,
-            });
-        }
-    }
-    for ((task, source_path, subject, reason), claims) in refuted {
-        let quoted: Vec<String> = claims.iter().map(|id| format!("'{id}'")).collect();
-        out.push(TracePolicyFinding {
-            text: format!(
-                "task {task}: its claim of {} is refuted at base commit {base}: {subject}: {reason}; re-author the task body so every claim rests only on files, symbols and verifier commands that exist at the base commit or that a task in the set declares it will create",
-                quoted.join(", ")
-            ),
-            subject: task,
-            source_path,
-            remediation_scope: archon_workflow::RemediationScope::Body,
-        });
-    }
-    out
-}
-
-fn render(index: &EvidenceIndex, results: &[ClaimResult]) -> String {
-    let refuted = |r: &ClaimResult| {
-        r.checked
-            .iter()
-            .any(|c| matches!(c.verdict, Verdict::Refuted(_)))
-    };
-    let count = |f: &dyn Fn(&Verdict) -> bool| {
-        results
-            .iter()
-            .flat_map(|r| &r.checked)
-            .filter(|c| f(&c.verdict))
-            .count()
-    };
-    let refuted_claims = results.iter().filter(|r| refuted(r)).count();
-    let untestable = results.iter().filter(|r| r.untestable.is_some()).count();
-    let mut out = format!(
-        "\nClaim falsification against {} at base commit {}:\n  {} claim(s): {} tested, {} refuted, {} untestable\n  observables: {} exist, {} derived from declarations, {} refuted, {} untested\n",
-        index.root_text(),
-        index.base(),
-        results.len(),
-        results.len() - untestable,
-        refuted_claims,
-        untestable,
-        count(&|v| matches!(v, Verdict::Exists(_))),
-        count(&|v| matches!(v, Verdict::Derived(_))),
-        count(&|v| matches!(v, Verdict::Refuted(_))),
-        count(&|v| matches!(v, Verdict::Untested(_))),
-    );
-    for result in results {
-        let head = format!("{} {}", result.task_id, result.requirement);
-        if let Some(reason) = &result.untestable {
-            out.push_str(&format!("  UNTESTABLE {head}: {reason}\n"));
-        } else if !refuted(result) {
-            let exist = result
-                .checked
-                .iter()
-                .filter(|c| matches!(c.verdict, Verdict::Exists(_)))
-                .count();
-            let derived = result
-                .checked
-                .iter()
-                .filter(|c| matches!(c.verdict, Verdict::Derived(_)))
-                .count();
-            out.push_str(&format!(
-                "  tested {head}: {exist} exist, {derived} derived\n"
-            ));
-        }
-        for checked in &result.checked {
-            match &checked.verdict {
-                Verdict::Refuted(reason) => {
-                    out.push_str(&format!(
-                        "  REFUTED {head}: {}: {reason}\n",
-                        checked.subject
-                    ));
-                }
-                Verdict::Untested(reason) => {
-                    out.push_str(&format!("    untested {}: {reason}\n", checked.subject));
-                }
-                _ => {}
-            }
-        }
-    }
-    out
-}
+use output::{findings, render};
+mod output;
 
 #[cfg(test)]
 mod anchor_tests;
@@ -449,3 +357,6 @@ mod anchor_tests;
 mod gate_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod p6_tests;
