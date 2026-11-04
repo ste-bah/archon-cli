@@ -48,9 +48,9 @@
 //!
 //! Before a run the host also names each program and subcommand missing
 //! from the configured toolchain path ([`unresolved_on_path`]). It lists
-//! only tools some check runs with a word no `tool-word` on that path
-//! provides, of which some `tool-*` program is on that path or the host's,
-//! each tool once, all at once, never on an async thread.
+//! tools some check runs with a word no `tool-word` on that path
+//! provides, including tools whose built-ins are listed without any installed
+//! plugins, each tool once, all at once, never on an async thread.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -101,8 +101,8 @@ pub(super) fn host_path() -> Option<String> {
 /// after it, where a tool suggests a similar command such as `test` --
 /// names another program the check runs and not `tool`: `mycli: unknown
 /// command 'build'` in `cargo build && mycli build` is mycli's, never
-/// cargo's. A line that names no program is `tool`'s: a false proof is
-/// worse than a lost verdict. Then, by the `tool --list` listing
+/// cargo's. A line that names no program belongs to the product for `run`,
+/// `exec` or an invocation forwarding `--` arguments; otherwise it is `tool`'s. Then, by the `tool --list` listing
 /// (`verdict_subcommand_list`), whether the host's own search path has a
 /// program `tool-word`, and whether the check's does:
 ///
@@ -111,7 +111,7 @@ pub(super) fn host_path() -> Option<String> {
 /// | any | any | yes | verdict: the subcommand resolves, so the rejection is not for its lack; the check's own failure decides |
 /// | lists `word` | any | no | no verdict: the site rejected what the host lists, so the site lacks it (a toolchain its tree pins, which the listing never reads); the check depends on what the site does not provide |
 /// | lists commands without `word` | yes | no | no verdict: an environment tool the site lacks; the check must not depend on it |
-/// | lists commands without `word` | no | no | no verdict: no program anywhere provides it, so it passes only if the deliverable adds it (an alias in the tree); its author guards it (`tool --list \| grep -qw word && tool word`), so that its failure before the implementation is its own assertion |
+/// | lists commands without `word` | no | no | no verdict: the plugin binary is not on the site PATH; the check must use an available program or the deliverable must add it |
 /// | lists none (it has no `--list`) | yes | no | no verdict: the environment lacks a program the host has; the check must not depend on it |
 /// | lists none (it has no `--list`) | no | no | verdict (Issue 328): nothing the site could install provides `word`, so only the deliverable can add it to its own tool |
 /// | silent scratch overrun | yes | no | no verdict: the site lacks a program the host has; the check must not depend on it |
@@ -147,6 +147,7 @@ pub(super) fn missing(
     commands: &[Simple],
     output: &str,
     at: &Context,
+    requirements: &[String],
 ) -> Option<(String, UnprovenCause)> {
     if ASSERTED.is_match(output) {
         return None;
@@ -174,7 +175,10 @@ pub(super) fn missing(
                 });
                 !names(&line, &tool) && (programs.iter()).any(|other| *other != tool && names(&line, other))
             };
-            (rejections.iter()).find(|&&line| quoted(lines[line], name) && !theirs(lines[line]))?;
+            (rejections.iter()).find(|&&line| {
+                quoted(lines[line], name) && !theirs(lines[line])
+                    && (names(lines[line], &tool) || !runs_product(command, name, at.on_path(&format!("{tool}-{name}"))))
+            })?;
             if at.on_path(&format!("{tool}-{name}")) {
                 return None;
             }
@@ -185,7 +189,8 @@ pub(super) fn missing(
             let depends = depends(&tool, name);
             let host = plugin(&tool, name, at);
             let site = |why: String| Some((why, UnprovenCause::SiteLacks));
-            match (listing(&program, at), host) {
+            let listed = listing(&program, at);
+            match (&listed, host) {
                 (Listing::Commands(builtins), _) if builtins.contains(name) => site(format!(
                     "{lacks}; the host lists `{name}` as built into `{tool}`, yet `{tool}` rejected it at the check's site, so that site lacks it (for example a toolchain its tree pins, which the host does not read). {depends}"
                 )),
@@ -197,14 +202,14 @@ pub(super) fn missing(
                     "{lacks}, though the host has one at {}: a subcommand its environment lacks (whether `{name}` is built into `{tool}` is not known: {why}). {depends}",
                     host.display()
                 )),
-                (Listing::Commands(_), None) => Some((
+                (Listing::Commands(_), None) if unavailable_candidate(&tool, name, &listed, at) => Some((
                     format!(
-                        "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`: it passes only if the deliverable adds it. {}",
-                        guard(&tool, name)
+                        "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`; {}",
+                        absent_remedy(&tool, name, requirements)
                     ),
                     UnprovenCause::ProgramAbsent,
                 )),
-                (Listing::Unlisted(_), None) => None,
+                (Listing::Commands(_), None) | (Listing::Unlisted(_), None) => None,
                 (Listing::HostUnproven(why), _) => Some((
                     format!("the host could not tell whether `{name}` is built into `{tool}`: {why}; the host must retry its listing probe, which gives no evidence that the check or its site is at fault"),
                     UnprovenCause::TransientHost,
@@ -225,6 +230,11 @@ pub(super) fn missing(
             }
         })
     })
+}
+
+/// A separator alone cannot establish that an absent plugin ran.
+fn runs_product(_command: &Simple, candidate: &str, plugin_present: bool) -> bool {
+    plugin_present || matches!(candidate, "run" | "exec")
 }
 
 /// Whether `text` names `program` as a word of its own.
@@ -272,7 +282,8 @@ pub(crate) fn unresolved_on_path(texts: &[&str], at: &Context) -> Vec<Vec<String
 
 /// The tool `command` starts and where, and its candidate subcommands,
 /// when the start of a run lists it: no candidate is a `tool-word` program
-/// on `at`'s path, and some `tool-*` program is on that path or the host's.
+/// on `at`'s path. A built-in listing can establish a missing subcommand
+/// even when no plugin for that tool is installed.
 fn judged<'a>(command: &'a Simple, at: &Context) -> Option<(String, PathBuf, Vec<&'a str>)> {
     let (tool, program) = tool(command, at)?;
     let names = candidates(command);
@@ -280,16 +291,12 @@ fn judged<'a>(command: &'a Simple, at: &Context) -> Option<(String, PathBuf, Vec
     if names.is_empty() || names.iter().any(resolved) {
         return None;
     }
-    let prefix = format!("{tool}-");
-    let paths = [at.path.as_deref(), at.host_path.as_deref()];
-    let dispatches = (paths.into_iter().flatten())
-        .flat_map(|path| which::search_dirs(path, cfg!(windows)))
-        .filter_map(|dir| std::fs::read_dir(dir).ok())
-        .flatten()
-        .flatten()
-        .any(|entry| entry.file_name().to_string_lossy().starts_with(&prefix));
-    dispatches.then_some((tool, program, names))
+    Some((tool, program, names))
 }
+
+#[path = "workflow_acceptance_executability_subcommand_dispatch.rs"]
+mod dispatch;
+use dispatch::unavailable_candidate;
 
 /// What `command` runs that `at`'s search path does not resolve, by the
 /// listings `listed`.
@@ -319,6 +326,12 @@ fn unresolved(
     };
     let no_answer = Listing::NoAnswer(format!("`{}` was not listed", located.display()));
     let listing = listed.get(&located).unwrap_or(&no_answer);
+    if !names
+        .iter()
+        .any(|name| unavailable_candidate(&tool, name, listing, at))
+    {
+        return None;
+    }
     // In order: the first word built in, or that some program provides,
     // decides; one only an option's value may be is passed over.
     for name in &names {
@@ -345,9 +358,9 @@ fn unresolved(
     let last = names[names.len() - 1];
     match listing {
         Listing::Commands(_) => Some(format!(
-            "{} (not built into `{tool}`, and no `{tool}-{last}` on the path or the host's: it passes only if the deliverable adds it. {})",
+            "{} (not built into `{tool}`; {})",
             which(last),
-            guard(&tool, last)
+            unavailable(&tool, last)
         )),
         Listing::Unlisted(_) => None,
         Listing::HostUnproven(why) => Some(format!(
@@ -381,11 +394,9 @@ fn depends(tool: &str, name: &str) -> String {
 /// What a check's author does when the deliverable adds `tool name` (an
 /// alias in the tree's configuration, which the host never reads); only
 /// where no program anywhere provides it.
-fn guard(tool: &str, name: &str) -> String {
-    format!(
-        "If the deliverable adds it (for example an alias in the tree's configuration), make the check show first that the tree provides it: `{tool} --list | grep -qw {name} && {tool} {name} ...`, so that it fails by its own assertion before the implementation"
-    )
-}
+#[path = "workflow_acceptance_executability_subcommand_remedy.rs"]
+mod remedy;
+use remedy::{absent_remedy, unavailable};
 
 /// The tool `command` starts, by its own name, and where it is: a name on
 /// `at`'s search path, or an absolute path that exists.

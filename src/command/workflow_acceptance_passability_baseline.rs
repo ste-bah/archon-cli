@@ -15,10 +15,8 @@ pub(crate) async fn judge_baseline_failures(
 ) -> Result<Vec<GateFinding>> {
     let mut findings = probed.findings;
     let baseline = probed.baseline;
-    // Proven authored defects defer model judging, but not deterministic proofs.
-    let defer_assessment = findings
-        .iter()
-        .any(|finding| finding.remediation_scope != archon_workflow::RemediationScope::Operational);
+    // Proven authored defects used to defer model judging, but not deterministic proofs.
+    // Every other accepted check now gets its passability decision in this round.
     // No baseline means every probed check is already unproven, the host's.
     let Some(runs) = baseline else {
         return Ok(findings);
@@ -48,9 +46,39 @@ pub(crate) async fn judge_baseline_failures(
     let store = (resume.persist).then(|| Store {
         dir: project_root.join(FREEZE_CACHE_DIR).join("passability"),
     });
+    let base_commit =
+        super::super::executability::Baseline::for_task_set(repository_root, tasks_root)
+            .map(|base| base.commit)
+            .unwrap_or_else(|| runs.commit.clone());
     let mut refuted = BTreeMap::new();
     let mut pending = Vec::new();
-    for candidate in candidates {
+    for mut candidate in candidates {
+        if let Some((rule, reason)) = setup::diagnose(
+            &mut candidate,
+            contract,
+            &requirements,
+            repository_root,
+            project_root,
+            base_commit.as_str(),
+        ) {
+            let decision = Decision {
+                verdict: JudgeDecision::Refuted,
+                counterexample: rule.clone(),
+                reason: reason.clone(),
+                sampling: Some(
+                    serde_json::json!({"provenance": "host", "kind": "missing-base-setup"}),
+                ),
+            };
+            let text = evidence::host_finding_text(
+                &candidate.id,
+                CANNOT_PASS,
+                &candidate.evidence,
+                &rule,
+                &reason,
+            );
+            refuted.insert(candidate.id.clone(), (decision, text));
+            continue;
+        }
         let Some(command) = usage::check_command(contract, &candidate.id) else {
             pending.push(candidate);
             continue;
@@ -63,13 +91,7 @@ pub(crate) async fn judge_baseline_failures(
             command,
         ) {
             let rejected_line = evidence::inert(&rejected_line);
-            let rule = format!(
-                "{program} ({}, outside the repository) rejected the check's command line: {rejected_line}",
-                path.display()
-            );
-            let reason = format!(
-                "nothing the repository implements can change how {program} parses its arguments; fix the invocation"
-            );
+            let (rule, reason) = usage::parser_diagnosis(&program, &path, &rejected_line, command);
             let decision = Decision {
                 verdict: JudgeDecision::Refuted,
                 counterexample: rejected_line,
@@ -86,7 +108,7 @@ pub(crate) async fn judge_baseline_failures(
                 )
                 .with_context(|| format!("writing passability audit for check {}", candidate.id))?;
             }
-            let text = evidence::finding_text(
+            let text = evidence::host_finding_text(
                 &candidate.id,
                 CANNOT_PASS,
                 &candidate.evidence,
@@ -98,20 +120,34 @@ pub(crate) async fn judge_baseline_failures(
             pending.push(candidate);
         }
     }
-    if !defer_assessment && refuted.is_empty() && !pending.is_empty() {
-        refuted.extend(
-            assess(
-                client,
-                crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS,
-                contract,
-                &pending,
-                &redactor,
-                store.as_ref(),
-                resume,
-                None,
-            )
-            .await?,
-        );
+    if !pending.is_empty() {
+        match assess(
+            client,
+            crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS,
+            contract,
+            &pending,
+            &redactor,
+            store.as_ref(),
+            resume,
+            None,
+        )
+        .await
+        {
+            Ok(judged) => refuted.extend(judged),
+            Err(error) if !findings.is_empty() || !refuted.is_empty() => {
+                findings.push(GateFinding::new(
+                    GateId::FreezeAcceptance,
+                    format!(
+                        "operational: passability judgment is unproven: {}",
+                        evidence::prose(&error.to_string(), &redactor)
+                    ),
+                    "acceptance-passability",
+                    None,
+                    archon_workflow::RemediationScope::Operational,
+                ));
+            }
+            Err(error) => return Err(error),
+        }
     }
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     for (id, (decision, text)) in refuted {
@@ -132,7 +168,17 @@ pub(crate) async fn judge_baseline_failures(
             .and_then(serde_json::Value::as_str)
             == Some("host")
         {
-            HOST_PASSABILITY_CALL.to_string()
+            if decision
+                .sampling
+                .as_ref()
+                .and_then(|s| s.get("kind"))
+                .and_then(serde_json::Value::as_str)
+                == Some("missing-base-setup")
+            {
+                HOST_SETUP_CALL.to_string()
+            } else {
+                HOST_PASSABILITY_CALL.to_string()
+            }
         } else {
             format!("{PASSABILITY_CALL}{id}")
         };
@@ -154,11 +200,14 @@ pub(crate) async fn judge_baseline_failures(
 /// The host call id prefix of a passability verdict, and the id of one the
 /// host decided itself from argument-parser usage output.
 pub(crate) const PASSABILITY_CALL: &str = "acceptance-passability-batch:";
+pub(crate) const HOST_SETUP_CALL: &str = "host:missing-base-setup";
 pub(crate) const HOST_PASSABILITY_CALL: &str = "host:argument-parser-usage";
 
 /// Whether a check's judgment came from the passability stage (#562).
 pub(crate) fn is_passability_call(host_call_id: &str) -> bool {
-    host_call_id.starts_with(PASSABILITY_CALL) || host_call_id == HOST_PASSABILITY_CALL
+    host_call_id.starts_with(PASSABILITY_CALL)
+        || host_call_id == HOST_PASSABILITY_CALL
+        || host_call_id == HOST_SETUP_CALL
 }
 
 #[cfg(test)]

@@ -48,6 +48,15 @@ async fn reverify_on_scratch_in(
         &trees.repo,
         &["commit", "-qm", "setup", "--allow-empty"],
     );
+    // These are environment/guard tests: all setup inputs belong to base.
+    let mut record = archon_workflow::repository_record::read_repository_record(&trees.set.tasks)
+        .unwrap()
+        .unwrap();
+    record.base_commit = crate::command::workflow_task_set::executability::probe_tests::git(
+        &trees.repo,
+        &["rev-parse", "HEAD"],
+    );
+    archon_workflow::repository_record::write_repository_record(&trees.set.tasks, &record).unwrap();
     let project = trees.set.project.path();
     std::fs::create_dir_all(project.join(".archon")).unwrap();
     let scratch_parent = trees.outside.path().join("scratch");

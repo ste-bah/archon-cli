@@ -237,8 +237,41 @@ async fn a_run_start_names_a_subcommand_nothing_provides() {
     assert_eq!(
         events[0]["detail"]["checks"],
         serde_json::json!({
-            "AC-1": ["`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path or the host's: it passes only if the deliverable adds it. If the deliverable adds it (for example an alias in the tree's configuration), make the check show first that the tree provides it: `archon331tool --list | grep -qw lint && archon331tool lint ...`, so that it fails by its own assertion before the implementation)"],
+            "AC-1": ["`archon331tool lint` (not built into `archon331tool`; replace `archon331tool lint` with what the site provides; neither the site nor the host has it; the plugin program `archon331tool-lint` is not on the site's PATH; the check must use an available program or the deliverable must add it)"],
         })
     );
     assert!(lines.len() == 1 && lines[0].contains("AC-1"), "{lines:?}");
+}
+
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn P2_27_warning_distinguishes_marked_deliverable_items() {
+    let checks = [
+        ("check-tool", "missing-check-tool", true),
+        ("check-command", "archon331tool lint --all", true),
+    ];
+    let (store, run_id, _, _kept) =
+        launched(&checks, &["archon331tool", "archon331tool-other"], &[]);
+    let (events, lines) = warned(&store, &run_id).await;
+    assert_eq!(events.len(), 1);
+    let text =
+        "cannot pass until the toolchain path, or for marked items the deliverable, provides them";
+    assert!(lines[0].contains(text));
+    assert!(
+        events[0]["detail"]["effect"]
+            .as_str()
+            .unwrap()
+            .contains(text)
+    );
+    let items = &events[0]["detail"]["checks"];
+    assert!(
+        items["check-tool"]
+            .to_string()
+            .contains("missing-check-tool")
+    );
+    assert!(
+        items["check-command"]
+            .to_string()
+            .contains("the check must use an available program or the deliverable must add it")
+    );
 }

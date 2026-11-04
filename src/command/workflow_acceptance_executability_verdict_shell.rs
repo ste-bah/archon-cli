@@ -109,7 +109,7 @@ pub(super) fn expands(word: &str) -> bool {
 }
 
 /// The words of each simple command of `text`, quotes removed.
-fn lex(text: &str) -> Vec<Vec<String>> {
+pub(super) fn lex(text: &str) -> Vec<Vec<String>> {
     let chars: Vec<char> = text.chars().collect();
     let (mut commands, mut words, mut word) = (Vec::new(), Vec::new(), String::new());
     let mut heredocs: Vec<(String, bool)> = Vec::new();

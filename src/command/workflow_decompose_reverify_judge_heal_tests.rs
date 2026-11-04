@@ -100,3 +100,72 @@ async fn reverify_acceptance_recovers_interrupted_judge_io_before_reporting() {
         Some(acceptance::RemediationRoute::Task)
     );
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn R4_D6_permanent_missing_repository_record_is_not_transient() {
+    use crate::command::workflow_task_set::executability::UnprovenCause;
+    let ids = ["check".into()].into();
+    let causes = [(
+        "check".into(),
+        (
+            "repository.lock record missing".into(),
+            UnprovenCause::PermanentHost,
+        ),
+    )]
+    .into();
+    // Even a successful product observation cannot override a permanent proof failure.
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "check".into(),
+        exit_code: Some(0),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        verdict_streams: Default::default(),
+        fault: None,
+        quota_walk_count: 0,
+        operational_error: None,
+        classification: None,
+        environment_note: None,
+    };
+    let evidence = [
+        crate::command::workflow_task_set::executability::CheckEvidence {
+            result,
+            copy_layout: None,
+        },
+    ];
+    assert!(!transient_observations(&ids, &evidence, &causes));
+}
+
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn R4_D6_missing_record_heal_returns_permanent_finding() {
+    let fixture = crate::command::workflow::workflow_decompose_reverify_tests::fixture();
+    let tasks = fixture.project.join("tasks/PRD-X");
+    std::fs::remove_file(tasks.join("repository.lock")).unwrap();
+    let state = fixture.store.load_state(&fixture.run_id).unwrap();
+    let checks = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        checks(
+            (&fixture.store, &fixture.run_id, state.generation, None),
+            (
+                &fixture.project,
+                &fixture.project.join("prds/PRD-X.md"),
+                &tasks,
+            ),
+            &ArchonConfig::default(),
+            &archon_core::env_vars::load_env_vars_from(&Default::default()),
+        ),
+    )
+    .await
+    .expect("permanent absence must not enter transient retries")
+    .unwrap();
+    assert!(checks.operational_failure);
+    assert!(!checks.transient_only);
+    assert!(
+        checks
+            .checks
+            .iter()
+            .flat_map(|check| &check.findings)
+            .any(|text| text.contains("repository.lock"))
+    );
+}

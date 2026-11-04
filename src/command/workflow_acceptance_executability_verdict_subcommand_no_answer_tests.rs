@@ -73,7 +73,7 @@ fn no_answer_with_a_host_plugin_is_site_lacks_and_reaches_its_author() {
     no_answer(true);
 }
 
-fn scratch_overrun(host_has_plugin: bool) {
+pub(super) fn scratch_overrun(host_has_plugin: bool) {
     let installed = [("fixture-item", "#!/bin/sh\nexit 0\n")];
     let bin = Bin::with_host(
         Path::new("/bin/sh"),

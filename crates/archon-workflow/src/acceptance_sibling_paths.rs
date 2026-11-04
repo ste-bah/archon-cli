@@ -3,6 +3,9 @@
 
 use std::path::PathBuf;
 
+#[path = "task_set_contract_policy_paths_commands.rs"]
+pub(crate) mod commands;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SiblingPath {
     pub path: PathBuf,
@@ -134,7 +137,19 @@ pub fn discover_with_diagnostics(project: &std::path::Path, checks: &[String]) -
             if !names_entry_below_parent(&named.path) {
                 continue;
             }
-            let candidate = normalize(project.join(&named.path));
+            let mut candidate = normalize(project.join(&named.path));
+            // A missing descendant can be a deliverable. Materialize its
+            // existing sibling root so policy and execution see the same tree.
+            if !candidate.exists()
+                && let Some(parent) = project.parent()
+                && let Ok(relative) = candidate.strip_prefix(parent)
+                && let Some(first) = relative.components().next()
+            {
+                let sibling = parent.join(first);
+                if sibling.exists() {
+                    candidate = sibling;
+                }
+            }
             if !candidate.exists() {
                 candidates.push(SiblingCandidate {
                     path: named.path,
@@ -211,111 +226,9 @@ pub fn scan(command: &str) -> Vec<SiblingPath> {
     scan_from(command, std::path::Path::new(""))
 }
 
-/// Parent operands read from a proven logical directory, relative to the selected root.
-pub(crate) fn scan_from(command: &str, directory: &std::path::Path) -> Vec<SiblingPath> {
-    let command = strip_quote_prefixes(command);
-    // R2: comments set aside, so an apostrophe in one opens no quote that
-    // would hide every path after it.
-    let shell = without_comments(&crate::check_source_resolve::without_heredocs(&command));
-    let words = crate::check_source_resolve::words(&shell);
-    let mut found = Vec::new();
-    let mut command_start = 0;
-    let mut redirect_target = false;
-    while command_start < words.len() {
-        let end = (command_start..words.len())
-            .find(|index| {
-                matches!(
-                    words[*index].as_str(),
-                    ";" | "&&" | "||" | "|" | "&" | "(" | ")"
-                )
-            })
-            .unwrap_or(words.len());
-        let segment = &words[command_start..end];
-        let command_index = segment
-            .iter()
-            .position(|word| !is_assignment(word) && !word.starts_with("-"));
-        let executable = command_index.map(|index| segment[index].as_str());
-        let executable = executable
-            .unwrap_or_default()
-            .rsplit('/')
-            .next()
-            .unwrap_or_default();
-        let mut required_indexes = Vec::new();
-        if matches!(executable, "cd" | "pushd")
-            && let Some(index) = command_index.and_then(|command| {
-                ((command + 1)..segment.len()).find(|index| !segment[*index].starts_with('-'))
-            })
-        {
-            required_indexes.push(index);
-        }
-        for index in 0..segment.len() {
-            let word = &segment[index];
-            if matches!(word.as_str(), "-C" | "--manifest-path" | "--path") {
-                if index + 1 < segment.len() {
-                    required_indexes.push(index + 1);
-                }
-            } else if let Some((option, value)) = word.split_once('=')
-                && matches!(option, "-C" | "--manifest-path" | "--path")
-                && !value.is_empty()
-            {
-                if let Some(path) = sibling_word(value, directory) {
-                    push(&mut found, path, true);
-                }
-            }
-            if matches!(word.as_str(), ">" | ">>" | "<" | "2>" | "1>") {
-                redirect_target = true;
-            } else if redirect_target {
-                required_indexes.push(index);
-                redirect_target = false;
-            }
-        }
-        if matches!(executable, "test" | "[") {
-            for (index, word) in segment.iter().enumerate() {
-                if matches!(word.as_str(), "-f" | "-d" | "-e" | "-x" | "-s")
-                    && index + 1 < segment.len()
-                {
-                    required_indexes.push(index + 1);
-                }
-            }
-        }
-        for (index, word) in segment.iter().enumerate() {
-            if let Some(path) = sibling_word(word, directory) {
-                push(&mut found, path, required_indexes.contains(&index));
-            }
-        }
-        command_start = end + 1;
-    }
-    // Recognize the common two-step lexical escape without evaluating shell.
-    let commands = words
-        .split(|word| matches!(word.as_str(), ";" | "&&" | "||" | "|" | "&"))
-        .map(<[String]>::to_vec)
-        .collect::<Vec<_>>();
-    for pair in commands.windows(2) {
-        if pair[0].first().is_some_and(|word| word == "cd")
-            && pair[0].get(1).is_some_and(|word| word == "..")
-            && pair[1].first().is_some_and(|word| word == "cd")
-            && let Some(child) = pair[1].get(1)
-            && let Some(path) = sibling_word(&format!("../{child}"), directory)
-        {
-            push(&mut found, path, true);
-        }
-    }
-    for program in program_texts(&command) {
-        for path in program_parent_paths(&program, directory) {
-            push(&mut found, path, true);
-        }
-    }
-    found.sort_by(|a, b| a.path.cmp(&b.path).then(a.required.cmp(&b.required)));
-    let mut merged: Vec<SiblingPath> = Vec::new();
-    for item in found {
-        if let Some(existing) = merged.iter_mut().find(|old| old.path == item.path) {
-            existing.required |= item.required;
-        } else {
-            merged.push(item);
-        }
-    }
-    merged
-}
+#[path = "acceptance_sibling_scan.rs"]
+mod scan_paths;
+pub(crate) use scan_paths::scan_from;
 
 /// The existing program-text path detection, shared with rooted policy scans.
 pub(crate) fn program_parent_paths(program: &str, directory: &std::path::Path) -> Vec<PathBuf> {
@@ -401,13 +314,10 @@ fn sibling_word(word: &str, directory: &std::path::Path) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(value);
-    if !path
-        .components()
-        .any(|part| part == std::path::Component::ParentDir)
-    {
+    if path.is_absolute() || value.contains(['$', '`', '~']) {
         return None;
     }
-    let path = directory.join(path);
+    let path = relative_normalize(directory.join(path));
     names_entry_below_parent(&path).then_some(path)
 }
 
@@ -483,3 +393,54 @@ fn push(found: &mut Vec<SiblingPath>, path: PathBuf, required: bool) {
 #[cfg(test)]
 #[path = "acceptance_sibling_paths_tests.rs"]
 mod tests;
+
+/// Lexical normalization that preserves leading parents in a relative path.
+fn relative_normalize(path: PathBuf) -> PathBuf {
+    let mut result = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir if result.file_name().is_some_and(|p| p != "..") => {
+                result.pop();
+            }
+            other => result.push(other.as_os_str()),
+        }
+    }
+    result
+}
+
+/// Refuse only an absent sibling root; its descendants may be deliverables.
+/// Shared by author preflight and the actual scratch site.
+pub fn missing_root(root: &std::path::Path, command: &str) -> Option<String> {
+    let root = archon_shell::paths::canonicalize(root).ok()?;
+    for named in commands::missing_root_paths(command, &root) {
+        let path = normalize(root.join(&named));
+        if path.starts_with(&root) {
+            continue;
+        }
+        let Some(parent) = root.ancestors().skip(1).find(|p| path.starts_with(p)) else {
+            continue;
+        };
+        let Some(first) = path
+            .strip_prefix(parent)
+            .ok()
+            .and_then(|p| p.components().next())
+        else {
+            continue;
+        };
+        // Only the first component outside the working root is setup.
+        // Descendants may be files or directories the work must add.
+        if !parent.join(first).exists() {
+            let shown = format!(
+                "{}{}",
+                "../".repeat(root.strip_prefix(parent).ok()?.components().count()),
+                first.as_os_str().to_string_lossy()
+            );
+            return Some(format!(
+                "names sibling directory {}, which does not exist next to the working directory; name an existing directory",
+                shown
+            ));
+        }
+    }
+    None
+}

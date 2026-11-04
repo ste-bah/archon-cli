@@ -176,10 +176,9 @@ pub(super) async fn pre_implementation_findings_with_limits(
         }
     }
     let unproven = unproven.into_iter().map(|(id, (why, cause))| {
-        let text = format!(
-            "check '{id}': operational: the host could not prove it after repairing its own environment ({why}); it is not published until the host can"
-        );
-        let identity = archon_workflow::defect::DeterministicDefect::new(cause.code(), &id, "check");
+        let text = unproven_finding_text(&id, &why);
+        let identity =
+            archon_workflow::defect::DeterministicDefect::new(cause.code(), &id, "check");
         finding(id, text, archon_workflow::RemediationScope::Operational).with_defect(identity)
     });
     let findings = (defects.into_iter())
@@ -229,3 +228,9 @@ pub(crate) async fn pre_implementation_findings(
 #[cfg(test)]
 #[path = "workflow_acceptance_coverage_gate_tests.rs"]
 mod tests;
+
+pub(super) fn unproven_finding_text(id: &str, why: &str) -> String {
+    format!(
+        "check '{id}': operational: the host could not prove it ({why}); it is not published until the host can"
+    )
+}

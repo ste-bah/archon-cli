@@ -81,3 +81,100 @@ fn a_recorded_baseline_is_found_without_git() {
         (Some(trees.head.clone()), None)
     );
 }
+
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn P2_15_only_assertion_failures_hold_original_strength() {
+    use std::os::unix::fs::PermissionsExt;
+    let trees = trees(&[("check", "test -f feature.txt", TrustedCwd::RepoRoot)]);
+    let external = tempfile::tempdir().unwrap();
+    std::fs::write(external.path().join("tool"), "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(
+        external.path().join("tool"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let result = |exit_code, stderr: &str, operational_error| {
+        archon_workflow::acceptance_scratch::CheckResult {
+            acceptance_id: "check".into(),
+            exit_code,
+            stderr: stderr.as_bytes().to_vec(),
+            stdout: Vec::new(),
+            verdict_streams: Default::default(),
+            fault: None,
+            quota_walk_count: 0,
+            operational_error,
+            classification: None,
+            environment_note: None,
+        }
+    };
+    for (command, result, call, expected) in [
+        (
+            "test -f feature.txt",
+            result(Some(0), "", None),
+            "",
+            super::Original::Passed,
+        ),
+        (
+            "test -f feature.txt",
+            result(Some(1), "assertion failed", None),
+            "",
+            super::Original::Failed,
+        ),
+        (
+            "python3 -c 'broken('",
+            result(
+                Some(1),
+                "  File \"<string>\", line 1\n    broken(\nSyntaxError: invalid syntax\n",
+                None,
+            ),
+            "",
+            super::Original::Defect,
+        ),
+        (
+            "test -f feature.txt",
+            result(None, "", Some("host unavailable".into())),
+            "",
+            super::Original::Defect,
+        ),
+        (
+            "tool --bad",
+            result(
+                Some(2),
+                "error: unexpected argument '--bad' found\nUsage: tool [OPTIONS]\n",
+                None,
+            ),
+            "",
+            super::Original::Defect,
+        ),
+        (
+            "test -f feature.txt",
+            result(Some(1), "failure", None),
+            "acceptance-passability-batch:check",
+            super::Original::Defect,
+        ),
+    ] {
+        let mut contract = trees.contract();
+        contract.acceptance[0].check =
+            archon_workflow::task_set_contract::AcceptanceCheck::Command {
+                command: command.into(),
+                cwd: TrustedCwd::RepoRoot,
+            };
+        contract.acceptance[0].judgment.host_call_id = call.into();
+        if !call.is_empty() {
+            contract.acceptance[0].judgment.verdict =
+                archon_workflow::task_set_contract::JudgeDecision::Refuted;
+        }
+        let at = super::verdict::Context::new(
+            [("PATH".into(), external.path().display().to_string())].into(),
+            &contract,
+        )
+        .with_requirements(&probe, &contract);
+        assert_eq!(
+            super::originals(&at, &contract, vec![result]).await["check"],
+            expected,
+            "{command}"
+        );
+    }
+}

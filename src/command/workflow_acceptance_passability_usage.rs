@@ -30,7 +30,33 @@ pub(crate) async fn cannot_pass_findings(
     let resume = FreezeResume::none();
     let mut refuted = BTreeMap::new();
     let mut pending = Vec::new();
-    for candidate in candidates {
+    for mut candidate in candidates {
+        if let Some((rule, reason)) = super::setup::diagnose(
+            &mut candidate,
+            contract,
+            &requirements,
+            repository_root,
+            project_root,
+            runs.commit.as_str(),
+        ) {
+            let decision = Decision {
+                verdict: JudgeDecision::Refuted,
+                counterexample: rule.clone(),
+                reason: reason.clone(),
+                sampling: Some(
+                    serde_json::json!({"provenance": "host", "kind": "missing-base-setup"}),
+                ),
+            };
+            let text = super::evidence::host_finding_text(
+                &candidate.id,
+                CANNOT_PASS,
+                &candidate.evidence,
+                &rule,
+                &reason,
+            );
+            refuted.insert(candidate.id.clone(), (decision, text));
+            continue;
+        }
         let Some(command) = check_command(contract, &candidate.id) else {
             pending.push(candidate);
             continue;
@@ -39,13 +65,7 @@ pub(crate) async fn cannot_pass_findings(
             external_usage_error(runs, &candidate.id, repository_root, project_root, command)
         {
             let rejected_line = super::evidence::inert(&rejected_line);
-            let resolved = path.display().to_string();
-            let rule = format!(
-                "{program} ({resolved}, outside the repository) rejected the check's command line: {rejected_line}"
-            );
-            let reason = format!(
-                "nothing the repository implements can change how {program} parses its arguments; fix the invocation"
-            );
+            let (rule, reason) = parser_diagnosis(&program, &path, &rejected_line, command);
             let decision = Decision {
                 verdict: JudgeDecision::Refuted,
                 counterexample: rejected_line,
@@ -62,7 +82,7 @@ pub(crate) async fn cannot_pass_findings(
                 )
                 .with_context(|| format!("writing passability audit for check {}", candidate.id))?;
             }
-            let text = super::evidence::finding_text(
+            let text = super::evidence::host_finding_text(
                 &candidate.id,
                 CANNOT_PASS,
                 &candidate.evidence,
@@ -463,3 +483,17 @@ mod regression_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_passability_usage_tests.rs"]
 mod tests;
+
+pub(crate) fn original_usage_error(
+    runs: &BaselineRuns,
+    id: &str,
+    command: &str,
+    repository: &Path,
+    project: &Path,
+) -> bool {
+    external_usage_error(runs, id, repository, project, command).is_some()
+}
+
+#[path = "workflow_acceptance_passability_usage_diagnosis.rs"]
+mod diagnosis;
+pub(super) use diagnosis::parser_diagnosis;

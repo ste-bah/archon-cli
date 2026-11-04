@@ -460,9 +460,7 @@ pub(crate) fn files_under(dir: &Path) -> Vec<PathBuf> {
 #[path = "check_source_shell.rs"]
 mod shell;
 use shell::segments;
-pub(crate) use shell::{
-    strip_wrappers, with_heredoc_programs, without_heredocs, words, words_with_certainty,
-};
+pub(crate) use shell::{strip_wrappers, with_heredoc_programs, words, words_with_certainty};
 
 #[cfg(test)]
 #[path = "check_source_resolve_tests.rs"]

@@ -114,21 +114,9 @@ pub(super) fn copy_external(
             crate::task_set_contract::TrustedCwd::ProjectRoot => (&project, copied_project),
             crate::task_set_contract::TrustedCwd::RepoRoot => (&repository, copied_repository),
         };
-        for named in crate::acceptance_sibling_paths::scan(check) {
-            if super::site_path::site_alias_leaves_live_root(root, *cwd, &named.path) {
-                let reason = match cwd {
-                    crate::task_set_contract::TrustedCwd::ProjectRoot => "project root",
-                    crate::task_set_contract::TrustedCwd::RepoRoot => "repository root",
-                };
-                internal_failures.insert(
-                    index,
-                    (
-                        format!("the path leaves the {reason}: {}", named.path.display()),
-                        Some(super::faults::FaultCause::SiteAliasRefused),
-                    ),
-                );
-                continue 'checks;
-            }
+        if let Some(failure) = helpers::setup_failure(root, *cwd, check) {
+            internal_failures.insert(index, failure);
+            continue 'checks;
         }
         for sibling in crate::acceptance_sibling_paths::discover(root, std::slice::from_ref(check))
         {

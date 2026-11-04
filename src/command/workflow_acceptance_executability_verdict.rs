@@ -104,6 +104,8 @@ pub(crate) struct Context {
     /// platform's, but for a test of those rules on any platform.
     windows: bool,
     deliverables: Vec<String>,
+    requirements: BTreeMap<String, Vec<String>>,
+    roots: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// The variables a listing of a tool runs with (Issue 333), and the
     /// search path the check runs on among them. Only the site's own
     /// context gives them (`silent::context`, [`Context::for_scratch`]):
@@ -117,6 +119,9 @@ pub(crate) struct Context {
     /// on the live tree, where no path is known to be outside the site.
     tree: Option<setup_path::SiteTree>,
 }
+
+#[path = "workflow_acceptance_executability_verdict_requirements.rs"]
+mod requirements;
 
 impl Context {
     /// The site environment `environment`, from the site's own context
@@ -172,6 +177,8 @@ impl Context {
     ) -> Self {
         Self {
             windows,
+            requirements: BTreeMap::new(),
+            roots: None,
             path: which::variable(&environment, "PATH", windows).map(str::to_string),
             pathext: which::variable(&environment, "PATHEXT", windows).map(str::to_string),
             deliverables,
@@ -277,7 +284,14 @@ pub(crate) fn no_verdict_cause(
         ));
     }
     if code != 0
-        && let Some(why) = subcommand::missing(&commands, &output(result), at)
+        && let Some(why) = subcommand::missing(
+            &commands,
+            &output(result),
+            at,
+            at.requirements
+                .get(&result.acceptance_id)
+                .map_or(&[], Vec::as_slice),
+        )
     {
         return Some(why);
     }

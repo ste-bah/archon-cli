@@ -58,3 +58,56 @@ async fn reverify_retry_reuses_every_observation_after_judge_failure() {
     assert_eq!(retry.take_reuse_audit().len(), trees.ids().len());
     assert_eq!(std::fs::read(&run_record).unwrap(), original_record);
 }
+
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn P2_23_reverify_at_base_keeps_existing_behavior() {
+    let trees = trees(&[("check", "test -f feature.txt", REPO)]);
+    git(&trees.repo, &["checkout", "-q", &trees.base]);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let (evidence, commit, _, findings) = probe
+        .run_reverify_copy(&trees.contract(), &trees.ids())
+        .await
+        .unwrap();
+    assert_eq!(commit, Some(trees.base));
+    assert_eq!(evidence[0].exit_code, Some(1));
+    assert!(findings.is_empty());
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn P2_24_reverify_head_pass_is_proven_on_recorded_base() {
+    let trees = trees(&[("check", "test -f feature.txt", REPO)]);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let (evidence, commit, _, findings) = probe
+        .run_reverify_copy(&trees.contract(), &trees.ids())
+        .await
+        .unwrap();
+    assert_eq!(commit, Some(trees.head));
+    assert_eq!(evidence[0].exit_code, Some(0));
+    assert!(
+        findings.is_empty(),
+        "HEAD's pass is not a baseline pass: {findings:?}"
+    );
+    assert_eq!(probe.take_baseline_runs().unwrap().commit, trees.base);
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn P2_25_reverify_without_repository_lock_is_host_unproven() {
+    let trees = trees(&[("check", "test -f feature.txt", REPO)]);
+    std::fs::remove_file(trees.set.tasks.join("repository.lock")).unwrap();
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let (evidence, commit, missing, findings) = probe
+        .run_reverify_copy(&trees.contract(), &trees.ids())
+        .await
+        .unwrap();
+    assert!(evidence.is_empty());
+    assert!(commit.is_none());
+    assert!(missing["check"].contains("repository.lock"));
+    assert!(findings.is_empty());
+    let causes = probe.take_unproven_causes();
+    assert_eq!(
+        causes["check"].1,
+        crate::command::workflow_task_set::executability::UnprovenCause::PermanentHost
+    );
+    assert!(causes["check"].0.contains("repository.lock"));
+}

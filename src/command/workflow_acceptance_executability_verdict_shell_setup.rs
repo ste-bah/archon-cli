@@ -40,6 +40,18 @@ pub(super) fn refusal(
             let speaker = speaker.rsplit(['/', '\\']).next().unwrap_or(speaker);
             matches!(speaker, "sh" | "bash" | "dash" | "ash" | "ksh")
                 && has_option_refusal_wording(message)
+                && commands.first().is_some_and(|first| {
+                    first
+                        .args
+                        .iter()
+                        .take_while(|arg| {
+                            !matches!(arg.as_str(), "-c" | "--") && arg.starts_with('-')
+                        })
+                        .any(|arg| {
+                            message.contains(arg.as_str())
+                                || (message.trim_end().ends_with('-') && arg.starts_with('-'))
+                        })
+                })
         })
     {
         return Some(

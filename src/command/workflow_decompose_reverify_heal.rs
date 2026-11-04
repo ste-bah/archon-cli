@@ -46,9 +46,10 @@ pub(super) fn transient_observations(
     >,
 ) -> bool {
     accepted_ids.iter().all(|id| {
-        causes.get(id).is_some_and(|(_, cause)| {
-            cause.class() == crate::command::workflow_host_fault::Class::Transient
-        }) || evidence
+        if let Some((_, cause)) = causes.get(id) {
+            return cause.class() == crate::command::workflow_host_fault::Class::Transient;
+        }
+        evidence
             .iter()
             .find(|item| &item.acceptance_id == id)
             .is_some_and(|item| item.operational_error.is_none())

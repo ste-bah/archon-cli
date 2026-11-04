@@ -259,3 +259,55 @@ fn current_sibling_gate_accepts_the_two_real_checks_after_copying_their_inputs()
         "current sibling gate findings: {findings:?}"
     );
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_16_sibling_operands_resolve_after_cd() {
+    let paths = archon_workflow::acceptance_sibling_paths::scan("cd D && test -f ../x");
+    assert!(
+        paths.is_empty(),
+        "../x stays inside the selected root: {paths:?}"
+    );
+}
+#[test]
+#[allow(non_snake_case)]
+fn P2_17_directory_stack_and_subshell_scope() {
+    for command in [
+        "cd D; cd -; test -f ../x",
+        "pushd D; popd; test -f ../x",
+        "(cd D); test -f ../x",
+    ] {
+        let paths = archon_workflow::acceptance_sibling_paths::scan(command);
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.path == std::path::Path::new("../x") && p.required),
+            "{command}: {paths:?}"
+        );
+    }
+}
+#[test]
+#[allow(non_snake_case)]
+fn P2_18_output_paths_are_never_required_siblings() {
+    for command in [
+        "cmd > ../out.log",
+        "cmd >> ../out.log",
+        "cmd 2> ../out.log",
+        "cmd | tee ../f",
+    ] {
+        assert!(
+            archon_workflow::acceptance_sibling_paths::scan(command)
+                .iter()
+                .all(|p| !p.required),
+            "{command}"
+        );
+    }
+}
+#[test]
+#[allow(non_snake_case)]
+fn P2_20_unknown_cd_stops_relative_resolution() {
+    assert!(
+        archon_workflow::acceptance_sibling_paths::scan("cd \"$VAR\"; test -f ../missing")
+            .is_empty()
+    );
+}

@@ -365,15 +365,15 @@ pub(super) async fn reverify_checks(
             .is_some_and(|classification| !classification.passed);
         let really_ran = item.operational_error.is_none() && classification.is_some();
         let siblings = reported_siblings(id, &item);
-        if !really_ran {
+        if !really_ran || causes.contains_key(id) {
             operational_failure = true;
         }
-        if failed {
+        if failed && !causes.contains_key(id) {
             baseline_failures.insert(id.clone(), item.clone());
         }
         results.push(CheckResult {
             check_id: id.clone(),
-            verdict: if really_ran {
+            verdict: if really_ran && !causes.contains_key(id) {
                 "accepted"
             } else {
                 "operational_failure"
@@ -383,7 +383,12 @@ pub(super) async fn reverify_checks(
             setup_failure: false,
             real_failure: false,
             sibling_paths: siblings,
-            findings: item.operational_error.clone().into_iter().collect(),
+            findings: item
+                .operational_error
+                .clone()
+                .into_iter()
+                .chain(causes.get(id).map(|(why, _)| why.clone()))
+                .collect(),
             not_run_reason: None,
             regression_guard: regression_guards.get(id).cloned(),
             remediation_route: None,
@@ -453,6 +458,9 @@ pub(super) async fn reverify_checks(
         }
     }
     for check in &mut results {
+        if causes.contains_key(&check.check_id) {
+            continue;
+        }
         apply_passability_result(
             check,
             failed_ids.contains(&check.check_id),

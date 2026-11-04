@@ -103,12 +103,40 @@ pub fn site_path_alone(
             })
         };
     }
+    if let Some(reason) = crate::acceptance_sibling_paths::missing_root(root, check) {
+        let scoped = format!(
+            "test -e {}",
+            crate::acceptance_sibling_paths::commands::path_command(&[named.to_path_buf()])
+        );
+        let reason = if crate::acceptance_sibling_paths::missing_root(root, &scoped).is_some() {
+            format!(
+                "alone in its site, `{}` resolves to `{}`, which the site does not create: {reason}",
+                archon_shell::paths::stored_text(named),
+                archon_shell::paths::stored_text(&site_target)
+            )
+        } else {
+            reason
+        };
+        return Err(SitePathRefusal {
+            reason: Some(reason),
+            site_target,
+        });
+    }
     for sibling in &discovered {
         let alias =
             lexical_site_path(&site_cwd.join(super::siblings::relative(root, &sibling.alias)));
         if site_target == alias || site_target.starts_with(&alias) {
             return Ok(());
         }
+    }
+    // Data words and paths with an unknown reading directory are not setup requirements.
+    // Keep site-alias and reserved-directory refusals above independent of B1.
+    if !root.join(named).exists()
+        && !crate::acceptance_sibling_paths::commands::parent_paths(check, root)
+            .iter()
+            .any(|path| path == named)
+    {
+        return Ok(());
     }
     Err(SitePathRefusal {
         site_target,

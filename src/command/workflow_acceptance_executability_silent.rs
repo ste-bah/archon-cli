@@ -39,7 +39,8 @@ const EVIDENCE_BYTES: usize = 800;
 /// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
-    let at = Context::new(super::sites::listing_environment(probe), contract);
+    let at = Context::new(super::sites::listing_environment(probe), contract)
+        .with_requirements(probe, contract);
     match scratch_copy_tree(probe, contract, None) {
         Some((depth, roots)) => at.within(depth, &roots),
         None => at,
@@ -53,7 +54,8 @@ pub(super) fn baseline_context(
     contract: &AcceptanceContract,
     layout: Option<&super::hermetic::CopyLayout>,
 ) -> Context {
-    let at = Context::new(super::sites::listing_environment(probe), contract);
+    let at = Context::new(super::sites::listing_environment(probe), contract)
+        .with_requirements(probe, contract);
     let tree = match probe.site {
         Site::Direct | Site::Hermetic => layout.and_then(|layout| layout.site_tree()),
         Site::Scratch(_) => scratch_copy_tree(probe, contract, layout),
@@ -232,7 +234,7 @@ pub(super) fn settle_as(
         // sends it there): no host action makes it available.
         UnprovenCause::ProgramAbsent => {
             return Some(format!(
-                "check '{id}': it cannot be proven on the base commit {short}: {why}. Neither the check's site nor the host has that program, and no host action makes it available, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides: make it fail by its own assertion on that tree, never by starting a program that neither the site nor the host has"
+                "check '{id}': it cannot be proven on the base commit {short}: {why}. Neither the check's site nor the host has that program, and no host action makes it available, so no retry can prove it; this is not a finding against the criterion. Its stderr there:\n{evidence}\nCheck the criterion with what the site provides: make it fail by its own assertion on that tree."
             ));
         }
         UnprovenCause::Host | UnprovenCause::PermanentHost => {

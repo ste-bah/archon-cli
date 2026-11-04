@@ -57,3 +57,36 @@ pub(crate) fn relative(from: &Path, to: &Path) -> PathBuf {
     }
     path
 }
+
+pub(super) fn setup_failure(
+    root: &Path,
+    cwd: crate::task_set_contract::TrustedCwd,
+    check: &str,
+) -> Option<(String, Option<super::faults::FaultCause>)> {
+    for named in crate::acceptance_sibling_paths::scan(check) {
+        if super::site_path::site_alias_leaves_live_root(root, cwd, &named.path) {
+            let reason = match cwd {
+                crate::task_set_contract::TrustedCwd::ProjectRoot => "project root",
+                crate::task_set_contract::TrustedCwd::RepoRoot => "repository root",
+            };
+            return Some((
+                format!(
+                    "the path leaves the {reason}: {}",
+                    archon_shell::paths::stored_text(&named.path)
+                ),
+                Some(super::faults::FaultCause::SiteAliasRefused),
+            ));
+        }
+    }
+    if let Some(reason) = crate::acceptance_sibling_paths::missing_root(root, check) {
+        return Some((
+            format!("the check {reason}"),
+            Some(super::faults::FaultCause::SiblingShapeRefused),
+        ));
+    }
+    None
+}
+
+#[cfg(test)]
+#[path = "acceptance_scratch_sibling_setup_tests.rs"]
+mod setup_tests;
