@@ -216,11 +216,11 @@ fn R5_D8_six_production_consumers_share_directory_and_operand_rules() {
         let paths = scan(command);
         let discovered = discover(&root, &[command.into()]);
         assert!(
-            discovered
-                .iter()
-                .any(|sibling| std::fs::canonicalize(other.join("data"))
+            discovered.iter().any(
+                |sibling| archon_shell::paths::canonicalize(other.join("data"))
                     .unwrap()
-                    .starts_with(&sibling.alias)),
+                    .starts_with(&sibling.alias)
+            ),
             "copy/observation/reuse input: {command}: {discovered:?}"
         );
         assert!(

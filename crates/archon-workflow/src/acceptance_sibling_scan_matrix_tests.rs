@@ -86,8 +86,8 @@ fn R4_D8_cd_forms_by_layout_preserve_expected_sibling_sets() {
                         vec![]
                     } else {
                         vec![SiblingSource {
-                            alias: std::fs::canonicalize(&other).unwrap(),
-                            source: std::fs::canonicalize(&other).unwrap(),
+                            alias: archon_shell::paths::canonicalize(&other).unwrap(),
+                            source: archon_shell::paths::canonicalize(&other).unwrap(),
                         }]
                     },
                     "{layout}: {command}"
