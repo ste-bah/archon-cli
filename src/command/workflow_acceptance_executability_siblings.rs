@@ -40,7 +40,7 @@ pub(crate) fn manifest_relative_input(token: &str, command: &str, cwd: &Path) ->
             exact_path_exists(&root.join(relative)).then(|| {
                 format!(
                     "{}/{}",
-                    named.path.parent().expect("manifest parent").display(),
+                    archon_shell::paths::stored_text(named.path.parent().expect("manifest parent")),
                     token
                 )
             })

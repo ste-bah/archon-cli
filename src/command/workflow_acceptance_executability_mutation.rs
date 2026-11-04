@@ -277,11 +277,10 @@ pub(super) fn input_discovery_for_check(
                 let resolved = resolved.as_ref()?;
                 let source = sibling.source.canonicalize().ok()?;
                 let within = resolved.strip_prefix(&source).ok()?;
-                Some(
-                    paths::relative_path(&cwd, &source.join(within))
-                        .to_string_lossy()
-                        .into_owned(),
-                )
+                Some(archon_shell::paths::stored_text(&paths::relative_path(
+                    &cwd,
+                    &source.join(within),
+                )))
             });
             let manifest_sibling = commands
                 .iter()

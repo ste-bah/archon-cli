@@ -49,6 +49,21 @@ fn P4_20_prefetch_mines_only_check_text() {
 }
 
 #[test]
+fn named_inputs_keep_missing_nested_paths_and_exclude_missing_outside_paths() {
+    let set = frozen_set(&[(
+        "AC-X-001",
+        "inspect noise/from-feedback.txt ../outside/missing.txt",
+        false,
+    )]);
+    let paths = crate::command::workflow_task_set::executability::named_inputs(
+        &set.contract().acceptance[0],
+        set.project.path(),
+        set.project.path(),
+    );
+    assert_eq!(paths, ["noise/from-feedback.txt"]);
+}
+
+#[test]
 fn P4_22_every_applicable_reason_reaches_the_author() {
     use crate::command::workflow_gate::{GateFinding, GateId};
     let set = frozen_set(&[("AC-X-001", "run", false)]);
