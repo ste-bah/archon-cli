@@ -16,8 +16,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              80,
-              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+              81,
+              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -68,8 +68,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              80,
-              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+              81,
+              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -99,8 +99,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              80,
-              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+              81,
+              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -129,7 +129,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1.\nAuthor ONLY entry AC-X-001: The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: none.\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
+            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"<repo_root or project_root>\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every file (source, test or data) it reads by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1.\nAuthor ONLY entry AC-X-001: The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: none.\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nCommand examples: {\"kind\":\"command\",\"cwd\":\"repo_root\",\"command\":\"make test\"} and {\"kind\":\"command\",\"cwd\":\"project_root\",\"command\":\"./verify\"}.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
           }
         },
         "depends_on": [],
@@ -170,7 +170,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -189,7 +189,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-001: SUPPLEMENTARY check owed to PRD requirement REQ-X-001 (no other check covers it): The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nIts covers is exactly [\"REQ-X-001\"]; it must fail whenever REQ-X-001 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-001': PRD requirement REQ-X-001 is covered by no acceptance check; author supplementary check SUP-REQ-X-001 with covers [\"REQ-X-001\"] that fails whenever REQ-X-001 is violated: The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 1, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
+            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"<repo_root or project_root>\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every file (source, test or data) it reads by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-001: SUPPLEMENTARY check owed to PRD requirement REQ-X-001 (no other check covers it): The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nIts covers is exactly [\"REQ-X-001\"]; it must fail whenever REQ-X-001 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-001': PRD requirement REQ-X-001 is covered by no acceptance check; author supplementary check SUP-REQ-X-001 with covers [\"REQ-X-001\"] that fails whenever REQ-X-001 is violated: The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 1, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep names, flags and formats consistent; a regression guard still names its own deciding file. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. Duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nCommand examples: {\"kind\":\"command\",\"cwd\":\"repo_root\",\"command\":\"make test\"} and {\"kind\":\"command\",\"cwd\":\"project_root\",\"command\":\"./verify\"}.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
           }
         },
         "depends_on": [],
@@ -230,7 +230,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -249,7 +249,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-002: SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nIts covers is exactly [\"REQ-X-002\"]; it must fail whenever REQ-X-002 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-002': PRD requirement REQ-X-002 is covered by no acceptance check; author supplementary check SUP-REQ-X-002 with covers [\"REQ-X-002\"] that fails whenever REQ-X-002 is violated: The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 2, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\n- SUP-REQ-X-001 sha256:de8c0875d25eef2712bd9acfb0e05963c1302e774adbe3db94e49be077ae0d77 covers=[REQ-X-001] command cwd=repo_root: test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
+            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"<repo_root or project_root>\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every file (source, test or data) it reads by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-002: SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nIts covers is exactly [\"REQ-X-002\"]; it must fail whenever REQ-X-002 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-002': PRD requirement REQ-X-002 is covered by no acceptance check; author supplementary check SUP-REQ-X-002 with covers [\"REQ-X-002\"] that fails whenever REQ-X-002 is violated: The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 2, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep names, flags and formats consistent; a regression guard still names its own deciding file. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. Duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\n- SUP-REQ-X-001 sha256:de8c0875d25eef2712bd9acfb0e05963c1302e774adbe3db94e49be077ae0d77 covers=[REQ-X-001] command cwd=repo_root: test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nCommand examples: {\"kind\":\"command\",\"cwd\":\"repo_root\",\"command\":\"make test\"} and {\"kind\":\"command\",\"cwd\":\"project_root\",\"command\":\"./verify\"}.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
           }
         },
         "depends_on": [],
@@ -290,7 +290,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -309,7 +309,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author the complete TASK body for host-frozen task_id TASK-X-010.\nThe exact frozen file_name is TASK-X-010.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nsource_sections: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nCopy the frozen implements array exactly, preserving every value and its order.\nThe task body must carry out what its frozen source_sections require for this task's work.\nFrozen source_sections: [\"0\"]\nCited PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nFor each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nPreserve every frozen tuple field exactly.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Author the complete TASK body for host-frozen task_id TASK-X-010.\nThe exact frozen file_name is TASK-X-010.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nsource_sections: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nThe host stamps implements, source_sections, depends_on, blocks and deliverable_contracts from the frozen skeleton; read them there\nName every frozen implements id (obligation or constraint) in a body sentence outside the yaml block that also names the file, symbol or command that keeps or proves it.\nThe task body must carry out what its frozen source_sections require for this task's work.\nFrozen source_sections: [\"0\"]\nCited PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -350,7 +350,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -369,7 +369,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author the complete TASK body for host-frozen task_id TASK-X-020.\nThe exact frozen file_name is TASK-X-020.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nsource_sections: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nCopy the frozen implements array exactly, preserving every value and its order.\nThe task body must carry out what its frozen source_sections require for this task's work.\nFrozen source_sections: [\"0\"]\nCited PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nFor each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nPreserve every frozen tuple field exactly.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Author the complete TASK body for host-frozen task_id TASK-X-020.\nThe exact frozen file_name is TASK-X-020.md.\nRead the PRD at <project-root>/prd.md, the frozen chain under <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nEvery path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.\nStop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.\nEvery path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (`<project-root>/repository/<relative path>` or the repository-relative path), exactly one of these three observations and nothing in their place:\n  `<path>` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);\n  `<path>` — exists (directory)   for a directory;\n  `<path>` — absent   for a path that is not in the repository.\nThe host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root.\nThe file must open with a fenced yaml block carrying exactly these keys:\n```yaml\ntask_id: <frozen task id>\ntitle: <short title>\ncomplexity: low|medium|high\nstatus: ready\ndepends_on: <host stamps frozen value>\nblocks: <host stamps frozen value>\nimplements: <host stamps frozen value>\nsource_sections: <host stamps frozen value>\nrequired_env_keys: []\nrequired_tools: <exact tools this task must exercise; [] only when no tool invocation is required>\ndeliverable_contracts: <host stamps frozen value>\n```\nValues are yours except task_id and file_name, which must equal the frozen tuple above.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.\nThe host stamps implements, source_sections, depends_on, blocks and deliverable_contracts from the frozen skeleton; read them there\nName every frozen implements id (obligation or constraint) in a body sentence outside the yaml block that also names the file, symbol or command that keeps or proves it.\nThe task body must carry out what its frozen source_sections require for this task's work.\nFrozen source_sections: [\"0\"]\nCited PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nRead the project MCP configuration at <project-root>/.mcp.json and match this task's PRD obligations to its exact permitted tool names.\nDeclare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.\nAn MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.\nEvery MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.\nHTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.\nEvery test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.\nFiles Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.\nAfter the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.\nThe yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the TASK file itself, as raw UTF-8 Markdown.\nWrap the reply in no outer code fence, and add no commentary before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -410,7 +410,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -425,13 +425,15 @@
           "method": "agent",
           "options": {
             "extra": {
+              "frozenSkeleton": false,
+              "previousSkeleton": null,
               "recordLanding": "skeleton"
             },
             "result_mode": "rawOutcome",
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nCite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). Every host-listed qualifying PRD section must be cited by source_sections of at least one task whose work it justifies; a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.\nQualifying PRD sections (key: title):\n\"0\": Artifact Preparation\nFull PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nThe document must deserialize into this exact shape:\n{\"schema_version\":1,\"acceptance_digest\":\"\",\"tasks\":[{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation id the host lists>\"],\"source_sections\":[\"<PRD section key the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"instance_source_records_field\":\"<optional: name of the records field in the instance source>\",\"registry_records_field\":\"<optional: name of the records field in the registry>\",\"min_instances\":1}]}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nThe host overwrites acceptance_digest: send the placeholder shown.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nYour entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.\nEmit no prose, no explanation, no headings and no Markdown code fences before or after it.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Land task records for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nCite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). For every host-listed qualifying PRD section, cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements); a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.\nQualifying PRD sections (key: title):\n\"0\": Artifact Preparation\nFull PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nEach landed task must deserialize into this shape:\n{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation or constraint id the host lists>\"],\"source_sections\":[\"<PRD section key the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"instance_source_records_field\":\"<optional: name of the records field in the instance source>\",\"registry_records_field\":\"<optional: name of the records field in the registry>\",\"min_instances\":1}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nLand each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -439,22 +441,35 @@
         "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
-          "commands_run": [],
+          "commands_run": [
+            {
+              "command": "land-skeleton-record {}",
+              "kind": "inspect",
+              "output_summary": "host tool trace: call returned",
+              "status": "succeeded"
+            },
+            {
+              "command": "land-skeleton-record {}",
+              "kind": "inspect",
+              "output_summary": "host tool trace: call returned",
+              "status": "succeeded"
+            }
+          ],
           "data": {
-            "content": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}",
+            "content": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}",
             "stopReason": "end_turn",
-            "tokensIn": 1,
+            "tokensIn": 2,
             "tokensInUnknownReason": null,
-            "tokensOut": 1,
+            "tokensOut": 2,
             "tokensOutUnknownReason": null,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
               "inputsTruncated": 0,
-              "kept": 0,
+              "kept": 2,
               "recorded": true,
               "source": "host session trace",
-              "toolCalls": 0,
+              "toolCalls": 2,
               "topLevelLists": "host_trace"
             }
           },
@@ -472,7 +487,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -554,8 +569,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
-            "logicVersion": 80,
+            "logicDigest": "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
+            "logicVersion": 81,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -565,7 +580,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "4331a86b0a38205ef130c050a6ba5d8c7c1e89f3ea5e9b4ff88cdc806b8f6b11",
+                  "blake3": "b5d031949cdb872a30d2d5463d8b796ec25c2ca9b724546694118f2fa619d86a",
                   "content": {
                     "acceptance": [
                       {
@@ -583,8 +598,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              80,
-                              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+                              81,
+                              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -636,8 +651,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              80,
-                              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+                              81,
+                              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -667,8 +682,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              80,
-                              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+                              81,
+                              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -686,11 +701,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "14a788a5b78446d86a4419a8d5d6731d01d394f1d285d7c74b829382f5ac0038",
+                  "blake3": "4ea7a045ac0f077fc500d2d279b94204f64f3f962ace18bf417e3312fa847660",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+                    "digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -702,18 +717,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874",
+                  "blake3": "e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c",
                   "content": {
-                    "acceptance_digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+                    "acceptance_digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-edd9a0b63176",
+                    "freeze_event_id": "acceptance-freeze-3b2b15978a81",
                     "lineage_recording": 1,
-                    "skeleton_digest": "733e8be0c853e5fd3435ed667416950b109738bd1d6311d978a1963221483684",
+                    "skeleton_digest": "a6b47399f4f42eba5447c4808917016029403c2bb4eee825c30ce6354e917c19",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -787,7 +802,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -842,8 +857,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
-            "logicVersion": 80,
+            "logicDigest": "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
+            "logicVersion": 81,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -853,7 +868,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "4331a86b0a38205ef130c050a6ba5d8c7c1e89f3ea5e9b4ff88cdc806b8f6b11",
+                  "blake3": "b5d031949cdb872a30d2d5463d8b796ec25c2ca9b724546694118f2fa619d86a",
                   "content": {
                     "acceptance": [
                       {
@@ -871,8 +886,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              80,
-                              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+                              81,
+                              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -924,8 +939,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              80,
-                              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+                              81,
+                              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -955,8 +970,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              80,
-                              "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+                              81,
+                              "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -975,11 +990,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "14a788a5b78446d86a4419a8d5d6731d01d394f1d285d7c74b829382f5ac0038",
+                  "blake3": "4ea7a045ac0f077fc500d2d279b94204f64f3f962ace18bf417e3312fa847660",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+                    "digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -992,18 +1007,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874",
+                  "blake3": "e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c",
                   "content": {
-                    "acceptance_digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+                    "acceptance_digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-edd9a0b63176",
+                    "freeze_event_id": "acceptance-freeze-3b2b15978a81",
                     "lineage_recording": 1,
-                    "skeleton_digest": "733e8be0c853e5fd3435ed667416950b109738bd1d6311d978a1963221483684",
+                    "skeleton_digest": "a6b47399f4f42eba5447c4808917016029403c2bb4eee825c30ce6354e917c19",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1032,7 +1047,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
             "stderrBytes": 647,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"4331a86b0a38205ef130c050a6ba5d8c7c1e89f3ea5e9b4ff88cdc806b8f6b11\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"14a788a5b78446d86a4419a8d5d6731d01d394f1d285d7c74b829382f5ac0038\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"cfd9e9b997100afbc48df86727cdb052ccd398d5d603cc8fac9ede54e6df6f72\",\"exists\":true},\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"b5d031949cdb872a30d2d5463d8b796ec25c2ca9b724546694118f2fa619d86a\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"4ea7a045ac0f077fc500d2d279b94204f64f3f962ace18bf417e3312fa847660\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"69ce69b18ac340896c4fb6a87ce07a2c3375a99cffdfc01af856ca45fea77133\",\"exists\":true},\"schema_version\":1}",
             "stdoutBytes": 799,
             "stdoutTruncated": false,
             "timedOut": false
@@ -1051,7 +1066,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1066,11 +1081,11 @@
           "options": {
             "extra": {
               "commandId": "freeze-skeleton",
-              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}"
+              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}"
             },
             "host_command": {
               "commandId": "freeze-skeleton",
-              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}"
+              "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}"
             },
             "target_files": [],
             "target_files_from_item": false
@@ -1106,8 +1121,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
-            "logicVersion": 9,
+            "logicDigest": "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
+            "logicVersion": 10,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative frozen skeleton chain evaluated"
@@ -1117,18 +1132,18 @@
               "command_id": "freeze-skeleton",
               "entries": [
                 {
-                  "blake3": "b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874",
+                  "blake3": "e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c",
                   "content": {
-                    "acceptance_digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+                    "acceptance_digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-edd9a0b63176",
+                    "freeze_event_id": "acceptance-freeze-3b2b15978a81",
                     "lineage_recording": 1,
-                    "skeleton_digest": "733e8be0c853e5fd3435ed667416950b109738bd1d6311d978a1963221483684",
+                    "skeleton_digest": "a6b47399f4f42eba5447c4808917016029403c2bb4eee825c30ce6354e917c19",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1152,9 +1167,9 @@
                   "relative_path": "gate-envelope.json"
                 },
                 {
-                  "blake3": "2425ea42f68ddb24721cf37c46341ae55aec8edbaf417634390389fc4ee7ea37",
+                  "blake3": "8a68c39e098252ff5c9c496eaeeb6e9e22365024ec69ab8ea4633a190268a10e",
                   "content": {
-                    "acceptance_digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+                    "acceptance_digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
                     "schema_version": 1,
                     "tasks": [
                       {
@@ -1237,11 +1252,11 @@
                   "relative_path": "task-skeleton.json"
                 },
                 {
-                  "blake3": "2b244bb129d5c1c5e741af3b9b663c8e6ccc885aa2c171670134f718b4af1034",
+                  "blake3": "bf865db6ad2afcff151a40eeec08b5ecd721d05033c843bb6727070aec63f4eb",
                   "content": {
-                    "acceptance_digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+                    "acceptance_digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
                     "algorithm": "blake3",
-                    "digest": "733e8be0c853e5fd3435ed667416950b109738bd1d6311d978a1963221483684",
+                    "digest": "a6b47399f4f42eba5447c4808917016029403c2bb4eee825c30ce6354e917c19",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1258,7 +1273,7 @@
             "stderr": "",
             "stderrBytes": 0,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"2425ea42f68ddb24721cf37c46341ae55aec8edbaf417634390389fc4ee7ea37\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"2b244bb129d5c1c5e741af3b9b663c8e6ccc885aa2c171670134f718b4af1034\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"8a68c39e098252ff5c9c496eaeeb6e9e22365024ec69ab8ea4633a190268a10e\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"bf865db6ad2afcff151a40eeec08b5ecd721d05033c843bb6727070aec63f4eb\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
             "stdoutBytes": 662,
             "stdoutTruncated": false,
             "subjects": [
@@ -1287,7 +1302,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1350,8 +1365,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-            "logicVersion": 31,
+            "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+            "logicVersion": 32,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1407,7 +1422,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1470,8 +1485,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-            "logicVersion": 31,
+            "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+            "logicVersion": 32,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1527,7 +1542,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1581,8 +1596,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "3171c973a3c1f01e70034176dd530d95b003c58348d33675dc9c228098642360",
-            "logicVersion": 12,
+            "logicDigest": "fa8433f7c9bcb22fec653bdda9b3add0575ef26bd2774320ead553d4c39ff0fc",
+            "logicVersion": 13,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative requirements-trace postcondition evaluated"
@@ -1636,7 +1651,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1678,7 +1693,7 @@
             "exitCode": 0,
             "gateEnvelope": {
               "policy_findings": [],
-              "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
+              "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n  observe: exits 0 for policy findings.\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
               "schema_version": 1
             },
             "interrupted": false,
@@ -1690,8 +1705,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-            "logicVersion": 26,
+            "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+            "logicVersion": 27,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative task-set-lint postcondition evaluated"
@@ -1701,10 +1716,10 @@
               "command_id": "task-set-lint",
               "entries": [
                 {
-                  "blake3": "d1950b8e71176b025a3bdecf03a19f6d7b96ee66513e1da82287e28d46c1c140",
+                  "blake3": "22b801e5657fafdf9c19cb681db5f3901894b761e7de5a4984756545089e1d14",
                   "content": {
                     "policy_findings": [],
-                    "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
+                    "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n  observe: exits 0 for policy findings.\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
                     "schema_version": 1
                   },
                   "destination_path": "<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
@@ -1716,7 +1731,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\n",
             "stderrBytes": 140,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"d1950b8e71176b025a3bdecf03a19f6d7b96ee66513e1da82287e28d46c1c140\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"22b801e5657fafdf9c19cb681db5f3901894b761e7de5a4984756545089e1d14\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 270,
             "stdoutTruncated": false,
             "subjects": [
@@ -1745,7 +1760,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1776,8 +1791,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
-                  "logicVersion": 80,
+                  "logicDigest": "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
+                  "logicVersion": 81,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1787,13 +1802,13 @@
                     "command_id": "freeze-acceptance",
                     "entries": [
                       {
-                        "blake3": "4331a86b0a38205ef130c050a6ba5d8c7c1e89f3ea5e9b4ff88cdc806b8f6b11",
+                        "blake3": "b5d031949cdb872a30d2d5463d8b796ec25c2ca9b724546694118f2fa619d86a",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.json"
                       },
                       {
-                        "blake3": "14a788a5b78446d86a4419a8d5d6731d01d394f1d285d7c74b829382f5ac0038",
+                        "blake3": "4ea7a045ac0f077fc500d2d279b94204f64f3f962ace18bf417e3312fa847660",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.lock"
@@ -1839,8 +1854,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
-                      "logicVersion": 80,
+                      "logicDigest": "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
+                      "logicVersion": 81,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1850,13 +1865,13 @@
                         "command_id": "freeze-acceptance",
                         "entries": [
                           {
-                            "blake3": "4331a86b0a38205ef130c050a6ba5d8c7c1e89f3ea5e9b4ff88cdc806b8f6b11",
+                            "blake3": "b5d031949cdb872a30d2d5463d8b796ec25c2ca9b724546694118f2fa619d86a",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.json"
                           },
                           {
-                            "blake3": "14a788a5b78446d86a4419a8d5d6731d01d394f1d285d7c74b829382f5ac0038",
+                            "blake3": "4ea7a045ac0f077fc500d2d279b94204f64f3f962ace18bf417e3312fa847660",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.lock"
@@ -1878,7 +1893,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                       "stderrBytes": 647,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"4331a86b0a38205ef130c050a6ba5d8c7c1e89f3ea5e9b4ff88cdc806b8f6b11\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"14a788a5b78446d86a4419a8d5d6731d01d394f1d285d7c74b829382f5ac0038\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"cfd9e9b997100afbc48df86727cdb052ccd398d5d603cc8fac9ede54e6df6f72\",\"exists\":true},\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"b5d031949cdb872a30d2d5463d8b796ec25c2ca9b724546694118f2fa619d86a\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"4ea7a045ac0f077fc500d2d279b94204f64f3f962ace18bf417e3312fa847660\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"69ce69b18ac340896c4fb6a87ce07a2c3375a99cffdfc01af856ca45fea77133\",\"exists\":true},\"schema_version\":1}",
                       "stdoutBytes": 799,
                       "stdoutTruncated": false,
                       "timedOut": false
@@ -1900,7 +1915,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                   "stderrBytes": 647,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"4331a86b0a38205ef130c050a6ba5d8c7c1e89f3ea5e9b4ff88cdc806b8f6b11\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"14a788a5b78446d86a4419a8d5d6731d01d394f1d285d7c74b829382f5ac0038\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"cfd9e9b997100afbc48df86727cdb052ccd398d5d603cc8fac9ede54e6df6f72\",\"exists\":true},\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"b5d031949cdb872a30d2d5463d8b796ec25c2ca9b724546694118f2fa619d86a\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"4ea7a045ac0f077fc500d2d279b94204f64f3f962ace18bf417e3312fa847660\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"69ce69b18ac340896c4fb6a87ce07a2c3375a99cffdfc01af856ca45fea77133\",\"exists\":true},\"schema_version\":1}",
                   "stdoutBytes": 799,
                   "stdoutTruncated": false,
                   "summary": "host command '<host-call-id>' completed with exit Some(0)",
@@ -1922,8 +1937,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
-                  "logicVersion": 9,
+                  "logicDigest": "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
+                  "logicVersion": 10,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative frozen skeleton chain evaluated"
@@ -1933,7 +1948,7 @@
                     "command_id": "freeze-skeleton",
                     "entries": [
                       {
-                        "blake3": "b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874",
+                        "blake3": "e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c",
                         "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                         "prior_blake3": "<receipt-digest-of-overwritten-content>",
                         "relative_path": "acceptance-pin.json"
@@ -1944,12 +1959,12 @@
                         "relative_path": "gate-envelope.json"
                       },
                       {
-                        "blake3": "2425ea42f68ddb24721cf37c46341ae55aec8edbaf417634390389fc4ee7ea37",
+                        "blake3": "8a68c39e098252ff5c9c496eaeeb6e9e22365024ec69ab8ea4633a190268a10e",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                         "relative_path": "task-skeleton.json"
                       },
                       {
-                        "blake3": "2b244bb129d5c1c5e741af3b9b663c8e6ccc885aa2c171670134f718b4af1034",
+                        "blake3": "bf865db6ad2afcff151a40eeec08b5ecd721d05033c843bb6727070aec63f4eb",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                         "relative_path": "task-skeleton.lock"
                       }
@@ -1983,8 +1998,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
-                      "logicVersion": 9,
+                      "logicDigest": "d9bf0aaecd66c648e3c73a360157078d76fb6e21f948782e0a54849bd45162a5",
+                      "logicVersion": 10,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative frozen skeleton chain evaluated"
@@ -1994,7 +2009,7 @@
                         "command_id": "freeze-skeleton",
                         "entries": [
                           {
-                            "blake3": "b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874",
+                            "blake3": "e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c",
                             "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                             "prior_blake3": "<receipt-digest-of-overwritten-content>",
                             "relative_path": "acceptance-pin.json"
@@ -2005,12 +2020,12 @@
                             "relative_path": "gate-envelope.json"
                           },
                           {
-                            "blake3": "2425ea42f68ddb24721cf37c46341ae55aec8edbaf417634390389fc4ee7ea37",
+                            "blake3": "8a68c39e098252ff5c9c496eaeeb6e9e22365024ec69ab8ea4633a190268a10e",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                             "relative_path": "task-skeleton.json"
                           },
                           {
-                            "blake3": "2b244bb129d5c1c5e741af3b9b663c8e6ccc885aa2c171670134f718b4af1034",
+                            "blake3": "bf865db6ad2afcff151a40eeec08b5ecd721d05033c843bb6727070aec63f4eb",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                             "relative_path": "task-skeleton.lock"
                           }
@@ -2020,7 +2035,7 @@
                       "stderr": "",
                       "stderrBytes": 0,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"2425ea42f68ddb24721cf37c46341ae55aec8edbaf417634390389fc4ee7ea37\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"2b244bb129d5c1c5e741af3b9b663c8e6ccc885aa2c171670134f718b4af1034\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"8a68c39e098252ff5c9c496eaeeb6e9e22365024ec69ab8ea4633a190268a10e\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"bf865db6ad2afcff151a40eeec08b5ecd721d05033c843bb6727070aec63f4eb\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                       "stdoutBytes": 662,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2052,7 +2067,7 @@
                   "stderr": "",
                   "stderrBytes": 0,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"b0562bb356d5e41697f679bb586a75f63638ca1232aee4edca9d9f617db70874\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"2425ea42f68ddb24721cf37c46341ae55aec8edbaf417634390389fc4ee7ea37\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"2b244bb129d5c1c5e741af3b9b663c8e6ccc885aa2c171670134f718b4af1034\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"e9fc52664228d07a6aa8d66b4892cf050d6ba1649d09ff733e325dd8233e3d2c\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"8a68c39e098252ff5c9c496eaeeb6e9e22365024ec69ab8ea4633a190268a10e\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"bf865db6ad2afcff151a40eeec08b5ecd721d05033c843bb6727070aec63f4eb\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                   "stdoutBytes": 662,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2084,8 +2099,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-                  "logicVersion": 31,
+                  "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+                  "logicVersion": 32,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2134,8 +2149,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-                      "logicVersion": 31,
+                      "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+                      "logicVersion": 32,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2216,8 +2231,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-                  "logicVersion": 31,
+                  "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+                  "logicVersion": 32,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2266,8 +2281,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-                      "logicVersion": 31,
+                      "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+                      "logicVersion": 32,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2336,7 +2351,7 @@
                   "exitCode": 0,
                   "gateEnvelope": {
                     "policy_findings": [],
-                    "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
+                    "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n  observe: exits 0 for policy findings.\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
                     "schema_version": 1
                   },
                   "interrupted": false,
@@ -2348,8 +2363,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-                  "logicVersion": 26,
+                  "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+                  "logicVersion": 27,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2359,7 +2374,7 @@
                     "command_id": "task-set-lint",
                     "entries": [
                       {
-                        "blake3": "d1950b8e71176b025a3bdecf03a19f6d7b96ee66513e1da82287e28d46c1c140",
+                        "blake3": "22b801e5657fafdf9c19cb681db5f3901894b761e7de5a4984756545089e1d14",
                         "destination_path": "<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                         "relative_path": "gate-envelope.json"
                       }
@@ -2381,7 +2396,7 @@
                       "exitCode": 0,
                       "gateEnvelope": {
                         "policy_findings": [],
-                        "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
+                        "report": "topology lint — task directory <project-root>/tasks/PRD-X\n2 nodes, advisory only: nothing here blocks a run\n\n## diamond conformance\n  no reduce stage has any verification feeding it — nothing to check.\n\n## dependency edges\n  1 edge(s) classified across 1 node(s) with declared consumption: 1 carrying dataflow, 0 ordering-only, 0 unsupported.\n  no unsupported edges.\n\n## stop-rule fusion\n  no findings.\n\n## requirement coverage\n  3 obligation(s) in <project-root>/prd.md, 3 claimed across 2 task(s).\n  every obligation is claimed by at least one task.\n  every ID cited by a task is defined in the PRD.\n  AC-*: 1 of 1 obligation(s) stated in tables or done-definition items are claimed by a task\n  observe: exits 0 for policy findings.\n\n## declared capabilities\n  2 task(s) checked; every runner and environment key a focused test uses is declared.\n\n## deliverable contracts\n  2 task(s) checked; every declared contract is satisfiable as written\n\n## unowned obligations\n  none: every file a task body obliges has an owning task\n\n## task-set freeze\n  2 TASK file(s) match the frozen skeleton and full digest chain\n  dependency contracts: no informational findings\n\n## obligation fidelity\n  AC-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-001: necessarily true given TASK-X-010, TASK-X-020\n  REQ-X-002: necessarily true given TASK-X-010, TASK-X-020\n  NOTE obligation AC-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim AC-X-001\n  NOTE obligation REQ-X-001 is claimed by TASK-X-010, whose text names TASK-X-020 as owning the result, but TASK-X-020 does not claim REQ-X-001\n  NOTE obligation REQ-X-002 is claimed by TASK-X-020, whose text names TASK-X-010 as owning the result, but TASK-X-010 does not claim REQ-X-002\n  3 claimed obligation(s) in 1 cluster(s), 1 call batch(es): 2 asked of claude-opus-5, 1 served from <project-root>/.archon/lint-cache/fidelity\n",
                         "schema_version": 1
                       },
                       "interrupted": false,
@@ -2393,8 +2408,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
-                      "logicVersion": 26,
+                      "logicDigest": "d7f0f733f144d0b3b054ba4dce0914e8d4f541e5c8654aedfbf06ceaf7846909",
+                      "logicVersion": 27,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2404,7 +2419,7 @@
                         "command_id": "task-set-lint",
                         "entries": [
                           {
-                            "blake3": "d1950b8e71176b025a3bdecf03a19f6d7b96ee66513e1da82287e28d46c1c140",
+                            "blake3": "22b801e5657fafdf9c19cb681db5f3901894b761e7de5a4984756545089e1d14",
                             "destination_path": "<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                             "relative_path": "gate-envelope.json"
                           }
@@ -2414,7 +2429,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\n",
                       "stderrBytes": 140,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"d1950b8e71176b025a3bdecf03a19f6d7b96ee66513e1da82287e28d46c1c140\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"22b801e5657fafdf9c19cb681db5f3901894b761e7de5a4984756545089e1d14\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 270,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2446,7 +2461,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\n",
                   "stderrBytes": 140,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"d1950b8e71176b025a3bdecf03a19f6d7b96ee66513e1da82287e28d46c1c140\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"22b801e5657fafdf9c19cb681db5f3901894b761e7de5a4984756545089e1d14\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 270,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2478,8 +2493,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "3171c973a3c1f01e70034176dd530d95b003c58348d33675dc9c228098642360",
-                  "logicVersion": 12,
+                  "logicDigest": "fa8433f7c9bcb22fec653bdda9b3add0575ef26bd2774320ead553d4c39ff0fc",
+                  "logicVersion": 13,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2523,8 +2538,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "3171c973a3c1f01e70034176dd530d95b003c58348d33675dc9c228098642360",
-                      "logicVersion": 12,
+                      "logicDigest": "fa8433f7c9bcb22fec653bdda9b3add0575ef26bd2774320ead553d4c39ff0fc",
+                      "logicVersion": 13,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2692,7 +2707,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -2740,14 +2755,14 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20",
+        "scaffold_hash": "83cd3d86aaf61783575f6a7568f80c4eeccbc44bc9fe018779c10d5cd803a50a",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
     ]
   ],
   "skeleton": {
-    "acceptance_digest": "edd9a0b63176110921de5a80e7135cd8eb7b82f0e9614ec6f537be8e6403a8fd",
+    "acceptance_digest": "3b2b15978a816926916bd42e062a6e72c9af166738fc66962828406f251385b5",
     "schema_version": 1,
     "tasks": [
       {
