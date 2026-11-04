@@ -82,8 +82,57 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets
 
-  build-and-test:
-    name: build + test (${{ matrix.os }})
+  source-lints:
+    name: source lints
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4.3.1
+      - name: Select pinned Rust toolchain
+        run: |
+          toolchain="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          test -n "$toolchain"
+          rustup toolchain install "$toolchain" --component rustfmt --component clippy
+      - name: Install system dependencies
+        run: |
+          timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y pkg-config perl make libasound2-dev
+      - uses: Swatinem/rust-cache@v2.8.2
+        with:
+          # Match the existing warnings job's automatic job-id cache prefix.
+          shared-key: warnings
+          save-if: false
+        # Match dtolnay's cache environment without exporting homes to tests.
+        env:
+          CARGO_HOME: /home/runner/.cargo
+          CARGO_INCREMENTAL: '0'
+      # Issue 340's spawn lint, spawn-env lint and their scanner self-tests
+      # live below spawn::lint_tests. This leaf has no production archon deps:
+      # target ~5 min with rust-cache, without the root's 5600 tests. Its
+      # dev-only archon-test-support -> archon-memory edge can cost more cold.
+      # Other source scans live in heavier crates (core/tools/tui/workflow).
+      # write/test_baseline_lint_tests.rs exercises baseline behaviour, not
+      # source text, and workflow pulls archon-tools + tree-sitter + QuickJS.
+      # Keep those in the full matrix rather than delaying this feedback path.
+      - name: Run shell source lints
+        shell: bash
+        run: |
+          cargo test -p archon-shell --lib --locked -- lint_tests 2>&1 | tee "$RUNNER_TEMP/source-lints.log"
+          if ! grep -Eq 'running [1-9][0-9]* tests?' "$RUNNER_TEMP/source-lints.log"; then
+            echo "::error::Shell source lint filter executed zero tests"
+            exit 1
+          fi
+
+  # Build once per OS, then fan out execution (no test filters). PR #591,
+  # run 41893591793: nextest compile/run was 25/18.5 min Linux, 33/38 macOS,
+  # 39/55 Windows. Three shards amortise compilation; four on Windows reduce
+  # its dominant execution phase from ~18 to ~14 min per shard. Standard
+  # public runners are free. Separate needs edges avoid an all-OS build barrier.
+  # YAML anchors keep all OS setup fixes shared (GitHub supports anchors).
+  # https://nexte.st/docs/ci-features/partitioning/: hash:K/N assigns each test
+  # to exactly one bucket; keep every K and never add a test-selection filter.
+  build-ubuntu:
+    name: build test archive (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # Per-OS timeout (#237). Linux 90 min, macOS 135, Windows 180 (set per
     # matrix entry below). All raised 50% for slow runners: run 38139774216
@@ -110,7 +159,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
             # Measured job time: 33-38 min with a warm rust-cache, about
@@ -120,81 +168,77 @@ jobs:
             # a stuck step and must clear the cold-cache time.
             # 60 -> 90: slow runners (Windows cancelled at 120 min, run 38139774216).
             timeout-override: 90
-          - os: macos-latest
-            # macOS runners are noticeably slower than ubuntu for this
-            # workspace: no mold linker, slower disk, and `cargo nextest
-            # run --workspace` finishes in ~28.5 of the budget on its own
-            # — leaving doc tests + sccache upload to push the job over
-            # 30 min and trigger a wall-clock cancel. Verified on the
-            # 5564ab8 CI run where all 5864 tests passed at 10:06:46Z and
-            # the operation was canceled at 10:08:10Z mid-sccache upload.
-            # Bumped to 45 to give headroom for the post-test phases.
-            #
-            # 45 is no longer enough. That figure was set against a 5864-test
-            # suite; the workspace now runs 11246. Measured on run
-            # 31384583601:
-            #
-            #   cold cache  cancelled at 46m14s, mid-nextest at test
-            #               8080/11246 with every test to that point passing
-            #   warm cache  35m11s for the same job — 78% of a 45 min budget
-            #               with nothing gone wrong
-            #
-            # This was masked until now: the docs schema race (fixed in
-            # b23baabe4) aborted the run early, so the preceding macOS jobs
-            # "finished" in 33-40 min having never reached the end of the
-            # suite. Fixing it is what first ran all 11246 tests here.
-            #
-            # 90 for the same reason Windows was on 120 — enough for one cold
-            # cache to get through the whole phase. Tune down once a few warm
-            # runs establish the real figure.
-            # 90 -> 135: slow runners (Windows cancelled at 120 min, run 38139774216).
-            timeout-override: 135
-          - os: windows-latest
-            # Windows has no mold and links with MSVC link.exe, which dominates
-            # a workspace producing ~200 test binaries. (Vendored OpenSSL is
-            # NOT a Windows-specific cost -- `openssl` is pinned with the
-            # `vendored` feature untargeted, and the Linux job installs perl to
-            # build it too. An earlier version of this comment claimed
-            # otherwise.)
-            #
-            # 60 min was not enough: run 30695094906 built the workspace
-            # successfully and was then cancelled mid-nextest at exactly
-            # 60m07s, with macOS finishing the same job in 30m36s. Raised to
-            # 120 so a cold cache can get through the test phase at least once;
-            # tune back down once a warm-cache run shows the real figure.
-            # 120 -> 180: run 38139774216 was cancelled at 120 min with
-            # 17777/18193 tests done on a slow runner (last green: ~70 min).
-            timeout-override: 180
-    steps:
-      - uses: actions/checkout@v4
+    steps: &build-steps
+      - uses: actions/checkout@v4.3.1
 
-      - name: Free disk space (Linux only)
+      - &free-linux-disk
+        name: Free disk space (Linux only)
         if: runner.os == 'Linux'
         # GitHub-hosted ubuntu-latest has ~14 GB free disk by default. A
         # 1000-rlib debug build + rust-cache restore can push this near
         # zero, and the linker's mmap'd intermediate writes then SIGBUS
         # on the largest test binaries (#236 voice_capture_events, after
-        # #226 lld already cleared smoke_resolve_overflow). Removing the
-        # pre-installed Android/CodeQL/Haskell/.NET bloat frees ~30 GB
-        # of headroom BEFORE cache restore.
+        # #226 lld already cleared smoke_resolve_overflow). Remove the
+        # pre-installed SDKs, toolcache and Docker images BEFORE cache restore.
+        # Run 41893591793 added ~80 GB in test-profile output alone; leave
+        # room on the root filesystem for the archive in RUNNER_TEMP too.
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+          sudo docker image prune --all --force
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache /usr/local/swift \
+            /usr/share/swift /opt/swift /usr/local/.ghcup "$HOME/.ghcup"
           df -h
 
-      - uses: dtolnay/rust-toolchain@stable
+      - &windows-host-disk
+        name: Log Windows backing volume before Dev Drive creation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try { Get-Volume -FilePath "$env:RUNNER_TEMP\" | Format-List DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+
+      - &windows-dev-drive
+        name: Set up Windows Dev Drive
+        if: runner.os == 'Windows'
+        uses: samypr100/setup-dev-drive@v4.0.0
+        with:
+          # PR #591/run 41893591793: 39 min compiling nextest binaries plus
+          # 7 min cargo build on Windows. Move compiler IO off NTFS. A dynamic
+          # 150GB ceiling covers the ~80GB Linux test build plus
+          # headroom; host free space is logged before creation on every job.
+          drive-size: 150GB
+          drive-type: Dynamic
+          drive-path: ${{ runner.temp }}/archon-dev-drive.vhdx
+          drive-format: ReFS
+          # Identical mount paths on build/shards preserve env!(CARGO_BIN_EXE_*)
+          # absolute paths. Keep RUNNER_TEMP itself on NTFS for the 8.3 probe.
+          mount-path: ${{ runner.temp }}/archon-dev-drive
+          # Only map a private path variable. Cargo/rustup homes retain the
+          # runner defaults; --target-dir scopes build IO to the Dev Drive
+          # without changing the Cargo environment inherited by tests.
+          env-mapping: |
+            ARCHON_TARGET_DIR,{{ DEV_DRIVE }}/target
+
+      - &posix-rust-toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         if: runner.os != 'Windows'
+        with:
+          toolchain: stable
 
       # Windows equivalent of the step above. dtolnay/rust-toolchain installs
       # via `shell: bash` composite steps, which the runner image's BASH_FUNC_*
       # env vars make impossible (#244). The image already ships rustup, and
       # rust-toolchain.toml pins the version, so rustup downloads and selects
-      # the pinned toolchain on the first cargo invocation inside the checkout
-      # — which is exactly what the action would have arranged anyway.
-      - name: Set up Rust (Windows, without bash)
+      # the pinned toolchain explicitly from the checkout before using Cargo.
+      - &windows-rust-toolchain
+        name: Set up Rust (Windows, without bash)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          rustup --version
+          $toolchain = (Select-String -Path rust-toolchain.toml -Pattern '^channel = "([^"]+)"').Matches.Groups[1].Value
+          if (!$toolchain) { throw 'Missing pinned Rust toolchain' }
+          rustup toolchain install $toolchain --component rustfmt --component clippy
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo --version
           rustc --version
 
@@ -207,7 +251,8 @@ jobs:
       # deterministic — PATH then resolves to the dtolnay-installed
       # `$HOME/.cargo/bin/cargo` with no cross-step race. Safe on ephemeral
       # GH runners (passwordless sudo; runner discarded post-job).
-      - name: Select usable rustup and remove macOS tool shims
+      - &macos-rust-shims
+        name: Select usable rustup and remove macOS tool shims
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -271,13 +316,15 @@ jobs:
           cargo --version
           rustup --version
 
-      - name: Install Linux system dependencies
+      - &linux-system-deps
+        name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get install -y pkg-config perl make libasound2-dev
 
-      - name: Install mold linker (faster + lower memory than lld for large workspaces)
+      - &linux-mold
+        name: Install mold linker (faster + lower memory than lld for large workspaces)
         if: runner.os == 'Linux'
         # Fourth remediation for #236 ubuntu link-time SIGBUS:
         #   #220 [profile.test] tweaks: didn't help
@@ -293,33 +340,58 @@ jobs:
           sudo apt-get install -y mold
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
 
-      - uses: Swatinem/rust-cache@v2
+      - &posix-cache-target
+        name: Select cache target path (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "CARGO_CACHE_TARGET=target" >> "$GITHUB_ENV"
+
+      - &windows-cache-target
+        name: Select cache target path (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $relative = [System.IO.Path]::GetRelativePath($env:GITHUB_WORKSPACE, $env:ARCHON_TARGET_DIR)
+          if ([System.IO.Path]::IsPathRooted($relative)) {
+            throw 'rust-cache requires the workspace and Dev Drive mount on the same volume'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "CARGO_CACHE_TARGET=$relative"
+
+      - uses: Swatinem/rust-cache@v2.8.2
         with:
           shared-key: ci-${{ matrix.os }}
+          # rust-cache joins this path to the workspace (absolute paths are
+          # not supported). Cargo home keeps the runner's original location.
+          workspaces: ". -> ${{ env.CARGO_CACHE_TARGET }}"
           # Without this the cache is only saved on success, so a job that runs
           # out of wall-clock saves nothing and the next attempt starts cold —
           # which on Windows is most of the budget gone before a test runs.
           cache-on-failure: true
 
-      - name: Install cargo-nextest
+      # Pin nextest too: producer and every consumer must agree on archive
+      # metadata, runtime CARGO_BIN_EXE_* support and the hash partitioner.
+      - &install-nextest
+        name: Install cargo-nextest
         if: runner.os != 'Windows'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.89.1
         with:
-          tool: nextest
+          tool: nextest@0.9.138
 
       # taiki-e/install-action is also a bash composite, so Windows uses
       # nextest's own prebuilt archive instead. get.nexte.st serves a zip for
       # this target; unpacking it into the cargo bin directory puts it on PATH
-      # for later steps without touching GITHUB_PATH ordering.
-      - name: Install cargo-nextest (Windows, without bash)
+      # for later steps. Prepend that same bin directory explicitly.
+      - &install-nextest-windows
+        name: Install cargo-nextest (Windows, without bash)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $dest = "$env:USERPROFILE\.cargo\bin"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Invoke-WebRequest -Uri 'https://get.nexte.st/latest/windows' -OutFile "$env:RUNNER_TEMP\nextest.zip"
+          Invoke-WebRequest -Uri 'https://get.nexte.st/0.9.138/windows' -OutFile "$env:RUNNER_TEMP\nextest.zip"
           Expand-Archive -Path "$env:RUNNER_TEMP\nextest.zip" -DestinationPath $dest -Force
-          cargo nextest --version
+          Add-Content -Path $env:GITHUB_PATH -Value $dest
+          & "$dest\cargo-nextest.exe" nextest --version
 
       - name: Build workspace
         if: runner.os != 'Windows'
@@ -335,10 +407,12 @@ jobs:
       - name: Build workspace (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        # No `df` equivalent worth the noise here: the disk-pressure failures
-        # that motivated those snapshots (#236) were ubuntu link-time SIGBUS,
-        # which does not apply to the MSVC linker.
-        run: cargo build --workspace
+        run: |
+          try { Get-Volume | Format-Table DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+          cargo build --workspace --target-dir "$env:ARCHON_TARGET_DIR"
+          $status = $LASTEXITCODE
+          try { Get-Volume | Format-Table DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+          exit $status
 
       - name: Windows Issue 92 process evidence
         if: runner.os == 'Windows'
@@ -362,7 +436,7 @@ jobs:
           $failures = @()
           foreach ($test in $tests) {
             Write-Host "START Issue #92 test: $($test.Name)"
-            & cargo test -p $test.Package @($test.Target) $test.Name -- --test-threads=1 2>&1 |
+            & cargo test --target-dir "$env:ARCHON_TARGET_DIR" -p $test.Package @($test.Target) $test.Name -- --test-threads=1 2>&1 |
               Tee-Object -Variable output |
               Write-Host
             if ($LASTEXITCODE -ne 0) {
@@ -379,7 +453,7 @@ jobs:
             throw "Issue #92 tests failed: $($failures -join ', ')"
           }
 
-      - name: Run tests (nextest)
+      - name: Build nextest archive
         if: runner.os != 'Windows'
         shell: bash
         env:
@@ -424,8 +498,259 @@ jobs:
         # runner-capacity failures remain diagnosable without verbose rustc
         # command logs.
         run: |
+          mkdir -p "$RUNNER_TEMP/nextest-artifact"
           df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
-          cargo nextest run --workspace --no-fail-fast &
+          cargo nextest archive --workspace --archive-file "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" &
+          nextest_pid=$!
+          while kill -0 "$nextest_pid" 2>/dev/null; do
+            sleep 60
+            echo "nextest still running..."
+            df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+          done
+          status=0
+          wait "$nextest_pid" || status=$?
+          df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+          if [[ -f "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" ]]; then
+            ls -lh "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst"
+            wc -c < "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst"
+          fi
+          exit "$status"
+
+      - name: Build nextest archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          # Same reason as the POSIX step above: the archon bin's workflow
+          # live-runner tests overflow libtest's 2 MiB test-thread stack.
+          RUST_MIN_STACK: "33554432"
+        # Deliberately NOT setting CARGO_BUILD_JOBS=1, unlike the POSIX step.
+        # That exists to keep peak link memory inside ubuntu-latest's 7GB
+        # ceiling (#225 SIGBUS). Windows runners have 16GB and a different
+        # linker, so the setting buys nothing there and costs enormously:
+        # nextest links ~200 test binaries, and serialising MSVC linking is why
+        # run 30697135157 spent ~100 minutes in this step and was cancelled at
+        # the 2h wall, against 8 minutes for the same suite on macOS.
+        #
+        # No heartbeat loop either: that exists on the POSIX side to keep long
+        # quiet phases diagnosable alongside disk snapshots, and reproducing
+        # bash job control in pwsh would buy nothing. Execution and its
+        # --no-fail-fast policy live in the shard job below.
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/nextest-artifact" | Out-Null
+          try { Get-Volume | Format-Table DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+          cargo nextest archive --workspace --target-dir "$env:ARCHON_TARGET_DIR" --archive-file "$env:RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst"
+          $status = $LASTEXITCODE
+          try { Get-Volume | Format-Table DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+          try { Get-Volume -FilePath "$env:ARCHON_TARGET_DIR\" | Format-List DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+          Get-Item "$env:RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" | Select-Object FullName, Length
+          exit $status
+
+      # https://nexte.st/docs/ci-features/archiving/: archives contain test
+      # binaries, integration-test executables, dylibs and workspace OUT_DIRs
+      # (one level deep). Our generated archon_env_vars.rs is a direct OUT_DIR
+      # child and compiled in; fixtures/source come from the same-ref checkout.
+      # env!(CARGO_MANIFEST_DIR)/env!(CARGO_BIN_EXE_archon) occur throughout the
+      # tests, so remapping alone is insufficient: assert identical paths and
+      # extract into the original target location on every shard as well.
+      # Archives have a literal target/ prefix, so --extract-to is its PARENT,
+      # not the target directory itself. No extra archive.include paths are needed.
+      - name: Record archive paths (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/target" > "$RUNNER_TEMP/nextest-artifact/paths.txt"
+
+      - name: Record archive paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          @($env:GITHUB_WORKSPACE, $env:ARCHON_TARGET_DIR) | Set-Content "$env:RUNNER_TEMP/nextest-artifact/paths.txt"
+
+      - name: Upload nextest archive
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          # archive:false ignores name and uses the filename as artifact name.
+          path: ${{ runner.temp }}/nextest-artifact/nextest-${{ matrix.os }}.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload archive path assertions
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: nextest-paths-${{ matrix.os }}
+          path: ${{ runner.temp }}/nextest-artifact/paths.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  build-macos:
+    name: build test archive (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout-override }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            # macOS runners are noticeably slower than ubuntu for this
+            # workspace: no mold linker, slower disk, and `cargo nextest
+            # run --workspace` finishes in ~28.5 of the budget on its own
+            # — leaving doc tests + sccache upload to push the job over
+            # 30 min and trigger a wall-clock cancel. Verified on the
+            # 5564ab8 CI run where all 5864 tests passed at 10:06:46Z and
+            # the operation was canceled at 10:08:10Z mid-sccache upload.
+            # Bumped to 45 to give headroom for the post-test phases.
+            #
+            # 45 is no longer enough. That figure was set against a 5864-test
+            # suite; the workspace now runs 11246. Measured on run
+            # 31384583601:
+            #
+            #   cold cache  cancelled at 46m14s, mid-nextest at test
+            #               8080/11246 with every test to that point passing
+            #   warm cache  35m11s for the same job — 78% of a 45 min budget
+            #               with nothing gone wrong
+            #
+            # This was masked until now: the docs schema race (fixed in
+            # b23baabe4) aborted the run early, so the preceding macOS jobs
+            # "finished" in 33-40 min having never reached the end of the
+            # suite. Fixing it is what first ran all 11246 tests here.
+            #
+            # 90 for the same reason Windows was on 120 — enough for one cold
+            # cache to get through the whole phase. Tune down once a few warm
+            # runs establish the real figure.
+            # 90 -> 135: slow runners (Windows cancelled at 120 min, run 38139774216).
+            timeout-override: 135
+    steps: *build-steps
+
+  build-windows:
+    name: build test archive (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout-override }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            # Windows has no mold and links with MSVC link.exe, which dominates
+            # a workspace producing ~200 test binaries. (Vendored OpenSSL is
+            # NOT a Windows-specific cost -- `openssl` is pinned with the
+            # `vendored` feature untargeted, and the Linux job installs perl to
+            # build it too. An earlier version of this comment claimed
+            # otherwise.)
+            #
+            # 60 min was not enough: run 30695094906 built the workspace
+            # successfully and was then cancelled mid-nextest at exactly
+            # 60m07s, with macOS finishing the same job in 30m36s. Raised to
+            # 120 so a cold cache can get through the test phase at least once;
+            # tune back down once a warm-cache run shows the real figure.
+            # 120 -> 180: run 38139774216 was cancelled at 120 min with
+            # 17777/18193 tests done on a slow runner (last green: ~70 min).
+            timeout-override: 180
+    steps: *build-steps
+
+  test-ubuntu:
+    name: build + test (${{ matrix.os }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: [build-ubuntu]
+    runs-on: ${{ matrix.os }}
+    # Measured execution / 3 is ~6 min; allow hash imbalance, artifact
+    # download/extraction and slow runners. nextest's 4 x 60s test limit stays.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        shard: [1, 2, 3]
+        shards: [3]
+    steps: &shard-steps
+      - uses: actions/checkout@v4.3.1
+      - *free-linux-disk
+      - *windows-host-disk
+      - *windows-dev-drive
+      - *posix-rust-toolchain
+      - *macos-rust-shims
+      - *linux-system-deps
+      - *linux-mold
+      - *install-nextest
+      - *install-nextest-windows
+      - name: Download nextest archive
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: nextest-${{ matrix.os }}.tar.zst
+          path: ${{ runner.temp }}/nextest-artifact
+          skip-decompress: true
+
+      - name: Download archive path assertions
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: nextest-paths-${{ matrix.os }}
+          path: ${{ runner.temp }}/nextest-artifact
+
+      - name: Check archive paths (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # macOS ships Bash 3: read lines individually rather than mapfile.
+          { IFS= read -r build_workspace; IFS= read -r build_target; } < "$RUNNER_TEMP/nextest-artifact/paths.txt"
+          test "$build_workspace" = "$GITHUB_WORKSPACE"
+          test "$build_target" = "$GITHUB_WORKSPACE/target"
+
+      - name: Check archive paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $paths = Get-Content "$env:RUNNER_TEMP/nextest-artifact/paths.txt"
+          if ($paths[0] -ne $env:GITHUB_WORKSPACE -or $paths[1] -ne $env:ARCHON_TARGET_DIR) {
+            throw 'Archive build paths differ from shard paths; env! literals cannot be remapped'
+          }
+
+      - name: Run tests (nextest)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: "1"
+          # 32 MiB per test thread. libtest runs every test on a thread whose
+          # stack defaults to 2 MiB, and tokio's blocking pool — where
+          # `WorkflowV2ScriptRunner::run` hosts the script runtime — inherits
+          # the same default. In a debug build the v3 live runner's poll
+          # frames no longer fit: eight bin tests (`workflow_live_v2_
+          # lifecycle_e2e_tests_{b,e}`, `workflow_live_v2_blocking_gap_tests`,
+          # the canary regressions, `declared_output_tests`) passed at
+          # d79f930bc and aborted with SIGABRT at 6294791c9 with no change to
+          # the tests. The one outsized frame — `LiveAgentDispatch::run_call`
+          # carrying four copies of the live call future, 1.3-1.5 MiB under
+          # lldb — is boxed at the source; what remains is the read-only
+          # fan-out path of the decomposed lifecycle, a stack of 30-430 KiB
+          # frames that measured between 2 and 3 MiB (fails at 2, passes at
+          # 3). The env var is the standard remedy for large debug futures; it
+          # reserves address space, not memory, and child test processes
+          # inherit it. Same family as the Windows main-thread bump in
+          # `.cargo/config.toml`.
+          RUST_MIN_STACK: "33554432"
+        # Compilation/link memory is bounded in the archive step above. Keep
+        # its env here too for tests that spawn Cargo; this job only reuses builds.
+        #
+        # NOTE on test parallelism (#233):
+        # No --test-threads flag here on purpose. nextest defaults to
+        # num_cpus, which is fine on GitHub-hosted runners (ubuntu/macos:
+        # 4 cores + 16GB RAM, windows: 4 cores + 16GB RAM).
+        #
+        # The project's WSL2 dev box rule "cargo test MUST use
+        # --test-threads=2" applies to LOCAL developer invocations only
+        # (small RAM, prior crash incidents on parallel rustc/test
+        # binaries). It does NOT apply to CI runners. Forcing
+        # --test-threads=1 here previously timed out the ubuntu test step
+        # at 64+ minutes (commit 3fded2c). Job timeout-minutes still bounds
+        # future regressions while allowing current workspace tests to finish.
+        # Emit a heartbeat so GitHub does not kill long, quiet nextest
+        # phases as an apparent no-output hang, and include disk snapshots so
+        # runner-capacity failures remain diagnosable without verbose rustc
+        # command logs.
+        run: |
+          df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+          cargo nextest run --archive-file "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" \
+            --workspace-remap "$GITHUB_WORKSPACE" \
+            --extract-to "$GITHUB_WORKSPACE" --extract-overwrite \
+            --partition "hash:${{ matrix.shard }}/${{ matrix.shards }}" --no-fail-fast &
           nextest_pid=$!
           while kill -0 "$nextest_pid" 2>/dev/null; do
             sleep 60
@@ -510,14 +835,80 @@ jobs:
         # quiet phases diagnosable alongside disk snapshots, and reproducing
         # bash job control in pwsh would buy nothing. --no-fail-fast so one
         # failing crate still reports the rest.
-        run: cargo nextest run --workspace --no-fail-fast
+        run: >-
+          cargo nextest run --archive-file "$env:RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst"
+          --workspace-remap "$env:GITHUB_WORKSPACE"
+          --extract-to (Split-Path $env:ARCHON_TARGET_DIR -Parent) --extract-overwrite
+          --partition "hash:${{ matrix.shard }}/${{ matrix.shards }}" --no-fail-fast
 
+  test-macos:
+    name: build + test (${{ matrix.os }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: [build-macos]
+    runs-on: ${{ matrix.os }}
+    # Measured execution / 3 is ~13 min; allow hash imbalance, artifact
+    # download/extraction and slow runners. nextest's 4 x 60s test limit stays.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+        shard: [1, 2, 3]
+        shards: [3]
+    steps: *shard-steps
+
+  test-windows:
+    name: build + test (${{ matrix.os }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: [build-windows]
+    runs-on: ${{ matrix.os }}
+    # Measured execution / 4 is ~14 min; allow hash imbalance, artifact
+    # download/extraction and slow runners. nextest's 4 x 60s test limit stays.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        shard: [1, 2, 3, 4]
+        shards: [4]
+    steps: *shard-steps
+
+  doctests:
+    name: doctests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout }}
+    # Independent of builders: a doctest failure must not skip any shard.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            timeout: 90
+          - os: macos-latest
+            timeout: 135
+          - os: windows-latest
+            timeout: 180
+    steps:
+      - uses: actions/checkout@v4.3.1
+      - *free-linux-disk
+      - *windows-host-disk
+      - *windows-dev-drive
+      - *posix-rust-toolchain
+      - *windows-rust-toolchain
+      - *macos-rust-shims
+      - *linux-system-deps
+      - *linux-mold
+      - *posix-cache-target
+      - *windows-cache-target
+      - uses: Swatinem/rust-cache@v2.8.2
+        with:
+          shared-key: ci-${{ matrix.os }}
+          workspaces: ". -> ${{ env.CARGO_CACHE_TARGET }}"
+          save-if: false
       - name: Run doctests
         if: runner.os != 'Windows'
         shell: bash
         env:
           CARGO_BUILD_JOBS: "1"
-        # nextest does not execute doctests; preserve coverage here.
+        # Same workspace doctest command and all three OSes as the old CI.
         run: cargo test --workspace --doc -- --test-threads=1
 
       - name: Run doctests (Windows)
@@ -525,7 +916,7 @@ jobs:
         shell: pwsh
         env:
           CARGO_BUILD_JOBS: "1"
-        run: cargo test --workspace --doc -- --test-threads=1
+        run: cargo test --workspace --target-dir "$env:ARCHON_TARGET_DIR" --doc -- --test-threads=1
 
   python-security-tests:
     name: Python security tests
@@ -740,7 +1131,7 @@ jobs:
   build-release-smoke:
     name: release build smoke
     runs-on: ubuntu-latest
-    needs: [build-and-test]
+    needs: [test-ubuntu, test-macos, test-windows, doctests]
     # Only build the release profile when a release is actually intended.
     #
     # This job sits at the tail of every run: it waits for the whole test matrix
