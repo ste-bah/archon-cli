@@ -50,7 +50,7 @@ impl WorkflowLlmClient for DependencyJudge {
         };
         Ok(WorkflowAgentOutcome {
             content: serde_json::json!({"decisions": [{
-                "id": "AC-X-001", "verdict": verdict,
+                "id": "AC-X-001", "kind":"state","cited_paths":[],"verdict": verdict,
                 "counterexample": "the existing assertion fails while the final file checks succeed",
                 "reason": "the complete command's status is measured against the deciding assertion"
             }]}).to_string(),

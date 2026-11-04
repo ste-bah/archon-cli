@@ -67,7 +67,7 @@ fn contract() -> AcceptanceContract {
     }
 }
 
-const DECISIONS: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"ok"}]}"#;
+const DECISIONS: &str = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"ok"}]}"#;
 
 #[test]
 fn a_fenced_judge_reply_is_accepted() {
@@ -126,6 +126,8 @@ fn the_judge_prompt_fixes_the_toolchain_and_bounds_counterexamples() {
         "fallible, not adversarial",
         "under it no check could ever pass",
         "\"verdict\":\"accepted|refuted\"",
+        "\"kind\":\"state|duplicate|coverage|other\"",
+        "\"cited_paths\":[\"...\"]",
     ] {
         assert!(prompt.contains(phrase), "missing: {phrase}");
     }

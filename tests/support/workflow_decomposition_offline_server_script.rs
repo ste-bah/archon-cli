@@ -1,3 +1,7 @@
+#[path = "workflow_decomposition_judge_reply.rs"]
+mod judge_reply;
+pub(super) use judge_reply::judge_decision;
+
 // Read the product marker's value rather than duplicating its prompt sentence.
 fn skeleton_author_marker() -> &'static str {
     include_str!("../../src/command/workflow_decompose_v1_frozen.js")
@@ -41,14 +45,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
         }
         let decisions = ids
             .into_iter()
-            .map(|id| {
-                serde_json::json!({
-                    "id": id,
-                    "verdict": "accepted",
-                    "counterexample": "None found: a missing or false outcome makes the command exit non-zero.",
-                    "reason": "The command directly checks the declared outcome and exits non-zero when it is false."
-                })
-            })
+            .map(|id| judge_decision(id, false))
             .collect::<Vec<_>>();
         return (
             "judge",

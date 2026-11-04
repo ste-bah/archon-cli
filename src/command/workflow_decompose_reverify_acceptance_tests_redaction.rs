@@ -231,7 +231,7 @@ impl archon_workflow::WorkflowLlmClient for RecordingJudge {
             .iter()
             .map(|check| {
                 serde_json::json!({
-                    "id": check["id"], "verdict": "accepted", "counterexample": "none",
+                    "id": check["id"], "kind":"state","cited_paths":[],"verdict": "accepted", "counterexample": "none",
                     "reason": "the absent file is the missing feature"
                 })
             })

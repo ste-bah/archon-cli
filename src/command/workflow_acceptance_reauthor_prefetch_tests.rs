@@ -114,3 +114,34 @@ fn oversized_prefetch_keeps_output_contract_and_id_ahead_of_content() {
         "The check is a valid regression guard only when its pass or fail is decided by that test"
     ));
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn R5_feedback_prefetch_refreshes_each_attempt() {
+    let set = frozen_set(&[("AC-X-001", "run", false)]);
+    let scope = scope(&set);
+    let mut frozen = set.contract().acceptance[0].clone();
+    frozen.check = AcceptanceCheck::Command {
+        command: "run".into(),
+        cwd: TrustedCwd::ProjectRoot,
+    };
+    for (file, content) in [
+        ("first.txt", "first attempt evidence"),
+        ("second.txt", "second attempt evidence"),
+    ] {
+        std::fs::write(set.project.path().join(file), content).unwrap();
+    }
+    let mut cache = crate::command::workflow_task_set::judge::ReauthorPrefetchCache::default();
+    for (file, content) in [
+        ("first.txt", "first attempt evidence"),
+        ("second.txt", "second attempt evidence"),
+    ] {
+        let files = super::author::prefetch_files_cached(
+            &scope,
+            &frozen,
+            &[format!("inspect {file}")],
+            &mut cache,
+        );
+        assert!(files.iter().any(|value| value["content"] == content));
+    }
+}

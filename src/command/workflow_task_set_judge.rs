@@ -49,6 +49,9 @@ pub(crate) fn named_files_for_reauthor_cached(
     )
 }
 
+#[path = "workflow_task_set_judge_screen.rs"]
+mod screen;
+
 #[path = "workflow_task_set_judge_each.rs"]
 mod each;
 pub(crate) use each::{
@@ -77,20 +80,11 @@ pub(crate) use incomplete::{JudgeIncomplete, JudgeIncompleteKind};
 /// what a judgment records and a saved repair is keyed by.
 pub(crate) const JUDGE_MODEL_ALIAS: &str = "sonnet";
 
-const NAMED_FILES_INSTRUCTION: &str = "A named-file regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails. A guard names its deciding file by its literal path relative to the check's working directory. Naming a file or asserting that it exists does not make it the deciding assertion. Judge supplied named_files content as written. These regression-guard rules apply to a check whose deciding test or implementation exists. A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules. A deciding input marked not_supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. A deciding input marked not_judgeable has binary content the host cannot show as text; its assertions are unknown and cannot be assumed to accept a regression guard. Refute a check if an in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file. A duplicated or relocated implementation may be an in-bounds counterexample when the delivered path uses it while the named test checks an old copy; a speculative counterexample requiring deliberate gaming remains invalid. The host may use a move-aside proof only for named inputs it actually moves; requiring the check to fail when such an input is moved aside is proof of the guard, never a counterexample. Inputs the host does not move, including scripts run through an interpreter and build manifests, do not qualify for that proof.";
+const NAMED_FILES_INSTRUCTION: &str = "A named-file regression guard is valid only when its pass or fail is decided by the existing test or implementation it names, and it fails whenever that test fails. A guard names its deciding file by its literal path relative to the check's working directory. Naming a file or asserting that it exists does not make it the deciding assertion. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. A move-aside handle line is neither the deciding assertion nor a reason to refute; judge the deciding test. Judge supplied named_files content as written. These regression-guard rules apply to a check whose deciding test or implementation exists. A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules. A deciding input marked not_supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. A deciding input marked not_judgeable has binary content the host cannot show as text; its assertions are unknown and cannot be assumed to accept a regression guard. Refute a check if an in-bounds state lets its deciding test fail or not run while the check still passes, including when the command discards or masks that test's status, runs it so its failure cannot fail the check, or decides by matching text in a source or test file. For duplication, refute only a duplicate whose path you name and were shown. A duplicated or relocated implementation may be an in-bounds counterexample when the delivered path uses it while the named test checks an old copy; a speculative counterexample requiring deliberate gaming remains invalid. The host may use a move-aside proof only for named inputs it actually moves; requiring the check to fail when such an input is moved aside is proof of the guard, never a counterexample. Inputs the host does not move, including scripts run through an interpreter and build manifests, do not qualify for that proof.";
 
-#[derive(Debug, serde::Deserialize)]
-struct BatchedJudgeResponse {
-    decisions: Vec<JudgeResponse>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct JudgeResponse {
-    id: String,
-    verdict: JudgeDecision,
-    counterexample: String,
-    reason: String,
-}
+#[path = "workflow_task_set_judge_schema.rs"]
+mod schema;
+use schema::{BatchedJudgeResponse, JudgeResponse};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct JudgeRoots {
@@ -140,7 +134,8 @@ pub(super) fn batched_judge_prompt_with_roots(
         })
         .collect::<Vec<_>>();
     Ok(format!(
-        "Adversarially judge every acceptance check below. The toolchain is fixed: the shell, the operating system, environment variables, PATH, and every executable that the repository does not itself build are out of bounds, and a counterexample that stubs, wraps, replaces or shadows any executable, or edits PATH, is invalid and must not refute a check. Everything the implementation produces may vary: the repository's own source and the program it builds from that source, and every file, directory and data artifact under the project root, including any data root the check names. The implementation is fallible, not adversarial: it may be missing, partial, wrong, stale, empty, malformed or hand-placed, its tests may be absent or cover less than the criterion, and its output may be an error message; it does not write source, tests or data whose purpose is to satisfy this check while the criterion is false. {} A counterexample that needs such deliberate gaming, a program that answers true for the check's sake or a test written to pass trivially, is invalid and must not refute a check: under it no check could ever pass. For each id, try to construct such an in-bounds state where the check passes while the criterion is false. Return JSON only as {{\"decisions\":[{{\"id\":\"...\",\"verdict\":\"accepted|refuted\",\"counterexample\":\"...\",\"reason\":\"...\"}}]}} with exactly one decision for every input id and no extra ids. counterexample and reason must each be a non-empty sentence, even when the verdict is accepted: say what the closest passing-but-false state would be, or that none is constructible. Every string must be a single line with newlines escaped as \\n; emit the JSON document alone. Checks: {}",
+        "Adversarially judge every acceptance check below. The toolchain is fixed: the shell, the operating system, environment variables, PATH, and every executable that the repository does not itself build are out of bounds, and a counterexample that stubs, wraps, replaces or shadows any executable, or edits PATH, is invalid and must not refute a check. Everything the implementation produces may vary: the repository's own source and the program it builds from that source, and every file, directory and data artifact under the project root, including any data root the check names. {} The implementation is fallible, not adversarial: it may be missing, partial, wrong, stale, empty, malformed or hand-placed, its tests may be absent; tests may cover less than the criterion only when named tests whose supplied content was shown leave a covered requirement unasserted, and its output may be an error message; it does not write source, tests or data whose purpose is to satisfy this check while the criterion is false. {} A counterexample that needs such deliberate gaming, a program that answers true for the check's sake or a test written to pass trivially, is invalid and must not refute a check: under it no check could ever pass. For each id, try to construct such an in-bounds state where the check passes while the criterion is false. Return JSON only as {{\"decisions\":[{{\"id\":\"...\",\"verdict\":\"accepted|refuted\",\"kind\":\"state|duplicate|coverage|other\",\"cited_paths\":[\"...\"],\"counterexample\":\"...\",\"reason\":\"...\"}}]}} with exactly one decision for every input id and no extra ids. kind is required for every decision: state describes a constructible passing-but-false implementation state; duplicate claims a duplicate check or a duplicated or relocated implementation, and cited_paths names its existing base-tree files; only a structured existing check with the exact same command and working directory proves check equivalence; coverage claims a covered requirement is unasserted in a named test, and cited_paths names those tests for supplied-content review; other covers remaining claims. For accepted decisions use other and an empty cited_paths array. cited_paths is always required and contains file paths relative to the check working directory (repo_root or project_root); an absolute path inside those roots is also allowed. The host re-asks pure denials of a counterexample, duplicate claims, coverage on content not yet supplied, and toolchain claims; only a pure state denial or a duplicate check with the exact same command and working directory can lead to host acceptance; other persistent refutations are forwarded with their kind; duplicate and toolchain claims are screened by content even if labelled state. counterexample and reason must each be a non-empty sentence, even when the verdict is accepted: say what the closest passing-but-false state would be, or that none is constructible. Every string must be a single line with newlines escaped as \\n; emit the JSON document alone. Checks: {}",
+        screen::TOOLCHAIN_FACT,
         NAMED_FILES_INSTRUCTION,
         serde_json::to_string(&checks)?
     ))
@@ -163,6 +158,14 @@ pub(super) fn apply_judgments(
     contract: &mut AcceptanceContract,
     content: &str,
 ) -> Result<BTreeSet<String>> {
+    apply_judgments_schema(contract, content, true)
+}
+
+fn apply_judgments_schema(
+    contract: &mut AcceptanceContract,
+    content: &str,
+    main_judge: bool,
+) -> Result<BTreeSet<String>> {
     // The judge is a model too, and models package documents in prose and code
     // fences. The host decides what counts as the reply here exactly as it does
     // for an authored candidate, so one provider's habits cannot fail a freeze
@@ -174,7 +177,12 @@ pub(super) fn apply_judgments(
             .ok()
             .and_then(archon_workflow::describe_json_fault)
             .unwrap_or_default();
-        format!("acceptance judge returned malformed batched JSON ({fault}); retry the full batch")
+        let schema = if main_judge {
+            "required keys include kind and cited_paths; allowed kind values: state, duplicate, coverage, other"
+        } else {
+            "required keys: id, verdict, counterexample, reason"
+        };
+        format!("acceptance judge returned malformed batched JSON ({fault}); {schema}; retry the full batch")
     })?;
     let expected: BTreeSet<_> = contract
         .acceptance

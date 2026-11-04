@@ -18,7 +18,7 @@ async fn a_second_freeze_rebinds_the_lock_and_pin_to_the_latest_contract() {
         &tasks,
         &prd,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"first attempt","reason":"first reason"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"first attempt","reason":"first reason"}]}"#.into()),
         }),
     )
     .await
@@ -36,7 +36,7 @@ async fn a_second_freeze_rebinds_the_lock_and_pin_to_the_latest_contract() {
         &tasks,
         &prd,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"second attempt","reason":"second reason"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"second attempt","reason":"second reason"}]}"#.into()),
         }),
     )
     .await

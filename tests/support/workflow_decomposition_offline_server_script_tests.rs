@@ -359,3 +359,33 @@ fn M1_current_skeleton_author_and_reauthor_land_tasks_then_reply_with_receipt() 
         assert_eq!(done["content"][0]["text"], r#"{"records_landed":2}"#);
     }
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn R6_R1_offline_judges_share_the_production_reply_schema() {
+    use super::super::variants::{self, Variant};
+    let prompt = "Adversarially judge every acceptance check below. The toolchain is fixed: Checks: [{\"id\":\"AC-X-001\"}]";
+    let (role, normal) = scripted_answer(prompt);
+    let (_, large) = variants::answer(prompt, Variant::Large(3));
+    let refuted = variants::refute_first_judge_answer(
+        role,
+        prompt,
+        normal.clone(),
+        Variant::RefuteFirstJudge,
+        1,
+    );
+    for (reply, verdict, kind) in [
+        (normal, "accepted", "other"),
+        (large, "accepted", "other"),
+        (refuted, "refuted", "state"),
+    ] {
+        let reply: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        let decisions = reply["decisions"].as_array().unwrap();
+        assert!(!decisions.is_empty());
+        for decision in decisions {
+            assert_eq!(decision["kind"], kind);
+            assert_eq!(decision["cited_paths"], serde_json::json!([]));
+            assert_eq!(decision["verdict"], verdict);
+        }
+    }
+}

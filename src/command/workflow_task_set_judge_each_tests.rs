@@ -59,7 +59,7 @@ impl WorkflowLlmClient for Recording {
                         .any(|file| file["status"] != "supplied");
                     serde_json::json!({
                         "id": check["id"],
-                        "verdict": if withheld { "refuted" } else { "accepted" },
+                        "kind":"state","cited_paths":[],"verdict": if withheld { "refuted" } else { "accepted" },
                         "counterexample": if withheld { "the deciding inputs are not_supplied" } else { "none is constructible" },
                         "reason": if withheld { "the deciding test content is unknown" } else { "the named file decides it" },
                     })

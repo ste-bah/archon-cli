@@ -13,7 +13,7 @@ async fn judged_reprepare_keeps_the_pre_reauthor_contract_snapshot() {
         GateMode::Observe,
         original.clone(),
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()),
         }),
     )
     .await

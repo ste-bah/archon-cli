@@ -29,7 +29,7 @@ impl LlmProvider for RecordingProvider {
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.0.lock().unwrap().push(request.extra);
         let (tx, rx) = tokio::sync::mpsc::channel(3);
-        tx.send(StreamEvent::TextDelta { index:0, text: r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"predicate rejects the false state"}]}"#.into() }).await.unwrap();
+        tx.send(StreamEvent::TextDelta { index:0, text: r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"predicate rejects the false state"}]}"#.into() }).await.unwrap();
         tx.send(StreamEvent::MessageDelta {
             stop_reason: Some("end_turn".into()),
             usage: Default::default(),

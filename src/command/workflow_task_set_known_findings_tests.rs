@@ -52,7 +52,7 @@ impl WorkflowLlmClient for UndecidedJudge {
             let decisions = (checks.iter())
                 .map(|check| {
                     serde_json::json!({
-                        "id": check["id"], "verdict": "accepted",
+                        "id": check["id"], "kind":"state","cited_paths":[],"verdict": "accepted",
                         "counterexample": "none is constructible",
                         "reason": "the failure is the absent feature",
                     })

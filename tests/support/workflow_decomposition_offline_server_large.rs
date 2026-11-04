@@ -3,7 +3,7 @@
 //! boolean field of the same outcome artifact each, so every check is
 //! distinct, executable and owned by the first task.
 
-use super::super::script::{scripted_answer, user_prompt_text};
+use super::super::script::{judge_decision, scripted_answer, user_prompt_text};
 
 fn field(k: usize) -> String {
     if k == 1 {
@@ -99,14 +99,7 @@ pub fn answer(prompt: &str, n: usize) -> (&'static str, String) {
         }
         let decisions = ids
             .into_iter()
-            .map(|id| {
-                serde_json::json!({
-                    "id": id,
-                    "verdict": "accepted",
-                    "counterexample": "None found: a missing or false outcome makes the command exit non-zero.",
-                    "reason": "The command directly checks the declared outcome and exits non-zero when it is false."
-                })
-            })
+            .map(|id| judge_decision(id, false))
             .collect::<Vec<_>>();
         return (
             "judge",

@@ -95,6 +95,7 @@ impl archon_workflow::WorkflowLlmClient for Judge {
                 let line = output.lines().find(|line| line.contains(rule)).unwrap_or_default().trim();
                 serde_json::json!({
                     "id": check["id"],
+                    "kind": "state", "cited_paths": [],
                     "verdict": if refuted { "refuted" } else { "accepted" },
                     "counterexample": if refuted { format!("the output says \"{line}\"") } else { "no setup rule refused the check".to_string() },
                     "reason": if refuted { "the check supplies too little data for the required minimum" } else { "the output shows the feature is absent" }

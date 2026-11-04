@@ -46,7 +46,7 @@ async fn contract_policy_first_author_refuses_an_own_root_alias_before_judging()
         Arc::new(FinishReasonJudge {
             calls: calls.clone(),
             stop_reason: Some("end_turn".into()),
-            content: r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"checks the input"}]}"#.into(),
+            content: r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"checks the input"}]}"#.into(),
         }),
     )
     .await;

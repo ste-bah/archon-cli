@@ -35,7 +35,7 @@ impl WorkflowLlmClient for CountingJudge {
     ) -> WorkflowResult<WorkflowAgentOutcome> {
         self.calls.fetch_add(1, SeqCst);
         Ok(WorkflowAgentOutcome {
-            content: r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"an invalid file","reason":"jq rejects it"}]}"#.into(),
+            content: r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"an invalid file","reason":"jq rejects it"}]}"#.into(),
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })
@@ -109,7 +109,7 @@ async fn an_incremental_supplementary_only_batch_is_judged_and_saved() {
     subset.supplementary.push(supplementary);
     let expected = BTreeSet::from(["SUP-1".to_string()]);
     let client = Scripted::new(vec![Ok((
-        r#"{"decisions":[{"id":"SUP-1","verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
+        r#"{"decisions":[{"id":"SUP-1","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
         Some("end_turn"),
     ))]);
     let store = JudgeStore::at(dir.path().join("judge"));
@@ -278,7 +278,7 @@ async fn a_discarded_reply_keeps_no_progress_credit() {
     let dir = tempfile::tempdir().unwrap();
     let progress = Arc::new(crate::command::workflow_freeze_budget::FreezeProgress::default());
     let store = JudgeStore::at_with_progress(dir.path().to_path_buf(), progress.clone());
-    let wrong_id = r#"epted","counterexample":"none","reason":"ok"},{"id":"AC-OTHER","verdict":"accepted","counterexample":"n","reason":"r"}]}"#;
+    let wrong_id = r#"epted","counterexample":"none","reason":"ok"},{"id":"AC-OTHER","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"n","reason":"r"}]}"#;
     let mut replies = Vec::new();
     for _ in 0..4 {
         replies.push(Ok((HEAD, Some("max_tokens"))));
@@ -323,7 +323,7 @@ async fn a_corrupt_partial_counter_is_ignored() {
     let progress = Arc::new(crate::command::workflow_freeze_budget::FreezeProgress::default());
     let store = JudgeStore::at_with_progress(dir.path().to_path_buf(), progress.clone());
     let fresh = Scripted::new(vec![Ok((
-        r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"ok"}]}"#,
+        r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"ok"}]}"#,
         Some("end_turn"),
     ))]);
     store
@@ -345,7 +345,7 @@ async fn the_saved_partial_reply_is_redacted_and_private() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("judge");
     let store = JudgeStore::at(dir.clone());
-    let leaky = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"uses sk-abcdefghijklmnopqrstuvwxyz0123 as"#;
+    let leaky = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"uses sk-abcdefghijklmnopqrstuvwxyz0123 as"#;
     let client = Scripted::new(vec![
         Ok((leaky, Some("max_tokens"))),
         Ok(("", Some("max_tokens"))),
@@ -438,3 +438,6 @@ async fn orphan_completion_marker_is_not_progress() {
 
 #[path = "workflow_judge_store_undecided_tests.rs"]
 mod undecided_tests;
+
+#[path = "workflow_judge_store_schema_tests.rs"]
+mod schema_tests;

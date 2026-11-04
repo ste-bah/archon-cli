@@ -294,6 +294,10 @@ fn resolve_named_files(
         .collect()
 }
 
+#[path = "workflow_task_set_judge_duplicate.rs"]
+mod duplicate;
+pub(super) use duplicate::{exists_in_base, same_check_in_base, same_path};
+
 pub(super) fn over_budget(path: &str) -> serde_json::Value {
     serde_json::json!({
         "path": path,

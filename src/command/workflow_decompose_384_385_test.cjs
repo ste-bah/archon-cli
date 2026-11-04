@@ -28,7 +28,7 @@ function promptRules() {
     'For each claimed PRD obligation, decide whether it is necessarily true',
   ]) assert.ok(body.includes(rule), `body prompt lacks rule: ${rule}`);
   assert.ok(acceptance.includes('fail on the pre-implementation baseline'), 'acceptance prompt lacks baseline proof rule');
-  assert.ok(acceptance.includes('moves aside every data file it names by a path relative to its working directory'), 'acceptance prompt lacks already-true proof rule');
+  assert.ok(acceptance.includes('moves aside every file (source, test or data) it reads by a path relative to its working directory'), 'acceptance prompt lacks already-true proof rule');
 }
 
 async function replyFormatIsTheLastTaskSection() {
@@ -44,7 +44,7 @@ async function replyFormatIsTheLastTaskSection() {
   await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 2, state);
   assert.equal(tasks.length, 2);
   assert.ok(tasks[0].includes('"command_block":true'), 'the acceptance entry shape uses a check block');
-  assert.ok(!tasks[0].includes('"command":"'), 'the acceptance entry shape has no inline command example');
+  assert.ok(tasks[0].includes('Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.'), 'both command working directories have inline examples');
   const format = ctx.acceptanceReplyFormat();
   const formatLines = format.split('\n');
   assert.ok(formatLines.includes('```json'), 'the reply example opens a JSON fence on its own line');

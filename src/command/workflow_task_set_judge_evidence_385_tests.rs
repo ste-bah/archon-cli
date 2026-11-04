@@ -43,7 +43,7 @@ async fn evidence_385_malformed_reply_carries_its_exact_parse_error_into_retry()
     assert_eq!(retry[1]["content"], rejected);
     assert_eq!(
         retry[2]["content"],
-        "Your reply was rejected: acceptance judge returned malformed batched JSON (expected ident at line 1 column 2; at the fault: n<HERE>ot-json); retry the full batch: expected ident at line 1 column 2\nReply again with the complete JSON document required by the first message."
+        "Your reply was rejected: acceptance judge returned malformed batched JSON (expected ident at line 1 column 2; at the fault: n<HERE>ot-json); required keys include kind and cited_paths; allowed kind values: state, duplicate, coverage, other; retry the full batch: expected ident at line 1 column 2\nReply again with the complete JSON document required by the first message."
     );
 }
 
@@ -106,7 +106,7 @@ async fn a_mixed_incremental_subset_accepts_all_its_decisions() {
     supplementary.id = "SUP-1".into();
     subset.supplementary.push(supplementary);
     let client = Scripted::new(vec![Ok((
-        r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"valid"},{"id":"SUP-1","verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
+        r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"valid"},{"id":"SUP-1","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
         Some("end_turn"),
     ))]);
 

@@ -249,7 +249,7 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
                 };
                 serde_json::json!({
                     "id": id,
-                    "verdict": if accepted { "accepted" } else { "refuted" },
+                    "kind":"state","cited_paths":[],"verdict": if accepted { "accepted" } else { "refuted" },
                     "counterexample": if accepted { "none is constructible".to_string() } else { refuted },
                     "reason": if accepted { "the check fails whenever the criterion is false" } else { "the check misses a branch of the criterion" },
                 })

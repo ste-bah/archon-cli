@@ -102,12 +102,18 @@ impl WorkflowLlmClient for EvidenceJudge {
                 let refused = stderr.contains(RULE);
                 // A correct judge quotes the refusing line exactly as printed (#526).
                 let line = stderr.lines().find(|line| line.contains(RULE)).unwrap_or_default().trim();
-                serde_json::json!({
+                let mut decision = serde_json::json!({
                     "id": check["id"],
                     "verdict": if refused { "refuted" } else { "accepted" },
                     "counterexample": if refused { format!("the output says \"{line}\"") } else { "none is constructible".to_string() },
                     "reason": format!("{}{quote}", if refused { "its own fixture is below the minimum the product enforces; supply enough rows" } else { "the failure is the absent feature" }),
-                })
+                });
+                // Only the main judge requires the refutation-screen fields.
+                if !shown {
+                    decision["kind"] = "other".into();
+                    decision["cited_paths"] = serde_json::json!([]);
+                }
+                decision
             })
             .collect::<Vec<_>>();
         Ok(WorkflowAgentOutcome {

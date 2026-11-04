@@ -10,7 +10,7 @@ async fn acceptance_candidate_prepares_exact_staged_bytes_without_reading_or_wri
         b"malformed live sentinel",
     )
     .unwrap();
-    let response = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"rejects"}]}"#;
+    let response = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted","reason":"rejects"}]}"#;
 
     let prepared = prepare_acceptance_freeze_from_candidate(
         temp.path(),

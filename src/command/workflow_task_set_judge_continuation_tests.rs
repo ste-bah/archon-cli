@@ -47,10 +47,11 @@ pub(crate) fn contract() -> AcceptanceContract {
     }
 }
 
-pub(crate) const HEAD: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"acc"#;
+pub(crate) const HEAD: &str =
+    r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"acc"#;
 pub(crate) const TAIL: &str = r#"epted","counterexample":"none","reason":"ok"}]}"#;
-const ACCEPTED: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"ok"}]}"#;
-const REFUTED: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"a stub","reason":"it passes on a stub"}]}"#;
+const ACCEPTED: &str = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"ok"}]}"#;
+const REFUTED: &str = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"a stub","reason":"it passes on a stub"}]}"#;
 
 /// One scripted reply: its content and finish reason, or a provider error.
 type Reply = Result<(String, Option<&'static str>), String>;
@@ -148,8 +149,8 @@ async fn a_truncated_reply_is_continued_and_the_whole_reply_is_judged() {
 
 #[tokio::test]
 async fn a_partial_batch_keeps_valid_decisions_and_reasks_only_missing_ids() {
-    let first = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"criterion can make it pass"}]}"#;
-    let second = r#"{"decisions":[{"id":"AC-X-002","verdict":"refuted","counterexample":"setup violates a rule","reason":"the output names the rule"}]}"#;
+    let first = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"criterion can make it pass"}]}"#;
+    let second = r#"{"decisions":[{"id":"AC-X-002","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"setup violates a rule","reason":"the output names the rule"}]}"#;
     let client = Scripted::new(vec![
         Ok((first, Some("end_turn"))),
         Ok((second, Some("end_turn"))),
@@ -200,8 +201,8 @@ async fn a_partial_batch_keeps_valid_decisions_and_reasks_only_missing_ids() {
 
 #[tokio::test]
 async fn a_partial_full_contract_batch_merges_decisions_before_final_validation() {
-    let first = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"criterion can make it pass"}]}"#;
-    let second = r#"{"decisions":[{"id":"AC-X-002","verdict":"refuted","counterexample":"setup violates a rule","reason":"the output names the rule"}]}"#;
+    let first = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"criterion can make it pass"}]}"#;
+    let second = r#"{"decisions":[{"id":"AC-X-002","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"setup violates a rule","reason":"the output names the rule"}]}"#;
     let client = Scripted::new(vec![
         Ok((first, Some("end_turn"))),
         Ok((second, Some("end_turn"))),
@@ -372,7 +373,7 @@ async fn an_empty_normally_ended_continuation_is_incomplete() {
 /// a long string legitimately repeats text.
 #[tokio::test]
 async fn identical_chunks_that_extend_the_document_are_progress() {
-    let head = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"ab"#;
+    let head = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"ab"#;
     let client = Scripted::new(vec![
         Ok((head, Some("max_tokens"))),
         Ok(("ab", Some("max_tokens"))),
@@ -390,8 +391,7 @@ async fn identical_chunks_that_extend_the_document_are_progress() {
 /// Round 2 (P1): no total count of continuations while each one extends.
 #[tokio::test]
 async fn extending_continuations_have_no_total_limit() {
-    let head =
-        r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":""#;
+    let head = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":""#;
     let chunks: Vec<String> = (0..80).map(|n| format!("w{n} ")).collect();
     let mut replies = vec![Ok((head, Some("max_tokens")))];
     replies.extend(
@@ -430,8 +430,7 @@ async fn a_whitespace_only_continuation_is_no_progress() {
 /// Round 3 (decision D): a partial reply past the byte cap is no progress.
 #[tokio::test]
 async fn a_reply_past_the_byte_cap_is_incomplete() {
-    let head =
-        r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":""#;
+    let head = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":""#;
     let huge = "x".repeat(9 * 1024 * 1024);
     let client = Scripted::new(vec![
         Ok((head, Some("max_tokens"))),
@@ -459,7 +458,7 @@ fn supplementary_subset() -> AcceptanceContract {
 async fn an_incremental_subset_can_contain_only_supplementary_checks() {
     let subset = supplementary_subset();
     let client = Scripted::new(vec![Ok((
-        r#"{"decisions":[{"id":"SUP-1","verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
+        r#"{"decisions":[{"id":"SUP-1","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
         Some("end_turn"),
     ))]);
 

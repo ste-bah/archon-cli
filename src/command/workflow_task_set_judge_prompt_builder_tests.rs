@@ -9,11 +9,11 @@ async fn acceptance_reask_uses_the_acceptance_prompt_for_the_missing_id() {
     subject.acceptance.push(second);
     let client = Scripted::new(vec![
         Ok((
-            r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"the neutral check is sound"}]}"#,
+            r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"the neutral check is sound"}]}"#,
             Some("end_turn"),
         )),
         Ok((
-            r#"{"decisions":[{"id":"AC-X-002","verdict":"accepted","counterexample":"none","reason":"the neutral check is sound"}]}"#,
+            r#"{"decisions":[{"id":"AC-X-002","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"the neutral check is sound"}]}"#,
             Some("end_turn"),
         )),
     ]);
