@@ -70,8 +70,12 @@ async fn probe_server_channels(h: &server::Handle) -> ProbeResults {
 impl server::Handler for HostileServer {
     type Error = russh::Error;
 
-    async fn auth_publickey(&mut self, _user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        if key.key_data() == self.client_key.key_data() {
+    async fn auth_publickey(
+        &mut self,
+        _user: &str,
+        key: server::VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
+        if key.public_key.key_data() == self.client_key.key_data() {
             Ok(Auth::Accept)
         } else {
             Ok(Auth::reject())
