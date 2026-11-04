@@ -318,18 +318,22 @@ async fn permanent_inner(status: u16, alternate: bool) {
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_http_400_remedy_survives_executor() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     permanent(400).await;
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_http_401_remedy_survives_executor() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     permanent(401).await;
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_http_403_remedy_survives_executor() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     permanent(403).await;
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_http_404_remedy_survives_executor() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     permanent(404).await;
 }
 async fn header(status: u16) {
@@ -355,11 +359,13 @@ async fn header_inner(status: u16, alternate: bool) {
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_http_503_header_controls_backoff() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     header(503).await;
     header(429).await;
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_status_precedes_quoted_body() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let _lock = archon_tools::subagent_executor::executor_test_lock::lock();
     let root = tempfile::tempdir().unwrap();
     let (provider, _, server) = endpoint(502, "quoted prior response (400); AC-X-001").await;
@@ -371,6 +377,7 @@ async fn workflow_live_v2_status_precedes_quoted_body() {
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_cancel_interrupts_real_provider_backoff_within_one_tick() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let _lock = archon_tools::subagent_executor::executor_test_lock::lock();
     let root = tempfile::tempdir().unwrap();
     let (provider, calls, server) = endpoint(503, "AC-X-001").await;
@@ -417,4 +424,28 @@ async fn workflow_live_v2_cancel_interrupts_real_provider_backoff_within_one_tic
     let cancelled_at = cancel.await.unwrap();
     assert!(cancelled_at.elapsed() <= Duration::from_secs(2));
     assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn recovery_http_credentials_redact_locally_without_masking_sibling_test_ids() {
+    use archon_observability::{
+        secret_values::scoped_registry_for_tests, shared_redactor::redact_text,
+    };
+    let outer = scoped_registry_for_tests();
+    {
+        let _registry = scoped_registry_for_tests();
+        // Anthropic registers credentials in AuthProvider::header(), only when
+        // sending a request. Drive that path on this scoped current-thread
+        // runtime; endpoint construction alone does not register credentials.
+        permanent_inner(401, true).await;
+        assert_eq!(redact_text("AC-X-002", "[REDACTED]"), "[REDACTED]");
+        assert_eq!(
+            std::thread::spawn(|| redact_text("AC-X-002", "[REDACTED]"))
+                .join()
+                .unwrap(),
+            "AC-X-002"
+        );
+    }
+    assert_eq!(redact_text("AC-X-002", "[REDACTED]"), "AC-X-002");
+    drop(outer);
 }

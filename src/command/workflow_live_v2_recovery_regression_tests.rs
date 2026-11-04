@@ -33,14 +33,17 @@ async fn rejection(status: u16, code: &str) {
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_quota_payload_is_permanent_through_executor() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     rejection(429, "insufficient_quota").await;
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_invalid_model_payload_is_permanent_through_executor() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     rejection(500, "model_not_found").await;
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_http_408_recovers_through_executor() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     for alternate in [false, true] {
         let _lock = archon_tools::subagent_executor::executor_test_lock::lock();
         let root = tempfile::tempdir().unwrap();
@@ -61,6 +64,7 @@ async fn workflow_live_v2_http_408_recovers_through_executor() {
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_http_504_uses_header_instead_of_display_text() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     for alternate in [false, true] {
         let _lock = archon_tools::subagent_executor::executor_test_lock::lock();
         let root = tempfile::tempdir().unwrap();
@@ -89,6 +93,7 @@ async fn workflow_live_v2_http_504_uses_header_instead_of_display_text() {
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_validation_continuation_heals_http_outage() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     use super::recovery_http_tests::SocketTransport;
     use std::sync::{
         Arc,
@@ -200,9 +205,11 @@ async fn local_rejection(status: u16, code: &str) {
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_local_quota_reaches_executor_once() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     local_rejection(429, "insufficient_quota").await;
 }
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_local_invalid_model_reaches_executor_once() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     local_rejection(500, "model_not_found").await;
 }

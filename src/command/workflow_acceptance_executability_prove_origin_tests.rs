@@ -185,6 +185,15 @@ fn P1_N9_b_mutation_strike_phase_survives_changed_text() {
 // The selected tree may be a recorded base or HEAD when no record exists.
 // Exercise the producer and both routing readers, rather than a copied lead.
 pub(super) async fn selected_tree_reader_text(recorded: bool) -> String {
+    selected_tree_reader_text_with_missing_record(recorded, false).await
+}
+
+#[tokio::test]
+async fn head_fallback_with_a_missing_recorded_commit_reaches_every_reader_truthfully() {
+    selected_tree_reader_text_with_missing_record(false, true).await;
+}
+
+async fn selected_tree_reader_text_with_missing_record(recorded: bool, missing: bool) -> String {
     // Judge a real manifest: unlike an ordinary input, it is never moved.
     // Keep it in both selected commits so each real baseline run passes.
     let mut trees = trees(&[("AC-X-001", "test -f Cargo.toml", TrustedCwd::RepoRoot)]);
@@ -209,6 +218,22 @@ pub(super) async fn selected_tree_reader_text(recorded: bool) -> String {
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         lock["baseline_commit"] = trees.base.clone().into();
         std::fs::write(path, serde_json::to_vec(&lock).unwrap()).unwrap();
+    }
+    if missing {
+        let path = tasks.join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE);
+        let mut lock: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                trees
+                    .set
+                    .tasks
+                    .join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        lock["baseline_commit"] = "0000000000000000000000000000000000000001".into();
+        std::fs::write(path, serde_json::to_vec(&lock).unwrap()).unwrap();
+        assert!(Baseline::recorded(&trees.repo, tasks).is_none());
     }
     let baseline = Baseline::for_task_set(&trees.repo, tasks).unwrap();
     assert_eq!(
@@ -254,7 +279,7 @@ pub(super) async fn selected_tree_reader_text(recorded: bool) -> String {
         );
     } else {
         assert!(
-            text.contains("passed on the HEAD tree (no recorded base exists) at "),
+            text.contains("passed on the HEAD tree (no usable recorded base) at "),
             "{text}"
         );
         let (lead, _) = text.split_once(super::super::super::CANNOT_FAIL).unwrap();

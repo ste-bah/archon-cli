@@ -51,7 +51,7 @@ impl BaselineOrigin {
     pub(super) fn tree_name(self) -> &'static str {
         match self {
             Self::RecordedBase => "pre-implementation tree",
-            Self::HeadFallback => "HEAD tree (no recorded base exists)",
+            Self::HeadFallback => "HEAD tree (no usable recorded base)",
             Self::ProbedTree => "probed tree",
         }
     }

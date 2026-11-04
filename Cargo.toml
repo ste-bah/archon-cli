@@ -282,6 +282,7 @@ same-file = "1.0.6"
 sha2.workspace = true
 
 [dev-dependencies]
+archon-observability = { path = "crates/archon-observability", features = ["test-support"] }
 tracing-subscriber.workspace = true
 # Exercise fixture timing with a paused clock rather than a wall-clock race.
 tokio = { workspace = true, features = ["test-util"] }

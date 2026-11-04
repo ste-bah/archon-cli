@@ -120,3 +120,56 @@ fn p4_author_and_progress_node_suite() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[tokio::test]
+async fn explicit_id_repair_without_prior_seeds_shows_the_original_defect() {
+    use crate::command::workflow_task_set::executability::ExecutabilityProbe;
+    use crate::command::workflow_task_set::reauthor::{
+        ReauthorGate, reauthor_partial_with_cache,
+        test_client::{ScriptedAuthorJudge, command_entry},
+    };
+    struct Probe;
+    #[async_trait::async_trait]
+    impl ExecutabilityProbe for Probe {
+        async fn script_defects(
+            &self,
+            contract: &AcceptanceContract,
+            ids: &BTreeSet<String>,
+        ) -> BTreeMap<String, String> {
+            assert!(ids.contains("AC-X-001"));
+            if serde_json::to_string(contract)
+                .unwrap()
+                .contains("broken-original")
+            {
+                BTreeMap::from([("AC-X-001".into(), "original script syntax defect".into())])
+            } else {
+                BTreeMap::new()
+            }
+        }
+    }
+    let set = frozen_set(&[("AC-X-001", "broken-original", true)]);
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "test -f present"),
+        |_, _| true,
+    );
+    let progress = reauthor_partial_with_cache(
+        &client,
+        &set.contract(),
+        &BTreeSet::from(["AC-X-001".into()]),
+        &scope,
+        crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS,
+        &ReauthorGate {
+            probe: &Probe,
+            seeds: &BTreeMap::new(),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(progress.unproven.is_empty());
+    let prompts = client.prompts.lock().unwrap();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("original script syntax defect"));
+}

@@ -351,7 +351,7 @@ fn relabeling_the_lead_preserves_quoted_check_output() {
         super::super::super::BaselineOrigin::HeadFallback,
     );
     assert!(findings["AC-X-001"].ends_with(output));
-    assert!(findings["AC-X-001"].contains("HEAD tree (no recorded base exists)"));
+    assert!(findings["AC-X-001"].contains("HEAD tree (no usable recorded base)"));
 }
 
 #[test]
@@ -432,7 +432,7 @@ async fn P1_R7_d_with_baseline_head_preserves_explicit_head_fallback_origin() {
     .await;
     let text = &findings["AC-X-001"];
     assert!(
-        text.contains("passed on the HEAD tree (no recorded base exists) at "),
+        text.contains("passed on the HEAD tree (no usable recorded base) at "),
         "{text}"
     );
     let (lead, _) = text.split_once(super::super::super::CANNOT_FAIL).unwrap();
