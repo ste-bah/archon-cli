@@ -41,6 +41,7 @@ impl HostProbe {
             ));
         };
         let tree = Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::ProbedTree,
             commit: commit.clone(),
             repository: self.repository.clone(),
         };

@@ -251,3 +251,67 @@ fn a_snapshot_error_with_a_recreated_input_records_unsafe_reason_and_recreation_
         "recreated"
     );
 }
+
+#[allow(non_snake_case)]
+#[tokio::test]
+async fn P1_16_one_untouched_input_restored() {
+    untouched(&["a"], "ls a; true").await;
+}
+#[allow(non_snake_case)]
+#[tokio::test]
+async fn P1_17_same_parent_inputs_restored() {
+    untouched(&["a", "b"], "ls a b; true").await;
+}
+#[allow(non_snake_case)]
+#[tokio::test]
+async fn P1_18_different_parent_inputs_restored() {
+    untouched(&["d/a", "e/b"], "ls d/a e/b; true").await;
+}
+#[allow(non_snake_case)]
+#[tokio::test]
+async fn P1_19_nested_input_covered_by_ancestor() {
+    untouched(&["d", "d/a"], "ls d d/a; true").await;
+}
+async fn untouched(paths: &[&str], command: &str) {
+    let temp = tempfile::tempdir().unwrap();
+    for path in paths.iter().rev() {
+        let target = temp.path().join(path);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        if !target.is_dir() {
+            std::fs::write(target, "original").unwrap();
+        }
+    }
+    let root = super::super::super::mutation_fd::SiteRoot::capture(temp.path()).unwrap();
+    let plan = MutationPlan {
+        nonce: "0123456789abcdef0123456789abcdef".into(),
+        inputs: paths
+            .iter()
+            .map(|path| MutationInputPlan {
+                named_path: path.to_string(),
+                site_copy_alias: false,
+                move_path: PathBuf::from(path),
+                aside_path: PathBuf::from(format!("{path}.archon-mutated-0123456789ab")),
+            })
+            .collect(),
+    };
+    let mut site = site(temp.path(), false, 20);
+    site.mutation_root = Some(root);
+    site.mutation_plan = Some(&plan);
+    let result = run(&site, command).await;
+    let out = String::from_utf8_lossy(&result.stdout);
+    let err = String::from_utf8_lossy(&result.stderr);
+    assert_eq!(result.exit_code, Some(0));
+    assert!(!out.contains("original-recreated"), "{out} {err}");
+    assert!(
+        out.contains("archon-mutation-restored-0123456789abcdef0123456789abcdef"),
+        "{out} {err}"
+    );
+    for (index, path) in paths.iter().enumerate() {
+        assert!(temp.path().join(path).exists());
+        if *path == "d/a" && paths.contains(&"d") {
+            assert!(err.contains("covered by moved ancestor 'd'"), "{err}");
+        } else {
+            assert!(out.contains(&format!(": {index}:restored")), "{out}");
+        }
+    }
+}

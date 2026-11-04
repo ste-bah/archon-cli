@@ -24,6 +24,7 @@ async fn unrestored_mutation_results_are_not_saved_or_memoized_across_same_key_r
             .with_resume(&resume)
             .with_copy_parent(copies.path().to_path_buf());
         let baseline = Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         };
@@ -293,6 +294,7 @@ async fn project_root_repository_alias_input_is_moved_and_restored_at_scratch_si
     );
 
     let baseline = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: trees.repo.clone(),
     };
@@ -328,6 +330,7 @@ async fn normal_run_saves_and_reuses_evidence_with_an_existing_lock_path() {
         .with_resume(&resume)
         .with_copy_parent(copies.path().to_path_buf());
     let baseline = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: trees.repo.clone(),
     };

@@ -89,7 +89,7 @@ async fn a_staged_freeze_routes_an_authored_finding_and_keeps_the_unproven_check
     .await
     .unwrap_or_else(|error| panic!("the authored finding is routed, not paused: {error:#}"));
     let probed_again =
-        |text: &str| text.contains("AC-I-001") && text.contains("on the base commit");
+        |text: &str| text.contains("AC-I-001") && text.contains("on the pre-implementation tree");
     let routed: Vec<(&str, archon_workflow::RemediationScope)> = (probed.findings.iter())
         .map(|finding| (finding.subject.as_str(), finding.remediation_scope))
         .collect();

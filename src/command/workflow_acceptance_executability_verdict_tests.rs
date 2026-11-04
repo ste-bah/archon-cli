@@ -487,3 +487,6 @@ fn a_windows_sites_path_and_pathext_resolve_as_its_child_does() {
 
 #[path = "workflow_acceptance_executability_verdict_shell_tests.rs"]
 mod shell_tests;
+
+#[path = "workflow_acceptance_executability_verdict_rows_tests.rs"]
+mod rows;

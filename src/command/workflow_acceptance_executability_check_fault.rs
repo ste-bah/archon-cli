@@ -93,6 +93,9 @@ pub(super) fn of_mutation(
     if markers.guarded(result) {
         return Fault::Host;
     }
+    if reason.contains("parent snapshot failed") {
+        return Fault::Availability(crate::command::workflow_host_fault::Class::Permanent);
+    }
     if let Some(signal) = markers.observed_signal(result) {
         return Fault::Ambiguous(format!("the check wrapper observed signal {signal}"));
     }
@@ -110,6 +113,21 @@ pub(super) fn of_mutation(
     Fault::Ambiguous(reason.to_string())
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Phase {
+    Baseline,
+    Mutation,
+}
+
+impl Phase {
+    fn strike_key(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Mutation => "fault",
+        }
+    }
+}
+
 /// Settle check `id` of `contract`, whose run `at` (where it ran, for the
 /// finding) on `commit` gave no verdict for `fault`: the author's finding,
 /// or `None` with `id` recorded unproven for `unproven`. An ambiguous fault
@@ -119,6 +137,22 @@ pub(super) fn settle(
     (commit, contract, id): (Option<&str>, &AcceptanceContract, &str),
     fault: Fault,
     at: &str,
+    unproven: String,
+) -> Option<String> {
+    settle_in_phase(
+        probe,
+        (commit, contract, id),
+        fault,
+        (at, Phase::Baseline),
+        unproven,
+    )
+}
+
+pub(super) fn settle_in_phase(
+    probe: &HostProbe,
+    (commit, contract, id): (Option<&str>, &AcceptanceContract, &str),
+    fault: Fault,
+    (at, phase): (&str, Phase),
     unproven: String,
 ) -> Option<String> {
     match (fault, commit) {
@@ -134,17 +168,23 @@ pub(super) fn settle(
         )),
         (Fault::Ambiguous(why), Some(commit)) => {
             let short: String = commit.chars().take(12).collect();
-            silent::strike_or_unproven(
+            let remedy = (!why.starts_with("signal ")
+                && !why.contains("observed signal")
+                && !why.contains("did not record its exit status"))
+            .then(|| input_state_remedy(&why))
+            .flatten()
+            .unwrap_or_else(|| "make it end by its own assertion without being stopped".into());
+            silent::strike_mutation(
                 probe,
                 commit,
                 contract,
                 id,
-                None,
+                phase.strike_key(),
                 (&why, UnprovenCause::Host),
                 || {
                     (
                         format!(
-                            "check '{id}': its own run {at} gave no verdict because {why}, and it did so again on the same commit {short} after a resume, so the host is not at fault; make it end by its own assertion without being stopped"
+                            "check '{id}': its own run {at} gave no verdict because {why}, and it did so again on the same commit {short} after a resume, so the host is not at fault; {remedy}"
                         ),
                         format!(
                             "{unproven}; it is probed again on retry, and goes to its author if it fails so again"
@@ -198,4 +238,13 @@ impl HostProbe {
     pub(super) fn is_unproven(&self, id: &str) -> bool {
         (self.unproven.lock().expect("unproven lock")).contains_key(id)
     }
+}
+
+fn input_state_remedy(why: &str) -> Option<String> {
+    let states = why.split_once("input states: ")?.1.split(';').next()?;
+    let clauses: Vec<_> = states.split(", ").filter_map(|entry| {
+        let (path, state) = entry.split_once('=')?;
+        (state != "restored" && state != "original-recreated" && state != "unreported").then(|| format!("it left `{path}` in state {state}; do not create, replace, link or remove {path} while it runs"))
+    }).collect();
+    (!clauses.is_empty()).then(|| clauses.join("; "))
 }

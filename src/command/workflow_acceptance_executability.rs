@@ -287,7 +287,8 @@ pub(crate) use baseline::Original;
 #[cfg(test)]
 pub(crate) use baseline::is_placeholder;
 pub(crate) use baseline::{
-    Baseline, BaselineRuns, FailedTree, PLACEHOLDER_REASON, ReuseAudit, originals, recorded_commit,
+    Baseline, BaselineOrigin, BaselineRuns, FailedTree, PLACEHOLDER_REASON, ReuseAudit, originals,
+    recorded_commit,
 };
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]

@@ -67,6 +67,10 @@ use super::verdict_shell::{Simple, expands, simple_commands};
 #[path = "workflow_acceptance_executability_verdict_printed.rs"]
 mod printed;
 use printed::printed_by;
+#[path = "workflow_acceptance_executability_verdict_mutation.rs"]
+mod mutation;
+pub(super) use mutation::mutation_build_failure_owned;
+use mutation::reported_missing;
 #[path = "workflow_acceptance_executability_verdict_setup_path.rs"]
 pub(super) mod setup_path;
 #[path = "workflow_acceptance_executability_verdict_shell_setup.rs"]
@@ -254,27 +258,7 @@ pub(crate) fn no_verdict_cause(
     if matches!(code, 126 | 127)
         && let Some(name) = missing_program(&commands, &output(result), at)
     {
-        let cause = match at.host_has(&name) {
-            true => UnprovenCause::SiteLacks,
-            false => UnprovenCause::ProgramAbsent,
-        };
-        return Some((
-            format!(
-                "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks; {}",
-                if cause == UnprovenCause::SiteLacks {
-                    format!(
-                        "the host has `{name}`, but the check's site does not provide it: the check must not depend on it; check the criterion with what the site provides"
-                    )
-                } else {
-                    // Issue 557: no host action makes a program available
-                    // that neither the site nor the host has.
-                    format!(
-                        "neither the check's site nor the host has `{name}`, and no host action makes it available: the check must not depend on it; if it does not mean to run `{name}` (for example a word left on a line of its own), remove it; check the criterion with what the site provides"
-                    )
-                }
-            ),
-            cause,
-        ));
+        return Some(mutation::program_failure(&name, code, &output(result), at));
     }
     if code != 0
         && let Some(why) = subcommand::missing(&commands, &output(result), at)
@@ -334,14 +318,38 @@ fn output(result: &CheckResult) -> String {
 /// directory`) ran, whatever the search path says: exit 127 is then its
 /// own answer, such as a script it was given that is not there.
 fn missing_program(commands: &[Simple], output: &str, at: &Context) -> Option<String> {
-    (commands.iter())
+    let reported = (commands.iter())
         .filter_map(|c| c.program.as_deref())
-        .filter(|program| !printed_by(output, program, at))
-        .find(|program| match which::is_path(program) {
-            true => which::is_absolute(program) && !Path::new(program).exists(),
-            false => !at.on_path(program),
+        .filter(|program| {
+            !printed_by(output, program, at)
+                || mutation::reported_permission_denied(output, program)
         })
-        .map(str::to_string)
+        .filter(|program| reported_missing(output, program))
+        .find(|program| match which::is_path(program) {
+            true => {
+                which::is_absolute(program)
+                    && (!Path::new(program).exists()
+                        || mutation::reported_permission_denied(output, program))
+            }
+            false => !at.on_path(program) || mutation::reported_permission_denied(output, program),
+        })
+        .map(str::to_string);
+    reported.or_else(|| {
+        // Issue 328/333: a missing tool with redirected diagnostics still
+        // gives no verdict. A report naming another operand must not blame
+        // an earlier guarded program instead.
+        commands
+            .iter()
+            .filter_map(|c| c.program.as_deref())
+            .find(|program| {
+                !printed_by(output, program, at)
+                    && match which::is_path(program) {
+                        true => which::is_absolute(program) && !Path::new(program).exists(),
+                        false => !at.on_path(program),
+                    }
+            })
+            .map(str::to_string)
+    })
 }
 
 /// The program's own name: a build tool whatever directory it is run from.

@@ -20,7 +20,8 @@ fn write_task_declaration(tasks: &Path, files: &str, implements: &str) {
 
 #[test]
 #[rustfmt::skip]
-fn baseline_prompt_leads_with_guard_template_and_verified_candidates() {
+#[allow(non_snake_case)]
+fn P1_N10_baseline_note_appears_once_with_guard_template_and_verified_candidates() {
     use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
     let root = tempfile::tempdir().unwrap();
@@ -59,8 +60,8 @@ fn baseline_prompt_leads_with_guard_template_and_verified_candidates() {
     let note = "check 'AC-F-001': the criterion already holds on the pre-implementation tree; write a regression guard; data the check writes itself is never evidence";
     let prompt = super::author::author_prompt(&scope, &frozen, &[note.into()], 1);
     let first = prompt.lines().next().unwrap();
-    assert!(first.starts_with("The criterion already holds on the pre-implementation tree"));
-    assert!(first.contains("Write a regression guard"));
+    assert_eq!(prompt.matches(note).count(), 1);
+    assert!(first.contains("Otherwise, write a regression guard"));
     assert!(first.contains("name the deciding file by its literal path relative to the check's working directory"));
     assert!(first.contains("The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails"));
     assert!(first.contains("Naming a file or asserting that it exists does not make it the deciding assertion."));
@@ -246,8 +247,11 @@ fn repository_candidate_only_in_live_tree_is_dropped_from_baseline_candidates() 
     let set = frozen_set(&[("AC-F-001", "run", false)]);
     let mut scope = scope(&set);
     scope.repository_root = repository.clone();
-    scope.baseline =
-        Some(crate::command::workflow_task_set::executability::Baseline { commit, repository });
+    scope.baseline = Some(crate::command::workflow_task_set::executability::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
+        commit,
+        repository,
+    });
     scope.task_universe = WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],
@@ -301,8 +305,11 @@ fn absolute_repository_candidate_is_relative_and_absolute_outside_roots_is_dropp
     std::fs::create_dir_all(scope.project_root.join("src")).unwrap();
     std::fs::write(scope.project_root.join("src/project.rs"), "project").unwrap();
     scope.repository_root = repository.clone();
-    scope.baseline =
-        Some(crate::command::workflow_task_set::executability::Baseline { commit, repository });
+    scope.baseline = Some(crate::command::workflow_task_set::executability::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
+        commit,
+        repository,
+    });
     scope.task_universe = WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],
@@ -397,8 +404,11 @@ fn nested_repository_candidate_uses_forward_slashes() {
     let set = frozen_set(&[("AC-F-001", "run", false)]);
     let mut scope = scope(&set);
     scope.repository_root = repository.clone();
-    scope.baseline =
-        Some(crate::command::workflow_task_set::executability::Baseline { commit, repository });
+    scope.baseline = Some(crate::command::workflow_task_set::executability::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
+        commit,
+        repository,
+    });
     scope.task_universe = WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],

@@ -143,6 +143,7 @@ async fn acceptance_scratch_later_site_outage_replaces_only_transient_results() 
             true
         }) as resume::SavePredicate)]);
         let mut run = repairs::tree_results_with_save_predicates(&probe, &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(), repository: trees.repo.clone(),
         }, &contract, &digest, &refs, None, false, &predicates, &BTreeMap::new()).await;
         assert!(matches!(check_fault::of_result(Some(&run.results["AC-X-001"].result)), check_fault::Fault::Check { .. }), "an authored finding is retained");

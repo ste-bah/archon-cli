@@ -16,14 +16,7 @@ use std::path::{Path, PathBuf};
 #[path = "workflow_acceptance_executability_prove_plan.rs"]
 mod plan;
 #[cfg(test)]
-pub(super) fn mutation_plan(
-    names: &[String],
-    discovery: &mutation::InputDiscovery,
-    entry: &AcceptanceCriterion,
-    markers: &mutation::Markers,
-) -> archon_workflow::acceptance_scratch::MutationPlan {
-    plan::plan(names, discovery, entry, markers).plan
-}
+pub(super) use plan::mutation_plan;
 
 #[path = "workflow_acceptance_executability_prove_diagnostics.rs"]
 mod diagnostics;
@@ -39,6 +32,7 @@ mod helpers;
 pub(super) use helpers::author_recreated_finding;
 #[cfg(test)]
 pub(super) use helpers::operational_error_diagnostics;
+#[cfg(test)]
 pub(super) use helpers::unattributed_recreation_finding;
 pub(super) use helpers::{
     MutationFinding, all_moved_inputs_restored, describe_states, describe_status, input_states,
@@ -47,6 +41,8 @@ pub(super) use helpers::{
 };
 
 use super::*;
+#[path = "workflow_acceptance_executability_prove_routes.rs"]
+mod routes;
 
 /// Findings for every check of `passing` (which passed on `baseline`) that
 /// cannot be shown to fail with the data it names moved aside; each one
@@ -60,6 +56,8 @@ pub(super) async fn prove(
     passing: &[String],
     copy_layouts: &BTreeMap<String, super::hermetic::CopyLayout>,
 ) -> BTreeMap<String, String> {
+    // Keep the caller's tree, copy layout and selection origin together.
+    let tree_name = baseline.origin.tree_name();
     let short: String = baseline.commit.chars().take(12).collect();
     let mut findings = BTreeMap::new();
     let redactor = probe.output_redactor();
@@ -75,28 +73,32 @@ pub(super) async fn prove(
         let entry = (contract.acceptance.iter())
             .chain(&contract.supplementary)
             .find(|entry| &entry.id == id);
-        let bound_accepted = entry.is_some_and(|entry| {
-            entry.judgment.verdict == JudgeDecision::Accepted
-                && refs.iter().any(|reference| {
-                    reference.acceptance_id == *id
-                        && reference.chain_digest == digest
-                        && executed_text(entry).is_some_and(|(_, text)| {
-                            reference.command_digest == content_digest(text.as_bytes())
-                        })
-                })
-        });
-        let discovery = (contract.acceptance.iter())
-            .chain(&contract.supplementary)
-            .find(|entry| &entry.id == id)
-            .map(|entry| {
-                mutation::input_discovery_for_check(
-                    entry,
-                    &probe.project,
-                    &baseline.repository,
-                    copy_layouts.get(id),
+        let bound_accepted = routes::bound_accepted(entry, refs, digest, id);
+        let Some(entry) = entry else {
+            probe.unproven_as(
+                id,
+                "passing check has no contract entry".into(),
+                UnprovenCause::PermanentHost,
+            );
+            continue;
+        };
+        let discovery = routes::discover_with_rebuild(
+            entry,
+            &probe.project,
+            &baseline.repository,
+            copy_layouts.get(id),
+            || async {
+                let refs = super::refs_for(contract, digest, &BTreeSet::from([id.clone()]));
+                let run = super::repairs::tree_results(
+                    probe, baseline, contract, digest, &refs, None, true,
                 )
-            })
-            .unwrap_or_default();
+                .await;
+                run.results
+                    .get(id)
+                    .and_then(|result| result.copy_layout.clone())
+            },
+        )
+        .await;
         let names = discovery.eligible.clone();
         let baseline_finding = format!(
             "{}; considered inputs: {}",
@@ -104,11 +106,13 @@ pub(super) async fn prove(
             describe_candidates(&discovery.candidates)
         );
         if names.is_empty() {
+            if let Some(why) = routes::alias_only(&discovery.candidates) {
+                probe.unproven_as(id, why, UnprovenCause::PermanentHost);
+                continue;
+            }
             // Unresolvable inputs never count as moved; a check with no
             // resolvable input routes here so its author can make paths explicit.
-            let finding =
-                format!("{baseline_finding}; no movable input exists under the selected root");
-            findings.insert(id.clone(), finding);
+            findings.insert(id.clone(), baseline_finding);
             continue;
         }
         // One fresh copy per mutated check; a retry meets the same mutation.
@@ -120,7 +124,6 @@ pub(super) async fn prove(
             .as_ref()
             .map(|(_, markers)| markers.clone())
             .unwrap_or_else(|| probe.mutation_markers(baseline, contract, id));
-        let entry = entry.expect("input discovery came from an acceptance entry");
         let built_plan = plan::plan(&names, &discovery, entry, &markers);
         debug_assert!(discovery.eligible.iter().all(|name| {
             built_plan
@@ -225,7 +228,7 @@ pub(super) async fn prove(
         if result.is_none() {
             probe.unproven_as(
                 id,
-                format!("it passed on the pre-implementation tree at {short}, but the run produced no result, so no input states or exit status were recorded: {}", run.unrun(id).unwrap_or_default()),
+                format!("it passed on the {tree_name} at {short}, but the run produced no result, so no input states or exit status were recorded: {}", run.unrun(id).unwrap_or_default()),
                 UnprovenCause::from_class(run.fault_class),
             );
             continue;
@@ -241,15 +244,32 @@ pub(super) async fn prove(
             if !all_moved_inputs_restored(result, &markers, &names) {
                 super::sites::discard_mutation_evidence(probe, baseline, &mutated, id);
             }
-            if let Some(finding) = super::silent::settle_timed_out_with_diagnostics(
+            if let Some(finding) = super::silent::settle_mutation_timeout(
                 probe,
                 &baseline.commit,
-                &mutated,
+                contract,
                 id,
+                &markers.moved(result, &names),
                 &diagnostics,
             ) {
                 let observation = mutation_observation(result, &markers, &names, &redactor);
                 findings.insert(id.clone(), observed(finding, &observation));
+            }
+            continue;
+        }
+        if let Some(finding) = routes::no_moves_for_result(
+            probe,
+            baseline,
+            contract,
+            id,
+            &short,
+            result,
+            &markers,
+            &names,
+            &diagnostics::baseline_pass_lead_for_tree(id, &short, baseline.origin),
+        ) {
+            if let Some(finding) = finding {
+                findings.insert(id.clone(), finding);
             }
             continue;
         }
@@ -311,17 +331,21 @@ pub(super) async fn prove(
             Some(MutationFinding::HostUnproven(reason)) => {
                 // What the check's own run caused is its author's (D1).
                 let unproven = format!(
-                    "it passed on the pre-implementation tree at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail; mutation observation: {observation}"
+                    "it passed on the {tree_name} at {short}, and the host could not run it with the data it names moved aside ({reason}), so it is not proven able to fail; mutation observation: {observation}"
                 );
                 let text = executed_text(entry).map_or("", |(_, text)| text);
                 let fault =
                     super::check_fault::of_mutation(&result.result, &markers, text, &reason);
-                let at = format!(
-                    "on the pre-implementation tree at {short} with the data it names moved aside"
-                );
-                let key = (Some(baseline.commit.as_str()), &mutated, id.as_str());
-                if let Some(finding) = super::check_fault::settle(probe, key, fault, &at, unproven)
-                {
+                let at =
+                    format!("on the {tree_name} at {short} with the data it names moved aside");
+                let key = (Some(baseline.commit.as_str()), contract, id.as_str());
+                if let Some(finding) = super::check_fault::settle_in_phase(
+                    probe,
+                    key,
+                    fault,
+                    (&at, super::check_fault::Phase::Mutation),
+                    unproven,
+                ) {
                     findings.insert(id.clone(), observed(finding, &observation));
                 }
                 continue;
@@ -333,10 +357,10 @@ pub(super) async fn prove(
             None => {}
         }
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
-        super::silent::ran(probe, &baseline.commit, &mutated, id);
+        super::silent::ran_mutation(probe, &baseline.commit, contract, id);
         // It gave a verdict with its data moved aside: an earlier strike of
         // a signal there is forgotten.
-        super::silent::clear(probe, &baseline.commit, &mutated, id);
+        super::silent::clear(probe, &baseline.commit, contract, id);
         let moved_all = markers.moved(result, &names);
         let moved: Vec<String> = moved_all.iter().cloned().collect();
         // Issue 328: nor did a run that failed for its host (a program that
@@ -350,9 +374,17 @@ pub(super) async fn prove(
         let silent = if crashed {
             None
         } else {
-            super::silent::silent_failure_off_thread(&mutated, result, &at).await
+            super::silent::silent_failure_off_thread(contract, result, &at)
+                .await
+                .filter(|(why, cause)| {
+                    !(*cause == UnprovenCause::PermanentHost
+                        && why.contains("did not build")
+                        && super::verdict::mutation_build_failure_owned(&result.result, &moved))
+                })
         };
-        if let Some((why, cause @ UnprovenCause::TransientHost)) = &silent {
+        if let Some((why, cause)) = &silent
+            && (*cause == UnprovenCause::TransientHost || why.contains("did not build"))
+        {
             probe.unproven_as(
                 id,
                 format!("the host could not decide the mutation proof: {why}"),
@@ -361,15 +393,7 @@ pub(super) async fn prove(
             continue;
         }
         let crashed = crashed || silent.is_some();
-        if moved.is_empty() {
-            findings.insert(
-                id.clone(),
-                observed(
-                    format!("{baseline_finding}; no movable input exists under the selected root"),
-                    &observation,
-                ),
-            );
-        } else if super::baseline::passed(result) {
+        if super::baseline::passed(result) {
             if !recreated.is_empty() {
                 findings.insert(
                     id.clone(),
@@ -382,7 +406,10 @@ pub(super) async fn prove(
                 findings.insert(
                     id.clone(),
                     observed(
-                        unattributed_recreation_finding(&baseline_finding),
+                        helpers::parent_changed_finding(
+                            &baseline_finding,
+                            &original_recreated.iter().cloned().collect::<Vec<_>>(),
+                        ),
                         &observation,
                     ),
                 );
@@ -390,12 +417,12 @@ pub(super) async fn prove(
                 let move_states = markers.move_states(&result.result, &names);
                 let output = output_evidence_with(&result.result, &redactor);
                 let basis = format!(
-                    "accepted on the stored judge verdict because the check passed on the pre-implementation tree at {short}; mutation proof: inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
+                    "accepted on the stored judge verdict because the check passed on the {tree_name} at {short}; mutation proof: inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
                     result.result.exit_code
                 );
                 probe.note_regression_guard(id, basis.clone());
                 probe.note(format!(
-                    "check '{id}': passed on the pre-implementation tree at {short}; accepted as a regression guard on its stored accepted judge verdict, bound to the current contract and check digests (the moved text-derived paths did not make it fail)"
+                    "check '{id}': passed on the {tree_name} at {short}; accepted as a regression guard on its stored accepted judge verdict, bound to the current contract and check digests (the moved text-derived paths did not make it fail)"
                 ));
             } else {
                 findings.insert(
@@ -414,8 +441,9 @@ pub(super) async fn prove(
                 id.clone(),
                 observed(
                     format!(
-                        "{baseline_finding}; with {} moved aside it only crashed, failed to start a program or failed to build, which says nothing about its criterion",
-                        moved.join(", ")
+                        "{baseline_finding}; with {} moved aside it only crashed, failed to start a program or failed to build, which says nothing about its criterion; {}",
+                        moved.join(", "),
+                        helpers::mutation_defect_reason(&silent, last_stderr_line(&result.result, &markers, &redactor))
                     ),
                     &observation,
                 ),
@@ -426,7 +454,7 @@ pub(super) async fn prove(
             // The host sees the exit status and the output, not which test
             // in the check decided it: it says only what it observed.
             let basis = format!(
-                "the check passed on the pre-implementation tree at {short} and failed with exit {} when the inputs were moved aside; last stderr line: {}; inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
+                "the check passed on the {tree_name} at {short} and failed with exit {} when the inputs were moved aside; last stderr line: {}; inputs={move_states:?}; moved={moved_all:?}; mutated_exit_code={:?}; output_excerpt={output:?}",
                 result
                     .result
                     .exit_code
@@ -436,51 +464,19 @@ pub(super) async fn prove(
             );
             probe.note_regression_guard(id, basis.clone());
             probe.note(format!(
-                "check '{id}': its criterion already holds on the pre-implementation tree at {short} (it passed there); kept as a regression guard, proven able to fail: it fails when {} is moved aside; {basis}",
+                "check '{id}': its criterion already holds on the {tree_name} at {short} (it passed there); kept as a regression guard, proven able to fail: it fails when {} is moved aside; {basis}",
                 moved.join(", ")
             ));
         }
     }
+    diagnostics::label_findings(&mut findings, &short, baseline.origin);
     findings
 }
 
 #[cfg(test)]
-fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
-    output_evidence_with(
-        result,
-        &crate::command::workflow_task_set::passability::evidence::Redactor::for_environment(
-            std::iter::empty(),
-            &[],
-        ),
-    )
-}
+use helpers::output_evidence;
 
-fn output_evidence_with(
-    result: &archon_workflow::acceptance_scratch::CheckResult,
-    redactor: &crate::command::workflow_task_set::passability::evidence::Redactor,
-) -> String {
-    // Captured output is already bounded by the capture limit, so the whole
-    // capture is redacted before the excerpt keeps its tail: a cut before
-    // redaction could split a secret and leave part of it in the record.
-    // Every value the host binds into the check's environment (`redactor`)
-    // is masked as well as credential-shaped text, so a value spanning
-    // lines goes whole.
-    let bounded_excerpt = |bytes: &[u8], budget: usize| -> String {
-        let decoded = redactor.redact(&String::from_utf8_lossy(bytes));
-        let redacted = archon_observability::redaction::redact_secret_values(&decoded);
-        archon_workflow::failure_evidence::failure_evidence(redacted.as_bytes(), budget)
-    };
-    let stdout = bounded_excerpt(
-        &result.stdout,
-        crate::command::workflow_task_set::passability::evidence::STDOUT_BYTES,
-    );
-    let stderr = bounded_excerpt(
-        &result.stderr,
-        crate::command::workflow_task_set::passability::evidence::STDERR_BYTES,
-    );
-    let excerpt = format!("stdout: {stdout}\nstderr: {stderr}");
-    excerpt
-}
+use helpers::output_evidence_with;
 
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_prove_tests.rs"]

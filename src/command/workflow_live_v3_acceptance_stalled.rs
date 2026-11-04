@@ -196,29 +196,18 @@ pub(super) async fn apply(
         );
         return Ok(false);
     };
-    let Some(base_commit) =
-        Baseline::round_commit(&context.repository, &context.task_root, run_dir)
-    else {
+    let Some(baseline) = Baseline::for_run(&context.repository, &context.task_root, run_dir) else {
         record.operational_errors.push("passability re-judge did not run: no usable base commit is available to corroborate a stalled-check refutation".into());
         return Ok(false);
     };
+    let base_commit = &baseline.commit;
     let probe = crate::command::workflow_task_set::executability::HostProbe::at_with_limits(
         context.project.clone(),
         context.repository.clone(),
         context.binding.clone(),
         context.cargo_limits.clone(),
     );
-    let base_results = match probe
-        .run_on_tree(
-            &contract,
-            &failed,
-            &Baseline {
-                commit: base_commit.clone(),
-                repository: context.repository.clone(),
-            },
-        )
-        .await
-    {
+    let base_results = match probe.run_on_tree(&contract, &failed, &baseline).await {
         Ok(results) => results,
         Err(error) => {
             record.operational_errors.push(format!("passability re-judge did not run: could not run checks on base commit {base_commit}: {error}"));
@@ -370,7 +359,7 @@ pub(super) async fn apply(
         &contract,
         &ids,
         &findings,
-        Some(&base_commit),
+        Some(&baseline),
         Some(failed_tree),
     )
     .await;

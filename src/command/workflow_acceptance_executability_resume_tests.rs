@@ -113,6 +113,7 @@ async fn a_nonliteral_check_reuses_only_for_the_same_commit_and_project_data() {
     let resume = saving(FreezeBudget::unlimited());
     let at = |commit: &str| {
         freeze(&trees, copies.path(), &resume).with_baseline(Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: commit.to_string(),
             repository: trees.repo.clone(),
         })

@@ -224,7 +224,9 @@ async fn a_program_the_check_runs_is_never_moved() {
             "{id}: {finding}"
         );
         assert!(
-            finding.contains("no movable input exists under the selected root"),
+            finding.contains(
+                "the command names no file that the host can move aside under the selected root"
+            ),
             "{id}: {finding}"
         );
     }
@@ -254,11 +256,19 @@ async fn cd_only_and_printed_inputs_get_the_literal_file_remedy() {
             "{id}: {finding}"
         );
         assert!(finding.contains("A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root."), "{id}: {finding}");
-        assert!(finding.contains("A test, target or module name is not a file path. A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root. The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason"), "{id}: {finding}");
         assert!(
-            finding.contains(&format!(
-                "; considered inputs: {considered}; no movable input exists under the selected root"
-            )),
+            finding.contains("it passed on the probed tree at"),
+            "{id}: {finding}"
+        );
+        assert!(finding.contains("A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it."), "{id}: {finding}");
+        assert!(
+            finding.contains(
+                "Use a handle, for example `test -f <path>` before the run that the file decides"
+            ),
+            "{id}: {finding}"
+        );
+        assert!(
+            finding.contains(&format!("; considered inputs: {considered}")),
             "{id}: {finding}"
         );
         assert!(!finding.contains("data the check writes itself is never evidence"));

@@ -163,8 +163,7 @@ async fn a_repair_whose_republish_meets_a_journal_another_writer_left_pauses_the
     );
     let base =
         crate::command::workflow_task_set::executability::Baseline::head_of(run.set.project.path())
-            .unwrap()
-            .commit;
+            .unwrap();
     let outcome = super::repair_unaccepted(Some(&client), &context, &contract, Some(&base)).await;
     let error = match outcome {
         Ok(repair) => panic!(

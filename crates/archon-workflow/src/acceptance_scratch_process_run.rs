@@ -33,12 +33,11 @@ pub async fn run_at(
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, None)?;
     }
-    let moved = site
+    let movement = site
         .mutation_plan
         .map(|plan| mutation::move_aside_plan(plan, site.mutation_root.as_ref()));
-    let parent_snapshots = site.mutation_plan.zip(moved.as_ref()).map(|(plan, moved)| {
-        mutation::snapshot_parent_states(plan, moved, site.mutation_root.as_ref())
-    });
+    let moved = movement.as_ref().map(|(moved, _)| moved.as_slice());
+    let parent_snapshots = movement.as_ref().map(|(_, snapshots)| snapshots.as_slice());
     #[cfg(not(windows))]
     let child = spawn_confined(process, cwd)?;
     #[cfg(windows)]
