@@ -197,6 +197,8 @@ impl FakeProvider {
     }
 
     /// Resume cells assert exact totals across both CLI launches.
+    /// Only the r17 test binary calls it.
+    #[allow(dead_code)]
     pub fn set_variant_preserving_history(&self, variant: Variant) {
         *self.variant.lock().unwrap() = variant;
     }

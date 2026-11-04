@@ -2,6 +2,8 @@
 use super::super::script::{body_author_marker, judge_decision, scripted_answer, user_prompt_text};
 use serde_json::{Value, json};
 
+// Each test binary builds only the cells it runs.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cell {
     V0,

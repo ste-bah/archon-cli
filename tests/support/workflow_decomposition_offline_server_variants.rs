@@ -27,6 +27,8 @@ pub const HEREDOC_SCRIPT: &str = "set -eu\npython3 - src/beta.json <<'PY'\nimpor
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
     Golden,
+    /// Only the r17 test binary builds it.
+    #[allow(dead_code)]
     R17(r17::Cell),
     /// The AC-X-001 author reply carries a secret-shaped word after its entry.
     SecretInAcceptanceReply,
