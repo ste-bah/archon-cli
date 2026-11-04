@@ -388,11 +388,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
     // A check that cannot pass as written is first shown its own finding,
     // with its pre-implementation output (Issue 275).
     let mut seeds = crashed.clone();
-    for finding in &prepared.findings {
-        if is_baseline_pass_finding(finding) {
-            seeds.insert(finding.subject.clone(), finding.text.clone());
-        }
-    }
+    super::reauthor::seed_findings(&mut seeds, &named, &prepared.findings);
     if named.is_empty() {
         for diagnostic in probe.take_diagnostics() {
             eprintln!("{diagnostic}");

@@ -30,3 +30,28 @@ pub(super) fn check_defects(
         Err(defects.join("; "))
     }
 }
+
+/// Keep every applicable gate reason, including a crash already seeded for
+/// the same entry. The caller's finding is the repair task, verbatim.
+pub(crate) fn seed_findings(
+    seeds: &mut BTreeMap<String, String>,
+    named: &BTreeSet<String>,
+    findings: &[crate::command::workflow_gate::GateFinding],
+) {
+    for finding in findings
+        .iter()
+        .filter(|finding| named.contains(&finding.subject))
+    {
+        seeds
+            .entry(finding.subject.clone())
+            .and_modify(|text| {
+                text.push('\n');
+                text.push_str(&finding.text);
+            })
+            .or_insert_with(|| finding.text.clone());
+    }
+}
+
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_text_p4_tests.rs"]
+mod p4_tests;

@@ -30,6 +30,7 @@ use reply_parse::candidate_entry;
 use reply_parse::candidate_entry_with_markers;
 #[path = "workflow_acceptance_reauthor_check_defects.rs"]
 mod check_defects;
+pub(crate) use check_defects::seed_findings;
 #[path = "workflow_acceptance_reauthor_passability.rs"]
 mod passability_pending;
 
@@ -46,6 +47,8 @@ pub(crate) const REAUTHOR_ATTEMPTS: usize = 3;
 /// and the resolved agent cannot drift apart.
 const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
 const AUTHOR_TOOLS: [&str; 3] = HOST_READ_ONLY_TOOLS;
+
+const COMMAND_CWD_EXAMPLES: &str = r#"Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}."#;
 
 /// The two entry shapes the decomposition author is shown.
 static ENTRY_SHAPES: LazyLock<String> = LazyLock::new(|| {
@@ -244,7 +247,7 @@ pub(crate) async fn reauthor_partial_with_cache(
             let frozen = entry(contract, id).expect("named ids were checked above");
             let notes = feedback.get_mut(id).expect("feedback seeded per id");
             // Findings evolve after every rejected draft. Snapshot the named
-            // inputs from the current notes immediately before each prompt.
+            // inputs from the check and current feedback immediately before each prompt.
             let prefetched_files =
                 author::prefetch_files_cached(scope, frozen, notes, &mut prefetch_cache);
             let reply = author::author_entry_with_prefetch(

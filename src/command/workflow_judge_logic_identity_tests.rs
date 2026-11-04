@@ -229,7 +229,7 @@ impl WorkflowLlmClient for RefutingJudge {
         self.batches.lock().unwrap().push(ids.clone());
         Ok(WorkflowAgentOutcome {
             content: serde_json::json!({"decisions": ids.iter().map(|id| serde_json::json!({
-                "id": id, "verdict": "refuted", "counterexample": "counterexample",
+                "id": id, "kind":"state","cited_paths":[],"verdict": "refuted", "counterexample": "counterexample",
                 "reason": "refuted by current logic"
             })).collect::<Vec<_>>()})
             .to_string(),

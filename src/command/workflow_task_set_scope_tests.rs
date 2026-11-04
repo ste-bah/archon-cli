@@ -51,7 +51,7 @@ async fn scopes_for(criterion: &str) -> Vec<archon_workflow::RemediationScope> {
         &prd,
         archon_core::config::GateMode::Observe,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"accepted for shadow measurement"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted","reason":"accepted for shadow measurement"}]}"#.into()),
         }),
     )
     .await

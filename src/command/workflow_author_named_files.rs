@@ -27,7 +27,8 @@ fn files(
         .cloned()
         .and_then(|check| serde_json::from_value(check).ok())
         .unwrap_or_else(|| AcceptanceCheck::Command {
-            command: criterion.clone(),
+            // No authored command yet: criterion prose is not a file operand.
+            command: String::new(),
             cwd: TrustedCwd::RepoRoot,
         });
     let frozen = AcceptanceCriterion {

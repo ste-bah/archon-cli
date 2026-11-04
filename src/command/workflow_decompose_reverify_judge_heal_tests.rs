@@ -31,7 +31,7 @@ impl archon_workflow::WorkflowLlmClient for RecoveringJudge {
             unreachable!();
         }
         Ok(archon_workflow::WorkflowAgentOutcome {
-            content: serde_json::json!({"decisions":[{"id":"AC-X-001", "verdict":"accepted",
+            content: serde_json::json!({"decisions":[{"id":"AC-X-001", "kind":"state","cited_paths":[],"verdict":"accepted",
                 "counterexample":"no setup rule refused the check", "reason":"the required fixture is absent"}]}).to_string(),
             stop_reason: Some("end_turn".into()), ..Default::default()
         })

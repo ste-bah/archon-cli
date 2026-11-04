@@ -29,7 +29,7 @@ async fn reject_check(check: serde_json::Value, expected: &[&str]) {
         serde_json::to_vec(&candidate).unwrap(),
         Arc::new(FinishReasonJudge {
             calls: calls.clone(), stop_reason: Some("end_turn".into()),
-            content: r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"ok"}]}"#.into(),
+            content: r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"ok"}]}"#.into(),
         }),
     ).await.expect_err("mechanical defect must be refused before judging");
     assert!(CandidateRejected::caused(&error), "{error:#}");
@@ -120,7 +120,7 @@ async fn changed_check_refutation_is_retained_for_the_acceptance_author() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, original) = seed(&temp);
     freeze_acceptance(temp.path(), &tasks, &prd, Arc::new(JudgeClient {
-        result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"checks the output"}]}"#.into()),
+        result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"checks the output"}]}"#.into()),
     })).await.unwrap();
     let first: AcceptanceContract =
         serde_json::from_slice(&std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap())
@@ -129,7 +129,7 @@ async fn changed_check_refutation_is_retained_for_the_acceptance_author() {
     candidate["acceptance"][0]["check"]["command"] = "./weaker-verifier".into();
     let next = prepare_acceptance_freeze_from_candidate(temp.path(), &tasks, &prd, GateMode::Observe,
         serde_json::to_vec(&candidate).unwrap(), Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"stale output passes","reason":"does not exercise the program"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"stale output passes","reason":"does not exercise the program"}]}"#.into()),
         })).await.unwrap();
     let restored: AcceptanceContract = serde_json::from_slice(&next.contract_bytes).unwrap();
     println!(
@@ -221,7 +221,7 @@ async fn changed_check_refutation_is_retained_for_the_acceptance_author() {
         GateMode::Observe,
         original,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"stale output passes","reason":"does not exercise the program"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"stale output passes","reason":"does not exercise the program"}]}"#.into()),
         }),
     ).await.unwrap();
     let unchanged: AcceptanceContract = serde_json::from_slice(&unchanged.contract_bytes).unwrap();

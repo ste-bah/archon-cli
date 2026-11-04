@@ -108,3 +108,25 @@ fn named_files_dispatch_does_not_read_or_cache_rejected_blob() {
         assert_eq!(judge::body_reads(), before + 1, "accepted blob is cached");
     });
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn R5_P4_20_entry_without_check_does_not_mine_criterion_prose() {
+    with_binding(|ctx, root| {
+        std::fs::create_dir(root.join("ids")).unwrap();
+        std::fs::write(
+            root.join("ids/versions.txt"),
+            "criterion prose is not a command",
+        )
+        .unwrap();
+        let binding: rquickjs::Function = ctx.globals().get("__archonNamedFiles").unwrap();
+        for criterion in ["inspect ids/versions.txt", "ids/versions."] {
+            let entry = serde_json::json!({"id":"A", "criterion":criterion});
+            let result: String = binding.call((entry.to_string(), "[]", 1024usize)).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&result).unwrap(),
+                serde_json::json!([])
+            );
+        }
+    });
+}

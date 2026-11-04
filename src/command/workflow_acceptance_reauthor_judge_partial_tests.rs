@@ -11,7 +11,7 @@ async fn an_incomplete_reauthor_judge_returns_decided_entries_and_retries_only_m
     asked.acceptance.push(second);
     let client = Scripted::new(vec![
         Ok((
-            r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"the neutral check is sound"}]}"#,
+            r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"the neutral check is sound"}]}"#,
             Some("end_turn"),
         )),
         Ok(("no structured reply", Some("end_turn"))),

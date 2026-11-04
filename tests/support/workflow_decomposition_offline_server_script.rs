@@ -1,3 +1,7 @@
+#[path = "workflow_decomposition_judge_reply.rs"]
+mod judge_reply;
+pub(super) use judge_reply::judge_decision;
+
 pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
     let text = user_prompt_text(prompt).unwrap_or_default();
     // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton/body src/command/workflow_decompose_v1.js:164/231;
@@ -30,14 +34,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
         }
         let decisions = ids
             .into_iter()
-            .map(|id| {
-                serde_json::json!({
-                    "id": id,
-                    "verdict": "accepted",
-                    "counterexample": "None found: a missing or false outcome makes the command exit non-zero.",
-                    "reason": "The command directly checks the declared outcome and exits non-zero when it is false."
-                })
-            })
+            .map(|id| judge_decision(id, false))
             .collect::<Vec<_>>();
         return (
             "judge",

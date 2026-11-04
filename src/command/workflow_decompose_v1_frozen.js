@@ -248,7 +248,7 @@ function attributeEntryFindings(findings, ids, published, candidate, held) {
     }
     for (const id of owners || []) {
       const open = own.get(id) || [];
-      if (!open.includes(finding.text)) open.push(finding.text);
+      pushGateFinding(open, finding, id);
       own.set(id, open);
     }
   }
@@ -257,7 +257,7 @@ function attributeEntryFindings(findings, ids, published, candidate, held) {
 
 // #555 review: the phase-level findings of the latest gate are current; an
 // earlier one it no longer reports is kept as one not to regress, and one it
-// reports again is current again, as settleGateFindings keeps an entry's.
+// reports again is current again, as settleGateFindings keeps an entry's by defect identity.
 function settlePhaseFindings(state, latest) {
   const earlier = (state.earlierPhaseFindings || []).slice();
   for (const text of state.phaseFindings || []) if (!latest.includes(text) && !earlier.includes(text)) earlier.push(text);

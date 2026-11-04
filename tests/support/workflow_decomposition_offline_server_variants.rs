@@ -4,7 +4,7 @@
 //! A variant changes one reply of the golden script and nothing else, so a
 //! cell's result differs from golden only where that reply reaches.
 
-use super::script::{scripted_answer, user_prompt_text};
+use super::script::{judge_decision, scripted_answer, user_prompt_text};
 
 #[path = "workflow_decomposition_offline_server_large.rs"]
 pub mod large;
@@ -144,10 +144,7 @@ pub fn refute_first_judge_answer(
         if decision["id"] != "AC-X-001" {
             continue;
         }
-        decision["verdict"] = serde_json::Value::String("refuted".into());
-        decision["counterexample"] =
-            serde_json::Value::String("a passing state where the criterion is false".into());
-        decision["reason"] = serde_json::Value::String("the check admits that state".into());
+        *decision = judge_decision("AC-X-001", true);
     }
     reply.to_string()
 }

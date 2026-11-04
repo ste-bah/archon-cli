@@ -52,7 +52,7 @@ pub fn acceptance_site_path_defect(
                     )
                 });
                 return Some(format!(
-                    "it names `{}` from the {root_name}; {reason} (site target `{}`).",
+                    "it names `{}` from the {root_name}; {reason} (site target `{}`). From repo_root name repository paths without `..`; when the repository directory sits beside the project, reach it from project_root using cwd project_root and ../<repository dir>/",
                     refused_path,
                     archon_shell::paths::stored_text(&refusal.site_target),
                 ));
