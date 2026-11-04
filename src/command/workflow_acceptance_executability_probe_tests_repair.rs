@@ -242,6 +242,7 @@ async fn S2_package_findings_never_escape_the_requested_ids() {
             &trees.repo,
             trees.set.project.path(),
             &base,
+            false,
         )
         .contains_key("unasked")
     );

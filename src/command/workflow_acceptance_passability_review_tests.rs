@@ -19,6 +19,7 @@ fn R3_static_package_selector_uses_manifest_names_before_any_execution() {
             repo.path(),
             repo.path(),
             "HEAD",
+            false,
         );
         assert!(
             findings["check"].contains("names directory")
@@ -30,7 +31,8 @@ fn R3_static_package_selector_uses_manifest_names_before_any_execution() {
                 &contract,
                 repo.path(),
                 repo.path(),
-                "HEAD"
+                "HEAD",
+                false,
             )
             .is_empty()
         );
@@ -60,7 +62,7 @@ fn R3_missing_new_test_targets_are_judged_with_absence_evidence() {
                 &requirements,
                 repo.path(),
                 repo.path(),
-                "HEAD"
+                "HEAD",
             )
             .is_none()
         );
@@ -136,7 +138,7 @@ fn package_case_at(name: &str, cd_operator: Option<&str>) -> BTreeMap<String, St
         )
         .unwrap();
         all.extend(super::super::super::setup::package_findings(
-            &contract, &repo, &project, "HEAD",
+            &contract, &repo, &project, "HEAD", false,
         ));
     }
     all
@@ -181,3 +183,6 @@ fn S6_project_sibling_cd_resolves_the_effective_cargo_workspace() {
         assert!(package_case_at("real-package", Some(op)).is_empty());
     }
 }
+
+#[path = "workflow_acceptance_passability_packages_tests.rs"]
+mod packages_tests;

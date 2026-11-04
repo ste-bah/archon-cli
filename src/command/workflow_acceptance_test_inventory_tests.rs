@@ -187,3 +187,20 @@ fn inventory_runner_flags_and_pytest_node_prefixes_do_not_become_false_filters()
     }
     assert!(cargo_multi_names("cargo test -F feature --target-dir cache only_one").is_empty());
 }
+
+#[test]
+fn test_inventory_located_commands_skip_heredoc_data_and_directory_changes() {
+    for reject_guards in [false, true] {
+        for text in [
+            "cat <<'END'\ncd elsewhere; cargo test -p data || true\nEND\ncargo test -p actual",
+            "cat <<-\"END\"\n\tcd elsewhere; cargo test -p data\n\tEND\ncargo test -p actual",
+            "cat <<A <<'B'\ncd elsewhere\nA\ncargo test -p data\nB\ncargo test -p actual",
+        ] {
+            let found = located_commands_with_guards(text, reject_guards);
+            let cargo: Vec<_> = found.iter().filter(|(c, _)| c.word == "cargo").collect();
+            assert_eq!(cargo.len(), 1, "{text}");
+            assert_eq!(cargo[0].0.args, ["test", "-p", "actual"]);
+            assert_eq!(cargo[0].1, Some(Vec::new()));
+        }
+    }
+}

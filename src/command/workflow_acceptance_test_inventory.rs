@@ -182,20 +182,30 @@ pub(crate) fn invocations(text: &str) -> Vec<Invocation> {
 
 /// Directory changes and their scope, without evaluating shell expansions.
 fn located_commands(text: &str) -> Vec<(Simple, Option<Vec<String>>)> {
+    located_commands_with_guards(text, true)
+}
+
+fn located_commands_with_guards(
+    text: &str,
+    reject_guards: bool,
+) -> Vec<(Simple, Option<Vec<String>>)> {
     let mut cwd = Some(Vec::new());
     let mut previous = None;
     let mut stack = Vec::new();
     let mut scopes = Vec::new();
     let mut found = Vec::new();
-    let parts = super::verdict::setup_path::flow::segments(text);
-    if parts.iter().any(|(body, op)| {
-        op == "||"
-            || body.trim_start().starts_with('!')
-            || body
-                .split_whitespace()
-                .next()
-                .is_some_and(|word| matches!(word, "if" | "while" | "until" | "for" | "case"))
-    }) {
+    let text = super::verdict_shell::without_heredoc_bodies(text);
+    let parts = super::verdict::setup_path::flow::segments(&text);
+    if reject_guards
+        && parts.iter().any(|(body, op)| {
+            op == "||"
+                || body.trim_start().starts_with('!')
+                || body
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|word| matches!(word, "if" | "while" | "until" | "for" | "case"))
+        })
+    {
         return found;
     }
     for (body, op) in parts {

@@ -82,7 +82,7 @@ pub use site_path::{
     SITE_BASELINE_DIRECTORY, SITE_CARGO_HOME_DIRECTORY, SITE_HOME_DIRECTORY,
     SITE_INTERNAL_DIRECTORIES, SITE_PROCESS_GROUPS_DIRECTORY, SITE_PROJECT_DIRECTORY,
     SITE_REPOSITORY_DIRECTORY, SITE_TARGET_DIRECTORY, SITE_TEMP_DIRECTORY, SitePathRefusal,
-    site_internal_directories, site_path_alone,
+    repository_copy_roots, site_internal_directories, site_path_alone,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -292,10 +292,14 @@ impl ScratchRoots {
             std::fs::create_dir_all(&roots.target)
                 .map_err(|e| WorkflowError::io(&roots.target, e))?;
             let mut remaining = policy.scratch_bytes;
-            if policy.combined {
-                io::copy_tree(&roots.repository, &roots.project, &mut remaining, true)?;
-                std::fs::copy(roots.repository.join(".git"), roots.project.join(".git"))
-                    .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
+            for destination in
+                site_path::repository_copy_roots(&roots.repository, &roots.project, policy.combined)
+                    .into_iter()
+                    .skip(1)
+            {
+                io::copy_tree(&roots.repository, destination, &mut remaining, true)?;
+                std::fs::copy(roots.repository.join(".git"), destination.join(".git"))
+                    .map_err(|e| WorkflowError::io(destination.join(".git"), e))?;
             }
             let project_excludes = inputs::project_excludes(policy)?;
             // Issue 440: the repository comes from its commit, never an input.

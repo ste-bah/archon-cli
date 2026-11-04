@@ -155,3 +155,10 @@
 // #589: requirements-trace 13 -> 14: the empty normalized repository-root
 // path is present, so a claim naming the root is no longer falsely refuted.
 // Re-pin other capabilities only: their verdict rules do not read this index.
+
+// #590: freeze-acceptance 81 -> 82:
+// B2 resolves package selectors through the check site's combined repository
+// layout and reports every distinct directory/package mismatch in a script.
+// Guarded scripts and heredoc data supply no B2 finding; only workspace package
+// selectors are scanned. verify-frozen-acceptance stays 21 (runs no probe).
+// Re-pin other changed closures only; their verdict rules do not use B2.

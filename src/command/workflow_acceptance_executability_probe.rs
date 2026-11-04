@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::command::workflow_task_set::live_root;
-
 #[path = "workflow_acceptance_executability_stalled_tree.rs"]
 mod stalled_tree;
 
@@ -221,6 +220,7 @@ impl HostProbe {
                 &self.repository,
                 &self.project,
                 &base.commit,
+                matches!(&self.site, Site::Scratch(binding) if binding.policy.combined),
             );
             findings.extend(packages.into_iter().filter(|(id, _)| ids.contains(id)));
         }
@@ -388,6 +388,7 @@ impl HostProbe {
                 &self.repository,
                 &self.project,
                 &base.commit,
+                matches!(&self.site, Site::Scratch(binding) if binding.policy.combined),
             );
             findings.extend(packages.into_iter().filter(|(id, _)| ids.contains(id)));
         }

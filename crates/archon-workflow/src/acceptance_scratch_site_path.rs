@@ -260,3 +260,16 @@ fn lexical_site_path(path: &Path) -> PathBuf {
     }
     result
 }
+
+/// Repository destinations materialized by the scratch site's combined view.
+pub fn repository_copy_roots<'a>(
+    repository: &'a Path,
+    project: &'a Path,
+    combined: bool,
+) -> Vec<&'a Path> {
+    let mut roots = vec![repository];
+    if combined {
+        roots.push(project);
+    }
+    roots
+}
