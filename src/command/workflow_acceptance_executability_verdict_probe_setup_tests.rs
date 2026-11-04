@@ -40,6 +40,7 @@ async fn a_same_commit_known_copy_result_keeps_its_layout_for_judgment() {
     let copies = tempfile::tempdir().unwrap();
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
         .with_baseline(super::Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.head.clone(),
             repository: trees.repo.clone(),
         })
@@ -91,6 +92,7 @@ async fn a_hermetic_memo_hit_keeps_its_layout_for_judgment() {
     let resume = FreezeResume::saving(FreezeBudget::unlimited(), true);
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
         .with_baseline(super::Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.head.clone(),
             repository: trees.repo.clone(),
         })

@@ -16,6 +16,7 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
     let accepted = super::super::prove::prove(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         },
@@ -28,7 +29,7 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
     .await;
     assert!(
         accepted.get("AC-3B-001").is_some_and(|finding| {
-            finding.contains("no movable input exists under the selected root")
+            finding.contains("passed on the pre-implementation tree")
                 && finding
                     .contains("the command names no file that the host can move aside under the selected root")
                 && !finding.contains("data the check writes itself is never evidence")
@@ -45,6 +46,7 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
     let rejected = super::super::prove::prove(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         },
@@ -62,6 +64,7 @@ async fn a_bound_accepted_judgment_does_not_exempt_a_vacuous_check() {
     let stale = super::super::prove::prove(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         },
@@ -85,6 +88,7 @@ async fn bound_proof(command: &str, id: &str) -> (BTreeMap<String, String>, Vec<
     let findings = super::super::prove::prove(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         },
@@ -140,6 +144,7 @@ async fn an_honest_bound_check_that_leaves_the_moved_path_missing_is_accepted() 
     let findings = super::super::prove::prove(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         },
@@ -212,6 +217,7 @@ async fn missing_judgments_do_not_exempt_vacuous_or_self_filled_checks() {
     let findings = super::super::prove::prove(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         },

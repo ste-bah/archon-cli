@@ -14,6 +14,7 @@ async fn a_probe_run_the_host_could_not_complete_is_repaired_and_recorded() {
             None,
         )
         .with_baseline(super::Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.base.clone(),
             repository: trees.repo.clone(),
         })
@@ -89,6 +90,7 @@ async fn a_scratch_probe_that_still_cannot_run_is_rerun_without_its_build_cache(
         Some(binding),
     )
     .with_baseline(super::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.head.clone(),
         repository: trees.repo.clone(),
     })

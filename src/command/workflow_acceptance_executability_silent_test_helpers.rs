@@ -13,6 +13,7 @@ pub(in super::super) fn settle(
 ) -> Option<String> {
     settle_as(
         probe,
+        BaselineOrigin::RecordedBase,
         commit,
         contract,
         result,

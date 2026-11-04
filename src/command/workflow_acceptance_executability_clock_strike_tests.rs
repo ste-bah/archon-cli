@@ -342,8 +342,16 @@ fn issue548_a_site_lacking_a_program_the_host_has_goes_to_its_author_without_a_s
     for attempt in 1..=3 {
         // A fresh probe per attempt: each is a resume of the run.
         let probe = HostProbe::for_task_set(site.set.project.path(), &site.set.tasks);
-        let finding = settle_as(&probe, &site.base, &contract, &result, (&why, cause), &at)
-            .unwrap_or_else(|| panic!("attempt {attempt}: the author gets it at once"));
+        let finding = settle_as(
+            &probe,
+            BaselineOrigin::RecordedBase,
+            &site.base,
+            &contract,
+            &result,
+            (&why, cause),
+            &at,
+        )
+        .unwrap_or_else(|| panic!("attempt {attempt}: the author gets it at once"));
         assert!(finding.starts_with("check 'AC-X-001': "), "{finding}");
         assert!(finding.contains("`sh`"), "{finding}");
         assert!(
@@ -375,11 +383,30 @@ fn issue548_a_site_lacking_a_program_the_host_has_goes_to_its_author_without_a_s
     let contract = other.contract();
     let result = failed_result("AC-X-001", "syntax error");
     let first = HostProbe::for_task_set(other.set.project.path(), &other.set.tasks);
-    assert!(settle_as(&first, &other.base, &contract, &result, crash, &at).is_none());
+    assert!(
+        settle_as(
+            &first,
+            BaselineOrigin::RecordedBase,
+            &other.base,
+            &contract,
+            &result,
+            crash,
+            &at
+        )
+        .is_none()
+    );
     let resumed = HostProbe::for_task_set(other.set.project.path(), &other.set.tasks);
     assert!(
-        settle_as(&resumed, &other.base, &contract, &result, crash, &at)
-            .is_some_and(|finding| finding.contains("It failed so again")),
+        settle_as(
+            &resumed,
+            BaselineOrigin::RecordedBase,
+            &other.base,
+            &contract,
+            &result,
+            crash,
+            &at
+        )
+        .is_some_and(|finding| finding.contains("It failed so again")),
         "the strike rule still applies to its own causes"
     );
 }

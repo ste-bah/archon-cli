@@ -69,17 +69,14 @@ pub(super) fn repair_author_scope(
     task_root: &Path,
     repository: &Path,
     prd_path: &Path,
-    base: Option<&str>,
+    base: Option<&Baseline>,
     build_cache: bool,
 ) -> anyhow::Result<AuthorScope> {
     let mut scope = AuthorScope::for_task_set(project, task_root, prd_path, build_cache)
         .map_err(anyhow::Error::msg)?;
     scope.repository_root = repository.to_path_buf();
-    if let Some(commit) = base {
-        scope.baseline = Some(Baseline {
-            commit: commit.to_string(),
-            repository: repository.to_path_buf(),
-        });
+    if let Some(baseline) = base {
+        scope.baseline = Some(baseline.clone());
     }
     Ok(scope)
 }
@@ -95,7 +92,7 @@ pub(super) async fn republish(
     contract: &AcceptanceContract,
     ids: &BTreeSet<String>,
     seeds: &BTreeMap<String, String>,
-    base: Option<&str>,
+    base: Option<&Baseline>,
     failed: Option<FailedTree>,
 ) -> anyhow::Result<ReauthorResult> {
     let Some(llm) = llm else {
@@ -118,10 +115,7 @@ pub(super) async fn republish(
         context.cargo_limits.clone(),
     );
     let probe = match base {
-        Some(commit) => probe.with_baseline(Baseline {
-            commit: commit.to_string(),
-            repository: context.repository.clone(),
-        }),
+        Some(baseline) => probe.with_baseline(baseline.clone()),
         None => probe,
     };
     let probe = match failed {
@@ -173,7 +167,7 @@ pub(super) struct Round<'a> {
     pub(super) call_id: &'a str,
     pub(super) evidence_dir: &'a Path,
     /// The run's base commit: the tree every repaired check must fail on.
-    pub(super) base: Option<&'a str>,
+    pub(super) base: Option<&'a Baseline>,
 }
 
 /// Checks that ran this round and go back to their author: each one's

@@ -70,7 +70,7 @@ pub(super) struct Site<'a> {
     pub(super) llm: Option<&'a dyn WorkflowLlmClient>,
     pub(super) context: &'a StageContext,
     pub(super) run_dir: &'a Path,
-    pub(super) base: Option<&'a str>,
+    pub(super) base: Option<&'a Baseline>,
     pub(super) store: &'a WorkflowStore,
     pub(super) run_id: &'a str,
     pub(super) call_id: &'a str,
@@ -171,19 +171,15 @@ fn working(
 /// task set's (`Baseline::for_task_set`).
 fn baseline_of(site: &Site<'_>) -> Option<Baseline> {
     let context = site.context;
-    match site.base {
-        Some(commit) => Some(Baseline {
-            commit: commit.to_string(),
-            repository: context.repository.clone(),
-        }),
-        None => Baseline::for_task_set(&context.repository, &context.task_root),
-    }
+    site.base
+        .cloned()
+        .or_else(|| Baseline::for_task_set(&context.repository, &context.task_root))
 }
 
 /// The probe every authored check clears: it runs without crashing at the
 /// round's own site, and it fails on the tree before implementation -- the
 /// round's baseline (Issue 328: the one its freeze recorded,
-/// `Baseline::round_commit`), else the task set's (`Baseline::for_task_set`). With neither, no check can be proven able to
+/// `Baseline::for_run`), else the task set's (`Baseline::for_task_set`). With neither, no check can be proven able to
 /// fail, so none is authored (M5): an error, never an unproven publish.
 pub(super) fn probe(site: &Site<'_>) -> Result<HostProbe, String> {
     let context = site.context;

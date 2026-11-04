@@ -99,6 +99,13 @@ pub(super) fn author_prompt(
     )
 }
 
+pub(super) fn is_baseline_pass_note(note: &str) -> bool {
+    note.contains("criterion already holds on the pre-implementation tree")
+        || note.contains(super::executability::CANNOT_FAIL)
+        || note.contains("passed on the pre-implementation tree")
+        || note.contains("passed on the selected tree")
+}
+
 pub(super) fn author_prompt_with_prefetch(
     scope: &AuthorScope,
     frozen: &AcceptanceCriterion,
@@ -106,10 +113,8 @@ pub(super) fn author_prompt_with_prefetch(
     attempt: usize,
     prefetched_files: &[serde_json::Value],
 ) -> String {
-    let baseline_pass = notes.iter().any(|note| {
-        note.contains("criterion already holds on the pre-implementation tree")
-            || note.contains(super::executability::CANNOT_FAIL)
-    });
+    let baseline_note = notes.iter().find(|note| is_baseline_pass_note(note));
+    let baseline_pass = baseline_note.is_some();
     let current = if baseline_pass {
         serde_json::json!({
             "id": frozen.id,
@@ -128,7 +133,7 @@ pub(super) fn author_prompt_with_prefetch(
     let mut prompt = Vec::new();
     if baseline_pass {
         prompt.extend([
-            "The criterion already holds on the pre-implementation tree. Write a regression guard by running the existing test or implementation that decides the criterion, and name the deciding file by its literal path relative to the check's working directory. Its content is shown to the judge only when it is supplied in named_files; if that content is not supplied, its assertions are unknown and it cannot be accepted on assumed content. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. A duplicated or relocated implementation can refute the guard when the delivered path uses it while the named test checks an old copy; speculation requiring deliberate gaming remains invalid. The host may prove the guard by moving aside a named input it actually moves and requiring the check to fail; that proof is never a counterexample. Do not generate substitute data.".to_string(),
+            String::from("Make the check fail on the pre-implementation tree if it does not exercise what the work must add. Otherwise, write a regression guard by running the existing test or implementation that decides the criterion, and name the deciding file by its literal path relative to the check's working directory. Its content is shown to the judge only when it is supplied in named_files; if that content is not supplied, its assertions are unknown and it cannot be accepted on assumed content. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. A duplicated or relocated implementation can refute the guard when the delivered path uses it while the named test checks an old copy; speculation requiring deliberate gaming remains invalid. The host may prove the guard by moving aside a named input it actually moves and requiring the check to fail; that proof is never a counterexample. Do not generate substitute data."),
             "Template: choose the root containing the deciding file; name it literally relative to the working directory; make the check's result depend on its test result. A move-aside failure proves the guard only for an input the host actually moves.".to_string(),
         ]);
     }

@@ -25,6 +25,8 @@ async fn proof(command: &str, id: &str, bound: bool) -> (Option<String>, Vec<Str
         let mut findings = super::super::prove::prove(
             &probe,
             &Baseline {
+                origin:
+                    crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
                 commit: trees.base.clone(),
                 repository: trees.repo.clone(),
             },

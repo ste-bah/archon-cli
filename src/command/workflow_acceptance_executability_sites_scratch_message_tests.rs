@@ -74,6 +74,7 @@ async fn assert_real_repository_sibling_is_moved_in_scratch(
     assert!(matches!(probe.site, Site::Scratch(_)));
     let contract = trees.contract();
     let baseline = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: sibling_repository,
     };

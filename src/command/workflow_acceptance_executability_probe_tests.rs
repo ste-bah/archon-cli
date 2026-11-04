@@ -261,11 +261,13 @@ async fn a_freeze_with_no_policy_proves_checks_can_fail_for_a_project_outside_th
     let vacuous = &findings["AC-P-002"];
     assert!(
         vacuous.contains("passed on the pre-implementation tree")
-            && vacuous.contains("no movable input exists under the selected root")
             && vacuous.contains("considered inputs: none discovered")
-            && vacuous.contains("the command names no file that the host can move aside under the selected root")
+            && vacuous.contains(
+                "the command names no file that the host can move aside under the selected root"
+            )
             && vacuous.contains("A test, target or module name is not a file path")
-            && vacuous.contains("The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason")
+            && vacuous.contains("A path the check reads by its literal relative path")
+            && !vacuous.contains(":;")
             && !vacuous.contains("data the check writes itself is never evidence"),
         "{vacuous}"
     );
@@ -366,6 +368,7 @@ async fn a_repair_is_held_to_its_originals_verdict_only_where_that_verdict_was_r
         None,
     )
     .with_baseline(super::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: trees.repo.clone(),
     })

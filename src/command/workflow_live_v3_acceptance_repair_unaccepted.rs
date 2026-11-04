@@ -9,7 +9,7 @@ pub async fn repair_unaccepted(
     llm: Option<&dyn WorkflowLlmClient>,
     context: &StageContext,
     contract: &AcceptanceContract,
-    base: Option<&str>,
+    base: Option<&Baseline>,
 ) -> WorkflowResult<Option<(AcceptanceContractRepairV1, Defects)>> {
     Ok(repair_unaccepted_detailed(llm, context, contract, base)
         .await?
@@ -20,7 +20,7 @@ async fn repair_unaccepted_detailed(
     llm: Option<&dyn WorkflowLlmClient>,
     context: &StageContext,
     contract: &AcceptanceContract,
-    base: Option<&str>,
+    base: Option<&Baseline>,
 ) -> WorkflowResult<Option<(Vec<AcceptanceContractRepairV1>, Defects)>> {
     let ids = non_accepted_ids(contract);
     if ids.is_empty() {
@@ -138,7 +138,7 @@ pub async fn apply(
     contract: &mut AcceptanceContract,
     chain_digest: &mut String,
     record: &mut AcceptanceRoundRecordV1,
-    base: Option<&str>,
+    base: Option<&Baseline>,
 ) -> WorkflowResult<Option<Defects>> {
     let Some((repairs, defects)) = repair_unaccepted_detailed(llm, context, contract, base).await?
     else {

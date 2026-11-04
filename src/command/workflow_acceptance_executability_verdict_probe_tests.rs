@@ -25,6 +25,7 @@ pub(super) fn round_at(
         None,
     )
     .with_baseline(Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: commit.to_string(),
         repository: trees.repo.clone(),
     })

@@ -79,11 +79,12 @@ fn proof_key(contract: &AcceptanceContract, id: &str) -> Option<String> {
 /// The tree before any implementation, as the in-run author finds it
 /// (`author::probe`): the run's base commit, else the commit the task set's
 /// decomposition recorded, else the checkout's HEAD.
-fn base_of(round: &Round<'_>) -> Option<String> {
+fn base_of(round: &Round<'_>) -> Option<Baseline> {
     let context = round.context;
-    (round.base.map(str::to_string)).or_else(|| {
-        Baseline::for_task_set(&context.repository, &context.task_root).map(|b| b.commit)
-    })
+    round
+        .base
+        .cloned()
+        .or_else(|| Baseline::for_task_set(&context.repository, &context.task_root))
 }
 
 fn proofs_path(run_dir: &Path, base: &str) -> PathBuf {
@@ -159,8 +160,8 @@ pub(super) async fn hold_passing(
         }
         return Ok(());
     };
-    let path = proofs_path(run_dir, &base);
-    let mut proofs = load(&path, &base);
+    let path = proofs_path(run_dir, &base.commit);
+    let mut proofs = load(&path, &base.commit);
     let mut findings = BTreeMap::new();
     let mut probe_ids = BTreeSet::new();
     for (id, key) in &passing {
@@ -178,10 +179,7 @@ pub(super) async fn hold_passing(
             context.binding.clone(),
             context.cargo_limits.clone(),
         )
-        .with_baseline(Baseline {
-            commit: base.clone(),
-            repository: context.repository.clone(),
-        });
+        .with_baseline(base.clone());
         let proved = probe.prove_can_fail(contract, &probe_ids).await;
         for id in &proved.proven {
             let proof = Proof {

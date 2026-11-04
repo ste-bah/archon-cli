@@ -479,3 +479,6 @@ fn host_redactor() -> crate::command::workflow_task_set::passability::evidence::
 
 #[path = "workflow_acceptance_executability_prove_alias_tests_diagnostic_cases.rs"]
 mod diagnostic_cases;
+
+#[path = "workflow_acceptance_executability_prove_alias_tests_p1.rs"]
+mod p1;

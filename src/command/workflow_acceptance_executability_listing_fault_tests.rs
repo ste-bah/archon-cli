@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use super::super::super::{ExecutabilityProbe, HostProbe, HostUnproven, UnprovenCause, silent};
+use super::super::super::{
+    BaselineOrigin, ExecutabilityProbe, HostProbe, HostUnproven, UnprovenCause, silent,
+};
 use super::super::no_verdict_cause;
 use super::tests::{Bin, result};
 use super::tests_333::{STALL, warm};
@@ -80,8 +82,16 @@ fn listing_without_output_is_a_retryable_host_fault_while_partial_output_keeps_i
             for _ in 0..2 {
                 let probe = HostProbe::at(root.path().into(), root.path().into(), None);
                 assert!(
-                    silent::settle_as(&probe, &"0".repeat(40), &check, &run, (&why, cause), &at)
-                        .is_none()
+                    silent::settle_as(
+                        &probe,
+                        BaselineOrigin::RecordedBase,
+                        &"0".repeat(40),
+                        &check,
+                        &run,
+                        (&why, cause),
+                        &at
+                    )
+                    .is_none()
                 );
                 assert_eq!(probe.resume.progress.total(), 0, "no verdict was saved");
                 let held = probe.take_unproven_causes();
@@ -169,6 +179,8 @@ fn mutation_proof_keeps_an_inconclusive_listing_with_the_host() {
         let findings = runtime.block_on(prove::prove(
             &probe,
             &Baseline {
+                origin:
+                    crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
                 commit: "0".repeat(40),
                 repository: root.path().into(),
             },

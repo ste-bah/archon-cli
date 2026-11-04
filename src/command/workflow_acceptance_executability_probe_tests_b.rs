@@ -71,6 +71,7 @@ fn round_at(
         None,
     )
     .with_baseline(Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: commit.to_string(),
         repository: trees.repo.clone(),
     })
@@ -116,8 +117,8 @@ async fn what_makes_a_check_run_never_proves_it_can_fail() {
     );
     let manifest = &findings["AC-1-003"];
     assert!(manifest.contains("considered inputs: build manifest or setup file: Cargo.toml"));
-    assert!(manifest.contains("data the check writes itself is never evidence"));
-    assert!(!manifest.contains("A test, target or module name is not a file path"));
+    assert!(manifest.contains("manifests never move"));
+    assert!(manifest.contains("A test, target or module name is not a file path"));
     trees.assert_live_untouched(copies.path());
 }
 

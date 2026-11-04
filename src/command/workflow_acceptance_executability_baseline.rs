@@ -38,18 +38,40 @@ use super::repairs::{TreeRun, timed_out, tree_results};
 use super::sites::{object_id, resolves};
 use super::*;
 
-/// The tree before any implementation, in the repository it belongs to.
+/// Why this tree was selected, carried with it rather than inferred by a reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BaselineOrigin {
+    RecordedBase,
+    HeadFallback,
+    /// A current or failed tree observation, not a pre-implementation baseline.
+    ProbedTree,
+}
+
+impl BaselineOrigin {
+    pub(super) fn tree_name(self) -> &'static str {
+        match self {
+            Self::RecordedBase => "pre-implementation tree",
+            Self::HeadFallback => "HEAD tree (no recorded base exists)",
+            Self::ProbedTree => "probed tree",
+        }
+    }
+}
+
+/// The selected tree, in the repository it belongs to, with its selection origin.
 #[derive(Debug, Clone)]
 pub(crate) struct Baseline {
+    pub(crate) origin: BaselineOrigin,
     pub(crate) commit: String,
     pub(crate) repository: PathBuf,
 }
 
 impl Baseline {
     /// The tree a freeze stands on: `repository`'s HEAD. `None` when it is
-    /// not a git checkout.
+    /// not a git checkout. An explicit HEAD selection carries HeadFallback;
+    /// recorded choices use recorded/decomposed/for_round instead.
     pub(crate) fn head_of(repository: &Path) -> Option<Self> {
         Some(Self {
+            origin: BaselineOrigin::HeadFallback,
             commit: git_head(repository)?,
             repository: repository.to_path_buf(),
         })
@@ -71,6 +93,7 @@ impl Baseline {
     pub(crate) fn recorded(repository: &Path, tasks_root: &Path) -> Option<Self> {
         let commit = recorded_commit(tasks_root).filter(|commit| usable(repository, commit))?;
         Some(Self {
+            origin: BaselineOrigin::RecordedBase,
             commit,
             repository: repository.to_path_buf(),
         })
@@ -84,6 +107,7 @@ impl Baseline {
             .map(|record| record.base_commit)
             .filter(|commit| usable(repository, commit))?;
         Some(Self {
+            origin: BaselineOrigin::RecordedBase,
             commit,
             repository: repository.to_path_buf(),
         })
@@ -114,6 +138,7 @@ impl Baseline {
             None => match run_base.filter(|commit| usable(repository, commit)) {
                 Some(commit) => (
                     Some(Self {
+                        origin: BaselineOrigin::RecordedBase,
                         commit: commit.to_string(),
                         repository: repository.to_path_buf(),
                     }),
@@ -132,14 +157,10 @@ impl Baseline {
         (baseline, Some(note))
     }
 
-    /// The commit a v3 acceptance round in `run_dir` proves its checks able
+    /// The tree a v3 acceptance round in `run_dir` proves its checks able
     /// to fail on ([`Self::for_round`], with the run's own base as its last
     /// fallback); a fallback is logged.
-    pub(crate) fn round_commit(
-        repository: &Path,
-        tasks_root: &Path,
-        run_dir: &Path,
-    ) -> Option<String> {
+    pub(crate) fn for_run(repository: &Path, tasks_root: &Path, run_dir: &Path) -> Option<Self> {
         let run_base = archon_workflow::v2::acceptance_regression::run_base_commit(
             &archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")),
         );
@@ -147,7 +168,7 @@ impl Baseline {
         if let Some(note) = note {
             tracing::warn!(task_root = %tasks_root.display(), "acceptance baseline: {note}");
         }
-        baseline.map(|baseline| baseline.commit)
+        baseline
     }
 }
 

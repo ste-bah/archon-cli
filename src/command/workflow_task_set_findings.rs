@@ -93,14 +93,28 @@ pub(super) fn finish_acceptance(
     })
 }
 
-fn is_baseline_pass_finding(finding: &GateFinding) -> bool {
+pub(super) fn is_baseline_pass_finding(finding: &GateFinding) -> bool {
+    let current = finding
+        .text
+        .starts_with(&format!("check '{}': it passed on the ", finding.subject))
+        && finding.text.contains(super::executability::CANNOT_FAIL);
+    let legacy = "passed on the pre-implementation tree";
+    let selected = format!(
+        "check '{}': it passed on the selected tree at ",
+        finding.subject
+    );
     finding
         .text
         .starts_with(&cannot_pass_prefix(&finding.subject))
-        || (finding.text.starts_with(&format!(
+        || current
+        || finding.text.starts_with(&selected)
+        || ((finding.text.starts_with(&format!(
             "check '{}': the criterion already holds on the pre-implementation tree;",
             finding.subject
-        )) && finding.text.contains(super::executability::CANNOT_FAIL))
+        )) || finding
+            .text
+            .starts_with(&format!("check '{}': it {legacy} at ", finding.subject)))
+            && finding.text.contains(legacy))
 }
 
 /// The passability-specific finding added to an ordinary judge refusal.

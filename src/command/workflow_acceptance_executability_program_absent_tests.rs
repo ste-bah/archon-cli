@@ -46,8 +46,16 @@ fn issue557_a_program_neither_site_nor_host_has_goes_to_its_author_without_a_str
     for attempt in 1..=3 {
         // A fresh probe per attempt: each is a resume of the run.
         let probe = HostProbe::for_task_set(site.set.project.path(), &site.set.tasks);
-        let finding = settle_as(&probe, &site.base, &contract, &result, (&why, cause), &at)
-            .unwrap_or_else(|| panic!("attempt {attempt}: the author gets it at once"));
+        let finding = settle_as(
+            &probe,
+            BaselineOrigin::RecordedBase,
+            &site.base,
+            &contract,
+            &result,
+            (&why, cause),
+            &at,
+        )
+        .unwrap_or_else(|| panic!("attempt {attempt}: the author gets it at once"));
         assert!(finding.starts_with("check 'AC-X-001': "), "{finding}");
         assert!(finding.contains("PY: command not found"), "{finding}");
         assert!(
@@ -91,22 +99,52 @@ fn issue557_true_host_causes_keep_the_strike_rule() {
     for cause in [UnprovenCause::Host, UnprovenCause::PermanentHost] {
         let why = ("it crashed in its own shell code", cause);
         let first = HostProbe::for_task_set(site.set.project.path(), &site.set.tasks);
-        assert!(settle_as(&first, &site.base, &contract, &result, why, &at).is_none());
+        assert!(
+            settle_as(
+                &first,
+                BaselineOrigin::RecordedBase,
+                &site.base,
+                &contract,
+                &result,
+                why,
+                &at
+            )
+            .is_none()
+        );
         let unproven = first.take_unproven_causes();
         let (text, held) = &unproven["AC-X-001"];
         assert_eq!(*held, cause);
         assert!(text.contains("probed again on retry"), "{text}");
         let resumed = HostProbe::for_task_set(site.set.project.path(), &site.set.tasks);
         assert!(
-            settle_as(&resumed, &site.base, &contract, &result, why, &at)
-                .is_some_and(|finding| finding.contains("It failed so again")),
+            settle_as(
+                &resumed,
+                BaselineOrigin::RecordedBase,
+                &site.base,
+                &contract,
+                &result,
+                why,
+                &at
+            )
+            .is_some_and(|finding| finding.contains("It failed so again")),
             "{cause:?}: the strike rule still applies to its own causes"
         );
         clear(&resumed, &site.base, &contract, "AC-X-001");
     }
     let probe = HostProbe::for_task_set(site.set.project.path(), &site.set.tasks);
     let transient = ("the listing gave no answer", UnprovenCause::TransientHost);
-    assert!(settle_as(&probe, &site.base, &contract, &result, transient, &at).is_none());
+    assert!(
+        settle_as(
+            &probe,
+            BaselineOrigin::RecordedBase,
+            &site.base,
+            &contract,
+            &result,
+            transient,
+            &at
+        )
+        .is_none()
+    );
     assert_eq!(
         probe.take_unproven_causes()["AC-X-001"].1,
         UnprovenCause::TransientHost
