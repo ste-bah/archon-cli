@@ -167,6 +167,18 @@ fn issue39_skeleton_rejects_hollow_entries_by_path() {
         "{error}"
     );
     assert_eq!(records.remaining().unwrap(), Vec::<String>::new());
+    // #588: a rejected subject blocks completion until it is re-landed or withdrawn.
+    let error = records
+        .assemble(&json!({"records_landed":0}))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("must be re-landed before completion") && error.contains("TASK-X-001"),
+        "{error}"
+    );
+    records
+        .land(json!({"subject":"TASK-X-001","remove":true}))
+        .unwrap();
     assert!(
         records.assemble(&json!({"records_landed":0})).unwrap()["tasks"]
             .as_array()
