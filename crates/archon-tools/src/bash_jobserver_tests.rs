@@ -37,7 +37,7 @@ fn bash_preparation_removes_legacy_jobserver_fds_after_host_overlay() {
     launch_with_jobserver(["--silent", "--jobserver-fds=PAIR -j2", ""]);
 }
 #[test]
-fn bash_preparation_removes_split_fds_and_keeps_fifo_and_assignments() {
+fn bash_preparation_removes_split_fds_keeps_fifo_and_drops_assignments() {
     launch_with_jobserver([
         "--silent --jobserver-auth PAIR",
         "",
@@ -97,7 +97,7 @@ async fn prepared_jobserver_child() {
                 .content
                 .contains("--jobserver-auth=fifo:/tmp/archon-jobserver")
         );
-        assert!(result.content.contains("-- X=keep"));
+        assert!(!result.content.contains("X=keep"), "{}", result.content);
     }
     assert!(result.content.contains("--silent"));
 }

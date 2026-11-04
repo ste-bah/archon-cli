@@ -61,7 +61,7 @@ fn powershell_child_gets_no_inherited_legacy_jobserver_fds() {
 }
 
 #[test]
-fn powershell_child_keeps_fifo_jobservers_and_assignments() {
+fn powershell_child_keeps_fifo_jobservers_and_drops_assignments() {
     launch_with_jobserver([
         "--silent --jobserver-auth PAIR",
         "",
@@ -102,7 +102,7 @@ async fn powershell_jobserver_child() {
     }
     if std::env::var("GNUMAKEFLAGS").unwrap().contains("fifo:") {
         assert!(seen.contains("--jobserver-auth=fifo:/tmp/archon-jobserver"));
-        assert!(seen.contains("-- X=keep"), "{seen}");
+        assert!(!seen.contains("X=keep"), "{seen}");
     }
     assert!(seen.contains("--silent"), "{seen}");
 }
