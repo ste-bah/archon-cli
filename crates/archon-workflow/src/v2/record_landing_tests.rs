@@ -307,12 +307,10 @@ fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema
     assert!(error.contains("a skeleton task must name the PRD obligations it implements and/or the artifacts it delivers"), "{error}");
     assert!(error.contains("implements"), "{error}");
     assert!(error.contains("Expected schema:"), "{error}");
+    assert!(landing.hint().unwrap().contains("Host retained 0 records."));
     assert!(
-        landing.assemble(&json!({"records_landed":0})).unwrap()["tasks"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
-        "the stub must not be retained"
+        landing.assemble(&json!({"records_landed":0})).is_err(),
+        "a rejected subject must be repaired before completion"
     );
     let error = landing.land(json!({"subject":"TASK-CORE-002","task":{"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md"}})).unwrap_err().to_string();
     assert!(

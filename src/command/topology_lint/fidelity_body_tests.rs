@@ -107,8 +107,7 @@ async fn a_false_verdict_on_the_candidate_is_a_body_finding_naming_obligation_an
 }
 
 #[tokio::test]
-async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_for_its_weakest_task()
- {
+async fn a_quote_less_cross_task_gap_is_a_body_gate_note_and_a_set_gate_skeleton_finding() {
     let temp = split_corpus();
     let cwd = temp.path();
     let body = candidate_body("This task names TASK-WS-001 as the owner of the shared result.");
@@ -162,7 +161,7 @@ async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_
     assert_eq!(finding.subject, "AC-WS-001");
     assert_eq!(
         finding.remediation_scope,
-        archon_workflow::RemediationScope::Body
+        archon_workflow::RemediationScope::Skeleton
     );
     assert!(
         finding

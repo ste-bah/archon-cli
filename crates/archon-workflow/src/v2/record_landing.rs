@@ -81,6 +81,7 @@ pub struct RecordLanding {
     subjects_are_tasks: bool,
     lock: Mutex<()>,
     frozen_tasks: Mutex<Option<BTreeMap<String, String>>>,
+    rejected: Mutex<BTreeMap<String, Vec<String>>>,
 }
 fn invalid(e: impl std::fmt::Display) -> WorkflowError {
     WorkflowError::ArtifactInvalid(e.to_string())
@@ -122,6 +123,7 @@ impl RecordLanding {
             subjects_are_tasks,
             lock: Mutex::new(()),
             frozen_tasks: Mutex::new(None),
+            rejected: Mutex::new(BTreeMap::new()),
         })
     }
     pub fn kind(&self) -> RecordKind {
@@ -240,8 +242,7 @@ impl RecordLanding {
         }
         Ok(())
     }
-    pub fn land(&self, mut value: Value) -> WorkflowResult<()> {
-        let _lock = self.lock.lock().map_err(invalid)?;
+    fn land_record(&self, mut value: Value) -> WorkflowResult<()> {
         // Issue-39: the agent envelope fills a missing command kind, derives status from exit_code and synthesises output_summary, while a landed record rejected the same entry with `missing field kind`; apply the one normaliser here so the two paths agree, and let the Issue-35 path error name whatever it cannot fill.
         if let Some(object) = value.as_object_mut() {
             super::agent_output_normalize::normalize_commands(object);
@@ -353,6 +354,7 @@ impl RecordLanding {
     }
     pub fn assemble(&self, completion: &Value) -> WorkflowResult<Value> {
         let _lock = self.lock.lock().map_err(invalid)?;
+        self.require_repaired()?;
         let records = self.records()?;
         let missing = self
             .subjects
@@ -482,3 +484,6 @@ pub(crate) fn expand_result(
 
 #[path = "record_landing_patch.rs"]
 mod patch;
+
+#[path = "record_landing_rejected.rs"]
+mod rejected;

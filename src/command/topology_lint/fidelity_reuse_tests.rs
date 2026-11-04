@@ -347,7 +347,8 @@ async fn standing_verdicts_that_contradict_each_other_are_one_finding_quoting_bo
         "{}",
         finding.text
     );
-    assert_eq!(finding.subject, "AC-WS-001");
+    assert_eq!(finding.subject, "TASK-WS-001");
+    assert_eq!(finding.judged_item.as_deref(), Some("AC-WS-001"));
     assert!(evaluation.report.contains("G-WS-001: necessarily true"));
 }
 

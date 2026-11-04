@@ -32,10 +32,10 @@ impl Drop for TestProject {
         let name = root.file_name().unwrap().to_string_lossy();
         let harness = root.parent().unwrap().join(format!("{name}-harness"));
         if std::thread::panicking() {
-            crate::diagnostics::print_failure(&root, &self.provider.requests);
             if let Some(temp) = self.temp.take() {
                 let _ = temp.keep();
             }
+            crate::diagnostics::print_failure(&root, &self.provider.requests);
         }
         if !std::thread::panicking() {
             let _ = fs::remove_dir_all(harness);
@@ -64,11 +64,12 @@ pub fn project_with(plan: server::Plan) -> TestProject {
 /// The fixture with `files` (project-relative path, contents) written over
 /// it before the repository's fixture commit.
 pub fn project_with_files(plan: server::Plan, files: &[(&str, String)]) -> TestProject {
-    let temp = tempfile::tempdir().unwrap();
+    let mut temp = crate::diagnostics::PendingProject(Some(tempfile::tempdir().unwrap()));
+    let temp_path = temp.0.as_ref().unwrap().path();
     let root = if plan.variant == server::Variant::SiblingCheck {
-        temp.path().join("project")
+        temp_path.join("project")
     } else {
-        temp.path().to_path_buf()
+        temp_path.to_path_buf()
     };
     fs::create_dir_all(&root).unwrap();
     fs::create_dir_all(root.join("repository")).unwrap();
@@ -146,7 +147,7 @@ max_concurrent = 1
     fs::write(root.join("config.toml"), &config).unwrap();
     fs::write(root.join(".archon/config.toml"), &config).unwrap();
     TestProject {
-        temp: Some(temp),
+        temp: temp.0.take(),
         root,
         provider,
     }

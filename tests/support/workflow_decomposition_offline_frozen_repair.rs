@@ -97,6 +97,9 @@ fn refresh_older_receipts(root: &Path, run_dir: &Path) {
     let canonical_root = root.canonicalize().unwrap();
     for entry in fs::read_dir(run_dir.join("v2/results")).unwrap() {
         let path = entry.unwrap().path();
+        if !path.is_file() {
+            continue;
+        }
         let mut record: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         if let Some(version) = record["result"]["data"]["logicVersion"].as_u64() {

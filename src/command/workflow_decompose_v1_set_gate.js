@@ -312,7 +312,7 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
   chain.outcome = outcome;
   chain.subjects = outcome.subjects;
   const next = SKELETON_TASKS.get(outcome);
-  const grouped = new Map(groupFindingsBySubject(bodyFindings, chain.subjects));
+  const grouped = new Map(groupFindingsBySubject([...bodyFindings, ...findings], chain.subjects));
   const onDisk = frozenChain().bodies;
   const dependencies = changedDependencySubjects(prior, next);
   const reached = (subject) => dependencies.has(subject.taskId) || !prior || !next

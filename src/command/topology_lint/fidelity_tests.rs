@@ -256,7 +256,7 @@ async fn evaluate(cwd: &Path, client: Result<Arc<dyn WorkflowLlmClient>>) -> Gat
 }
 
 #[tokio::test]
-async fn a_false_verdict_blocks_with_body_scope_and_the_exact_finding_text() {
+async fn a_quote_less_false_verdict_blocks_with_skeleton_scope_and_the_exact_finding_text() {
     let temp = corpus();
     let critic = FakeCritic::new(vec![Ok(reply(&["G-WS-001"]))]);
     let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
@@ -274,7 +274,7 @@ async fn a_false_verdict_blocks_with_body_scope_and_the_exact_finding_text() {
     );
     assert_eq!(
         finding.remediation_scope,
-        archon_workflow::RemediationScope::Body
+        archon_workflow::RemediationScope::Skeleton
     );
     assert_eq!(finding.subject, "G-WS-001");
     assert!(
@@ -461,3 +461,6 @@ async fn waivers_are_recorded_verbatim_in_the_pin_and_downgrade_the_finding() {
 
 #[path = "fidelity_cluster_tests.rs"]
 mod cluster;
+
+#[path = "fidelity_scope_tests.rs"]
+mod scope_tests;

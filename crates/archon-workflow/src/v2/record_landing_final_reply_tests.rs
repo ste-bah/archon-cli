@@ -82,3 +82,234 @@ fn issue550_only_a_skeleton_with_retained_records_offers_a_host_completion() {
         .unwrap();
     assert_eq!(review.retained_completion().unwrap(), None);
 }
+
+fn reject_duplicate(landing: &RecordLanding, id: &str) -> String {
+    let mut record = task_record(id);
+    record["task"]["source_sections"] = json!(["2", "2"]);
+    let error = landing.land(record).unwrap_err().to_string();
+    assert!(
+        error.contains(id) && error.contains("lists '2' twice"),
+        "{error}"
+    );
+    error
+}
+fn refused(landing: &RecordLanding, count: u64, earlier: &str) -> String {
+    let error = landing
+        .compose(&json!({"records_landed":count}))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains(earlier),
+        "must retain the exact rejection: {error}"
+    );
+    error
+}
+
+#[test]
+fn record_landing_rejected_a_fixed_then_final_is_accepted() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    reject_duplicate(&landing, "TASK-X-001");
+    landing.land(task_record("TASK-X-001")).unwrap();
+    assert_eq!(
+        landing.compose(&json!({"records_landed":1})).unwrap()["tasks"][0]["task_id"],
+        "TASK-X-001"
+    );
+}
+
+#[test]
+fn record_landing_rejected_a_then_final_repeats_a_and_duplicate() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let earlier = reject_duplicate(&landing, "TASK-X-001");
+    refused(&landing, 0, &earlier);
+}
+
+#[test]
+fn record_landing_rejected_a_then_b_landed_final_names_only_a() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let earlier = reject_duplicate(&landing, "TASK-X-001");
+    landing.land(task_record("TASK-X-002")).unwrap();
+    assert!(!refused(&landing, 1, &earlier).contains("TASK-X-002"));
+}
+
+#[test]
+fn record_landing_patch_rejected_subject_cannot_hide_behind_seed() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let seed = json!({"schema_version":1,"acceptance_digest":"", "tasks":[task_record("TASK-X-001")["task"], task_record("TASK-X-002")["task"]]});
+    landing.seed_skeleton(&seed, true).unwrap();
+    let earlier = reject_duplicate(&landing, "TASK-X-001");
+    refused(&landing, 2, &earlier);
+    landing.land(task_record("TASK-X-001")).unwrap();
+    landing.compose(&json!({"records_landed":2})).unwrap();
+}
+
+#[test]
+fn record_landing_retained_completion_refuses_rejected_unlanded_subject() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let earlier = reject_duplicate(&landing, "TASK-X-001");
+    landing.land(task_record("TASK-X-002")).unwrap();
+    assert!(
+        landing
+            .retained_completion()
+            .unwrap_err()
+            .to_string()
+            .contains(&earlier)
+    );
+}
+
+#[test]
+fn record_landing_never_fixed_is_never_silently_completed() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let earlier = reject_duplicate(&landing, "TASK-X-001");
+    landing.land(task_record("TASK-X-002")).unwrap();
+    // The runner retries two incomplete final replies then takes its existing
+    // `incomplete landed artifact` failure path (or reaches its turn budget).
+    // Its retained-completion fallback must never manufacture success here.
+    for _ in 0..3 {
+        refused(&landing, 1, &earlier);
+        assert!(landing.retained_completion().is_err());
+    }
+}
+
+#[test]
+fn record_landing_out_of_call_review_or_verify_is_not_pending() {
+    for kind in [RecordKind::Review, RecordKind::Verify] {
+        let (_temp, landing) = open(kind, &["A"]);
+        let mut record = json!({"subject":"other", "status":"failed",
+            "evidence":[{"kind":"inspection","summary":"read"}]});
+        assert!(
+            landing
+                .land(record.clone())
+                .unwrap_err()
+                .to_string()
+                .contains("outside this call")
+        );
+        record["subject"] = json!("A");
+        landing.land(record).unwrap();
+        landing.compose(&json!({"records_landed":1})).unwrap();
+    }
+}
+
+#[test]
+fn record_landing_unknown_draft_remove_is_not_pending_p5_31() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    assert!(
+        landing
+            .land(json!({"subject":"TASK-X-999", "remove":true}))
+            .unwrap_err()
+            .to_string()
+            .contains("cannot remove unknown draft task")
+    );
+    landing.land(task_record("TASK-X-001")).unwrap();
+    landing.compose(&json!({"records_landed":1})).unwrap();
+}
+
+#[test]
+fn record_landing_rejected_a_deliberately_removed_clears_pending() {
+    for retained in [false, true] {
+        let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+        if retained {
+            landing.land(task_record("TASK-X-001")).unwrap();
+        }
+        reject_duplicate(&landing, "TASK-X-001");
+        landing
+            .land(json!({"subject":"TASK-X-001", "remove":true}))
+            .unwrap();
+        landing.land(task_record("TASK-X-002")).unwrap();
+        landing.compose(&json!({"records_landed":1})).unwrap();
+        assert_eq!(
+            landing.retained_completion().unwrap(),
+            Some(json!({"records_landed":1}))
+        );
+    }
+}
+
+#[test]
+fn record_landing_subject_task_id_mismatch_is_not_pending() {
+    for frozen in [false, true] {
+        let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+        if frozen {
+            landing
+                .seed_skeleton(
+                    &json!({"schema_version":1,"acceptance_digest":"",
+                "tasks":[task_record("TASK-X-001")["task"]]}),
+                    true,
+                )
+                .unwrap();
+        }
+        let mut record = task_record("TASK-X-001");
+        record["subject"] = json!("typo");
+        let error = landing.land(record).unwrap_err().to_string();
+        assert!(
+            error.contains(if frozen {
+                "preserve every frozen task_id"
+            } else {
+                "skeleton task identity mismatch"
+            }),
+            "{error}"
+        );
+        landing.land(task_record("TASK-X-001")).unwrap();
+        landing.compose(&json!({"records_landed":1})).unwrap();
+    }
+}
+
+#[test]
+fn record_landing_rejected_a_still_bad_reports_newest_rejection_only() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let old = reject_duplicate(&landing, "TASK-X-001");
+    let mut record = task_record("TASK-X-001");
+    record["task"]["source_sections"] = json!(["9", "9"]);
+    let newest = landing.land(record).unwrap_err().to_string();
+    assert!(newest.contains("lists '9' twice"));
+    let error = refused(&landing, 0, &newest);
+    assert!(!error.contains(&old));
+    landing.land(task_record("TASK-X-002")).unwrap();
+    let hint = landing.hint().unwrap();
+    assert!(hint.contains("Completion is pending") && hint.contains("TASK-X-001"));
+    assert!(!hint.contains("your final reply is exactly"));
+}
+
+#[test]
+fn record_landing_string_encoded_task_rejection_is_pending_until_fixed() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let mut record = task_record("TASK-X-001");
+    record["task"]["source_sections"] = json!(["2", "2"]);
+    record["task"] = json!(record["task"].to_string());
+    let earlier = landing.land(record).unwrap_err().to_string();
+    assert!(earlier.contains("lists '2' twice"));
+    refused(&landing, 0, &earlier);
+    landing.land(task_record("TASK-X-001")).unwrap();
+    landing.compose(&json!({"records_landed":1})).unwrap();
+}
+
+#[test]
+fn record_landing_pending_new_task_hint_matches_draft_and_frozen_modes() {
+    for frozen in [false, true] {
+        let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+        landing
+            .seed_skeleton(
+                &json!({"schema_version":1,"acceptance_digest":"",
+            "tasks":[task_record("TASK-X-001")["task"]]}),
+                frozen,
+            )
+            .unwrap();
+        let error = reject_duplicate(&landing, "TASK-X-002");
+        let hint = landing.hint().unwrap();
+        assert!(hint.contains(&error), "{hint}");
+        let removal = landing.land(json!({"subject":"TASK-X-002", "remove":true}));
+        if frozen {
+            assert!(!hint.contains("withdraw"), "{hint}");
+            assert!(
+                hint.contains("Re-land valid tasks under these subject ids"),
+                "{hint}"
+            );
+            assert!(removal.is_err());
+            refused(&landing, 1, &error);
+            landing.land(task_record("TASK-X-002")).unwrap();
+            landing.compose(&json!({"records_landed":2})).unwrap();
+        } else {
+            assert!(hint.contains("Correct or withdraw"), "{hint}");
+            removal.unwrap();
+            landing.compose(&json!({"records_landed":1})).unwrap();
+        }
+    }
+}

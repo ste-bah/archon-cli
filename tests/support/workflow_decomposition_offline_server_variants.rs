@@ -9,6 +9,9 @@ use super::script::{body_author_marker, judge_decision, scripted_answer, user_pr
 #[path = "workflow_decomposition_offline_server_large.rs"]
 pub mod large;
 
+#[path = "workflow_decomposition_offline_server_r17.rs"]
+pub mod r17;
+
 /// A secret-shaped token (an Anthropic key prefix). Redaction of public
 /// copies replaces such a word with `<redacted>`.
 pub const SECRET_TOKEN: &str = "sk-ant-api03-offlineFixtureSecret0123456789";
@@ -24,6 +27,7 @@ pub const HEREDOC_SCRIPT: &str = "set -eu\npython3 - src/beta.json <<'PY'\nimpor
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
     Golden,
+    R17(r17::Cell),
     /// The AC-X-001 author reply carries a secret-shaped word after its entry.
     SecretInAcceptanceReply,
     /// SUP-REQ-X-001 is authored as a check block with CRLF line ends.
@@ -42,6 +46,9 @@ pub enum Variant {
 }
 
 pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {
+    if let Variant::R17(cell) = variant {
+        return r17::answer(prompt, cell);
+    }
     if let Variant::Large(n) = variant {
         return large::answer(prompt, n);
     }

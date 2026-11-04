@@ -147,3 +147,7 @@
 // classification change verdicts; re-pin P1, P4, P5, P6 and A20 wording changes.
 // verify-frozen-skeleton 8 -> 9 (P5, already bumped): normalized skeleton
 // equality changes verdicts; re-pin P1, P2+P3, P4, P6 and integration changes only.
+
+// #587/#588: task-set-lint 28 routes critic findings without verified body
+// evidence to Skeleton. Re-pin other changed closures only: landing completion
+// and repair hints change author sessions, not their gate verdict rules.

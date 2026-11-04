@@ -145,3 +145,53 @@ test('carried seed reaches freeze without writing context or calling the author'
   assert.deepEqual(out.prompts, []);
   assert.deepEqual(out.stdins, [previous]);
 });
+
+for (const scope of ['skeleton', 'body']) {
+  for (const skeletonChanges of scope === 'skeleton' ? [false, true] : [false]) {
+    test(`#587 ${scope} finding, skeleton ${skeletonChanges ? 'changes' : 'unchanged'}: named body receives omission and converges without pause`, async () => {
+      const {ctx} = context();
+      const previous = candidate(0);
+      const outcome = clean();
+      ctx.recordSkeletonTasks(outcome, previous);
+      const chain = {outcome, subjects:outcome.subjects};
+      const bodies = new Map([['TASK-X-001.md', {content:'a temporary root leaves the shared store empty'}]]);
+      const text = 'task TASK-X-001: require the shared store entry; a temporary root leaves the shared store empty';
+      const defect = {text, subject:'AC-X-001', source_path:'/project/tasks/TASK-X-001.md', remediation_scope:scope};
+      let skeletonAuthors = 0, bodyAuthors = 0, lintCalls = 0, repaired = false;
+      const w = {
+        agent:async (id, options) => {
+          if (id.startsWith('skeleton-')) {
+            skeletonAuthors++;
+            assert.equal(scope, 'skeleton');
+            assert(options.task.includes(text), 'skeleton receives the finding');
+            // A valid existing skeleton has nothing to change for a body omission.
+            const next = JSON.parse(previous);
+            if (skeletonChanges) next.tasks[0].source_sections = ['1'];
+            return {status:'accepted', stopReason:'end_turn', content:JSON.stringify(next)};
+          }
+          bodyAuthors++;
+          assert(options.task.includes(text), 'named body receives the finding even with identical frozen fields');
+          repaired = true;
+          return {status:'accepted', stopReason:'end_turn', content:'# Require the shared store entry'};
+        },
+        hostCommand:async capability => {
+          const result = clean();
+          if (capability === 'task-set-lint') {
+            assert(++lintCalls <= 3, 'bound a regression that fails to reach the body');
+            // Scripted critic stays false until the body changes, regardless of skeleton edits.
+            result.gateEnvelope.policy_findings = repaired ? [] : [defect];
+          }
+          return result;
+        },
+        checkpoint:async () => ({}),
+        pause:async () => { throw new Error('body omission must converge without pause'); }
+      };
+      await ctx.runSetGateLoop(w, chain, bodies);
+      assert.equal(lintCalls, 2);
+      assert.equal(skeletonAuthors, scope === 'skeleton' ? 1 : 0);
+      assert.equal(bodyAuthors, 1);
+      assert.equal(ctx.skeletonCandidateContent(chain.outcome), scope === 'body' ? previous
+        : skeletonChanges ? JSON.stringify({...JSON.parse(previous), tasks:[{...JSON.parse(previous).tasks[0], source_sections:['1']}]}) : previous);
+    });
+  }
+}

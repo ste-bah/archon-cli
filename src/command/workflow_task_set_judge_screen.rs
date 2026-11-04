@@ -289,3 +289,7 @@ mod review_tests;
 #[cfg(test)]
 #[path = "workflow_task_set_judge_safety_tests.rs"]
 mod safety_tests;
+
+#[cfg(test)]
+#[path = "workflow_task_set_judge_r16_dry_run_tests.rs"]
+mod r16_dry_run_tests;

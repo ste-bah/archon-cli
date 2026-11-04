@@ -2,6 +2,10 @@
 use super::*;
 
 impl RecordLanding {
+    pub(crate) fn skeleton_is_frozen(&self) -> WorkflowResult<bool> {
+        Ok(self.frozen_tasks.lock().map_err(invalid)?.is_some())
+    }
+
     pub fn seed_skeleton(&self, previous: &Value, frozen: bool) -> WorkflowResult<()> {
         if self.kind != RecordKind::Skeleton {
             return Err(invalid("only skeleton calls may be seeded"));
@@ -81,9 +85,16 @@ impl RecordLanding {
         let path = self.record_path(subject);
         match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(invalid(format!(
-                "cannot remove unknown draft task {subject}"
-            ))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // A rejected first landing may be deliberately withdrawn in a draft.
+                if self.rejected.lock().map_err(invalid)?.contains_key(subject) {
+                    Ok(())
+                } else {
+                    Err(invalid(format!(
+                        "cannot remove unknown draft task {subject}"
+                    )))
+                }
+            }
             Err(error) => Err(invalid(error)),
         }
     }

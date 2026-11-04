@@ -70,6 +70,7 @@ fn run_launch_repair_lifecycle(variant: server::Variant) {
     let result_records = fs::read_dir(first_run.join("v2/results"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .filter(|p| p.is_file())
         .collect::<Vec<_>>();
     let freeze_record = result_records
         .iter()
@@ -292,7 +293,9 @@ fn run_launch_repair_lifecycle(variant: server::Variant) {
     assert!(!log.contains("acceptance=reauthor_failed"), "{log}");
     let results = fs::read_dir(run_dir.join("v2/results"))
         .unwrap()
-        .map(|entry| fs::read(entry.unwrap().path()).unwrap())
+        .map(|entry| entry.unwrap().path())
+        .filter(|p| p.is_file())
+        .map(|p| fs::read(p).unwrap())
         .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).unwrap())
         .collect::<Vec<_>>();
     assert!(
