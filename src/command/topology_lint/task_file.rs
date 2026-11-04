@@ -477,14 +477,3 @@ fn finish(
         deterministic,
     }
 }
-
-pub(super) fn skeleton_owned_defect(id: &archon_workflow::defect::DeterministicDefect) -> bool {
-    matches!(
-        id.code.as_str(),
-        "uncited_section"
-            | "unknown_section"
-            | "unowned_constraint"
-            | "duplicate_entry"
-            | "untrimmed_entry"
-    )
-}

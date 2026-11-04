@@ -31,6 +31,7 @@ pub(crate) use provider_environment::freeze_provider_environment;
 /// script digest pins, so a change to any of them is a change to the runtime.
 pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
     include_str!("workflow_decompose_v1.js"),
+    include_str!("workflow_decompose_v1_body.js"),
     "\n",
     include_str!("workflow_decompose_reply_blocks.js"),
     "\n",

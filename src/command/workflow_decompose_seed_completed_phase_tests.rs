@@ -29,7 +29,8 @@ async fn completed_phases_are_kept_and_the_open_body_resumes_from_its_findings()
     let new_tasks = run.authors.tasks()[tasks..].to_vec();
     assert_eq!(new_tasks.len(), 1, "only the open body: {new_tasks:?}");
     assert!(
-        new_tasks[0].contains("body is weak") && new_tasks[0].contains("Preserve every frozen"),
+        new_tasks[0].contains("body is weak")
+            && new_tasks[0].contains("The host stamps implements, source_sections, depends_on, blocks and deliverable_contracts from the frozen skeleton; read them there"),
         "{}",
         new_tasks[0]
     );

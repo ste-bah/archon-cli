@@ -110,7 +110,7 @@ fn trace_verdict_blocks_only_deterministic_coverage_defects_with_remedies() {
     assert!(
         verdict.blocking_findings.iter().any(|finding| {
             finding.contains("REQ-X-002")
-                && finding.contains("add it to at least one TASK file's implements list")
+                && finding.contains("add it to at least one frozen skeleton task's implements list")
         }),
         "{:?}",
         verdict.blocking_findings
@@ -457,22 +457,24 @@ fn constraint_ids_are_defined_without_creating_requirement_proof_rows() {
     assert_eq!(report.rows.len(), 1);
 }
 
+#[path = "p6_verdict_tests.rs"]
+mod p6;
+
 #[test]
-fn numbered_section_citations_do_not_become_unknown_obligations() {
-    let dir = tempfile::tempdir().unwrap();
-    let prd = write_prd(dir.path(), &["## 7. Widgets", "- REQ-X-001: work"]);
-    let tasks = write_trace_task(
-        dir.path(),
-        "```yaml\ntask_id: TASK-X-001\ntitle: Widgets\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [REQ-X-001]\nsource_sections: ['7']\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n",
-    );
-    let evaluation = evaluate_trace(dir.path(), &TraceOptions::new(prd, tasks)).unwrap();
+#[allow(non_snake_case)]
+fn P6_3_PRD_constraint_yaml_only_claim_is_falsified_by_the_staged_trace() {
+    let (dir, options) = p6::constraint_claim_fixture();
+    let evaluation =
+        super::evaluation::evaluate_trace_for_published_bodies(dir.path(), &options).unwrap();
+    assert!(evaluation.operational_error().is_none());
+    assert_eq!(evaluation.findings.len(), 1, "{:?}", evaluation.findings);
     assert!(
-        !evaluation
-            .findings
-            .iter()
-            .any(|finding| finding.text.contains("section")
-                || finding.text.contains("unknown obligation")),
-        "{:?}",
-        evaluation.findings
+        evaluation.findings[0]
+            .text
+            .contains("never names QX-001 outside its implements list")
+    );
+    assert_eq!(
+        evaluation.findings[0].remediation_scope,
+        archon_workflow::RemediationScope::Body
     );
 }

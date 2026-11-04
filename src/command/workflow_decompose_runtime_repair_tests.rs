@@ -44,6 +44,7 @@ async fn workflow_decompose_rungs_use_real_host_checkpoints_then_pause_at_the_at
         |root| {
             [
                 "workflow_decompose_v1.js",
+                "workflow_decompose_v1_body.js",
                 "workflow_decompose_reply_blocks.js",
                 "workflow_decompose_v1_acceptance.js",
                 "workflow_decompose_v1_set_gate.js",

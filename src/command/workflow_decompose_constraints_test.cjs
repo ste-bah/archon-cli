@@ -2,7 +2,7 @@ const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const names = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js',
+const names = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js',
   'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js',
   'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'];
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
@@ -32,7 +32,7 @@ function promptChecks() {
   assert.match(skeleton, /all tasks if it restricts all work/);
   assert.match(body, /Read the host-listed PRD constraint texts; this task's work must keep every listed constraint its frozen implements names/);
   assert.doesNotMatch(body, /report that omission|name each applicable constraint id/);
-  assert.match(body, /Copy the frozen implements array exactly/);
+  assert.match(body, /The host stamps implements, source_sections/);
   ctx.args.prdConstraintTexts = Object.fromEntries(Array.from({length:2000}, (_, n) => [`QX-${n}`, 'long restriction']));
   const lines = ctx.constraintContext();
   assert.ok(lines.join('\n').length < 1024);

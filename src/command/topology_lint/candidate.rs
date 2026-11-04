@@ -37,6 +37,7 @@ pub(crate) fn evaluate_task_file_candidate(
                 .deterministic
                 .get_mut(&text)
                 .and_then(|identities| identities.pop_front());
+            super::finding_scope::route(&mut finding, path.parent());
             finding
         })
         .collect();

@@ -37,7 +37,7 @@ function acceptanceAuthorPrompt() {
 function acceptanceReplyFormat() {
   return [
     "Return exactly one complete reply with one entry and one check.",
-    'Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.',
+    COMMAND_EXAMPLES,
     "A complete reply looks exactly like this (each fence line alone on its line):",
     "```json",
     "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",

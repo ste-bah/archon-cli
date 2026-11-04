@@ -239,6 +239,13 @@ pub(super) async fn handle_staged_task_file_lint(
                 return Ok(());
             }
         };
+        if let Ok(raw) = std::str::from_utf8(&candidate) {
+            evaluation
+                .findings
+                .extend(crate::command::requirement_trace::body_claim_findings(
+                    cwd, &path, raw,
+                ));
+        }
         // Whatever the host removed is recorded, a wrapper pair included.
         if let Some(packaging) = &packaging {
             evaluation.report.push_str(&packaging.report());
