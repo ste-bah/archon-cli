@@ -311,3 +311,60 @@ fn deleting_a_verifier_without_a_positive_floor_is_still_unsatisfiable() {
         "{floor_findings:?}"
     );
 }
+
+#[test]
+fn skeleton_and_body_share_every_contract_refusal() {
+    use crate::task_skeleton::{FrozenTask, TaskSkeleton, skeleton_defects, validate_skeleton};
+    let mut bound = instances("output/<ID>/report.json", 0);
+    bound.instance_source_path = Some("input/records.json".into());
+    bound.instance_source_records_field = Some("records".into());
+    bound.instance_artifact_field = Some("report_path".into());
+    let mut floor = concrete("output/report.json");
+    floor.typed_verifier_command = None;
+    floor.min_instances = 1;
+    let mut contracts = vec![concrete("output/report.json"), floor, bound];
+    for verifier in [None, Some("test -f output/report.json"), Some("true")] {
+        let mut contract = concrete("output/report.json");
+        contract.typed_verifier_command = verifier.map(str::to_string);
+        contracts.push(contract);
+    }
+    for (index, contract) in contracts.into_iter().enumerate() {
+        let skeleton = TaskSkeleton {
+            schema_version: 1,
+            acceptance_digest: "digest".into(),
+            tasks: vec![FrozenTask {
+                task_id: "TASK-X-010".into(),
+                file_name: "TASK-X-010.md".into(),
+                depends_on: vec![],
+                blocks: vec![],
+                implements: vec![],
+                source_sections: vec![],
+                deliverable_contracts: vec![contract.clone()],
+            }],
+        };
+        let defects = skeleton_defects(&skeleton, "digest");
+        let body = audit_contracts(&universe(vec![task("TASK-X-010", vec![contract])]));
+        let certain: Vec<_> = body.iter().filter(|f| f.kind.is_certain()).collect();
+        assert_eq!(
+            defects.len(),
+            certain.len(),
+            "case {index}: {defects:?} {body:?}"
+        );
+        assert_eq!(validate_skeleton(&skeleton, "digest").is_ok(), index < 3);
+        if index >= 3 {
+            assert_eq!(defects.len(), 1);
+            assert_eq!(Some(&defects[0].identity), certain[0].identity.as_ref());
+            assert_eq!(defects[0].identity.subject, "TASK-X-010");
+            assert_eq!(
+                defects[0].identity.location,
+                "deliverable_contracts/0/typed_verifier_command"
+            );
+            assert!(
+                defects[0]
+                    .message
+                    .contains("task-skeleton.json task TASK-X-010")
+            );
+            assert!(defects[0].message.contains("min_instances"));
+        }
+    }
+}

@@ -47,6 +47,11 @@ pub fn skeleton_defects(skeleton: &TaskSkeleton, expected_digest: &str) -> Vec<V
             defects.push(ValidationDefect::new("duplicate_filename", &subject, "file_name", format!(
                 "task skeleton file_name '{}' is duplicated; give each task one distinct TASK-*.md filename", task.file_name)));
         }
+        for (index, contract) in task.deliverable_contracts.iter().enumerate() {
+            defects.extend(crate::task_universe_contract_audit::contract_defects(
+                &subject, index, contract,
+            ));
+        }
         let file = Path::new(&task.file_name);
         if file
             .parent()

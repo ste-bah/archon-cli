@@ -234,21 +234,7 @@ pub(crate) fn stamp_frozen_frontmatter(
         )));
     }
     let mut notes = Vec::new();
-    stamp_typed_field::<Vec<archon_workflow::task_skeleton::FrozenDependency>>(
-        map,
-        "depends_on",
-        &frozen.depends_on,
-        &mut notes,
-    )?;
-    stamp_typed_field::<Vec<String>>(map, "blocks", &frozen.blocks, &mut notes)?;
-    stamp_typed_field::<Vec<String>>(map, "implements", &frozen.implements, &mut notes)?;
-    stamp_typed_field::<Vec<String>>(map, "source_sections", &frozen.source_sections, &mut notes)?;
-    stamp_typed_field::<Vec<archon_workflow::task_universe::WorkflowV2DeliverableContract>>(
-        map,
-        "deliverable_contracts",
-        &frozen.deliverable_contracts,
-        &mut notes,
-    )?;
+    stamp_owned_fields(map, frozen, &mut notes)?;
     // Serializing the host's own mapping is a host fault, never `SpecInvalid`.
     let stamped_yaml = serde_yaml_ng::to_string(&metadata)?;
     let stamped_yaml = stamped_yaml.strip_prefix("---\n").unwrap_or(&stamped_yaml);
@@ -259,6 +245,28 @@ pub(crate) fn stamp_frozen_frontmatter(
     result.push('\n');
     result.push_str(&candidate[close..]);
     Ok((result, notes))
+}
+
+// This declaration drives both stamping and remediation ownership.
+macro_rules! frozen_fields {
+    ($($field:ident: $ty:ty),+ $(,)?) => {
+        pub(crate) const HOST_STAMPED_FIELDS: &[&str] = &[$(stringify!($field)),+];
+        fn stamp_owned_fields(
+            map: &mut serde_json::Map<String, serde_json::Value>,
+            frozen: &archon_workflow::task_skeleton::FrozenTask,
+            notes: &mut Vec<String>,
+        ) -> WorkflowResult<()> {
+            $(stamp_typed_field::<$ty>(map, stringify!($field), &frozen.$field, notes)?;)+
+            Ok(())
+        }
+    };
+}
+frozen_fields! {
+    depends_on: Vec<archon_workflow::task_skeleton::FrozenDependency>,
+    blocks: Vec<String>,
+    implements: Vec<String>,
+    source_sections: Vec<String>,
+    deliverable_contracts: Vec<archon_workflow::task_universe::WorkflowV2DeliverableContract>,
 }
 
 fn stamp_typed_field<T>(
