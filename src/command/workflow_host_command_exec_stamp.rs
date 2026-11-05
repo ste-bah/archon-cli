@@ -67,7 +67,7 @@ pub(super) fn stamp_request(
             ));
         }
     };
-    let (stamped, mut notes) =
+    let (stamped, notes) =
         match super::super::workflow_host_command_binding::stamp_frozen_frontmatter(
             &candidate[anchor.opener..],
             frozen,
@@ -82,18 +82,6 @@ pub(super) fn stamp_request(
             }
             Err(error) => return Err(error),
         };
-    let observed = crate::command::topology_lint::repository_observations_stamp::stamp(
-        &context.task_root,
-        path,
-        &stamped,
-    )
-    .map_err(|error| {
-        WorkflowError::ArtifactInvalid(format!("stamping repository observations: {error:#}"))
-    })?;
-    if observed != stamped {
-        notes.push("repository observations".into());
-    }
-    let stamped = observed;
     request.stdin = Some(format!("{}{}", &candidate[..anchor.opener], stamped));
     Ok(Ok(notes))
 }

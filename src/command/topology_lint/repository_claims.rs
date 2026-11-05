@@ -95,7 +95,7 @@ pub(crate) fn body_findings(
     };
     let reported: std::collections::BTreeSet<&str> =
         observed.iter().map(|(p, _)| p.as_str()).collect();
-    let claims = claim_findings(tree, project_root, task_id, text)
+    let claims = claim_findings(tree, project_root, task_id, text)?
         .into_iter()
         .filter(|(paths, _)| !paths.iter().any(|p| reported.contains(p.as_str())))
         .map(|(_, text)| text)
@@ -119,6 +119,7 @@ pub(crate) fn findings_against(
     text: &str,
 ) -> Vec<String> {
     claim_findings(tree, project_root, task_id, text)
+        .unwrap()
         .into_iter()
         .map(|(_, text)| text)
         .collect()
@@ -132,25 +133,60 @@ fn claim_findings(
     project_root: &Path,
     task_id: &str,
     text: &str,
-) -> Vec<(Vec<String>, String)> {
+) -> Result<Vec<(Vec<String>, String)>> {
     let mut findings = Vec::new();
     for claim in extract_claims(text) {
-        let Some(relatives) = resolve_scoped_paths(tree, &claim)
+        let resolved = (|| -> Result<Vec<String>> {
+            super::repository_paths::checked_path(tree, &claim.path)?;
+            if let Some(scope) = &claim.scope {
+                super::repository_paths::checked_path(tree, scope)?;
+            }
+            resolve_scoped_paths(tree, &claim)
+        })();
+        let paths = match resolved {
+            Ok(paths) => paths,
+            Err(error) => {
+                if error
+                    .downcast_ref::<super::repository_paths::PathFault>()
+                    .is_some()
+                {
+                    findings.push((vec![claim.path.clone()], format!("{task_id}: {error}")));
+                    continue;
+                }
+                return Err(error);
+            }
+        };
+        let Some(relatives) = paths
             .iter()
             .map(|path| tree.relative_to_root(path))
             .collect::<Option<Vec<_>>>()
         else {
             continue;
         };
-        let refutes = |relative: &String| {
-            let truth = tree.truth(relative);
+        let mut all_refuted = !relatives.is_empty();
+        let mut path_fault = false;
+        for relative in &relatives {
+            let truth = match super::repository_paths::truth(tree, relative) {
+                Ok(truth) => truth,
+                Err(error) => {
+                    if error
+                        .downcast_ref::<super::repository_paths::PathFault>()
+                        .is_some()
+                    {
+                        findings.push((vec![relative.clone()], format!("{task_id}: {error}")));
+                        path_fault = true;
+                        break;
+                    }
+                    return Err(error);
+                }
+            };
             let in_project = !claim.path.starts_with('/') && project_root.join(relative).exists();
-            match claim.claim {
+            all_refuted &= match claim.claim {
                 Claim::Absent => truth.certainly_exists(),
                 Claim::Exists => truth.certainly_absent() && !in_project,
-            }
-        };
-        if relatives.is_empty() || !relatives.iter().all(refutes) {
+            };
+        }
+        if path_fault || !all_refuted {
             continue;
         }
         let (said, observed) = match claim.claim {
@@ -178,7 +214,7 @@ fn claim_findings(
         );
         findings.push((relatives, finding));
     }
-    findings
+    Ok(findings)
 }
 
 /// The paths a claim may be about. A path with components may already be
@@ -186,25 +222,25 @@ fn claim_findings(
 /// directory: keep an existing root path, otherwise use the only scoped
 /// interpretation present in the tree. A bare name is joined to every
 /// directory the scope may name. Empty when the claim names no path.
-fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Vec<String> {
+fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Result<Vec<String>> {
     let Some(cited) = &claim.scope else {
-        return vec![claim.path.clone()];
+        return Ok(vec![claim.path.clone()]);
     };
-    let scopes = scope_directories(tree, cited);
+    let scopes = scope_directories(tree, cited)?;
     if claim.scoped_join || !claim.path.contains('/') {
-        return scopes
+        return Ok(scopes
             .iter()
             .map(|scope| format!("{scope}/{}", claim.path))
-            .collect();
+            .collect());
     }
     if scopes.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let Some(root_path) = tree.relative_to_root(&claim.path) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    if tree.truth(&root_path).certainly_exists() {
-        return vec![claim.path.clone()];
+    if super::repository_paths::truth(tree, &root_path)?.certainly_exists() {
+        return Ok(vec![claim.path.clone()]);
     }
     // Each scope directory is one reading, judged on its own: it names a path
     // only when exactly one of its candidates exists. A claim is checked
@@ -217,15 +253,19 @@ fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Vec<String>
         {
             candidates.push(format!("{scope}/{remainder}"));
         }
-        let mut present = candidates
-            .into_iter()
-            .filter(|path| tree.truth(path).certainly_exists());
+        let mut existing = Vec::new();
+        for path in candidates {
+            if super::repository_paths::truth(tree, &path)?.certainly_exists() {
+                existing.push(path);
+            }
+        }
+        let mut present = existing.into_iter();
         let (Some(only), None) = (present.next(), present.next()) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         readings.insert(only);
     }
-    readings.into_iter().collect()
+    Ok(readings.into_iter().collect())
 }
 
 /// The repository directories an explicit scope may name. Empty when the
@@ -242,32 +282,38 @@ fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Vec<String>
 ///   joined, so "`x.rs` exists under `docs/v1.3/`" is checked and refuted.
 ///   A scope like `config.json` may be a file outside the repository (a
 ///   project file, or one still to be written), so it is no scope.
-fn scope_directories(tree: &RepositoryTree, cited: &str) -> Vec<String> {
+fn scope_directories(tree: &RepositoryTree, cited: &str) -> Result<Vec<String>> {
     let slashed = cited.ends_with('/');
     let Some(scope) = tree.relative_to_root(cited).filter(|s| !s.is_empty()) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    if tree.is_dir_at_base(&scope) || tree.root().join(&scope).is_dir() {
-        return vec![scope];
+    let checked = super::repository_paths::checked_path(tree, &scope)?;
+    let metadata = match std::fs::metadata(checked) {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(super::repository_paths::metadata_error(&scope, error)),
+    };
+    if tree.is_dir_at_base(&scope) || metadata.as_ref().is_some_and(|m| m.is_dir()) {
+        return Ok(vec![scope]);
     }
-    if tree.exists_at_base(&scope) || tree.root().join(&scope).is_file() {
-        return Vec::new();
+    if tree.exists_at_base(&scope) || metadata.as_ref().is_some_and(|m| m.is_file()) {
+        return Ok(Vec::new());
     }
     let (dirs, files): (Vec<&String>, Vec<&String>) = tree
         .paths_ending_with(&scope)
         .into_iter()
         .partition(|path| tree.is_dir_at_base(path));
     if !slashed && !files.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if !dirs.is_empty() {
-        return dirs.into_iter().cloned().collect();
+        return Ok(dirs.into_iter().cloned().collect());
     }
     let last = scope.rsplit('/').next().unwrap_or(&scope);
     if slashed || !parser::has_file_extension(last) {
-        vec![scope]
+        Ok(vec![scope])
     } else {
-        Vec::new()
+        Ok(Vec::new())
     }
 }
 

@@ -46,7 +46,7 @@ mod preflight;
 mod render;
 mod repository_claims;
 pub(crate) mod repository_observations;
-pub(crate) mod repository_observations_stamp;
+mod repository_paths;
 pub(crate) mod scope_declarations;
 mod task_file;
 mod task_set;

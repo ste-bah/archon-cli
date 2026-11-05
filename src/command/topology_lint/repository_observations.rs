@@ -4,6 +4,7 @@ use std::path::Path;
 
 use archon_workflow::repository_record::RepositoryTree;
 use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
+use archon_write_plan::declared_paths::declared_file_paths;
 
 use super::fences::prose_lines;
 
@@ -16,9 +17,10 @@ pub(crate) enum Observation {
 
 /// The deliverable paths a parsed task names, as written.
 pub(crate) fn deliverable_paths(task: &WorkflowV2TaskUniverseTask, raw: &str) -> Vec<String> {
-    let mut paths: Vec<String> = archon_workflow::task_universe::parsing::declared_files_expected_to_change_items_preserving_lines(raw)
+    let prose = prose_lines(raw).collect::<Vec<_>>().join("\n");
+    let mut paths: Vec<String> = archon_workflow::task_universe::parsing::declared_files_expected_to_change_items_preserving_lines(&prose)
         .iter()
-        .flat_map(|item| paths_in_item(item))
+        .flat_map(|item| declared_file_paths(item))
         .collect();
     paths.extend(
         task.deliverable_contracts
@@ -33,46 +35,6 @@ pub(crate) fn deliverable_paths(task: &WorkflowV2TaskUniverseTask, raw: &str) ->
     paths.retain(|path| !path.is_empty());
     paths.sort();
     paths.dedup();
-    paths
-}
-
-/// Read only a leading path list. Descriptions terminate it independently of
-/// observation grammar; a wrapped line continues only after a list joiner.
-fn paths_in_item(item: &str) -> Vec<String> {
-    let mut paths = Vec::new();
-    let mut rest = item.trim_start();
-    loop {
-        let (token, tail) = if let Some(quoted) = rest.strip_prefix('`') {
-            let Some(close) = quoted.find('`') else { break };
-            (&quoted[..close], &quoted[close + 1..])
-        } else {
-            let end = rest
-                .find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':'))
-                .unwrap_or(rest.len());
-            (&rest[..end], &rest[end..])
-        };
-        if !is_path_shaped(token) {
-            break;
-        }
-        paths.push(token.to_string());
-        rest = tail.trim_start();
-        if let Some(tail) = rest.strip_prefix(',').or_else(|| rest.strip_prefix(';')) {
-            rest = tail.trim_start();
-            if let Some(tail) = rest
-                .strip_prefix("and")
-                .filter(|tail| tail.starts_with(char::is_whitespace))
-            {
-                rest = tail.trim_start();
-            }
-        } else if let Some(tail) = ["and/or", "and", "or", "+"].iter().find_map(|joiner| {
-            rest.strip_prefix(*joiner)
-                .filter(|tail| tail.starts_with(char::is_whitespace))
-        }) {
-            rest = tail.trim_start();
-        } else {
-            break;
-        }
-    }
     paths
 }
 
@@ -172,6 +134,7 @@ fn ends_word(tail: &str) -> bool {
 
 /// Lines as the `Read` tool numbers them: `str::lines`, on bytes so a file
 /// that is not UTF-8 still counts.
+#[cfg(test)]
 pub(crate) fn count_lines(bytes: &[u8]) -> usize {
     match bytes.last() {
         None => 0,
@@ -181,36 +144,51 @@ pub(crate) fn count_lines(bytes: &[u8]) -> usize {
 
 /// One rule source for landing and lint. Only NotFound means absent.
 pub(crate) fn observe(tree: &RepositoryTree, relative: &str) -> anyhow::Result<Observation> {
-    let path = tree.root().join(relative);
+    let path = super::repository_paths::checked_path(tree, relative)?;
     let fail = |error: std::io::Error| {
-        let message = format!(
-            "repository observation failed for {}: {error}",
+        anyhow::Error::new(error).context(format!(
+            "repository observation failed for {}",
             path.display()
-        );
-        eprintln!("{message}");
-        anyhow::anyhow!(message)
+        ))
     };
     let metadata = match std::fs::metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Observation::Absent);
         }
-        Err(error) => return Err(fail(error)),
+        Err(error) => return Err(super::repository_paths::metadata_error(relative, error)),
     };
     if metadata.is_dir() {
         return Ok(Observation::Directory);
     }
     if !metadata.is_file() {
-        let message = format!(
-            "repository observation failed for {}: unsupported file type",
-            path.display()
-        );
-        eprintln!("{message}");
-        anyhow::bail!(message);
+        return Err(super::repository_paths::PathFault(format!(
+            "`{relative}`: unsupported repository path file type"
+        ))
+        .into());
     }
-    let bytes = std::fs::read(&path).map_err(fail)?;
+    use std::io::Read;
+    const LIMIT: u64 = 64 * 1024 * 1024;
+    let mut reader = std::fs::File::open(&path).map_err(fail)?.take(LIMIT + 1);
+    let mut buffer = [0u8; 8192];
+    let (mut bytes, mut lines, mut last) = (0u64, 0usize, None);
+    loop {
+        let count = reader.read(&mut buffer).map_err(fail)?;
+        if count == 0 {
+            break;
+        }
+        bytes += count as u64;
+        if bytes > LIMIT {
+            anyhow::bail!(
+                "repository observation failed for {}: exceeds {LIMIT} byte limit",
+                path.display()
+            );
+        }
+        lines += buffer[..count].iter().filter(|b| **b == b'\n').count();
+        last = Some(buffer[count - 1]);
+    }
     Ok(Observation::File {
-        lines: count_lines(&bytes),
+        lines: lines + usize::from(last.is_some_and(|b| b != b'\n')),
     })
 }
 
@@ -252,10 +230,26 @@ pub(crate) fn findings_against(
     paths.dedup();
     let mut checked = std::collections::BTreeSet::new();
     for path in paths {
+        let actual = match observe(tree, &path) {
+            Ok(actual) => actual,
+            Err(error) => {
+                if error
+                    .downcast_ref::<super::repository_paths::PathFault>()
+                    .is_some()
+                {
+                    findings.push((path.clone(), format!("{task_id}: {error}")));
+                    continue;
+                }
+                return Err(error);
+            }
+        };
         let Some(relative) = tree.relative_to_root(&path).filter(|r| !r.is_empty()) else {
             continue;
         };
-        let truth = tree.truth(&relative);
+        let truth = archon_workflow::repository_record::PathTruth {
+            at_base: tree.exists_at_base(&relative),
+            in_checkout: actual != Observation::Absent,
+        };
         // A relative path present in the project but not in the checkout is
         // a project artifact (a registry, a report), not repository source.
         if !path.starts_with('/') && !truth.in_checkout && project_root.join(&relative).exists() {
@@ -266,7 +260,6 @@ pub(crate) fn findings_against(
         }
         let root = tree.root().display();
         let base = tree.base_commit();
-        let actual = observe(tree, &relative)?;
         let checkout_dir = actual == Observation::Directory;
         // Check every explicit observation, so a generated or correct claim
         // cannot hide a later contradiction in the author's prose.

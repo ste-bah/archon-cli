@@ -13,6 +13,7 @@ test('body prompts assign repository observations to the host', () => {
     vm.runInContext(fs.readFileSync(`${root}/${name}`, 'utf8'), ctx);
   }
   const prompt = vm.runInContext('bodyPolicy({taskId: "TASK-X-001", fileName: "TASK-X-001.md"}, []).prompt()', ctx);
-  assert.match(prompt, /The host stamps revision-bound repository observations for every declared path at landing\./);
+  assert.match(prompt, /Do not write existence or line-count observations for paths; the host checks the repository itself\. Any existence or count you do state must be exact\./);
+  assert.match(prompt, /Never claim a path exists or is absent unless you read it\./);
   assert.doesNotMatch(prompt, /exists \(N lines\)|last line number|no such observation|exactly one of these three observations/);
 });

@@ -180,20 +180,25 @@ fn a_description_relative_path_is_not_a_deliverable_path() {
 }
 
 #[test]
-fn every_path_in_a_head_list_is_declared() {
+fn only_the_opening_subject_in_a_head_list_is_declared() {
     assert_eq!(
-        paths_in_item("`src/a.rs`, `src/b.rs`"),
-        ["src/a.rs", "src/b.rs"]
+        archon_write_plan::declared_paths::declared_file_paths("`src/a.rs`, `src/b.rs`"),
+        ["src/a.rs"]
     );
 }
 
 #[test]
 fn wrapped_head_lists_stop_at_the_first_description() {
     assert_eq!(
-        paths_in_item("`src/a.rs`,\n `src/b.rs` (create) with `c.rs`"),
-        ["src/a.rs", "src/b.rs"]
+        archon_write_plan::declared_paths::declared_file_paths(
+            "`src/a.rs`,\n `src/b.rs` (create) with `c.rs`"
+        ),
+        ["src/a.rs"]
     );
-    assert!(paths_in_item("Module wiring:\n `src/c.rs`").is_empty());
+    assert_eq!(
+        archon_write_plan::declared_paths::declared_file_paths("Module wiring:\n `src/c.rs`"),
+        ["src/c.rs"]
+    );
 }
 
 #[test]
@@ -201,7 +206,7 @@ fn wrapped_description_does_not_add_a_path_after_an_observed_head() {
     let (_temp, project, tasks, tree) = grounded();
     let raw = body(
         "[]",
-        "- `/r/x/pine.rs` — exists (438 lines)\n  Pine tests are wired via `mod pine;` rather than duplicating it in `pine.rs`.",
+        "- `src/lib.rs` — exists (1 line)\n  Pine tests are wired via `mod pine;` rather than duplicating it in `pine.rs`.",
     );
     let found = findings(&tasks, &project, &tree, &raw);
     assert!(found.is_empty(), "{found:?}");
@@ -210,7 +215,7 @@ fn wrapped_description_does_not_add_a_path_after_an_observed_head() {
 #[test]
 fn absent_inside_a_filename_is_not_an_observation_marker() {
     assert_eq!(
-        paths_in_item("`src/path-absent.rs`"),
+        archon_write_plan::declared_paths::declared_file_paths("`src/path-absent.rs`"),
         ["src/path-absent.rs"]
     );
 }
@@ -218,7 +223,9 @@ fn absent_inside_a_filename_is_not_an_observation_marker() {
 #[test]
 fn an_unobserved_head_does_not_include_description_paths() {
     assert_eq!(
-        paths_in_item("`src/new.rs`\n describe `src/description.rs`"),
+        archon_write_plan::declared_paths::declared_file_paths(
+            "`src/new.rs`\n describe `src/description.rs`"
+        ),
         ["src/new.rs"]
     );
 }
@@ -417,5 +424,5 @@ mod list_tests;
 #[path = "repository_observations_shape_tests.rs"]
 mod shape_tests;
 
-#[path = "repository_observations_host_tests.rs"]
-mod host_tests;
+#[path = "repository_observations_security_tests.rs"]
+mod security_tests;

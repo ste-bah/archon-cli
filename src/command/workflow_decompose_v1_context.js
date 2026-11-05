@@ -477,9 +477,9 @@ function groundingRules() {
   ].join("\n");
 }
 
-// Repository facts are generated at landing, rather than transcribed by authors.
+// Repository facts are checked by the host.
 function observationRule() {
-  return "The host stamps revision-bound repository observations for every declared path at landing.";
+  return "Do not write existence or line-count observations for paths; the host checks the repository itself. Any existence or count you do state must be exact. Never claim a path exists or is absent unless you read it.";
 }
 
 // Directory names the host says are not worth reading, joined for a prompt.
