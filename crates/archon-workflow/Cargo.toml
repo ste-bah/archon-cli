@@ -34,6 +34,7 @@ glob.workspace = true
 hex.workspace = true
 libc = "0.2"
 regex.workspace = true
+quick-xml.workspace = true
 # The workflow.js grammar. `v2::script` composes and EXECUTES script source for
 # both the live host and the dry-run recorder, so the engine has to live with
 # the bridge; validation IS execution against a recording host, and a second

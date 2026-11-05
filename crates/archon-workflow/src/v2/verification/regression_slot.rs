@@ -32,7 +32,7 @@ use crate::v2::write::test_baseline_run_base::{
 };
 use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResultStore};
 
-const SLOT_DIR: &str = "regression-slots";
+const SLOT_DIR: &str = "regression-slots-test-ids-v2";
 
 /// What one slot's regression check found.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -228,3 +228,7 @@ async fn check(
 #[cfg(test)]
 #[path = "regression_slot_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "regression_slot_version_tests.rs"]
+mod version_tests;

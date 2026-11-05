@@ -24,7 +24,8 @@ fn only_cargo_items_are_retagged() {
             "item": { "commands": ["cargo test -p archon-trading validation"] }
         })),
         fanout_item(serde_json::json!({
-            "item": { "commands": ["ls -la crates/archon-trading/src"] }
+            "item": { "commands": ["ls -la crates/archon-trading/src"] },
+            "task": "Inspect the requested files"
         })),
     ];
 
@@ -52,7 +53,7 @@ fn retagging_never_touches_the_input() {
 #[test]
 fn a_bare_item_layout_is_also_recognised() {
     let items = vec![fanout_item(serde_json::json!({
-        "expected_evidence": ["cargo fmt --check passes"]
+        "commands": ["cargo fmt --check"]
     }))];
 
     assert_eq!(tag_cargo_serial_roles(items)[0].role, CARGO_SERIAL_ROLE);
@@ -118,5 +119,38 @@ fn cargo_still_matches_in_its_usual_shapes() {
             super::item_has_cargo_commands(&item),
             "{command} must take the serial role"
         );
+    }
+}
+
+#[test]
+fn all_build_tools_and_custom_commands_share_the_resource_lane() {
+    for command in [
+        "npm test",
+        "pytest a b",
+        "go test ./pkg",
+        "./gradlew test",
+        "custom-check --all",
+    ] {
+        let input = serde_json::json!({"command": command});
+        assert_eq!(
+            tag_cargo_serial_roles(vec![fanout_item(input)])[0].role,
+            CARGO_SERIAL_ROLE
+        );
+    }
+    let input = serde_json::json!({"task": "Discuss cargo test", "commands": ["cat README.md"], "expected_evidence": "cargo output"});
+    assert_eq!(
+        tag_cargo_serial_roles(vec![fanout_item(input)])[0].role,
+        "coder"
+    );
+}
+
+#[test]
+fn free_form_agent_tasks_without_declared_commands_take_the_safe_lane() {
+    for task in [
+        "Run the project checks",
+        "Inspect and report",
+        "Run the custom builder",
+    ] {
+        assert!(item_has_cargo_commands(&serde_json::json!({"task":task})));
     }
 }

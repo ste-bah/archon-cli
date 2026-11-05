@@ -7,7 +7,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
         // Earlier bump and re-pin notes: workflow_host_command_logic_catalog_history.rs.
-        version: 82, // #590: site-resolved package selectors across the whole script.
+        version: 83, // Runtime tool identity and manifest-relative inputs change probe reuse.
         // #584 P5 bump: republish now refuses legacy skeleton entry and constraint defects; operator re-pins digest.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.

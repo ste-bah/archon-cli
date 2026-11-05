@@ -21,6 +21,18 @@ const REPOSITORY_MARKERS: &[(&str, i32)] = &[
     ("Makefile", 50),
 ];
 
+pub fn is_repository_manifest(name: &str) -> bool {
+    REPOSITORY_MARKERS
+        .iter()
+        .any(|(marker, _)| *marker != ".git" && *marker == name)
+}
+
+pub(crate) fn has_repository_marker(path: &Path) -> bool {
+    REPOSITORY_MARKERS
+        .iter()
+        .any(|(marker, _)| path.join(marker).exists())
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct RepositoryCandidate {
     path: PathBuf,

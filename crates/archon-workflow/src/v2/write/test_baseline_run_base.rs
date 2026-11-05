@@ -37,7 +37,7 @@ use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::v2::WorkflowV2ResultStore;
 
 /// Directory under `baseline-tests/` holding these verdicts.
-const RUN_BASE_DIR: &str = "run-base";
+const RUN_BASE_DIR: &str = "run-base-test-ids-v2";
 /// Most distinct commands the host runs for ONE branch; the rest are named
 /// on the branch as not run, and excuse nothing.
 pub(crate) const MAX_COMMANDS_PER_BRANCH: usize = 4;
@@ -84,6 +84,8 @@ pub(crate) struct HostRunVerdict {
     /// fixed). Empty in a verdict cached before they were kept.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub passed_tests: Vec<String>,
+    #[serde(default)]
+    pub passed_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignored_tests: Vec<String>,
     /// Written by a host that keeps those ids (`false` in an older cache
@@ -235,6 +237,7 @@ pub(crate) async fn host_verdicts(
             passed_tests: super::test_baseline_parse::passed_tests(&run.output),
             ignored_tests: super::test_baseline_parse::ignored_tests(&run.output),
             ids_kept: true,
+            passed_count: super::test_baseline_parse::passed_count(&run.output),
         };
         cache(store, tree, &verdict);
         verdicts.insert(command, verdict);

@@ -79,7 +79,7 @@ mod tests {
     }
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(
         b.composite >= 0.85,
         "perfect code composite={}",
@@ -119,7 +119,7 @@ mod tests {
     }
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(b.completeness <= 0.8, "completeness={}", b.completeness);
     assert!(
         b.completeness >= 0.50,
@@ -145,7 +145,7 @@ pub fn iota() -> i32 { 9 }
 pub fn kappa() -> i32 { 10 }
 pub fn lambda() -> i32 { 11 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(
         b.documentation <= 0.1,
         "documentation should be near zero, got={}",
@@ -176,7 +176,7 @@ pub mod utils {
     pub fn id(x: i32) -> i32 { x }
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(b.code_quality <= 0.75, "cq={}", b.code_quality);
 }
 
@@ -202,7 +202,7 @@ pub mod math {
     pub fn mul(a: i32, b: i32) -> i32 { a * b }
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert_eq!(b.test_coverage, 0.0, "test_coverage={}", b.test_coverage);
 }
 
@@ -230,7 +230,7 @@ pub mod inner {
     pub fn x() {}
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(
         b.structural_integrity <= 0.75,
         "si={}",
@@ -242,7 +242,7 @@ pub mod inner {
 
 #[test]
 fn test_empty_input() {
-    let b = calc().score("");
+    let b = calc().score_rust("");
     assert_eq!(b.code_quality, 0.0);
     assert_eq!(b.completeness, 0.0);
     assert_eq!(b.structural_integrity, 0.0);
@@ -285,7 +285,7 @@ mod tests {
     }
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(
         b.composite >= 0.45 && b.composite <= 0.85,
         "mixed composite={}",
@@ -320,7 +320,7 @@ pub mod inner {
     pub fn inner_fn() { todo!() }
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(
         b.completeness <= 0.20,
         "completeness for stubs={}",
@@ -369,7 +369,7 @@ pub mod extras {
     pub fn neg(x: i32) -> i32 { -x }
 }
 "#;
-    let b = calc().score(&rust(code));
+    let b = calc().score_rust(&rust(code));
     assert!(b.documentation >= 0.5, "docs={}", b.documentation);
     assert_eq!(b.test_coverage, 0.0, "test_coverage={}", b.test_coverage);
 }
@@ -399,6 +399,6 @@ fn test_meets_threshold() {
 
 #[test]
 fn test_composite_rounding() {
-    let b = calc().score(&rust("fn foo() { 1 }"));
+    let b = calc().score_rust(&rust("fn foo() { 1 }"));
     assert_eq!(b.composite, round3(b.composite));
 }

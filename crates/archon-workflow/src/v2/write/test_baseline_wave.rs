@@ -20,9 +20,7 @@ use super::test_baseline::{
     routed_findings_for_task, save_record,
 };
 use super::test_baseline_owner::{Ownership, ownership, test_file};
-use super::test_baseline_parse::{
-    diagnostic_files, failing_tests, is_cargo_test_command, passed_tests, tail,
-};
+use super::test_baseline_parse::{diagnostic_files, failing_tests, passed_tests, tail};
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::WorkflowV2ResultStore;
@@ -120,11 +118,7 @@ async fn verdicts_for(
                 Some(ctx.store.run_root()),
             )
             .await;
-            let (failing, passed_ids) = if is_cargo_test_command(&command) {
-                (failing_tests(&run.output), passed_tests(&run.output))
-            } else {
-                (Vec::new(), Vec::new())
-            };
+            let (failing, passed_ids) = (failing_tests(&run.output), passed_tests(&run.output));
             let passed = run.exit_code == Some(0) && !run.timed_out && run.error.is_none();
             // A failure no test name explains is attributed by the files its
             // error diagnostics point at (Issue-64).

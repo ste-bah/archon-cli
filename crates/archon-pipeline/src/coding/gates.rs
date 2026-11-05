@@ -201,16 +201,11 @@ impl Default for ForbiddenPatternScanner {
     }
 }
 
-// ===========================================================================
 // Shared gate types (REQ-IMPROVE-006, REQ-IMPROVE-008)
-// ===========================================================================
 
-/// Language of the project being built.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum Language {
-    Rust,
-    TypeScript,
-}
+#[path = "gates_commands.rs"]
+mod commands;
+pub use commands::{GateCommand, Language};
 
 /// Result of running a pipeline gate. Deterministic — uses tool output only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,9 +225,7 @@ pub struct GateFailure {
     pub details: String,
 }
 
-// ===========================================================================
 // Compilation Gate (REQ-IMPROVE-006)
-// ===========================================================================
 
 /// Gate that runs `cargo build` or `npm run build` and requires exit code 0.
 pub struct CompilationGate;
@@ -243,12 +236,9 @@ const MAX_TIMEOUT_EVIDENCE_BYTES: usize = 1_024;
 impl CompilationGate {
     /// Execute the build command. Returns gate result with full compiler output.
     pub async fn run(&self, project_root: &Path, language: Language) -> GateResultRecord {
-        let (cmd, args) = match language {
-            Language::Rust => ("cargo", vec!["build"]),
-            Language::TypeScript => ("npm", vec!["run", "build"]),
-        };
+        let command = language.build_command();
         self.run_command(
-            CommandSpec::new(cmd, args.into_iter().map(str::to_owned), project_root),
+            CommandSpec::new(&command.program, command.args, project_root),
             COMPILATION_TIMEOUT,
         )
         .await
@@ -361,47 +351,11 @@ fn truncate_for_timeout_evidence(value: &str, max_bytes: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::compilation_gate::{ChildReap, TreeTermination};
-    use super::{CleanupOutcome, MAX_TIMEOUT_EVIDENCE_BYTES, compilation_timeout_result};
-    use std::time::Duration;
-
-    #[test]
-    fn compilation_timeout_evidence_is_bounded() {
-        let result = compilation_timeout_result(
-            &"x".repeat(2_000),
-            Duration::from_millis(100),
-            CleanupOutcome::TerminationRequestAccepted {
-                reap: ChildReap::Succeeded,
-            },
-            TreeTermination::Confirmed,
-        );
-
-        assert!(result.evidence.len() <= MAX_TIMEOUT_EVIDENCE_BYTES);
-        assert!(result.evidence.contains("...` exceeded limit"));
-    }
-    #[test]
-    fn compilation_timeout_surfaces_reap_failure_without_output() {
-        let result = compilation_timeout_result(
-            "cargo build",
-            Duration::from_millis(100),
-            CleanupOutcome::TerminationRequestAccepted {
-                reap: ChildReap::Failed,
-            },
-            TreeTermination::StillPresent,
-        );
-
-        assert!(!result.gate_passed);
-        assert_eq!(result.failures[0].description, "Compilation timed out");
-        assert_eq!(
-            result.failures[0].details,
-            "Compilation timeout: command `cargo build` exceeded limit 100ms; direct child termination request accepted; direct child reap failed; process group still had members after the termination bound."
-        );
-        assert_eq!(result.failures[0].details, result.evidence);
-        assert!(!result.evidence.contains("STDOUT:"));
-        assert!(!result.evidence.contains("STDERR:"));
-    }
-}
+#[path = "gates_command_tests.rs"]
+mod command_tests;
+#[cfg(test)]
+#[path = "gates_timeout_tests.rs"]
+mod tests;
 
 /// Gate that checks every new file is referenced by at least one other file.
 pub struct OrphanDetectionGate;
@@ -413,9 +367,7 @@ impl OrphanDetectionGate {
     }
 }
 
-// ===========================================================================
 // Manual Override (EC-PIPE-010)
-// ===========================================================================
 
 /// A manual override for a gate that cannot be automatically verified.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -425,9 +377,7 @@ pub struct ManualOverride {
     pub timestamp: String,
 }
 
-// ===========================================================================
 // Tests Run Gate (REQ-IMPROVE-019)
-// ===========================================================================
 
 /// Gate that executes test suites and requires exit code 0.
 /// Evidence: full test runner output with pass/fail counts.
@@ -436,11 +386,9 @@ pub struct TestsRunGate;
 impl TestsRunGate {
     /// Execute test suites and require exit 0.
     pub async fn run(&self, project_root: &Path, language: Language) -> GateResultRecord {
-        let (cmd, args) = match language {
-            Language::Rust => ("cargo", vec!["test"]),
-            Language::TypeScript => ("npm", vec!["test"]),
-        };
-
+        let command = language.test_command();
+        let cmd = command.program.as_str();
+        let args: Vec<_> = command.args.iter().map(String::as_str).collect();
         let output = pipeline_output(cmd, &args, project_root);
 
         match output {
@@ -483,196 +431,21 @@ impl TestsRunGate {
     }
 }
 
-// ===========================================================================
-// E2E Smoke Test Gate (REQ-IMPROVE-010)
-// ===========================================================================
+#[path = "gates_smoke.rs"]
+mod smoke;
+pub use smoke::E2ESmokeTestGate;
 
-/// Final gate — executes the binary and exercises the new feature.
-/// Includes fraud detection to reject test-only evidence.
-pub struct E2ESmokeTestGate;
-
-impl E2ESmokeTestGate {
-    /// Execute the smoke command and validate the output.
-    pub async fn run(
-        &self,
-        project_root: &Path,
-        smoke_command: &str,
-        manual_override: Option<ManualOverride>,
-    ) -> GateResultRecord {
-        // 1. If manual_override is Some, return passed with justification
-        if let Some(override_info) = manual_override {
-            return GateResultRecord {
-                gate_name: "e2e-smoke".into(),
-                gate_passed: true,
-                evidence: format!(
-                    "MANUAL OVERRIDE: {} (by: {}, at: {})",
-                    override_info.justification,
-                    override_info.overridden_by,
-                    override_info.timestamp,
-                ),
-                failures: vec![],
-                timestamp: now_iso8601(),
-            };
-        }
-
-        // 2. Parse and execute smoke_command
-        let parts: Vec<&str> = smoke_command.split_whitespace().collect();
-        if parts.is_empty() {
-            return GateResultRecord {
-                gate_name: "e2e-smoke".into(),
-                gate_passed: false,
-                evidence: "Empty smoke command".into(),
-                failures: vec![GateFailure {
-                    description: "No smoke command provided".into(),
-                    file: None,
-                    details: String::new(),
-                }],
-                timestamp: now_iso8601(),
-            };
-        }
-
-        let output = pipeline_output(parts[0], &parts[1..], project_root);
-
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let combined = format!("STDOUT:\n{}\nSTDERR:\n{}", stdout, stderr);
-
-                if !out.status.success() {
-                    return GateResultRecord {
-                        gate_name: "e2e-smoke".into(),
-                        gate_passed: false,
-                        evidence: combined.clone(),
-                        failures: vec![GateFailure {
-                            description: "Smoke command exited non-zero".into(),
-                            file: None,
-                            details: combined,
-                        }],
-                        timestamp: now_iso8601(),
-                    };
-                }
-
-                // 3. Fraud detection
-                if Self::is_test_only_evidence(&combined) {
-                    return GateResultRecord {
-                        gate_name: "e2e-smoke".into(),
-                        gate_passed: false,
-                        evidence: combined.clone(),
-                        failures: vec![GateFailure {
-                            description: "FRAUD DETECTED: Evidence appears to be test output only, not actual feature invocation".into(),
-                            file: None,
-                            details: "E2E smoke test requires actual feature execution output, not test runner output".into(),
-                        }],
-                        timestamp: now_iso8601(),
-                    };
-                }
-
-                GateResultRecord {
-                    gate_name: "e2e-smoke".into(),
-                    gate_passed: true,
-                    evidence: combined,
-                    failures: vec![],
-                    timestamp: now_iso8601(),
-                }
-            }
-            Err(e) => GateResultRecord {
-                gate_name: "e2e-smoke".into(),
-                gate_passed: false,
-                evidence: format!("Failed to execute smoke command: {}", e),
-                failures: vec![GateFailure {
-                    description: "Smoke command failed to execute".into(),
-                    file: None,
-                    details: e.to_string(),
-                }],
-                timestamp: now_iso8601(),
-            },
-        }
-    }
-
-    /// Fraud detection: returns true if evidence looks like test-only output.
-    pub fn is_test_only_evidence(output: &str) -> bool {
-        let test_patterns = [
-            r"test result:\s*ok",
-            r"\d+\s+passed,?\s*\d*\s*failed",
-            r"Tests:\s*\d+\s+passed",
-            r"test result:\s*FAILED",
-            r"running\s+\d+\s+tests?",
-            r"tests?\s+passed",
-        ];
-
-        // Check if ANY test pattern matches
-        let has_test_pattern = test_patterns
-            .iter()
-            .any(|p| Regex::new(p).is_ok_and(|re| re.is_match(output)));
-
-        if !has_test_pattern {
-            return false;
-        }
-
-        // Check for feature-specific output indicators
-        let feature_indicators = [
-            "HTTP/",
-            "200 OK",
-            "201 Created",
-            "compiled",
-            "Compiled",
-            "indexed",
-            "Indexed",
-            "processed",
-            "Processed",
-            "created",
-            "Created",
-            "started",
-            "Started",
-            "listening on",
-            "Listening on",
-            "\"status\"",
-            "\"result\"",
-        ];
-
-        let has_feature_output = feature_indicators.iter().any(|ind| output.contains(ind));
-
-        // It's test-only if it has test patterns but no feature indicators
-        !has_feature_output
-    }
-}
-
-// ===========================================================================
 // Persistence
-// ===========================================================================
 
-/// Save a gate result to `<session_dir>/gate-results/<gate_name>.json`.
-pub fn save_gate_result(result: &GateResultRecord, session_dir: &Path) -> Result<()> {
-    let dir = session_dir.join("gate-results");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.json", result.gate_name));
-    let json = serde_json::to_string_pretty(result)?;
-    std::fs::write(&path, json)?;
-    Ok(())
-}
+#[path = "gates_store.rs"]
+mod store;
+pub use store::{load_gate_result, save_gate_result};
 
-/// Load a gate result from `<session_dir>/gate-results/<gate_name>.json`.
-pub fn load_gate_result(gate_name: &str, session_dir: &Path) -> Result<GateResultRecord> {
-    let path = session_dir
-        .join("gate-results")
-        .join(format!("{}.json", gate_name));
-    let data = std::fs::read_to_string(&path)?;
-    let result: GateResultRecord = serde_json::from_str(&data)?;
-    Ok(result)
-}
-
-// ===========================================================================
 // Helpers
-// ===========================================================================
 
-fn now_iso8601() -> String {
-    let dur = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    // Simple ISO 8601-ish timestamp
-    format!("{}Z", dur.as_secs())
-}
+#[path = "gates_clock.rs"]
+mod clock;
+use clock::now_iso8601;
 
 fn pipeline_output(
     program: &str,

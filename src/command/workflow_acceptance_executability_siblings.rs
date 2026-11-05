@@ -29,11 +29,20 @@ pub(crate) fn manifest_relative_input(token: &str, command: &str, cwd: &Path) ->
     archon_workflow::acceptance_sibling_paths::scan(command)
         .into_iter()
         .filter(|named| {
-            named.required
-                && named
-                    .path
-                    .file_name()
-                    .is_some_and(|name| name == "Cargo.toml")
+            let manifest = named
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(archon_workflow::repo_root::is_repository_manifest);
+            let selected = super::super::test_inventory::shell_commands(command)
+                .iter()
+                .any(|(_, args)| {
+                    args.windows(2).any(|pair| {
+                        matches!(pair[0].as_str(), "-f" | "--file" | "--config" | "--project")
+                            && Path::new(&pair[1]) == named.path
+                    })
+                });
+            manifest && (named.required || selected)
         })
         .find_map(|named| {
             let root = cwd.join(&named.path).parent()?.canonicalize().ok()?;
@@ -352,3 +361,7 @@ fn git_repository(path: &Path) -> bool {
 #[path = "workflow_acceptance_executability_sibling_io.rs"]
 mod io;
 use io::{clone_head, copy_directory, git_head, link_repository_copy};
+
+#[cfg(test)]
+#[path = "workflow_acceptance_sibling_manifest_tests.rs"]
+mod manifest_tests;

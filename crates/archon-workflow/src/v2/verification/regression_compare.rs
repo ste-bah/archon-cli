@@ -45,6 +45,11 @@ pub enum RegressionFinding {
     OldBaseCache {
         command: String,
     },
+    PassingCountDecreased {
+        command: String,
+        before: usize,
+        after: Option<usize>,
+    },
     Hidden {
         command: String,
         test: String,
@@ -84,6 +89,7 @@ impl RegressionFinding {
             | Self::UnnamedPreExisting { command }
             | Self::NotJudgeable { command, .. }
             | Self::OldBaseCache { command }
+            | Self::PassingCountDecreased { command, .. }
             | Self::Hidden { command, .. }
             | Self::Vanished { command, .. }
             | Self::PreExisting { command, .. }
@@ -141,6 +147,15 @@ pub(crate) fn compare(
                 _ => F::UnnamedNew {
                     command: command.clone(),
                 },
+            });
+        }
+        if let Some(before) = at_base.and_then(|run| run.passed_count)
+            && at_tip.passed_count.is_none_or(|after| after < before)
+        {
+            out.push(F::PassingCountDecreased {
+                command: command.clone(),
+                before,
+                after: at_tip.passed_count,
             });
         }
         if at_base.is_some_and(|run| !run.ids_kept) {

@@ -81,7 +81,7 @@ fn output_excerpt(output: &str) -> String {
 /// rather than a const because `concat!` accepts only literals.
 macro_rules! test_filter_rule {
     () => {
-        "- TEST COMMANDS: pass ONE filter per invocation. Most runners (cargo included) reject or silently ignore multiple positional filters, so a combined command can exit 0 while the filters you named matched nothing — that is not evidence and the host demotes it. Run each filter as its own command and check each reported a non-zero match count.\n"
+        "- TEST COMMANDS: use the selected runner’s documented selector syntax, including multiple selectors when supported. Confirm every intended selector matched tests; a successful command with zero matches is not evidence. Split invocations only when the runner requires it.\n"
     };
 }
 

@@ -1,21 +1,6 @@
-//! Batch O2 (CUT-11a): a declared test command that is not a plain cargo
-//! runner invocation, compared anyway.
-//!
-//! The run-base machinery (`write::test_baseline_run_base`) runs only an
-//! allow-listed `cargo test` / `cargo nextest run`, because it also runs
-//! commands an AGENT reported. A task's DECLARED focused-test command is the
-//! task set's own -- the baseline wave already runs it, as declared, in the
-//! POSIX shell of a branch worktree (`test_baseline_wave`) -- so the
-//! regression check runs it the same way: once at the run base and once at
-//! the tip, each in a throwaway detached worktree of its commit (never the
-//! live checkout), under the project-input tripwire, cached per (commit,
-//! command) so a resume never re-runs it. Its outcome is compared
-//! generically: the exit code, and the test ids its output names in the
-//! libtest shape when it names any. A run that timed out, could not start
-//! or tripped the tripwire is no verdict.
-//!
-//! Before this a non-cargo project could never go green on its own tests:
-//! the gate recorded every such command as "NOT COMPARED".
+//! Compare every declared command at the base and tip in isolated worktrees.
+//! Both paths use the shared runner-result adapters, including named verdicts
+//! and summary-only cardinality evidence. Unstartable runs supply no verdict.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -70,6 +55,7 @@ pub(crate) async fn generic_verdicts(
             exit_code: run.exit_code,
             failing_tests: failing_tests(&run.output),
             passed_tests: passed_tests(&run.output),
+            passed_count: crate::v2::write::test_baseline_parse::passed_count(&run.output),
             ignored_tests: ignored_tests(&run.output),
             ids_kept: true,
             ..HostRunVerdict::default()
@@ -134,3 +120,7 @@ fn remove_worktree(root: &Path, worktree: &Path) {
         let _ = std::fs::remove_dir_all(worktree);
     }
 }
+
+#[cfg(test)]
+#[path = "regression_generic_result_tests.rs"]
+mod result_tests;

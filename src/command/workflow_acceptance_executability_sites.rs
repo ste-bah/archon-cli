@@ -432,31 +432,8 @@ impl HostProbe {
 fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
     probe.identity.get_or_init(|| {
         let (environment, _) = site_environment(probe);
-        let tools: Vec<_> = [("rustc", "-Vv"), ("cargo", "-V")]
-            .into_iter()
-            .map(|(name, arg)| {
-                let executable = environment.get("PATH").and_then(|path| {
-                    std::env::split_paths(path)
-                        .map(|dir| dir.join(name))
-                        .find(|path| path.is_file())
-                });
-                let binary = executable.as_ref().and_then(|path| {
-                    Some((
-                        archon_shell::paths::canonicalize(path).ok()?,
-                        content_digest(&std::fs::read(path).ok()?),
-                    ))
-                });
-                let mut version = archon_shell::spawn::command(name);
-                let version = archon_shell::spawn::replace_environment(&mut version, &environment)
-                    .arg(arg)
-                    .current_dir(&probe.repository)
-                    .output()
-                    .ok()
-                    .filter(|out| out.status.success())
-                    .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
-                serde_json::json!([binary, version])
-            })
-            .collect();
+        let tools =
+            archon_workflow::toolchain_versions::fingerprint(&environment, &probe.repository);
         serde_json::json!([env!("ARCHON_GIT_HASH"), environment, tools])
     })
 }

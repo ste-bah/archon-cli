@@ -171,7 +171,7 @@ async fn build_prompt_includes_base_task_and_algorithm() {
 }
 
 #[tokio::test]
-async fn coding_prompt_requires_tagged_rust_fences_for_scored_code() {
+async fn coding_prompt_uses_project_languages_and_tool_evidence() {
     let facade = make_facade();
     let session = facade.init_session("implement parser").await.unwrap();
     let phase4_agent = AGENTS
@@ -183,15 +183,8 @@ async fn coding_prompt_requires_tagged_rust_fences_for_scored_code() {
     let (messages, system, _) = facade.build_prompt(&session, &info).await.unwrap();
     let rendered = format!("{messages:?}\n{system:?}").to_ascii_lowercase();
 
-    assert!(
-        rendered.contains("```rust"),
-        "prompt must require rust fences"
-    );
-    assert!(rendered.contains("```rs"), "prompt must allow rs fences");
-    assert!(
-        rendered.contains("quality-scored only"),
-        "prompt must disclose tagged-fence scoring exclusivity"
-    );
+    assert!(rendered.contains("project’s languages and tools"));
+    assert!(rendered.contains("report executed checks"));
 }
 
 #[tokio::test]
@@ -282,11 +275,8 @@ mod tests {
         .unwrap();
 
     assert!(score.overall >= 0.0 && score.overall <= 1.0);
-    assert!(score.dimensions.contains_key("code_quality"));
-    assert!(score.dimensions.contains_key("completeness"));
-    assert!(score.dimensions.contains_key("structural_integrity"));
-    assert!(score.dimensions.contains_key("documentation"));
-    assert!(score.dimensions.contains_key("test_coverage"));
+    assert!(score.dimensions.contains_key("output_completeness"));
+    assert!(!score.dimensions.contains_key("test_coverage"));
     assert!(score.dimensions.contains_key("phase_threshold"));
 }
 

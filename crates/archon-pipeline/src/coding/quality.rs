@@ -5,6 +5,14 @@
 
 use regex::Regex;
 
+#[path = "quality_output.rs"]
+mod output_quality;
+
+/// The default gate measures only syntax-independent output completeness.
+pub fn output_completeness(output: &str) -> f64 {
+    output_quality::completeness(output)
+}
+
 /// Weighted breakdown of quality across 5 dimensions.
 #[derive(Debug, Clone)]
 pub struct QualityBreakdown {
@@ -100,8 +108,14 @@ impl CodingQualityCalculator {
         }
     }
 
-    /// Score an agent's output text across all 5 dimensions.
-    pub fn score(&self, output: &str) -> QualityBreakdown {
+    /// Opt-in syntax adapter for explicitly selected Rust output.
+    /// The general facade uses `output_completeness` instead.
+    pub fn score(&self, output: &str) -> f64 {
+        output_completeness(output)
+    }
+
+    /// Explicit syntax adapter; never inferred from a project's language.
+    pub fn score_rust(&self, output: &str) -> QualityBreakdown {
         let code = extract_rust_fences(output);
         if code.trim().is_empty() {
             return QualityBreakdown {
@@ -140,7 +154,7 @@ impl CodingQualityCalculator {
 
     /// Check whether output meets the quality threshold for a given phase.
     pub fn meets_threshold(&self, output: &str, phase: u32) -> bool {
-        self.score(output).composite >= phase_threshold(phase)
+        self.score(output) >= phase_threshold(phase)
     }
 
     // ── Code Quality (0.30) ──────────────────────────────────────────

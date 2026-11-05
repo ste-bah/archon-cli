@@ -59,6 +59,8 @@ pub(crate) async fn run_in_worktree(
     } else {
         crate::acceptance_check_environment::NO_RUN_POLICY_REMEDY
     };
+    let reports_before = super::test_result_reports::snapshot(worktree);
+    let observed_command = super::runner_observation::command(command);
     let label = format!(
         "host-run test command `{command}` in {}",
         worktree.display()
@@ -66,12 +68,38 @@ pub(crate) async fn run_in_worktree(
     let (mut run, violation) = crate::write_coordinator::input_tripwire::watch(
         run_root,
         &label,
-        run_unwatched(dispatch, worktree, command, policy.as_ref(), remedy),
+        run_unwatched(
+            dispatch,
+            worktree,
+            &observed_command,
+            policy.as_ref(),
+            remedy,
+        ),
     )
     .await;
+    if observed_command.as_ref() != command {
+        let observation = format!("Host diagnostic invocation: {}", observed_command);
+        run.note = Some(match run.note {
+            Some(note) => format!("{note}; {observation}"),
+            None => observation,
+        });
+    }
     if let Some(violation) = violation {
         run.exit_code = None;
         run.error = Some(violation.message());
+    }
+    if !run.timed_out && run.error.is_none() {
+        match super::test_result_reports::fresh_records(worktree, &reports_before) {
+            Ok(records) if !records.is_empty() => {
+                run.output.push('\n');
+                run.output.push_str(&records);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                run.exit_code = None;
+                run.error = Some(error);
+            }
+        }
     }
     run
 }

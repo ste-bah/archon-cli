@@ -102,6 +102,10 @@ fn gap(found: &SlotFinding, universe: &WorkflowV2TaskUniverse, by: &str) -> Resi
         RegressionFinding::NewFailure { test, .. } => {
             format!("`{test}` fails now and did not fail at the run's base commit")
         }
+        RegressionFinding::PassingCountDecreased { before, after, .. } => format!(
+            "The passing test count decreased from {before} to {}; restore the tests or provide a complete test report.",
+            after.map_or_else(|| "an unreported count".into(), |count| count.to_string())
+        ),
         RegressionFinding::Vanished { test, .. } => format!(
             "`{test}` passed at the run's base commit and is no longer reported: it was removed or renamed, and a test that is gone proves nothing passes"
         ),

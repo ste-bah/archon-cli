@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use archon_core::config::{AnthropicModelsConfig, ContextConfig};
 
 use crate::coding::agents::AGENTS;
-use crate::coding::quality::{CodingQualityCalculator, phase_threshold};
+use crate::coding::quality::{output_completeness, phase_threshold};
 use crate::coding::rlm::RlmStore;
 use crate::learning::integration::LearningIntegration;
 use crate::prompt_cap::{PromptBudget, truncate_prompt_to_budget};
@@ -35,7 +35,6 @@ use helpers::{agent_to_info, dependencies_satisfied, find_coding_agent};
 /// Facade implementing the coding pipeline's 50-agent sequence with 11-layer
 /// prompt augmentation.
 pub struct CodingFacade {
-    quality_calculator: CodingQualityCalculator,
     rlm_store: Mutex<RlmStore>,
     learning: Option<Mutex<LearningIntegration>>,
     /// Anthropic model alias map. Defaults to compile-time defaults; callers
@@ -53,7 +52,6 @@ impl CodingFacade {
     /// Create a new facade with an empty RLM store.
     pub fn new() -> Self {
         Self {
-            quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: None,
             models: AnthropicModelsConfig::default(),
@@ -69,7 +67,6 @@ impl CodingFacade {
     /// context is available.
     pub fn with_learning(learning: LearningIntegration) -> Self {
         Self {
-            quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: Some(Mutex::new(learning)),
             models: AnthropicModelsConfig::default(),
@@ -226,7 +223,7 @@ impl PipelineFacade for CodingFacade {
         let system = vec![serde_json::json!({
             "type": "text",
             "text": format!(
-                "You are a pipeline agent in the Archon coding pipeline. Agent: {}. Phase: {}. Rust code is quality-scored only inside ```rust or ```rs fenced blocks; tag every Rust code fence.",
+                "Agent: {}. Stage: {}. Use the project’s languages and tools. Tag code fences with the language they contain. Report executed checks and their results as evidence.",
                 agent.display_name,
                 agent.phase,
             ),
@@ -242,21 +239,13 @@ impl PipelineFacade for CodingFacade {
         agent: &AgentInfo,
         result: &AgentResult,
     ) -> Result<QualityScore> {
-        let breakdown = self.quality_calculator.score(&result.output);
-
+        let overall = output_completeness(&result.output);
         let mut dimensions = HashMap::new();
-        dimensions.insert("code_quality".to_string(), breakdown.code_quality);
-        dimensions.insert("completeness".to_string(), breakdown.completeness);
-        dimensions.insert(
-            "structural_integrity".to_string(),
-            breakdown.structural_integrity,
-        );
-        dimensions.insert("documentation".to_string(), breakdown.documentation);
-        dimensions.insert("test_coverage".to_string(), breakdown.test_coverage);
+        dimensions.insert("output_completeness".to_string(), overall);
         dimensions.insert("phase_threshold".to_string(), phase_threshold(agent.phase));
 
         Ok(QualityScore {
-            overall: breakdown.composite,
+            overall,
             dimensions,
         })
     }

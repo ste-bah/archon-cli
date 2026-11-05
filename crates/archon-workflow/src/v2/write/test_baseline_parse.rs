@@ -25,7 +25,11 @@ pub(crate) fn is_cargo_test_command(command: &str) -> bool {
 /// would miss a harness killed mid-run; the result lines alone would miss
 /// nothing, but the block is what a human reads and the two must agree.
 pub(crate) fn failing_tests(output: &str) -> Vec<String> {
-    let mut ids: Vec<String> = Vec::new();
+    let mut ids = super::runner_test_ids::ids(output, super::runner_test_ids::Status::Failed);
+    ids.extend(super::runner_test_records::ids(
+        output,
+        super::runner_test_ids::Status::Failed,
+    ));
     let mut in_block = false;
     for raw in output.lines() {
         let line = raw.trim_end_matches('\r');
@@ -60,6 +64,7 @@ pub(crate) fn failing_tests(output: &str) -> Vec<String> {
         }
     }
     ids.sort();
+    ids.dedup();
     ids
 }
 
@@ -68,7 +73,11 @@ pub(crate) fn failing_tests(output: &str) -> Vec<String> {
 /// <binary> <id>`. An ignored test (`... ignored`, nextest `SKIP`) is not
 /// passed; a quiet run that prints no per-test line names none.
 pub(crate) fn passed_tests(output: &str) -> Vec<String> {
-    let mut ids: Vec<String> = Vec::new();
+    let mut ids = super::runner_test_ids::ids(output, super::runner_test_ids::Status::Passed);
+    ids.extend(super::runner_test_records::ids(
+        output,
+        super::runner_test_ids::Status::Passed,
+    ));
     for raw in output.lines() {
         let line = raw.trim_end_matches('\r');
         if let Some(id) = result_line_verdict(line, "ok").or_else(|| nextest_pass(line)) {
@@ -76,13 +85,18 @@ pub(crate) fn passed_tests(output: &str) -> Vec<String> {
         }
     }
     ids.sort();
+    ids.dedup();
     ids
 }
 
 /// The test ids `output` reports as IGNORED (`test <id> ... ignored`, a
 /// reason after it tolerated; nextest `SKIP`), sorted and deduplicated.
 pub(crate) fn ignored_tests(output: &str) -> Vec<String> {
-    let mut ids: Vec<String> = Vec::new();
+    let mut ids = super::runner_test_ids::ids(output, super::runner_test_ids::Status::Skipped);
+    ids.extend(super::runner_test_records::ids(
+        output,
+        super::runner_test_ids::Status::Skipped,
+    ));
     for raw in output.lines() {
         let line = raw.trim_end_matches('\r');
         let skipped = || {
@@ -102,6 +116,7 @@ pub(crate) fn ignored_tests(output: &str) -> Vec<String> {
         }
     }
     ids.sort();
+    ids.dedup();
     ids
 }
 
@@ -294,3 +309,8 @@ pub(crate) fn cargo_package(command: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "test_baseline_parse_tests.rs"]
 mod tests;
+
+/// Cardinality evidence is kept separately from named tests.
+pub(crate) fn passed_count(output: &str) -> Option<usize> {
+    super::runner_test_records::passed_count(output)
+}

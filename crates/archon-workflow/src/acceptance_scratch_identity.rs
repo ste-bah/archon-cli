@@ -214,23 +214,8 @@ pub(super) fn capture_site(
         }
         targets.push(object(&path).map_err(site("target links"))?);
     }
-    let mut tools = BTreeMap::new();
-    for name in ["cargo", "rustc", "python3", "python", "sh"] {
-        if let Some(path) = std::env::split_paths(&policy.toolchain_path)
-            .map(|p| p.join(name))
-            .find(|p| p.is_file())
-        {
-            let path = path
-                .canonicalize()
-                .map(archon_shell::paths::plain)
-                .map_err(|e| CaptureFailure::Other(WorkflowError::io(&path, e)))?;
-            let bytes = io::read(&path).map_err(CaptureFailure::Other)?;
-            tools.insert(
-                name.into(),
-                format!("{}:{}", path.display(), content_digest(&bytes)),
-            );
-        }
-    }
+    let tools =
+        crate::toolchain_versions::fingerprint(&roots.environment(policy), &roots.repository());
     let mut config = BTreeMap::new();
     for (label, base) in [
         (

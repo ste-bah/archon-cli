@@ -76,7 +76,7 @@ async fn a_write_batch_that_mentions_cargo_keeps_its_requested_parallelism() {
 }
 
 #[tokio::test]
-async fn a_read_only_batch_that_mentions_cargo_is_still_serialised() {
+async fn a_read_only_batch_leaves_resource_scheduling_to_the_host() {
     let body = format!(
         "await agents([{}, {}], {{ maxParallelism: 2 }})",
         spec("a", "Run `cargo test` and report.", "echo a"),
@@ -87,8 +87,8 @@ async fn a_read_only_batch_that_mentions_cargo_is_still_serialised() {
     assert_eq!(call.write_mode, None, "{call:?}");
     assert_eq!(
         call.options.max_parallelism,
-        Some(1),
-        "read-only branches share the canonical checkout and its build lock: {call:?}"
+        Some(2),
+        "the host classifies declared commands independently from prose: {call:?}"
     );
 }
 

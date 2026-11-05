@@ -1316,6 +1316,7 @@ dependencies = [
  "glob",
  "hex",
  "libc",
+ "quick-xml 0.41.0",
  "regex",
  "rquickjs",
  "serde",

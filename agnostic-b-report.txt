@@ -1,0 +1,40 @@
+Class B report — agn-b at 253a5c3bc: 39 rows verified; 16 W fixed through shared paths, 23 L deferred; no wholly false row found.
+Research: Bazel keys declared inputs/environment (https://bazel.build/extending/repo); Task centralizes concurrency (https://taskfile.dev/docs/guide/dependencies).
+Research: pytest supports multiple node selectors (https://docs.pytest.org/en/7.1.x/how-to/usage.html); TAP supplies portable results (https://node-tap.org/api/); Go exposes JSON (https://go.dev/src/cmd/go/internal/test/test.go); Jenkins ingests JUnit reports (https://www.jenkins.io/doc/pipeline/tour/tests-and-artifacts/).
+W files: source_context.rs + repo_root.rs — recognize Git worktree files and the existing multi-manifest table; neutral discovery errors.
+W files: acceptance_scratch_identity.rs + workflow_acceptance_executability_sites.rs — shared toolchain_identity.rs/toolchain_versions.rs fingerprint PATH executables and query runtime shims across toolchains.
+W files: coding/gates.rs + gates_commands.rs — explicit program/argv build and test gates; existing presets remain adapters; split smoke/store/clock/tests below 500 lines.
+W files: coding/quality.rs + quality_output.rs + facade.rs — default score() returns scalar completeness with an honestly named dimension; legacy syntax breakdown is explicit score_rust; neutral prompts.
+W file: v2/agent_adapter_b.rs — preserve valid multiple selectors; split only when the selected runner requires it.
+W files: cargo_serial.rs + v3_primitives.js; shared callers verify_options.rs/workflow_live_v2_read_only_b.rs — host resource lane for declared commands, conservative unknown-program/free-form-task fallback, no prompt/evidence substring scheduling.
+W files: test_baseline_parse.rs/test_baseline_wave.rs/regression_generic.rs — shared named/JSON/TAP/JUnit adapters, diagnostic-only runner options in runner_observation.rs and fresh reports in test_result_reports.rs via test_baseline_run.rs (workspace quick-xml dependency; Cargo.toml/Cargo.lock updated); regression_compare.rs/regression_gate.rs/residual_regression.rs compare separate counts for quiet suites.
+W files: test_baseline.rs/test_baseline_run_base.rs/regression_slot.rs — v2 cache namespaces prevent reuse of verdicts/slots missing the new evidence.
+W file: workflow_acceptance_executability_siblings.rs — manifest-relative input mapping across the repository-marker table; retain selection and local-path precedence.
+W file: coding/orphan_gate.rs + pattern/paths helpers — more source adapters and unknown-text fallback; existing adapters retain precise matching.
+L acceptance_check_resource_limits.rs: optional resource-policy forwarding, no foreign-command refusal; plan explicit runner resource adapters.
+L acceptance_scratch.rs: optional dependency-cache provisioning; plan declared cache-seed mounts with equal cache treatment.
+L acceptance_scratch_observe.rs: extra cache observation detail; plan observations for declared cache roots.
+L check_source_cargo.rs: extra package/target source resolution; plan build-system resolver adapters plus declared source sets.
+L check_source_chain.rs: extra compilation-chain pinning; plan declaration/discovery-chain adapters.
+L check_source_manifest.rs: extra manifest-item precision; plan selected manifest sections or whole-file fallback.
+L check_source_rust.rs: extra item-level pin precision; plan language parsers with whole-file fallback.
+L check_source_follow.rs: less import/fixture inference; plan import adapters and shared package-marker detection.
+L check_source_resolve.rs: unsupported recipes are explicitly unresolved; plan declared recipe source maps, retaining unresolved evidence.
+L stage_prompt.rs: extra conditional tool policy, no native-command gate; plan guidance generated from declared tools/resources.
+L task_scope_amendment_refs.rs: missing inferred dependency ownership; plan generic declared edges plus import adapters.
+L task_scope_amendment_refs_paths.rs: missing native import resolution; plan a resolver interface with explicit-path fallback.
+L verify_batching.rs: only startup/batching efficiency differs; plan batching by declared resource/command identity.
+L lifecycle_prompts.rs: richer native package guidance; plan tool-selected examples generated from capabilities.
+L target_expansion.rs: explicit targets still work; plan module expansion adapters with declared ownership fallback.
+L test_baseline_owner.rs: weaker automatic owner attribution, not suppression of regression findings; plan report-path attribution.
+L test_baseline_run_base_args.rs: exploratory-command allowlist only; declared commands already use the generic comparator; plan safe runner descriptors.
+L workflow_acceptance_passability_packages.rs: weaker static diagnosis; plan selector adapters while keeping execution authoritative.
+L workflow_acceptance_passability_setup.rs: weaker setup diagnosis; plan runner-specific diagnostics plus generic exit/setup evidence.
+L workflow_live_v2_read_only_roots.rs: external caches lack automatic discovery, not an automatic watch/root refusal; plan declared resource roots.
+L focused_test_targets.rs: explicit commands remain usable; plan focused-selector adapters with verbatim-command fallback.
+L workflow_acceptance_test_inventory.rs: fewer preimplementation probes; plan inventory adapters and a declared inventory protocol.
+L verification/signals.rs: less automatic duplicate-pass recovery; plan structured pass evidence shared with runner adapters.
+Tests: 94 isolated Rust tests and 2 Node tests passed; command-boundary, sibling, wave and slot integration tests added; full crate/async suites were not run (no cargo).
+Checks: git diff --check and scripts/check-file-sizes.sh pass; every changed source file <=500 lines; no cargo, stash, commit, subagents, or class C/D/E edits.
+Expected re-pins: freeze-acceptance logic 82->83; regenerate affected sources_digest entries (expect all seven catalog capabilities) and offline_decomposition_golden*.json; digest values untouched.
+Limits: quiet summaries detect count loss, not same-count identity replacement; custom shims need explicit version adapters; default score is completeness, not tool-proven quality; source-pin closure set needs generator confirmation.

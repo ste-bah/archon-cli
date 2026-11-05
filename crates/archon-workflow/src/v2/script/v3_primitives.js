@@ -164,8 +164,6 @@ function __archonPrimitives(w) {
     }
     ordinal += 1;
     const id = `${slug(opts.label || "agents")}-${ordinal}`;
-    const cargoish = specs.some((spec) =>
-      [spec.prompt, ...(spec.focusedTests || [])].join(" ").includes("cargo "));
     const items = specs.map((spec, index) => {
       if (typeof spec.prompt !== "string" || spec.prompt.trim() === "") {
         throw new Error("every agents() spec requires a non-empty prompt");
@@ -199,7 +197,7 @@ function __archonPrimitives(w) {
     return await w.parallel(id, items, {
       tier: opts.tier || "coder",
       // Read-only branches share the canonical checkout (one build lock).
-      maxParallelism: cargoish ? 1 : opts.maxParallelism,
+      maxParallelism: opts.maxParallelism,
       task: opts.task || "Execute every item in this batch.",
       ...turnBound(opts),
     });

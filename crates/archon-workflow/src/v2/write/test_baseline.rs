@@ -63,7 +63,7 @@ pub(crate) const SCHEMA_VERSION: u32 = 1;
 /// baseline data it had already been handed, walking every run ever kept on
 /// the machine for 47 and 21 minutes before being killed by hand.
 pub(crate) const ROOT_DIR: &str = "baseline-tests";
-const CACHE_DIR: &str = "cache";
+const CACHE_DIR: &str = "cache-test-ids-v2";
 const FINDINGS_DIR: &str = "findings";
 
 /// One declared command's verdict on the base commit.
@@ -450,6 +450,9 @@ pub(crate) fn all_routed_findings(store: &WorkflowV2ResultStore) -> Vec<Value> {
 #[cfg(test)]
 #[path = "test_baseline_lint_tests.rs"]
 mod lint_tests;
+#[cfg(test)]
+#[path = "test_baseline_runner_tests.rs"]
+mod runner_tests;
 #[cfg(test)]
 #[path = "test_baseline_tests.rs"]
 pub(super) mod tests;

@@ -148,6 +148,10 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
             F::OldBaseCache { command } => verdict.notes.push(format!(
                 "warning: `{command}`'s base verdict was cached before passed ids were kept, so a test hidden at the final tip {tip_at} is not detected for it"
             )),
+            F::PassingCountDecreased { command, before, after } => verdict.blocking.push(format!(
+                "regression: `{command}` reported {before} passing tests at the run base and {} at the final tip; restore the tests or provide a complete test report; {late}",
+                after.map_or_else(|| "no comparable count".into(), |count| count.to_string())
+            )),
             F::Hidden { command, test } => verdict.blocking.push(format!(
                 "regression: `{test}` (`{command}`) passed at the run base {base_at} and is ignored at the final tip {tip_at}; {}; {late}",
                 owner_of(command, test)

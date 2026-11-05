@@ -27,6 +27,7 @@ pub mod check_source_rust;
 pub mod check_source_settle;
 pub mod command;
 mod command_execution;
+pub mod command_resources;
 mod completion_proof;
 pub mod config;
 pub mod context;
@@ -62,6 +63,8 @@ mod persistence;
 pub mod planner;
 pub mod policy;
 pub mod stage_write;
+pub mod toolchain_identity;
+pub mod toolchain_versions;
 // Issue 342: the probe moved down to the archon-shell leaf; same path here.
 pub use archon_shell::process_liveness;
 pub mod provider_tiers;

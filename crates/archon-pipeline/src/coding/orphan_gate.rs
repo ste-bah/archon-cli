@@ -1,9 +1,12 @@
 use std::ffi::OsStr;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
-const SOURCE_EXTENSIONS: &[&str] = &["rs", "ts", "tsx", "js", "jsx", "py", "go"];
+const SOURCE_EXTENSIONS: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "kt", "kts", "cs", "fs", "c", "h", "cpp",
+    "hpp", "rb", "php", "swift", "scala", "ex", "exs", "clj", "lua", "dart", "r", "sh",
+];
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct CandidateReferences {
@@ -21,6 +24,7 @@ struct CandidatePattern {
     candidate: String,
     path: PathBuf,
     pattern: Regex,
+    generic_pattern: Regex,
 }
 
 pub(crate) fn orphan_result(
@@ -212,6 +216,15 @@ fn scan_source<OnRead>(
 fn read_source(path: &Path, display: &str, errors: &mut Vec<String>) -> Option<String> {
     match std::fs::read_to_string(path) {
         Ok(content) => Some(content),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::InvalidData
+                && !path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|extension| SOURCE_EXTENSIONS.contains(&extension)) =>
+        {
+            None
+        }
         Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
             errors.push(format!("Non-UTF8 source content: {display}"));
             None
@@ -231,7 +244,17 @@ fn record_matches(
     content: &str,
 ) {
     for (candidate, reference) in candidates.iter().zip(references.iter_mut()) {
-        if source_path != candidate.path && candidate.pattern.is_match(content) {
+        let known_adapter =
+            source_path
+                .extension()
+                .and_then(OsStr::to_str)
+                .is_some_and(|extension| {
+                    matches!(extension, "rs" | "py" | "go" | "js" | "jsx" | "ts" | "tsx")
+                });
+        if source_path != candidate.path
+            && (candidate.pattern.is_match(content)
+                || (!known_adapter && candidate.generic_pattern.is_match(content)))
+        {
             reference.references.push(source_display.clone());
         }
     }
@@ -305,10 +328,12 @@ fn candidate_pattern(path: &Path, project_root: &Path) -> Result<CandidatePatter
     let pattern = reference_pattern(stem).map_err(|error| {
         format!("Unable to build reference pattern for candidate {candidate}: {error}")
     })?;
+    let generic_pattern = generic_reference_pattern(stem).map_err(|error| error.to_string())?;
     Ok(CandidatePattern {
         candidate,
         path: normalized,
         pattern,
+        generic_pattern,
     })
 }
 
@@ -325,24 +350,9 @@ fn candidate_stem_from_path<'a>(path: &'a Path, candidate: &str) -> Result<&'a s
     Ok(stem)
 }
 
-fn reference_pattern(stem: &str) -> Result<Regex, regex::Error> {
-    let stem = regex::escape(stem);
-    let module_end = r"(?:$|[^A-Za-z0-9_-])";
-    let go_import_name = r"(?:[A-Za-z_][A-Za-z0-9_]*|[_.])";
-    let path = format!(r#"["'](?:[^/"']*/)*{stem}(?:\.(?:rs|ts|tsx|js|jsx|py|go))?["']"#);
-    Regex::new(&format!(
-        r#"(?xs)
-            \bmod\s+{stem}{module_end}
-            | \buse\s+[^;]*?(?:^|[:{{,\s]){stem}{module_end}
-            | \bfrom\s+(?:\.+)?(?:[A-Za-z_][A-Za-z0-9_]*\.)*{stem}\s+import\b
-            | (?:\bimport|,)\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)*{stem}(?:$|[\s,])
-            | \bimport\s*(?:\(\s*)?(?:[^;]*?\bfrom\s+)?{path}
-            | \bimport\s+{go_import_name}\s+{path}
-            | \bimport\s*\(\s*(?:(?:{go_import_name}\s+)?["'][^"'\r\n]+["']\s*)*(?:{go_import_name}\s+)?{path}
-            | \brequire\s*\(\s*{path}
-        "#
-    ))
-}
+#[path = "orphan_gate_pattern.rs"]
+mod pattern;
+use pattern::{generic_reference_pattern, reference_pattern};
 
 fn collect_source_paths(dir: &Path, source_paths: &mut Vec<PathBuf>, errors: &mut Vec<String>) {
     let entries = match directory_entries(dir, errors) {
@@ -441,52 +451,17 @@ fn source_extension(extension: Option<&OsStr>) -> Result<bool, ()> {
     match extension {
         Some(extension) => extension
             .to_str()
-            .map(|extension| SOURCE_EXTENSIONS.contains(&extension))
+            .map(|extension| {
+                !matches!(
+                    extension,
+                    "md" | "txt" | "json" | "toml" | "yaml" | "yml" | "lock"
+                )
+            })
             .ok_or(()),
-        None => Ok(false),
+        None => Ok(true),
     }
 }
 
-fn normalize_root_join(project_root: &Path, path: &Path) -> PathBuf {
-    let joined = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        project_root.join(path)
-    };
-    normalize_path(&joined)
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    normalized.push(component.as_os_str());
-                }
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    normalized
-}
-
-/// Project-relative path for messages and gate output, always `/`-separated.
-///
-/// `Path::display` emits native separators, so the same repository produced
-/// `src/foo.rs` on Unix and `src\foo.rs` on Windows. These strings are compared
-/// against declared candidate paths and surfaced in gate reasons, so the
-/// platform leaked into both behaviour and output.
-fn display_path(project_root: &Path, path: &Path) -> String {
-    let relative = path.strip_prefix(project_root).unwrap_or(path);
-    relative
-        .components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn display_debug_path(path: &Path) -> String {
-    format!("{path:?}")
-}
+#[path = "orphan_gate_paths.rs"]
+mod paths;
+use paths::{display_debug_path, display_path, normalize_path, normalize_root_join};

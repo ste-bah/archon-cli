@@ -111,7 +111,7 @@ pub(crate) fn implementation_root_for_targets(
         let path = Path::new(root);
         return repository_root_for_path(path).ok_or_else(|| {
             WorkflowError::SpecInvalid(format!(
-                "target_repository_root '{}' is not inside a Git/Cargo repository",
+                "target_repository_root '{}' is not inside a recognized repository",
                 path.display()
             ))
         });
@@ -122,7 +122,7 @@ pub(crate) fn implementation_root_for_targets(
         .or_else(|| absolute_target_parent(targets))
         .ok_or_else(|| {
             WorkflowError::SpecInvalid(
-                "implementation stage requires a target_repository_root or discoverable Git/Cargo repository path in the workflow spec".into(),
+                "implementation stage requires a target_repository_root or discoverable recognized repository path in the workflow spec".into(),
             )
         })
 }
@@ -240,7 +240,7 @@ fn repository_root_for_path(path: &Path) -> Option<PathBuf> {
         path.parent()
     };
     while let Some(dir) = cursor {
-        if dir.join(".git").is_dir() || dir.join("Cargo.toml").is_file() {
+        if crate::repo_root::has_repository_marker(dir) {
             return Some(dir.to_path_buf());
         }
         cursor = dir.parent();
@@ -464,3 +464,7 @@ fn dedupe_paths(paths: &mut Vec<PathBuf>) {
     let mut seen = BTreeSet::new();
     paths.retain(|path| seen.insert(path.display().to_string()));
 }
+
+#[cfg(test)]
+#[path = "source_context_root_tests.rs"]
+mod root_tests;
