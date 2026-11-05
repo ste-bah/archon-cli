@@ -758,13 +758,38 @@ jobs:
             --extract-to "$GITHUB_WORKSPACE" --extract-overwrite \
             --partition "hash:${{ matrix.shard }}/${{ matrix.shards }}" --no-fail-fast &
           nextest_pid=$!
+          # PR #592 run 41941578008: ubuntu shard 3/3 filled the disk and the
+          # runner died before it uploaded any log. Below 6 GiB free, record
+          # the running processes, stop the tests first, then show what holds
+          # the disk, and fail the step, so the log survives with the cause.
+          guard_fired=0
+          ticks=0
           while kill -0 "$nextest_pid" 2>/dev/null; do
-            sleep 60
-            echo "nextest still running..."
-            df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+            sleep 10
+            ticks=$((ticks + 1))
+            if (( ticks % 6 == 0 )); then
+              echo "nextest still running..."
+              df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+            fi
+            avail_kb=$(df -Pk "$GITHUB_WORKSPACE" 2>/dev/null | awk 'NR==2 {print $4}' || true)
+            if [[ -n "$avail_kb" && "$avail_kb" -lt 6291456 ]]; then
+              guard_fired=1
+              procs=$(ps -Ao pid,ppid,etime,rss,command 2>/dev/null || true)
+              pkill -TERM -P "$nextest_pid" 2>/dev/null || true
+              kill -TERM "$nextest_pid" 2>/dev/null || true
+              echo "::error::disk below 6 GiB free during tests (${avail_kb} KiB); nextest stopped"
+              printf "%s\n" "$procs" | head -60 || true
+              sleep 5
+              pkill -KILL -P "$nextest_pid" 2>/dev/null || true
+              kill -KILL "$nextest_pid" 2>/dev/null || true
+              df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+              du -xhd 3 "$GITHUB_WORKSPACE" "$RUNNER_TEMP" "$HOME" /tmp 2>/dev/null | sort -h | tail -40 || true
+              break
+            fi
           done
           status=0
           wait "$nextest_pid" || status=$?
+          if (( guard_fired )); then status=1; fi
           df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
           exit "$status"
 
