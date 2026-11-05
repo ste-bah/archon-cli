@@ -270,15 +270,18 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const earlier = all.filter(id => state.entries.has(id) && !pending.includes(id)).map(id => state.entries.get(id));
   // Prefix window (Issue-247): entry i starts once entries 0..i-cap of this
   // round have settled, and sees exactly those (in order) after the entries of
-  // earlier rounds. Its prompt depends on its index alone, so a resume reuses
-  // the recorded call, and a slow entry delays only the entries behind it.
+  // earlier rounds, omitting failed entries. Its prompt depends on its index
+  // alone, so a resume reuses the recorded call, and a slow entry delays only
+  // the entries behind it.
   const { settled } = await runBounded(pending.length, cap, true, (index, done) => {
-    const prior = earlier.concat(done.slice(0, Math.max(0, index - cap + 1)).map(result => result.value.entry));
+    const prior = earlier.concat(done.slice(0, Math.max(0, index - cap + 1)).map(result => result.value.entry).filter(Boolean));
     return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria, state);
-  }, (result) => Boolean(result && result.failure));
+  }, (result) => Boolean(result?.failure && result.failure.malformed !== true && !Array.isArray(result.failure.findings)));
   // Every started call has settled. The window starts an index only while its
-  // fixed prefix holds no failure, so which entries ran depends on the replies
-  // alone, never on timing (runBounded). Every entry that succeeded is kept,
+  // fixed prefix holds no operational failure: one at f stops indices i >= f + cap.
+  // A shape refusal or malformed reply does not stop the window; a rejection
+  // stops all new starts. Which entries ran depends on the replies alone, never
+  // on timing (runBounded). Every entry that succeeded is kept,
   // in input order, the ones after a failure too: re-authoring a passed entry
   // wastes its call and can bring back a finding it already repaired.
   const succeeded = (result) => Boolean(result && result.status === "fulfilled" && !result.value.failure);
