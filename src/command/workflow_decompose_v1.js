@@ -115,8 +115,7 @@ async function workflow(w) {
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
     if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) {
-      const body = args.frozenChain?.body_contents?.[subject.fileName];
-      if (typeof body !== "string") throw new Error(`frozen body content missing for ${subject.fileName}`);
+      const body = { path: `${args.taskRoot}/${subject.fileName}` };
       publishBodyCandidate(`body-${subject.taskId}`, body);
       continue;
     }

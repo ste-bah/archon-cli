@@ -36,6 +36,7 @@ use host_owned::HostOwned;
 pub(super) mod record;
 pub(crate) use record::reply_entry;
 
+/// The acceptance gate. Its stdin is the candidate the script assembled.
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
 const ACCEPTANCE_PREFIX: &str = "acceptance-author-";
 
@@ -283,15 +284,9 @@ pub(crate) fn derive_with_reply_markers(
     Ok(derived)
 }
 
-type Gate<'a> = (&'a WorkflowV2CallRecord, &'a str, &'a str, GateSeed);
-
-struct Reply<'a> {
-    record: &'a WorkflowV2CallRecord,
-    id: String,
-    ordinal: u64,
-    text: String,
-    entry: Value,
-}
+#[path = "workflow_decompose_seed_types.rs"]
+mod seed_types;
+use seed_types::{Gate, Reply};
 
 /// The reply round a gate's candidate holds: the latest round after which
 /// the loop's entries (each entry's latest reply up to that round) are the

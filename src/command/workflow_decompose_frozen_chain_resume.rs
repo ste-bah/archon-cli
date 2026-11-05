@@ -209,6 +209,7 @@ fn decide_locked(
     effective.acceptance = acceptance.verify;
     effective.skeleton = skeleton.verify;
     effective.bodies = bodies;
+    effective.body_contents.retain(|name, _| effective.bodies.contains(name));
     // Older generation records predate body_contents. Recover only the bytes
     // their recorded digest authenticates; never substitute a changed body.
     for file_name in &effective.bodies {

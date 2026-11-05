@@ -25,9 +25,10 @@ function context() {
 function policy(ctx) { return ctx.bodyPolicy(subject, []); }
 function retained(ctx) { return vm.runInContext(`BODY_CANDIDATES.get('${phase}')`, ctx); }
 function details(prompt) {
-  const json = prompt.split('Retained candidate and exact gate findings (JSON):\n')[1]?.split('\n')[0];
-  assert.ok(json, 'repair contains the retained body and structured findings');
-  return JSON.parse(json);
+  const json = prompt.split('Exact gate findings (JSON):\n')[1]?.split('\n')[0];
+  assert.ok(json, 'repair contains structured findings');
+  const body = prompt.split('Retained candidate (raw text):\n')[1]?.split('\nEnd retained candidate.')[0];
+  return { body, ...JSON.parse(json) };
 }
 
 // Replay is the production persistence protocol: requests and results are in
@@ -111,9 +112,8 @@ test('large candidate uses exact host-written context; a failed write pauses and
     hostCommand: async () => outcome([])
   }, policy(ctx));
   const path = prompt.match(/at (\/run\/author-context\/[^ ]+)/)[1];
-  const saved = JSON.parse(ctx.__archonAuthorContext.files.get(path));
-  assert.equal(saved.body, body);
-  assert.deepEqual(saved.findings, found);
+  assert.equal(ctx.__archonAuthorContext.files.get(path), body);
+  assert.deepEqual(details(prompt).findings, found);
   assert.ok(Buffer.byteLength(prompt) < 20000);
   const broken = context(), logs = [];
   broken.retainBodyCandidate(phase, body + 'different', found);
@@ -203,13 +203,13 @@ test('Rust declaration-slicing harness still runs the body repair driver with th
 });
 
 
-test('set-gate reentry keeps a better rejected draft until publication or skeleton change', () => {
+test('set-gate reentry drops an older draft and uses the published judged bytes', () => {
   const ctx = context();
   ctx.publishBodyCandidate(phase, 'published');
   ctx.retainSetBodyCandidate(subject, findings(39, 'set'));
   ctx.retainBodyCandidate(phase, 'five-finding draft', findings(5, 'best'));
   ctx.retainSetBodyCandidate(subject, findings(33, 'later set'));
-  assert.equal(retained(ctx).body, 'five-finding draft');
+  assert.equal(retained(ctx).body, 'published');
   assert.equal(retained(ctx).score, 33);
   assert.deepEqual(JSON.parse(JSON.stringify(retained(ctx).findings)), findings(33, 'later set'));
 });
@@ -246,6 +246,7 @@ test('shadow return excludes inherited findings and re-entry delivers new groupe
     hostCommand: async () => outcome([...body, ...excluded]) }, policy(ctx));
   assert.equal(retained(ctx).score, 1);
   assert.equal(retained(ctx).findings.length, 1);
+  ctx.publishBodyCandidate(phase, 'published shadow body');
   const grouped = findings(1, 'G');
   ctx.retainSetBodyCandidate(subject, grouped);
   await ctx.authorCandidate({
@@ -255,7 +256,7 @@ test('shadow return excludes inherited findings and re-entry delivers new groupe
   assert.match(prompts[0], /new grouped finding G/);
   assert.match(prompts[0], /G finding 0/);
   assert.doesNotMatch(prompts[0], /excluded skeleton|excluded inherited_predecessor|body finding 0/);
-  assert.equal(details(prompts[0]).body, 'retained shadow body');
+  assert.equal(details(prompts[0]).body, 'published shadow body');
   assert.deepEqual(details(prompts[0]).findings, grouped);
 });
 
@@ -285,7 +286,7 @@ test('upgrade seed recovers the best journaled judgment, or the latest for older
 test('workflow seeds on-disk published body for set-gate repair', async () => {
   const ctx = context();
   ctx.args.frozenChain = { acceptance: true, skeleton: true, subjects: [subject],
-    bodies: [subject.fileName], body_contents: { [subject.fileName]: 'ON DISK BODY' } };
+    bodies: [subject.fileName] };
   ctx.subject = subject;
   vm.runInContext(`
     requireFixedArgs = () => {};
@@ -300,5 +301,65 @@ test('workflow seeds on-disk published body for set-gate repair', async () => {
   let prompt;
   await ctx.workflow({ agent: async (_, opts) => { prompt = opts.task; return reply('repaired disk body'); },
     hostCommand: async () => outcome([]), finalReport: async () => ({}) });
-  assert.equal(details(prompt).body, 'ON DISK BODY');
+  assert.match(prompt, /Read the retained candidate as raw text at \/tasks\/TASK-SAMPLE-001.md/);
+  assert.deepEqual(details(prompt).findings, [{ text: 'set defect', remediation_scope: 'body' }]);
+});
+
+
+test('empty or non-body judgments never retain or anchor a body candidate', async () => {
+  for (const found of [[], [{ text: 'predecessor defect', remediation_scope: 'inherited_predecessor' }]]) {
+    const ctx = context();
+    ctx.retainBodyCandidate(phase, 'unusable anchor', found);
+    assert.equal(retained(ctx), undefined);
+    assert.equal(ctx.bodyRepairContext(policy(ctx), 2), null);
+  }
+  const ctx = context();
+  await ctx.authorCandidate({ agent: async () => reply('unusable anchor'),
+    hostCommand: async () => outcome([{ text: 'predecessor defect', remediation_scope: 'inherited_predecessor' }]) }, policy(ctx));
+  assert.equal(retained(ctx), undefined);
+  ctx.publishBodyCandidate(phase, 'published');
+  ctx.retainSetBodyCandidate(subject, []);
+  assert.equal(retained(ctx), undefined);
+});
+
+test('set-gate task findings with fatal or inherited scopes reach the body author intact', async () => {
+  for (const scope of ['prd_input', 'operational', 'unknown', 'inherited_predecessor']) {
+    const ctx = context(), prompts = [];
+    ctx.publishBodyCandidate(phase, 'published body');
+    const found = { text: `exact ${scope} defect`, remediation_scope: scope,
+      source_path: `/tasks/${subject.fileName}`, subject: subject.taskId };
+    let round = 0;
+    await ctx.runSetGateLoop({ checkpoint: async () => ({}),
+      agent: async (_, opts) => { prompts.push(opts.task); return reply('corrected'); },
+      hostCommand: async cap => outcome(cap === 'task-set-lint' && ++round === 1 ? [found] : [])
+    }, { subjects: [subject] }, new Map());
+    assert.equal(prompts.length, 1);
+    assert.equal(details(prompts[0]).body, 'published body');
+    assert.deepEqual(details(prompts[0]).findings, [{ ...found, remediation_scope: 'body' }]);
+  }
+});
+
+test('latest unjudged seed goes to the gate before selecting a judged repair draft', async () => {
+  const ctx = context();
+  const seed = { candidate: 'latest unjudged', gate: null, journal_results: [
+    { body: 'earlier judged', findings: findings(1, 'earlier') }
+  ] };
+  const seeded = ctx.seedArtifact(seed, policy(ctx));
+  assert.equal(seeded.carried, 'latest unjudged');
+  assert.equal(seeded.previousCandidate, 'latest unjudged');
+  ctx.args.phaseSeed = { subjects: { [phase]: { kind: 'artifact', ...seed } } };
+  let gated;
+  await ctx.authorCandidate({ agent: async () => { throw new Error('must gate the carried reply first'); },
+    hostCommand: async (_, opts) => { gated = opts.stdin; return outcome([]); } }, policy(ctx));
+  assert.equal(gated, 'latest unjudged');
+});
+
+test('frozen arguments and verification envelopes exclude cached body text', () => {
+  const frozen = fs.readFileSync(`${root}/workflow_decompose_frozen_chain.rs`, 'utf8');
+  const argument = frozen.split('pub(crate) fn to_argument')[1].split('/// Read and verify')[0];
+  assert.doesNotMatch(argument, /body_contents/);
+  const stage = fs.readFileSync(`${root}/workflow_decompose_frozen_chain_stage.rs`, 'utf8');
+  assert.match(stage, /snapshot.to_argument\(\)/);
+  const launch = fs.readFileSync(`${root}/workflow_decompose_launch_repair.rs`, 'utf8');
+  assert.equal([...launch.matchAll(/launched\.bodies.clear\(\);\s*launched\.body_contents.clear\(\);/g)].length, 2);
 });

@@ -55,8 +55,8 @@ const BODY_PUBLISHED = new Map();
 
 function retainBodyCandidate(phase, body, findings, history = []) {
   findings = bodyRetryFindings(findings);
+  if (findings.length === 0) return;
   const measure = { ...attemptMeasure(findings), count: findings.length };
-  if (findings.length === 0) measure.tier = JUDGED_TIER;
   const score = findings.length;
   const prior = BODY_CANDIDATES.get(phase);
   if (!prior || prior.body === body || !isBetter(prior.measure, measure)) {
@@ -69,16 +69,14 @@ function publishBodyCandidate(phase, body) {
   BODY_CANDIDATES.delete(phase);
 }
 
-// A set gate judges the published body. Start its repair episode from those
-// bytes and those findings. An ongoing repair keeps its best rejected draft;
-// successful publication cleared the draft from any older episode.
+// A set gate judges the published body, not an unlanded repair draft.
+// Routing assigns these findings to this body whatever their original scope.
 function retainSetBodyCandidate(subject, findings) {
   const phase = `body-${subject.taskId}`;
-  const prior = BODY_CANDIDATES.get(phase);
-  const body = prior ? prior.body : BODY_PUBLISHED.get(phase);
+  const body = BODY_PUBLISHED.get(phase);
+  BODY_CANDIDATES.delete(phase);
   if (body !== undefined) {
-    // Re-entry evidence supersedes the old judgment for the retained bytes.
-    retainBodyCandidate(phase, body, findings);
+    retainBodyCandidate(phase, body, findings.map(f => ({ ...f, remediation_scope: "body" })));
   }
 }
 
@@ -96,22 +94,27 @@ function bodyRetryFindings(findings) {
 function bodyRepairContext(policy, rung) {
   if (policy.capability !== "land-task-body") return null;
   const best = BODY_CANDIDATES.get(policy.phase);
-  if (!best) return null;
+  if (!best || best.findings.length === 0) return null;
   if (rung === 4) return {
     text: `\nRe-author a complete replacement from fresh context. Keep the subject contract. Previously seen defects:\n- ${best.findings.map(findingText).join("\n- ")}`,
     feedback: [], history: best.history
   };
   const instruction = "Correct the retained candidate below. Change only what its findings require and keep every other line exactly. Return the complete corrected file, never a patch.";
-  const details = JSON.stringify({ body: best.body, findings: best.findings, blocking_findings: best.score });
-  let reference = `Retained candidate and exact gate findings (JSON):\n${details}`;
-  if (utf8Bytes(details) > 16384) {
-    try {
-      reference = `Read the retained candidate and exact gate findings at ${contextFile("json", details).path} (host-written context for this call: read it by its exact path, even under an excluded directory).`;
-    } catch (error) {
-      error.retainedBodyContext = true;
-      error.authorContext = true;
-      throw error;
-    }
+  const details = JSON.stringify({ findings: best.findings, blocking_findings: best.score });
+  let reference;
+  try {
+    const body = typeof best.body === "string" ? best.body : null;
+    const path = body === null ? best.body.path : utf8Bytes(body) > 16384 ? contextFile("txt", body).path : null;
+    reference = path
+      ? `Read the retained candidate as raw text at ${path} (host-written or frozen body context for this call: read it by its exact path, even under an excluded directory).`
+      : `Retained candidate (raw text):\n${body}\nEnd retained candidate.`;
+    reference += utf8Bytes(details) > 16384
+      ? `\nRead exact gate findings (JSON) at ${contextFile("json", details).path} (host-written context: read this exact path).`
+      : `\nExact gate findings (JSON):\n${details}`;
+  } catch (error) {
+    error.retainedBodyContext = true;
+    error.authorContext = true;
+    throw error;
   }
   return { text: `\n${instruction}\n${reference}`, feedback: best.findings.map(findingText), history: best.history };
 }

@@ -239,7 +239,7 @@ function seedArtifact(seed, policy) {
     for (const result of results) retainBodyCandidate(policy.phase, result.body, result.findings);
     if (results.length === 0 && seed.gate) retainBodyCandidate(policy.phase, seed.candidate, seed.gate.findings);
     const best = BODY_CANDIDATES.get(policy.phase);
-    if (best) return { feedback: best.findings.map(findingText), carried: null, previousCandidate: best.body };
+    if (best && seed.gate) return { feedback: best.findings.map(findingText), carried: null, previousCandidate: best.body };
   }
   const repair = seed.gate ? seedRepairFindings(seed.gate, policy).map((finding) => String(finding.text)) : [];
   return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: seed.candidate };

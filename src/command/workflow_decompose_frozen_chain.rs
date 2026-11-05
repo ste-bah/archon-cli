@@ -7,11 +7,14 @@
 //! root once, verifies whatever chain is frozen there with the SAME lock and
 //! pin checks the freeze and lint commands use, and hands the script a
 //! `frozenChain` argument saying what it may skip. Nothing here is a new
-//! verifier: acceptance uses `validate_acceptance_bundle` and the PRD digest; skeleton uses `validate_full_chain`.
+//! verifier: acceptance is `validate_acceptance_bundle` plus the PRD digest
+//! the postcondition checks, the skeleton is `validate_full_chain`.
 //!
 //! A lock that exists but does not verify is an error at launch, never a
 //! silent `false`: the operator asked to build on this root, and a root whose
 //! frozen record contradicts its contents is not one to build on quietly.
+//! Authenticated authored defects retain admission metadata so verification
+//! can return them to their owner; provenance contradictions remain errors.
 
 use std::path::Path;
 
@@ -130,7 +133,7 @@ pub(crate) struct FrozenChainSnapshot {
     pub(crate) subjects: Vec<HostCommandSubject>,
     /// Frozen file names whose body file exists under the task root.
     pub(crate) bodies: Vec<String>,
-    /// Body bytes seed set-gate repair from the verified on-disk artifact.
+    /// Legacy body cache for recorded snapshots; script context uses file paths.
     #[serde(default)]
     pub(crate) body_contents: std::collections::BTreeMap<String, String>,
     /// Content digests prove launch repair left bodies intact.
@@ -146,8 +149,8 @@ pub(crate) struct FrozenChainSnapshot {
 }
 
 impl FrozenChainSnapshot {
-    /// The script argument: camelCase subjects, exactly as `HostCommandSubject`
-    /// serialises for a host outcome, and a frozen skeleton's task entries.
+    /// The script argument: camelCase subjects and frozen skeleton entries.
+    /// Body text stays on disk, outside arguments and gate evaluation reports.
     pub(crate) fn to_argument(&self) -> serde_json::Value {
         let mut argument = serde_json::json!({
             "acceptance": self.acceptance,
@@ -155,9 +158,6 @@ impl FrozenChainSnapshot {
             "subjects": self.subjects,
             "bodies": self.bodies,
         });
-        if !self.body_contents.is_empty() {
-            argument["body_contents"] = serde_json::json!(self.body_contents);
-        }
         if self.skeleton && !self.tasks.is_empty() {
             argument["tasks"] = serde_json::json!(self.tasks);
         }
