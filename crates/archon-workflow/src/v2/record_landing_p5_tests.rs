@@ -69,7 +69,7 @@ fn P5_23_JS_shape_matches_schema() {
         assert!(
             task_schema()["properties"]["deliverable_contracts"]["items"]["properties"]
                 .get(field)
-                .is_none()
+                .is_some()
         );
     }
     let source = include_str!("../../../../src/command/workflow_decompose_v1.js");
@@ -104,7 +104,7 @@ fn P5_23_JS_shape_matches_schema() {
     let records = open(dir.path());
     let mut t = task(1);
     t["depends_on"] = json!([{"task_id":"TASK-X-002","ordering_only":false,"consumes":[{"artifact_path":"out","instance_source_records_field":"rows","registry_records_field":"entries"}]}]);
-    t["deliverable_contracts"] = json!([{"kind":"output","artifact_path":"out","instance_source_records_field":"rows","registry_records_field":"entries"}]);
+    t["deliverable_contracts"] = json!([{"kind":"output","artifact_path":"out","min_instances":1,"instance_source_records_field":"rows","registry_records_field":"entries"}]);
     land(&records, t.clone());
     let composed = records.compose(&json!({"records_landed":1})).unwrap();
     let expected: archon_workflow::task_skeleton::FrozenTask = serde_json::from_value(t).unwrap();
@@ -115,6 +115,27 @@ fn P5_23_JS_shape_matches_schema() {
 }
 #[test]
 fn P5_24_hint_uses_exact_schema() {
+    let schema = task_schema();
+    let fields = &schema["properties"]["deliverable_contracts"]["items"]["properties"];
+    for line in include_str!("../task_universe_deliverable.rs").lines() {
+        if let Some(field) = line
+            .trim()
+            .strip_prefix("pub ")
+            .and_then(|s| s.split_once(':'))
+        {
+            assert!(
+                fields.get(field.0).is_some(),
+                "missing contract field {}",
+                field.0
+            );
+        }
+    }
+    assert_eq!(fields["typed_verifier_command"]["type"], "string");
+    assert_eq!(fields["closed_weekdays"]["items"]["type"], "integer");
+    assert_eq!(
+        fields["minimum_count_fields"]["additionalProperties"]["type"],
+        "integer"
+    );
     assert!(schema_hint(RecordKind::Skeleton).contains(&task_schema().to_string()));
 }
 #[test]
@@ -211,4 +232,40 @@ fn P5_31_remove_draft_only() {
             .land(json!({"subject":"TASK-X-001","remove":true}))
             .is_err()
     );
+}
+
+#[test]
+fn frozen_seed_retains_every_task_with_a_missing_execution_obligation() {
+    let dir = tempfile::tempdir().unwrap();
+    let records = open(dir.path());
+    let mut seed = previous();
+    for task in seed["tasks"].as_array_mut().unwrap() {
+        task["deliverable_contracts"] =
+            json!([{"kind":"output","artifact_path":"out.json","min_instances":0}]);
+    }
+    records.seed_skeleton(&seed, true).unwrap();
+    let composed = records.compose(&json!({"records_landed":2})).unwrap();
+    let expected: archon_workflow::task_skeleton::TaskSkeleton =
+        serde_json::from_value(seed).unwrap();
+    assert_eq!(
+        composed["tasks"],
+        serde_json::to_value(&expected.tasks).unwrap()
+    );
+    assert!(archon_workflow::task_skeleton::validate_skeleton(&expected, "").is_err());
+    assert!(
+        records
+            .land(json!({"subject":"TASK-X-001","remove":true}))
+            .is_err()
+    );
+}
+
+#[test]
+fn seed_still_skips_tasks_with_invalid_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let records = open(dir.path());
+    let mut seed = previous();
+    seed["tasks"][0]["file_name"] = json!("nested/TASK-X-001.md");
+    records.seed_skeleton(&seed, true).unwrap();
+    let composed = records.compose(&json!({"records_landed":1})).unwrap();
+    assert_eq!(composed["tasks"][0]["task_id"], "TASK-X-002");
 }

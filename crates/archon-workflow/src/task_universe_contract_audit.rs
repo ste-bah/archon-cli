@@ -155,9 +155,10 @@ pub fn contract_defects(
         Some(contract),
     ) {
         defects.push(crate::defect::ValidationDefect::new(
-            "invalid_verifier", subject,
+            "invalid_verifier",
+            subject,
             &format!("deliverable_contracts/{index}/typed_verifier_command"),
-            format!("{defect}; in task-skeleton.json task {subject} deliverable_contracts/{index}, add a falsifiable typed_verifier_command, or a real positive min_instances floor/source binding"),
+            format!("{defect}; at deliverable_contracts/{index} for subject {subject}"),
         ));
     }
     defects

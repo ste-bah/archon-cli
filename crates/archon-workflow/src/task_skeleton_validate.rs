@@ -3,6 +3,21 @@ use super::*;
 use crate::defect::{ValidationDefect, defect_message};
 
 pub fn skeleton_defects(skeleton: &TaskSkeleton, expected_digest: &str) -> Vec<ValidationDefect> {
+    skeleton_validation_defects(skeleton, expected_digest, true)
+}
+
+pub(crate) fn skeleton_shape_defects(
+    skeleton: &TaskSkeleton,
+    expected_digest: &str,
+) -> Vec<ValidationDefect> {
+    skeleton_validation_defects(skeleton, expected_digest, false)
+}
+
+fn skeleton_validation_defects(
+    skeleton: &TaskSkeleton,
+    expected_digest: &str,
+    audit_contracts: bool,
+) -> Vec<ValidationDefect> {
     let mut defects = Vec::new();
     if skeleton.schema_version != 1 {
         defects.push(ValidationDefect::new("invalid_schema_version", "skeleton", "schema_version", format!(
@@ -47,10 +62,12 @@ pub fn skeleton_defects(skeleton: &TaskSkeleton, expected_digest: &str) -> Vec<V
             defects.push(ValidationDefect::new("duplicate_filename", &subject, "file_name", format!(
                 "task skeleton file_name '{}' is duplicated; give each task one distinct TASK-*.md filename", task.file_name)));
         }
-        for (index, contract) in task.deliverable_contracts.iter().enumerate() {
-            defects.extend(crate::task_universe_contract_audit::contract_defects(
-                &subject, index, contract,
-            ));
+        if audit_contracts {
+            for (index, contract) in task.deliverable_contracts.iter().enumerate() {
+                defects.extend(crate::task_universe_contract_audit::contract_defects(
+                    &subject, index, contract,
+                ));
+            }
         }
         let file = Path::new(&task.file_name);
         if file

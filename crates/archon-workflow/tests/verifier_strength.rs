@@ -84,8 +84,10 @@ fn verifier_or_positive_instance_obligation_is_mandatory() {
     assert!(
         missing
             .to_string()
-            .contains("deleting the verifier does not satisfy")
+            .contains("set min_instances >= 1, add a falsifiable typed_verifier_command")
     );
+    assert!(!missing.to_string().contains("replace"));
+    assert!(!missing.to_string().contains("deleting"));
     assert!(
         verifier_strength_defect(None, Some("out.json"), Some(&positive_floor)).is_none(),
         "a positive floor is a falsifiable execution obligation"

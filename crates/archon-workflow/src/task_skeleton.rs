@@ -101,7 +101,7 @@ mod ownership;
 #[path = "task_skeleton_validate.rs"]
 mod validate;
 pub use ownership::constraint_owner_findings;
-pub(crate) use validate::entry_findings;
+pub(crate) use validate::{entry_findings, skeleton_shape_defects};
 pub use validate::{skeleton_defects, validate_skeleton};
 
 pub fn validate_skeleton_set(

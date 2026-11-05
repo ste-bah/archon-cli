@@ -205,12 +205,18 @@ function skeletonPromptAndShape() {
     "These values name the producer's records field, not a task id or artifact path.",
     "The deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.",
   ]) assert.ok(prompt.includes(line), `skeleton prompt lacks: ${line}`);
+  assert.ok(prompt.includes(vm.runInContext('DELIVERABLE_CONTRACT_RULE', ctx)));
+  assert.ok(prompt.includes('Prefer min_instances: 1'));
   assert.ok(!prompt.includes('ids the PRD defines'));
   const shape = JSON.parse(vm.runInContext('SKELETON_SHAPE', ctx));
   assert.deepEqual(shape.tasks[0].implements, ['<obligation or constraint id the host lists>']);
   assert.deepEqual(shape.tasks[0].deliverable_contracts[0], {
     kind:'<short stable name for what this task produces>',
     artifact_path:'<path this task produces, exactly as its dependents consume it>',
+    typed_verifier_command:'<optional: falsifiable command that can exit non-zero when the declared outcome is false>',
+    instance_artifact_field:'<optional: artifact path field in each source record>',
+    instance_source_path:'<optional: path to the instance source>',
+    registry_path:'<optional: path to the registry instance source>',
     instance_source_records_field:'<optional: name of the records field in the instance source>',
     registry_records_field:'<optional: name of the records field in the registry>',
     min_instances:1,

@@ -51,12 +51,12 @@ fn skeleton_contract_with_blank_kind_or_path_is_rejected_by_path() {
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("task.deliverable_contracts[0].kind"),
+        error.contains("task.deliverable_contracts[0].kind is blank"),
         "{error}"
     );
-    let error = landing.land(skeleton_task(json!([]), json!([{"kind":"report","artifact_path":"out/a.json"},{"kind":"report","artifact_path":"  "}]))).unwrap_err().to_string();
+    let error = landing.land(skeleton_task(json!([]), json!([{"kind":"report","artifact_path":"out/a.json","min_instances":1},{"kind":"report","artifact_path":"  "}]))).unwrap_err().to_string();
     assert!(
-        error.contains("task.deliverable_contracts[1].artifact_path"),
+        error.contains("task.deliverable_contracts[1].artifact_path is blank"),
         "{error}"
     );
     assert!(error.contains("Expected schema:"), "{error}");

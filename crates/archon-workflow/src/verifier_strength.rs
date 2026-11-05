@@ -23,11 +23,21 @@ pub enum VerifierStrengthDefect {
 
 impl fmt::Display for VerifierStrengthDefect {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let replacement = "replace it with a command that can exit non-zero when the declared outcome is false, or declare a real positive instance floor/source binding; deleting the verifier does not satisfy this contract because it also removes the task's execution obligation";
+        let action = if matches!(self, Self::MissingExecutionObligation) {
+            "add"
+        } else {
+            "replace the verifier with"
+        };
+        let remedy = format!(
+            "set min_instances >= 1, {action} a falsifiable typed_verifier_command, or bind an instance source (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field)"
+        );
+        let replacement = format!(
+            "{remedy}; deleting the verifier does not satisfy this contract because it also removes the task's execution obligation"
+        );
         match self {
             Self::MissingExecutionObligation => write!(
                 f,
-                "deliverable contract has neither a verifier nor a positive instance obligation; {replacement}"
+                "deliverable contract has neither a verifier nor a positive instance obligation; {remedy}"
             ),
             Self::OwnArtifactExistenceOnly { artifact_path } => write!(
                 f,

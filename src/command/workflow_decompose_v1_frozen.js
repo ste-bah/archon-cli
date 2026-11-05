@@ -190,6 +190,7 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
       "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
       "The consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.",
+      DELIVERABLE_CONTRACT_RULE,
       "The deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.",
       "Generate large or repetitive fixture data with code rather than writing it literally.",
       "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt.",

@@ -273,6 +273,7 @@ fn verifier_strength_uses_one_runtime_predicate_for_bad_and_good_pairs() {
             certain[0]
         );
 
+        assert!(!certain[0].message.contains("add a falsifiable"));
         let good_findings = audit_contracts(&universe(vec![task("TASK-X-010", vec![good])]));
         assert!(
             !good_findings
@@ -299,9 +300,20 @@ fn deleting_a_verifier_without_a_positive_floor_is_still_unsatisfiable() {
     assert!(
         certain
             .message
-            .contains("deleting the verifier does not satisfy this contract")
+            .contains("set min_instances >= 1, add a falsifiable typed_verifier_command")
     );
 
+    assert!(!certain.message.contains("replace"));
+    assert!(!certain.message.contains("deleting"));
+    for field in [
+        "instance_artifact_field",
+        "instance_source_path",
+        "registry_path",
+        "instance_source_records_field",
+        "registry_records_field",
+    ] {
+        assert!(certain.message.contains(field), "{}", certain.message);
+    }
     let floor = verified_contract("out.json", None, 1);
     let floor_findings = audit_contracts(&universe(vec![task("TASK-X-010", vec![floor])]));
     assert!(
