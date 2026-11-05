@@ -24,7 +24,7 @@ use super::*;
 use crate::acceptance_check_environment::{
     CheckPolicy, check_environment, profile_bindings, withheld, withheld_note,
 };
-use crate::acceptance_world::{FrozenCommandRef, resolve_command};
+use crate::acceptance_world::{FrozenCommandRef, resolve_command_with_bindings};
 use crate::task_set_contract::AcceptanceContract;
 use std::collections::BTreeSet;
 use std::sync::{Arc, atomic::AtomicBool};
@@ -196,8 +196,9 @@ pub async fn run_check_direct_with_plan(
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<CheckResult> {
     site.validate()?;
-    let command = resolve_command(contract, chain_digest, reference)?;
     let (_home, environment, withheld) = site.prepare()?;
+    let bound: Vec<&str> = environment.keys().map(String::as_str).collect();
+    let command = resolve_command_with_bindings(contract, chain_digest, reference, &bound)?;
     let mutation_root = mutation_plan.and_then(|_| {
         let root = site.project.parent().unwrap_or(&site.project);
         super::mutation_fd::SiteRoot::capture(root).ok()

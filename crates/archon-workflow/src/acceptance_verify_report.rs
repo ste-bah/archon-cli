@@ -56,7 +56,7 @@ mod tests {
             command: "set -u; trap 'exit 0' EXIT; : \"${X:?msg}\"".into(),
             exit_code: Some(0),
             stdout: String::new(),
-            stderr: "sh: line 1: X: msg".into(),
+            stderr: "/bin/sh: X: msg".into(),
             environment_note: None,
             parse_error: None,
         };

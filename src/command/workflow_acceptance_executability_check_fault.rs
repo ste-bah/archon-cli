@@ -213,18 +213,25 @@ pub(super) fn policy_refused(
     contract: &AcceptanceContract,
     refs: &[FrozenCommandRef],
 ) -> BTreeSet<String> {
-    let policy = archon_workflow::task_set_contract::acceptance_policy_findings(contract);
+    let (environment, forwarded) = sites::site_environment(probe);
+    let bound: Vec<&str> = environment
+        .keys()
+        .chain(forwarded.iter())
+        .map(String::as_str)
+        .collect();
     let mut refused = BTreeSet::new();
     for reference in refs {
-        let prefix = format!("{}.", reference.acceptance_id);
-        let defects: Vec<&str> = (policy.iter())
-            .filter(|finding| finding.field.starts_with(&prefix))
-            .filter(|finding| {
-                finding
-                    .identity
-                    .as_ref()
-                    .is_none_or(|identity| identity.code != "unset_shell_variable")
-            })
+        let Some(entry) = contract
+            .acceptance
+            .iter()
+            .chain(&contract.supplementary)
+            .find(|entry| entry.id == reference.acceptance_id)
+        else {
+            continue;
+        };
+        let findings = archon_workflow::acceptance_world::execution_policy_defects(entry, &bound);
+        let defects: Vec<&str> = findings
+            .iter()
             .map(|finding| finding.message.as_str())
             .collect();
         if !defects.is_empty() {

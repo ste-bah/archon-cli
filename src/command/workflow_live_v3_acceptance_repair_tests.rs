@@ -487,3 +487,6 @@ async fn an_accepted_frozen_expansion_defect_is_repaired_in_the_round() {
     );
     archon_workflow::task_skeleton::validate_full_chain(&run.set.tasks, &run.set.pin()).unwrap();
 }
+
+#[path = "workflow_live_v3_acceptance_repair_binding_tests.rs"]
+mod binding_tests;

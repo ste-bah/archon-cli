@@ -406,7 +406,7 @@ fn previous_masked_abort_classification_is_a_cache_miss() {
     let key = "b".repeat(64);
     let path = store.path(&key).unwrap();
     let bytes = serde_json::to_vec(&serde_json::json!({
-        "schema": 5, "key": key,
+        "schema": 6, "key": key,
         "result": {"acceptance_id": "check", "exit_code": 0, "stdout": [],
             "stderr": [], "operational_error": null,
             "classification": {"passed": true, "zero_work": false, "crash": "Passed"}}
@@ -418,4 +418,27 @@ fn previous_masked_abort_classification_is_a_cache_miss() {
         assert!(store.load(&key, scratch).is_none());
     }
     assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
+
+#[test]
+fn unclassified_custom_expansion_cannot_be_saved_as_a_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::ResultStore::new(
+        dir.path().into(),
+        crate::command::workflow_task_set::passability::evidence::Redactor::from_vars(
+            Vec::new(),
+            &[],
+        ),
+    );
+    let result = serde_json::from_value(serde_json::json!({
+        "acceptance_id": "check", "exit_code": 0, "stdout": [],
+        "stderr": b"/bin/sh: X: msg", "operational_error": null
+    }))
+    .unwrap();
+    let key = "c".repeat(64);
+    assert!(store.save(&key, &result));
+    let path = store.path(&key).unwrap();
+    std::fs::rename(path.with_extension("provisional"), &path).unwrap();
+    let saved = store.load(&key, false).unwrap();
+    assert!(!saved.result.passed());
 }

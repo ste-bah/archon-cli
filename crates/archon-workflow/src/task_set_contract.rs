@@ -14,9 +14,9 @@ use crate::verifier_strength::verifier_strength_defect;
 mod policy;
 pub use policy::{
     AcceptancePolicyFinding, CHECK_SHAPE_VOCABULARY, acceptance_entry_policy_findings,
-    acceptance_policy_findings, acceptance_policy_findings_with_bindings,
-    acceptance_policy_findings_with_roots, acceptance_site_path_defect,
-    criterion_prescribes_check_shape, refuted_check_message,
+    acceptance_entry_policy_findings_with_bindings, acceptance_policy_findings,
+    acceptance_policy_findings_with_bindings, acceptance_policy_findings_with_roots,
+    acceptance_site_path_defect, criterion_prescribes_check_shape, refuted_check_message,
 };
 pub const ACCEPTANCE_CONTRACT_FILE: &str = "acceptance-contract.json";
 pub const ACCEPTANCE_LOCK_FILE: &str = "acceptance-contract.lock";

@@ -82,6 +82,13 @@ pub fn acceptance_entry_policy_findings(
     policy_findings(std::iter::once(entry), None, &[])
 }
 
+pub fn acceptance_entry_policy_findings_with_bindings(
+    entry: &super::AcceptanceCriterion,
+    bound: &[&str],
+) -> Vec<AcceptancePolicyFinding> {
+    policy_findings(std::iter::once(entry), None, bound)
+}
+
 fn policy_findings<'a>(
     entries: impl Iterator<Item = &'a super::AcceptanceCriterion>,
     roots: Option<(&Path, &Path, bool)>,

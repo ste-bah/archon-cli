@@ -356,3 +356,14 @@ fn fatal_expansions_override_exit_traps_and_preserve_raw_classification() {
 
 #[path = "acceptance_check_crash_expansion_tests.rs"]
 mod expansion_tests;
+
+#[test]
+fn unclassified_results_without_command_reject_masked_custom_expansion() {
+    for stderr in ["/bin/sh: X: msg", "/bin/dash: 1: X: msg"] {
+        let mut ran = result(Some(0), stderr);
+        assert!(!ran.passed());
+        ran.classify_raw("");
+        assert!(!ran.passed());
+        assert_eq!(ran.classification.unwrap().crash, CheckRunClass::Failed);
+    }
+}

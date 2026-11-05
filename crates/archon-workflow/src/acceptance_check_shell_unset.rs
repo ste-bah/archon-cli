@@ -120,3 +120,7 @@ pub fn unset_reads_with_bound(command: &str, bound: &[&str]) -> Vec<UnsetRead> {
 #[cfg(test)]
 #[path = "acceptance_check_shell_unset_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "acceptance_check_shell_expansion_domain_tests.rs"]
+mod domain_tests;

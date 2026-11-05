@@ -77,7 +77,7 @@ impl ResultStore {
         let original = result;
         let mut result = result.clone();
         // Native command results are already classified at capture. Declarative
-        // results have no command and cannot be a script crash.
+        // results have no command; unknown fatal expansion diagnostics conservatively fail.
         result.classify_raw("");
         if let Some(classification) = &mut result.classification
             && let CheckRunClass::ScriptDefect(defect) = &mut classification.crash

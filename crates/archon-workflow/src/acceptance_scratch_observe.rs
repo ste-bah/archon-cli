@@ -4,7 +4,7 @@ use super::hooks::{CHECK_DEFERRED, ObserveControl};
 mod isolate;
 use super::process::{CHECK_TIMED_OUT, CheckResult};
 use super::*;
-use crate::acceptance_world::{FrozenCommandRef, resolve_command};
+use crate::acceptance_world::{FrozenCommandRef, resolve_command_with_bindings};
 use crate::task_set_contract::{AcceptanceContract, content_digest};
 use isolate::normalized;
 use std::sync::{Arc, atomic::AtomicBool};
@@ -42,9 +42,11 @@ pub async fn observe_commands_hooked(
     // this function: every other selected check would then report a
     // guardian-level failure it did not cause, pointing at evidence that does
     // not exist. An unauthorized command is carried to its own check instead.
+    let environment = crate::acceptance_check_environment::CheckPolicy::configured(policy);
+    let bound = crate::acceptance_check_environment::policy_bound_names(&environment);
     let commands: Vec<WorkflowResult<_>> = refs
         .iter()
-        .map(|r| resolve_command(contract, chain_digest, r))
+        .map(|r| resolve_command_with_bindings(contract, chain_digest, r, &bound))
         .collect();
     if commands.is_empty() {
         return Err(invalid(

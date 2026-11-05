@@ -50,6 +50,7 @@
 //! since an EXIT trap can mask an abort. It is a script defect only when the
 //! whole-check authoring rule finds the name never bound, including the run's
 //! environment. Required-value expansions remain ordinary failed verdicts.
+//! A correct negative test whose child prints a fatal expansion diagnostic to stderr also fails.
 //!
 //! POSIX shell — the error line comes from a shell reading a script from
 //! stdin (`sh: line N:`, dash's `sh: N:`; never a named script, `-c`,
