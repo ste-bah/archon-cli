@@ -190,6 +190,7 @@ fn a_frozen_acceptance_contract_alone_is_reported_without_subjects() {
             skeleton: false,
             subjects: Vec::new(),
             bodies: Vec::new(),
+            body_contents: Default::default(),
             body_digests: Vec::new(),
             preserved_digests: Vec::new(),
             tasks: Vec::new(),
@@ -295,6 +296,7 @@ fn a_frozen_skeleton_reports_its_subjects_and_the_bodies_present() {
                 {"taskId": "TASK-X-020", "fileName": "TASK-X-020.md"},
             ],
             "bodies": ["TASK-X-020.md"],
+            "body_contents": {"TASK-X-020.md": "# body"},
             "tasks": [
                 {"task_id": "TASK-X-010", "file_name": "TASK-X-010.md", "depends_on": [],
                  "blocks": [], "implements": ["AC-X-001"], "deliverable_contracts": []},

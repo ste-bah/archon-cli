@@ -74,12 +74,13 @@ async function sequentialWhenCapIsOne() {
 }
 
 async function frozenBodiesAreSkipped() {
- const frozen={acceptance:true,skeleton:true,subjects:SUBJECTS,bodies:['TASK-X-2.md','TASK-X-5.md']};
+ const frozen={acceptance:true,skeleton:true,subjects:SUBJECTS,bodies:['TASK-X-2.md','TASK-X-5.md'],body_contents:{'TASK-X-2.md':'disk body 2','TASK-X-5.md':'disk body 5'}};
  const h=harness(4,{frozenChain:frozen});
  assert.equal(h.context.frozenChain().bodies.size,2,'fixture frozen chain is read');
  await h.context.workflow(h.w);
  assert.deepEqual(h.bodyCalls.map(c=>c.taskId).sort(),['TASK-X-1','TASK-X-3','TASK-X-4','TASK-X-6','TASK-X-7'],'frozen bodies are not re-authored');
  assert.equal(h.peak(),4);
+ assert.equal(vm.runInContext("BODY_PUBLISHED.get('body-TASK-X-2')",h.context),'disk body 2');
 }
 
 async function failureSurfacesAfterSiblingsSettle() {

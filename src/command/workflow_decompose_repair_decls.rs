@@ -67,6 +67,7 @@ pub(super) const SCRIPT_DECLS: &[&str] = &[
     "AUTHOR_CALLS",
     "BODY_CANDIDATES",
     "BODY_PUBLISHED",
+    "bodyRetryFindings",
     "retainBodyCandidate",
     "publishBodyCandidate",
     "bodyRepairContext",

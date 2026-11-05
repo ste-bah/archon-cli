@@ -7,14 +7,11 @@
 //! root once, verifies whatever chain is frozen there with the SAME lock and
 //! pin checks the freeze and lint commands use, and hands the script a
 //! `frozenChain` argument saying what it may skip. Nothing here is a new
-//! verifier: acceptance is `validate_acceptance_bundle` plus the PRD digest
-//! the postcondition checks, the skeleton is `validate_full_chain`.
+//! verifier: acceptance uses `validate_acceptance_bundle` and the PRD digest; skeleton uses `validate_full_chain`.
 //!
 //! A lock that exists but does not verify is an error at launch, never a
 //! silent `false`: the operator asked to build on this root, and a root whose
 //! frozen record contradicts its contents is not one to build on quietly.
-//! Authenticated authored defects retain admission metadata so verification
-//! can return them to their owner; provenance contradictions remain errors.
 
 use std::path::Path;
 
@@ -133,7 +130,10 @@ pub(crate) struct FrozenChainSnapshot {
     pub(crate) subjects: Vec<HostCommandSubject>,
     /// Frozen file names whose body file exists under the task root.
     pub(crate) bodies: Vec<String>,
-    /// Content digests let launch repair prove that it left frozen bodies intact.
+    /// Body bytes seed set-gate repair from the verified on-disk artifact.
+    #[serde(default)]
+    pub(crate) body_contents: std::collections::BTreeMap<String, String>,
+    /// Content digests prove launch repair left bodies intact.
     #[serde(default)]
     pub(crate) body_digests: Vec<(String, String)>,
     /// Frozen artifacts the acceptance repair is not allowed to republish.
@@ -155,6 +155,9 @@ impl FrozenChainSnapshot {
             "subjects": self.subjects,
             "bodies": self.bodies,
         });
+        if !self.body_contents.is_empty() {
+            argument["body_contents"] = serde_json::json!(self.body_contents);
+        }
         if self.skeleton && !self.tasks.is_empty() {
             argument["tasks"] = serde_json::json!(self.tasks);
         }
@@ -347,6 +350,9 @@ fn snapshot_inner(
             snapshot.bodies.push(task.file_name.clone());
             let bytes = verification::read(&path, false)
                 .with_context(|| format!("reading frozen task body {}", path.display()))?;
+            let body = String::from_utf8(bytes.clone())
+                .with_context(|| format!("decoding frozen task body {}", path.display()))?;
+            snapshot.body_contents.insert(task.file_name.clone(), body);
             snapshot
                 .body_digests
                 .push((task.file_name.clone(), content_digest(&bytes)));

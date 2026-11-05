@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['v1', 'v1_body', 'reply_blocks', 'v1_acceptance', 'v1_set_gate',
-  'v1_frozen', 'v1_progress', 'v1_failing_set', 'v1_context']
+  'v1_frozen', 'v1_progress', 'v1_failing_set', 'v1_seed', 'v1_context']
   .map(name => fs.readFileSync(`${root}/workflow_decompose_${name}.js`, 'utf8')).join('\n');
 const subject = { taskId: 'TASK-SAMPLE-001', fileName: 'TASK-SAMPLE-001.md' };
 const phase = `body-${subject.taskId}`;
@@ -74,8 +74,9 @@ test('39 -> 59 -> 5 -> 33 repairs from the five-finding body and accepts only th
   assert.match(run.prompts[1], /Change only what its findings require and keep every other line exactly/);
   assert.match(run.prompts[2], /Change only what its findings require/);
   assert.doesNotMatch(run.prompts[1] + run.prompts[2], /fresh context/);
-  assert.match(run.prompts[3], /fresh context after the bounded-edit attempts failed/);
-  assert.equal(details(run.prompts[3]).body, 'body-3\nunchanged line\n');
+  assert.match(run.prompts[3], /fresh context.*Previously seen defects/);
+  assert.doesNotMatch(run.prompts[3], /Retained candidate|unchanged line|bounded-edit attempts failed/);
+  assert.match(run.prompts[2], /Prioritize this group first/);
 });
 
 test('resume reconstructs the best rejected bytes, findings and score from durable calls', async () => {
@@ -101,7 +102,7 @@ test('ties prefer newer bytes; no score bypasses an unsatisfied gate postconditi
   assert.equal(retained(ctx).body, 'newer', 'failed publication cannot replace retained bytes');
 });
 
-test('large candidate uses exact host-written context; a failed write errors and logs', async () => {
+test('large candidate uses exact host-written context; a failed write pauses and logs', async () => {
   const ctx = context(), body = 'unchanged\n'.repeat(4000), found = findings(5, 'large');
   ctx.retainBodyCandidate(phase, body, found);
   let prompt;
@@ -119,8 +120,12 @@ test('large candidate uses exact host-written context; a failed write errors and
   broken.__archonAuthorContext = () => { throw new Error('disk unavailable'); };
   await assert.rejects(broken.authorCandidate({
     checkpoint: async (_, opts) => logs.push(opts.task),
-    agent: async () => { throw new Error('must not dispatch'); }
-  }, policy(broken)), /retained body candidate context failed.*disk unavailable/);
+    agent: async () => { throw new Error('must not dispatch'); },
+    pause: async (_, evidence) => {
+      assert.equal(evidence.reason, 'operational_no_progress');
+      throw new Error('paused context outage');
+    }
+  }, policy(broken)), /paused context outage/);
   assert.match(logs[0], /retained body candidate context failed.*disk unavailable/);
 });
 
@@ -205,5 +210,95 @@ test('set-gate reentry keeps a better rejected draft until publication or skelet
   ctx.retainBodyCandidate(phase, 'five-finding draft', findings(5, 'best'));
   ctx.retainSetBodyCandidate(subject, findings(33, 'later set'));
   assert.equal(retained(ctx).body, 'five-finding draft');
+  assert.equal(retained(ctx).score, 33);
+  assert.deepEqual(JSON.parse(JSON.stringify(retained(ctx).findings)), findings(33, 'later set'));
+});
+
+
+test('body ranking passes lint before comparing deduped fidelity findings', () => {
+  const ctx = context();
+  const lint = { ...findings(1, 'lint')[0], text: 'candidate artifact was refused: lint',
+    deterministic_defect: { provenance: 'host_validator', code: 'tool_obligation', stage: 'tools' } };
+  const fidelity = findings(5, 'fidelity').map(({ deterministic_defect, ...finding }) => finding);
+  ctx.retainBodyCandidate(phase, 'lint refusal', [lint]);
+  ctx.retainBodyCandidate(phase, 'mechanically clean', fidelity);
+  ctx.retainBodyCandidate(phase, 'lint regression', [lint]);
+  ctx.retainBodyCandidate(phase, 'judged lint regression', [{ ...lint, text: 'lint defect' }]);
+  assert.equal(retained(ctx).body, 'mechanically clean');
   assert.equal(retained(ctx).score, 5);
+  ctx.retainBodyCandidate(phase, 'deduped', [fidelity[0], fidelity[0]]);
+  assert.equal(retained(ctx).body, 'deduped');
+  assert.equal(retained(ctx).score, 1);
+  const foreign = ['skeleton', 'inherited_predecessor', 'prd_input', 'operational', 'unknown']
+    .map(remediation_scope => ({ text: 'foreign finding', remediation_scope }));
+  ctx.retainBodyCandidate(phase, 'only body findings count', [fidelity[0], ...foreign]);
+  assert.equal(retained(ctx).score, 1);
+  assert.equal(retained(ctx).findings.length, 1);
+});
+
+test('shadow return excludes inherited findings and re-entry delivers new grouped G', async () => {
+  const ctx = context(), prompts = [];
+  const body = findings(1, 'body');
+  const excluded = ['skeleton', 'inherited_predecessor'].map(remediation_scope => ({
+    text: `excluded ${remediation_scope}`, remediation_scope
+  }));
+  await ctx.authorCandidate({ agent: async () => reply('retained shadow body'),
+    hostCommand: async () => outcome([...body, ...excluded]) }, policy(ctx));
+  assert.equal(retained(ctx).score, 1);
+  assert.equal(retained(ctx).findings.length, 1);
+  const grouped = findings(1, 'G');
+  ctx.retainSetBodyCandidate(subject, grouped);
+  await ctx.authorCandidate({
+    agent: async (_, opts) => { prompts.push(opts.task); return reply('fixed'); },
+    hostCommand: async () => outcome([])
+  }, ctx.bodyPolicy(subject, ['new grouped finding G']));
+  assert.match(prompts[0], /new grouped finding G/);
+  assert.match(prompts[0], /G finding 0/);
+  assert.doesNotMatch(prompts[0], /excluded skeleton|excluded inherited_predecessor|body finding 0/);
+  assert.equal(details(prompts[0]).body, 'retained shadow body');
+  assert.deepEqual(details(prompts[0]).findings, grouped);
+});
+
+test('fresh rung on direct re-entry has findings without retained bytes or a failed-edit claim', async () => {
+  const ctx = context();
+  ctx.retainBodyCandidate(phase, 'SECRET RETAINED BODY', findings(1, 'previous'));
+  let prompt;
+  await ctx.authorCandidate({ agent: async (_, opts) => { prompt = opts.task; return reply('new'); },
+    hostCommand: async () => outcome([]) }, { ...policy(ctx), initialRung: 4 });
+  assert.match(prompt, /Previously seen defects:.*\n- previous finding 0/);
+  assert.doesNotMatch(prompt, /SECRET RETAINED BODY|bounded.edit.*failed|Retained candidate/);
+});
+
+test('upgrade seed recovers the best journaled judgment, or the latest for older seeds', () => {
+  for (const journaled of [true, false]) {
+    const ctx = context();
+    const seed = { kind: 'artifact', candidate: 'latest worse', gate: { findings: findings(33, 'latest') },
+      ...(journaled ? { journal_results: [
+        { body: 'best journaled', findings: findings(5, 'best') },
+        { body: 'latest worse', findings: findings(33, 'latest') }
+      ] } : {}) };
+    ctx.seedArtifact(seed, policy(ctx));
+    assert.equal(retained(ctx).body, journaled ? 'best journaled' : 'latest worse');
+  }
+});
+
+test('workflow seeds on-disk published body for set-gate repair', async () => {
+  const ctx = context();
+  ctx.args.frozenChain = { acceptance: true, skeleton: true, subjects: [subject],
+    bodies: [subject.fileName], body_contents: { [subject.fileName]: 'ON DISK BODY' } };
+  ctx.subject = subject;
+  vm.runInContext(`
+    requireFixedArgs = () => {};
+    prepareAuthorStages = async () => ({ acceptance: {}, skeleton: { subjects: [subject] }, changedChecks: new Set() });
+    reconcile = () => {};
+    runSetGateLoop = async w => {
+      retainSetBodyCandidate(subject, [{ text: 'set defect', remediation_scope: 'body' }]);
+      await authorCandidate(w, bodyPolicy(subject, ['set defect']));
+      return { taskSetLint: {}, requirementsTrace: {} };
+    };
+  `, ctx);
+  let prompt;
+  await ctx.workflow({ agent: async (_, opts) => { prompt = opts.task; return reply('repaired disk body'); },
+    hostCommand: async () => outcome([]), finalReport: async () => ({}) });
+  assert.equal(details(prompt).body, 'ON DISK BODY');
 });

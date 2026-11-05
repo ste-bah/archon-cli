@@ -36,7 +36,6 @@ use host_owned::HostOwned;
 pub(super) mod record;
 pub(crate) use record::reply_entry;
 
-/// The acceptance gate. Its stdin is the candidate the script assembled.
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
 const ACCEPTANCE_PREFIX: &str = "acceptance-author-";
 
@@ -86,6 +85,8 @@ pub(crate) enum SubjectSeed {
         candidate_call: String,
         /// The last gate that judged exactly this candidate.
         gate: Option<GateSeed>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        journal_results: Vec<Value>,
     },
 }
 
@@ -245,6 +246,7 @@ pub(crate) fn derive_with_reply_markers(
         })
         .collect();
     for (subject, (_, record)) in artifacts {
+        let journal_results = body_results::collect(&subject, &records, &gates);
         let candidate = reply_content(record).unwrap_or_default();
         // The last judgment of exactly these bytes, whichever reply held them.
         let gate = gates
@@ -254,6 +256,7 @@ pub(crate) fn derive_with_reply_markers(
         derived.subjects.insert(
             subject,
             SubjectSeed::Artifact {
+                journal_results,
                 candidate: candidate.to_string(),
                 candidate_call: record.call.id.clone(),
                 gate,
@@ -280,11 +283,8 @@ pub(crate) fn derive_with_reply_markers(
     Ok(derived)
 }
 
-/// A judged gate: its record, command, stdin and what the script saw.
 type Gate<'a> = (&'a WorkflowV2CallRecord, &'a str, &'a str, GateSeed);
 
-/// An acceptance author reply the script can read: its entry, with the
-/// host-owned fields of an owed check set, and its call ordinal.
 struct Reply<'a> {
     record: &'a WorkflowV2CallRecord,
     id: String,
@@ -491,6 +491,8 @@ fn acceptance(
     }))
 }
 
+#[path = "workflow_decompose_seed_body_results.rs"]
+mod body_results;
 #[cfg(test)]
 #[path = "workflow_decompose_seed_derive_tests.rs"]
 pub(crate) mod tests;

@@ -114,7 +114,12 @@ async function workflow(w) {
   const forceBodySubjects = new Set(Array.isArray(args.forceBodySubjects) ? args.forceBodySubjects : []);
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
-    if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) continue;
+    if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) {
+      const body = args.frozenChain?.body_contents?.[subject.fileName];
+      if (typeof body !== "string") throw new Error(`frozen body content missing for ${subject.fileName}`);
+      publishBodyCandidate(`body-${subject.taskId}`, body);
+      continue;
+    }
     unauthored.push([subject, []]);
   }
   const chain = { outcome: skeleton, subjects: skeleton.subjects };
@@ -238,8 +243,8 @@ async function authorCandidate(w, policy) {
       else {
         const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
         const bodyRepair = bodyRepairContext(policy, repairRung);
-        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${bodyRepair ? bodyRepair.text : rungInstruction}${operation}${bodyRepair ? "" : group}`, attempt + 1,
-          bodyRepair ? bodyRepair.feedback : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history);
+        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${bodyRepair ? bodyRepair.text : rungInstruction}${operation}${group}`, attempt + 1,
+          bodyRepair ? [...new Set([...bodyRepair.feedback, ...promptFeedback])] : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history);
         // Context writes are not journaled. Reserve no ordinal until the
         // complete prompt is ready, so recovery and replay dispatch identically.
         const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
@@ -263,7 +268,6 @@ async function authorCandidate(w, policy) {
       if (error?.retainedBodyContext === true) {
         const message = `retained body candidate context failed for ${policy.phase}: ${error.message}`;
         await w.checkpoint(`${policy.phase}-context-failed-${nextCall}`, { task: message });
-        throw new Error(message);
       }
       if (!error || error.authorContext !== true) throw error;
       authorState.roundCalls = 0;
@@ -317,7 +321,7 @@ async function authorCandidate(w, policy) {
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (policy.capability === "land-task-body" && !routed.operational && routed.all.length > 0) {
-      retainBodyCandidate(policy.phase, authored.content, routed.allFindings, [...history, { attempt: attempt + 1, findings: routed.all.slice() }]);
+      retainBodyCandidate(policy.phase, authored.content, routed.retryFindings, [...history, { attempt: attempt + 1, findings: routed.retry.slice() }]);
     }
     if (policy.capability === "land-task-body" && routed.shadow.length > 0 && routed.fatal.length === 0 && !routed.operational) {
       return { ...outcome, skeletonFindings: routed.shadowFindings, bodyFindings: routed.retryFindings, shadowRung: repairRung };
