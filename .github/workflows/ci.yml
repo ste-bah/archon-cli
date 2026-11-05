@@ -658,9 +658,12 @@ jobs:
     name: build + test (${{ matrix.os }}, ${{ matrix.shard }}/${{ matrix.shards }})
     needs: [build-ubuntu]
     runs-on: ${{ matrix.os }}
-    # Measured execution / 3 is ~6 min; allow hash imbalance, artifact
-    # download/extraction and slow runners. nextest's 4 x 60s test limit stays.
-    timeout-minutes: 45
+    # The test step measures 13-15 min (archive extract 5-8 + nextest 6-9.5,
+    # per shard of 3), and the ~17 GB archive download
+    # took 7.5-28.5 min (PR #592 runs 41955468502, 41967960980). At 45 min
+    # shard 2 was cancelled mid-run after a 28.5 min download. Allow hash
+    # imbalance and slow runners. nextest's 4 x 60s test limit stays.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
