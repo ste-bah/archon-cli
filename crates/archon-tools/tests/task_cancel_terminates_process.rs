@@ -93,7 +93,7 @@ async fn cancelling_the_context_token_terminates_the_running_process() {
     // Record the child's pid, then block long enough that only cancellation can
     // end it — a command that exits on its own would prove nothing.
     let command = format!(
-        "sh -c 'echo $$ > {0}; exec sleep 60' & while [ ! -s {0} ]; do sleep 0.01; done; wait",
+        "sh -c 'echo $$ > {0}.tmp && mv {0}.tmp {0}; exec sleep 60' & while [ ! -s {0} ]; do sleep 0.01; done; wait",
         shell_quote(&pid_file)
     );
 

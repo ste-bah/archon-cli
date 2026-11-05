@@ -59,7 +59,7 @@ async fn parent_exit_with_descendant_held_pipes_is_cleaned_before_result() {
 fn descendant_holding_pipes_command(pid_file: &std::path::Path) -> String {
     let path = shell_quote(pid_file);
     format!(
-        "sh -c \"trap '' HUP; echo \\$\\$ > {path}; exec sleep 30\" & while [ ! -s {path} ]; do sleep 0.01; done"
+        "sh -c \"trap '' HUP; echo \\$\\$ > {path}.tmp && mv {path}.tmp {path}; exec sleep 30\" & while [ ! -s {path} ]; do sleep 0.01; done"
     )
 }
 

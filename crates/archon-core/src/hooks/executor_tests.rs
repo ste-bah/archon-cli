@@ -107,7 +107,7 @@ async fn hook_parent_exit_with_descendant_held_pipes_hits_no_progress_timeout() 
 fn unix_descendant_holding_pipes_command(pid_file: &std::path::Path) -> String {
     let path = unix_shell_quote(pid_file);
     format!(
-        "sh -c \"trap '' HUP; echo \\$\\$ > {path}; exec sleep 30\" & while [ ! -s {path} ]; do sleep 0.01; done"
+        "sh -c \"trap '' HUP; echo \\$\\$ > {path}.tmp && mv {path}.tmp {path}; exec sleep 30\" & while [ ! -s {path} ]; do sleep 0.01; done"
     )
 }
 
@@ -370,7 +370,8 @@ fn write_windows_descendant_fixture(pid_file: &std::path::Path) -> std::path::Pa
         format!(
             "\
 $child = Start-Process '{command}' -ArgumentList @('/d', '/c', 'ping 127.0.0.1 -n 121 >NUL') -PassThru
-[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'descendant.pid'), [string]$child.Id)
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'descendant.pid.tmp'), [string]$child.Id)
+Move-Item -LiteralPath (Join-Path $PSScriptRoot 'descendant.pid.tmp') -Destination (Join-Path $PSScriptRoot 'descendant.pid') -ErrorAction Stop
 Wait-Process -Id $child.Id
 "
         ),

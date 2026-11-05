@@ -117,7 +117,8 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 # process and no wall-clock dependency to a cap that exists for both.
 #
 # GOTCHA: profile overrides do not inherit. CI builds one nextest archive per
-# OS, then runs every hash partition with `--archive-file --no-fail-fast` and
+# OS; each shard extracts it, deletes it, then runs its hash partition from
+# the extracted build (`--binaries-metadata`) with `--no-fail-fast` and
 # no `--profile` or `NEXTEST_PROFILE` (.github/workflows/ci.yml shard steps).
 # The default profile runs, so this block covers every shard. If a named
 # profile is ever added, repeat this override verbatim under

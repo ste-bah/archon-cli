@@ -54,7 +54,7 @@ impl Escaper {
 
     fn start_with(&self, how: &str, delay: u32, redirect: &str) -> String {
         format!(
-            "perl -MPOSIX -e '{how}; open(F, \">\", $ARGV[0]); print F $$; close F; sleep {delay}; open(F, \">\", $ARGV[1]); close F' '{pid}' '{late}'{redirect} &\nuntil [ -s '{pid}' ]; do sleep 0.01; done",
+            "perl -MPOSIX -e '{how}; open(F, \">\", \"$ARGV[0].tmp\"); print F $$; close F; rename(\"$ARGV[0].tmp\", $ARGV[0]) or die $!; sleep {delay}; open(F, \">\", $ARGV[1]); close F' '{pid}' '{late}'{redirect} &\nuntil [ -s '{pid}' ]; do sleep 0.01; done",
             pid = self.pid.display(),
             late = self.late.display(),
         )

@@ -213,7 +213,7 @@ async fn async_print_returns(
     agent.hook_registry.as_ref().unwrap().register_session_hook(
         "dispatch", event.clone(),
         serde_json::from_value(serde_json::json!({
-            "type":"command", "command":"echo $$ > hook.pid; for n in $(seq 1 60); do echo progress; sleep 0.2; done",
+            "type":"command", "command":"echo $$ > hook.pid.tmp && mv hook.pid.tmp hook.pid; for n in $(seq 1 60); do echo progress; sleep 0.2; done",
             "async":true, "timeout":1, "on_failure":"allow"
         })).unwrap(),
     );

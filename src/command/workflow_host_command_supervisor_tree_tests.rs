@@ -188,7 +188,7 @@ async fn completion_kills_a_setsid_descendant_seen_while_the_command_ran() {
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("daemon-pid");
     let body = format!(
-        "perl -MPOSIX -e 'POSIX::setsid(); open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{}' </dev/null >/dev/null 2>&1 &\nuntil [ -s '{}' ]; do sleep 0.01; done\nsleep 1.5\nexit 0",
+        "perl -MPOSIX -e 'POSIX::setsid(); open(F, \">\", \"$ARGV[0].tmp\"); print F $$; close F; rename(\"$ARGV[0].tmp\", $ARGV[0]) or die $!; sleep 30' '{}' </dev/null >/dev/null 2>&1 &\nuntil [ -s '{}' ]; do sleep 0.01; done\nsleep 1.5\nexit 0",
         pid_file.display(),
         pid_file.display()
     );
@@ -236,7 +236,7 @@ async fn an_escaped_descendant_holding_the_pipes_pauses_instead_of_failing() {
 fn escaping_pipe_holder(dir: &Path, rest: &str) -> (PathBuf, PathBuf) {
     let pid_file = dir.join("daemon-pid");
     let body = format!(
-        "perl -MPOSIX -e 'my $parent = $$; fork and exit; POSIX::setsid(); select(undef, undef, undef, 0.01) while getppid() == $parent; open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{pid}' &\nuntil [ -s '{pid}' ]; do sleep 0.01; done\n{rest}",
+        "perl -MPOSIX -e 'my $parent = $$; fork and exit; POSIX::setsid(); select(undef, undef, undef, 0.01) while getppid() == $parent; open(F, \">\", \"$ARGV[0].tmp\"); print F $$; close F; rename(\"$ARGV[0].tmp\", $ARGV[0]) or die $!; sleep 30' '{pid}' &\nuntil [ -s '{pid}' ]; do sleep 0.01; done\n{rest}",
         pid = pid_file.display()
     );
     (script(dir, "escaping", &body), pid_file)
@@ -322,7 +322,7 @@ async fn abort_before_first_scan_kills_an_original_session_descendant() {
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("unscanned-child");
     let body = format!(
-        "perl -e 'open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{}' </dev/null >/dev/null 2>&1 &\nsleep 30",
+        "perl -e 'open(F, \">\", \"$ARGV[0].tmp\"); print F $$; close F; rename(\"$ARGV[0].tmp\", $ARGV[0]) or die $!; sleep 30' '{}' </dev/null >/dev/null 2>&1 &\nsleep 30",
         pid_file.display()
     );
     let records = temp.path().join("records");

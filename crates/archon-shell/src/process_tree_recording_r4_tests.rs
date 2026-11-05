@@ -14,7 +14,10 @@ impl IdentityRecorder for FailingRecorder {
 }
 fn fixture() -> (tempfile::TempDir, std::process::Child, Tracker, Pinned) {
     let temp = tempfile::tempdir().unwrap();
-    let child = group_leader("sleep 30 & echo $! > ready; wait", temp.path());
+    let child = group_leader(
+        "sleep 30 & echo $! > ready.tmp && mv ready.tmp ready; wait",
+        temp.path(),
+    );
     wait_for(&temp.path().join("ready"));
     let descendant = std::fs::read_to_string(temp.path().join("ready"))
         .unwrap()

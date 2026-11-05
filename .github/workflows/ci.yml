@@ -183,12 +183,21 @@ jobs:
         # Run 41893591793 added ~80 GB in test-profile output alone; leave
         # room on the root filesystem for the archive in RUNNER_TEMP too.
         run: |
-          df -h
+          nproc
+          df -h /
+          ls -d /mnt || echo "no /mnt"
+          findmnt /tmp || true
           sudo docker image prune --all --force
+          # Keep system Node/npm, Python, Git, Docker and mold. Retain JVM/Gradle
+          # for the opt-in Java tests; Linux PowerShell tests supply a fake pwsh.
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /opt/hostedtoolcache /usr/local/swift \
-            /usr/share/swift /opt/swift /usr/local/.ghcup "$HOME/.ghcup"
-          df -h
+            /usr/share/swift /opt/swift /usr/local/.ghcup "$HOME/.ghcup" \
+            /usr/share/az_* /opt/az /usr/local/share/chromium \
+            /usr/local/share/powershell /usr/local/aws-cli /usr/local/aws-sam-cli \
+            /opt/pipx /usr/share/miniconda /usr/local/julia* \
+            /opt/microsoft /opt/google /usr/lib/google-cloud-sdk
+          df -h /
 
       - &windows-host-disk
         name: Log Windows backing volume before Dev Drive creation
@@ -712,6 +721,14 @@ jobs:
             throw 'Archive build paths differ from shard paths; env! literals cannot be remapped'
           }
 
+      # Main run 41990470644: the extracted test build is ~79G (job
+      # 127143481207, 41G -> 120G used during extraction on a 145G disk), and
+      # the 16G archive sat beside it. Extract once and delete only the
+      # archive, so the test run has ~16G more room. A 72G runner (job
+      # 127143481269) cannot hold the 79G build at all; that is tracked
+      # separately in #595 (smaller test binaries).
+      # Extract once, delete only the archive, then reuse the extracted build.
+      # Layout and reuse flags: https://nexte.st/docs/ci-features/archiving/
       - name: Run tests (nextest)
         if: runner.os != 'Windows'
         shell: bash
@@ -756,10 +773,20 @@ jobs:
         # command logs.
         run: |
           df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
-          cargo nextest run --archive-file "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" \
-            --workspace-remap "$GITHUB_WORKSPACE" \
-            --extract-to "$GITHUB_WORKSPACE" --extract-overwrite \
-            --partition "hash:${{ matrix.shard }}/${{ matrix.shards }}" --no-fail-fast &
+          (
+            cargo nextest list --archive-file "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" \
+              --workspace-remap "$GITHUB_WORKSPACE" \
+              --extract-to "$GITHUB_WORKSPACE" --extract-overwrite \
+              --list-type binaries-only > /dev/null
+            df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+            rm -- "$RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst"
+            df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+            exec cargo nextest run \
+              --binaries-metadata "$GITHUB_WORKSPACE/target/nextest/binaries-metadata.json" \
+              --cargo-metadata "$GITHUB_WORKSPACE/target/nextest/cargo-metadata.json" \
+              --workspace-remap "$GITHUB_WORKSPACE" --target-dir-remap "$GITHUB_WORKSPACE/target" \
+              --partition "hash:${{ matrix.shard }}/${{ matrix.shards }}" --no-fail-fast
+          ) &
           nextest_pid=$!
           # PR #592 run 41941578008: ubuntu shard 3/3 filled the disk and the
           # runner died before it uploaded any log. Below 6 GiB free, record
@@ -869,11 +896,24 @@ jobs:
         # quiet phases diagnosable alongside disk snapshots, and reproducing
         # bash job control in pwsh would buy nothing. --no-fail-fast so one
         # failing crate still reports the rest.
-        run: >-
-          cargo nextest run --archive-file "$env:RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst"
-          --workspace-remap "$env:GITHUB_WORKSPACE"
-          --extract-to (Split-Path $env:ARCHON_TARGET_DIR -Parent) --extract-overwrite
-          --partition "hash:${{ matrix.shard }}/${{ matrix.shards }}" --no-fail-fast
+        # Same archive/extracted-build overlap as the POSIX shard (PR #592,
+        # main run 41990470644: 16G archive beside a ~79G extracted build).
+        # Windows extracts target/ onto the Dev Drive; metadata lives there too.
+        run: |
+          cargo nextest list --archive-file "$env:RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" `
+            --workspace-remap "$env:GITHUB_WORKSPACE" `
+            --extract-to (Split-Path $env:ARCHON_TARGET_DIR -Parent) --extract-overwrite `
+            --list-type binaries-only > $null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          try { Get-Volume | Format-Table DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+          Remove-Item -LiteralPath "$env:RUNNER_TEMP/nextest-artifact/nextest-${{ matrix.os }}.tar.zst" -ErrorAction Stop
+          try { Get-Volume | Format-Table DriveLetter, FileSystem, Size, SizeRemaining } catch { Write-Warning "volume log: $_" }
+          cargo nextest run `
+            --binaries-metadata "$env:ARCHON_TARGET_DIR/nextest/binaries-metadata.json" `
+            --cargo-metadata "$env:ARCHON_TARGET_DIR/nextest/cargo-metadata.json" `
+            --workspace-remap "$env:GITHUB_WORKSPACE" --target-dir-remap "$env:ARCHON_TARGET_DIR" `
+            --partition "hash:${{ matrix.shard }}/${{ matrix.shards }}" --no-fail-fast
+          exit $LASTEXITCODE
 
   test-macos:
     name: build + test (${{ matrix.os }}, ${{ matrix.shard }}/${{ matrix.shards }})

@@ -136,7 +136,8 @@ fn write_windows_descendant_fixture(pid_file: &std::path::Path) -> std::path::Pa
         format!(
             "\
 $child = Start-Process '{shell}' -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 300') -PassThru
-[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'child.pid'), [string]$child.Id)
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'child.pid.tmp'), [string]$child.Id)
+Move-Item -LiteralPath (Join-Path $PSScriptRoot 'child.pid.tmp') -Destination (Join-Path $PSScriptRoot 'child.pid') -ErrorAction Stop
 Wait-Process -Id $child.Id
 "
         ),

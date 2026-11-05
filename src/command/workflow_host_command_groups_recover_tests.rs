@@ -54,7 +54,8 @@ fn host_command_resume_fixture_owner() {
         "TASK-X-001",
     )
     .unwrap();
-    std::fs::write(root.join("ready"), record.path().to_str().unwrap()).unwrap();
+    std::fs::write(root.join("ready.tmp"), record.path().to_str().unwrap()).unwrap();
+    std::fs::rename(root.join("ready.tmp"), root.join("ready")).unwrap();
     let _held = (record, child);
     std::thread::sleep(Duration::from_secs(30));
 }
@@ -182,9 +183,9 @@ fn tree(root: &Path, exit: bool) -> (Child, RecordedChild, GroupRecordGuard) {
     command.args([
         "-c",
         if exit {
-            "sleep 30 & echo $! > ready; read value"
+            "sleep 30 & echo $! > ready.tmp && mv ready.tmp ready; read value"
         } else {
-            "sleep 30 & echo $! > ready; wait"
+            "sleep 30 & echo $! > ready.tmp && mv ready.tmp ready; wait"
         },
     ]);
     command
