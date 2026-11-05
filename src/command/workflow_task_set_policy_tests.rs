@@ -16,7 +16,7 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
         &prd,
         archon_core::config::GateMode::Observe,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"accepted for shadow measurement"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted","reason":"accepted for shadow measurement"}]}"#.into()),
         }),
     )
     .await

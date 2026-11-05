@@ -215,11 +215,16 @@ async fn author_path_decisions_match_the_real_scratch_site() {
         };
     }
     for (index, entry) in contract.acceptance.iter().enumerate().skip(1) {
+        if index == 2 {
+            // An absent descendant of the existing repository sibling may be a deliverable.
+            check_defects::check_defects(&contract, entry.clone(), &author_scope)
+                .expect("B1 allows missing descendants inside an existing sibling root");
+            continue;
+        }
         let finding = check_defects::check_defects(&contract, entry.clone(), &author_scope)
             .expect_err("each refused path shape is rejected before judging");
         let expected = match index {
             1 => ("site does not create", "<site>/repository/item"),
-            2 => ("site does not create", "<site>/repository/missing/data.txt"),
             3 => ("site does not create", "<site>/workspace/item"),
             _ => unreachable!(),
         };

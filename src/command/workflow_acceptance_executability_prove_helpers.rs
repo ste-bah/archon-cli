@@ -57,7 +57,14 @@ pub(in crate::command::workflow_task_set::executability) fn unattributed_recreat
     baseline: &str,
 ) -> String {
     format!(
-        "{baseline}; the check passed, but a moved input was present again after mutation, or its parent directory metadata changed while it was moved aside; the observed change does not identify who wrote the input (its writer is unknown), so this run does not prove that the check depends on the moved input"
+        "{baseline}; the check passed, but a moved input was present again after mutation, or its parent directory metadata changed while it was moved aside; the observed change does not identify who wrote the input (its writer is unknown), so this run does not prove that the check depends on the moved input; do not create, replace or link files beside the moved input while it runs"
+    )
+}
+
+pub(super) fn parent_changed_finding(baseline: &str, paths: &[String]) -> String {
+    unattributed_recreation_finding(baseline).replace(
+        "the moved input while it runs",
+        &format!("{} while it runs", paths.join(", ")),
     )
 }
 
@@ -319,4 +326,65 @@ pub(in crate::command::workflow_task_set::executability) fn mutation_crashed(
         .join("\n")
         .into_bytes();
     !super::super::crash_findings(contract, [&view]).is_empty()
+}
+
+#[cfg(test)]
+pub(super) fn output_evidence(result: &archon_workflow::acceptance_scratch::CheckResult) -> String {
+    super::output_evidence_with(
+        result,
+        &crate::command::workflow_task_set::passability::evidence::Redactor::for_environment(
+            std::iter::empty(),
+            &[],
+        ),
+    )
+}
+
+pub(super) fn output_evidence_with(
+    result: &archon_workflow::acceptance_scratch::CheckResult,
+    redactor: &crate::command::workflow_task_set::passability::evidence::Redactor,
+) -> String {
+    // Captured output is already bounded by the capture limit, so the whole
+    // capture is redacted before the excerpt keeps its tail: a cut before
+    // redaction could split a secret and leave part of it in the record.
+    // Every value the host binds into the check's environment (`redactor`)
+    // is masked as well as credential-shaped text, so a value spanning
+    // lines goes whole.
+    let bounded_excerpt = |bytes: &[u8], budget: usize| -> String {
+        let decoded = redactor.redact(&String::from_utf8_lossy(bytes));
+        let redacted = archon_observability::redaction::redact_secret_values(&decoded);
+        archon_workflow::failure_evidence::failure_evidence(redacted.as_bytes(), budget)
+    };
+    let stdout = bounded_excerpt(
+        &result.stdout,
+        crate::command::workflow_task_set::passability::evidence::STDOUT_BYTES,
+    );
+    let stderr = bounded_excerpt(
+        &result.stderr,
+        crate::command::workflow_task_set::passability::evidence::STDERR_BYTES,
+    );
+    let excerpt = format!("stdout: {stdout}\nstderr: {stderr}");
+    excerpt
+}
+
+pub(super) fn mutation_defect_reason(
+    silent: &Option<(String, UnprovenCause)>,
+    last_line: String,
+) -> String {
+    let silent = silent.as_ref().map(|(why, cause)| {
+        (
+            why.trim_end_matches("; check the criterion with what the site provides"),
+            cause,
+        )
+    });
+    match silent {
+        Some((why, UnprovenCause::SiteLacks)) => format!(
+            "{why}; check the criterion with what the site provides, without depending on that program or subcommand"
+        ),
+        Some((why, UnprovenCause::ProgramAbsent)) => format!(
+            "{why}; check the criterion with what the site provides: {}.",
+            super::super::silent::PROGRAM_ABSENT_REMEDY
+        ),
+        Some((why, _)) => format!("{why}; fix that defect"),
+        None => format!("it crashed in its own script: {last_line}; fix that defect"),
+    }
 }

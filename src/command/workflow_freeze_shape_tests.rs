@@ -122,6 +122,7 @@ pub(super) fn script_source() -> String {
     if let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") {
         [
             "workflow_decompose_v1.js",
+            "workflow_decompose_v1_body.js",
             "workflow_decompose_v1_acceptance.js",
             "workflow_decompose_v1_set_gate.js",
             "workflow_decompose_v1_frozen.js",

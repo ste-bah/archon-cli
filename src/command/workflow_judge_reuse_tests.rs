@@ -77,7 +77,7 @@ impl WorkflowLlmClient for RecordingJudge {
             .map(|id| {
                 serde_json::json!({
                     "id": id,
-                    "verdict": "accepted",
+                    "kind":"state","cited_paths":[],"verdict": "accepted",
                     "counterexample": "no passing false state",
                     "reason": "verified"
                 })

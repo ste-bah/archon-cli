@@ -5,8 +5,12 @@ use super::{CheckResult, MutationPlan};
 pub(super) fn move_aside_plan(
     plan: &MutationPlan,
     root: Option<&mutation_fd::SiteRoot>,
-) -> Vec<mutation_fd::MoveOutcome> {
+) -> (
+    Vec<mutation_fd::MoveOutcome>,
+    Vec<Option<Result<String, String>>>,
+) {
     let mut outcomes = Vec::with_capacity(plan.inputs.len());
+    let mut snapshots = Vec::with_capacity(plan.inputs.len());
     for input in &plan.inputs {
         let covering_ancestor = plan
             .inputs
@@ -16,6 +20,11 @@ pub(super) fn move_aside_plan(
                 **outcome == mutation_fd::MoveOutcome::Moved
                     && super::super::is_strict_descendant(&input.move_path, &ancestor.move_path)
             });
+        // Capture before this move so a failed snapshot cannot be hidden by
+        // later host operations. Covered children need no restoration.
+        let before = root.map(|root| {
+            mutation_fd::snapshot_parent(root, &input.move_path).map_err(|e| e.to_string())
+        });
         let outcome = if let Some((ancestor, _)) = covering_ancestor {
             mutation_fd::MoveOutcome::CoveredByAncestor(ancestor.named_path.clone())
         } else {
@@ -24,9 +33,34 @@ pub(super) fn move_aside_plan(
                 None => mutation_fd::MoveOutcome::Failed("mutation site root unavailable".into()),
             }
         };
+        let snapshot = if outcome == mutation_fd::MoveOutcome::Moved {
+            before.map(|before| {
+                before.and_then(|_| {
+                    mutation_fd::snapshot_parent(root.expect("moved root"), &input.move_path)
+                        .map_err(|e| e.to_string())
+                })
+            })
+        } else {
+            None
+        };
+        snapshots.push(snapshot);
+        // Account for this host move in earlier snapshots of the same
+        // directory, keeping failures rather than replacing them.
+        if outcome == mutation_fd::MoveOutcome::Moved {
+            for (prior, snapshot) in plan.inputs.iter().zip(&mut snapshots) {
+                if prior.move_path.parent() == input.move_path.parent()
+                    && snapshot.as_ref().is_some_and(Result::is_ok)
+                {
+                    *snapshot = Some(
+                        mutation_fd::snapshot_parent(root.expect("moved root"), &prior.move_path)
+                            .map_err(|e| e.to_string()),
+                    );
+                }
+            }
+        }
         outcomes.push(outcome);
     }
-    outcomes
+    (outcomes, snapshots)
 }
 
 pub(super) fn record_move_outcomes(
@@ -94,27 +128,6 @@ pub(super) fn record_check_recreated(
     }
 }
 
-pub(super) fn snapshot_parent_states(
-    plan: &MutationPlan,
-    moved: &[mutation_fd::MoveOutcome],
-    root: Option<&mutation_fd::SiteRoot>,
-) -> Vec<Option<Result<String, String>>> {
-    plan.inputs
-        .iter()
-        .zip(moved)
-        .map(|(input, outcome)| {
-            (*outcome == mutation_fd::MoveOutcome::Moved)
-                .then(|| {
-                    root.map(|root| {
-                        mutation_fd::snapshot_parent(root, &input.move_path)
-                            .map_err(|error| error.to_string())
-                    })
-                })
-                .flatten()
-        })
-        .collect()
-}
-
 pub(super) fn restore_plan(
     result: &mut CheckResult,
     plan: &MutationPlan,
@@ -123,11 +136,22 @@ pub(super) fn restore_plan(
     root: &mutation_fd::SiteRoot,
 ) {
     let mut safe = true;
+    // Read all parents before the host restores anything. Later restores
+    // must never be mistaken for writes by the check in a shared parent.
+    let current_parents: Vec<_> = plan
+        .inputs
+        .iter()
+        .zip(moved)
+        .map(|(input, outcome)| {
+            (*outcome == mutation_fd::MoveOutcome::Moved)
+                .then(|| mutation_fd::snapshot_parent(root, &input.move_path))
+        })
+        .collect();
     for (index, (input, outcome)) in plan.inputs.iter().zip(moved).enumerate().rev() {
         if *outcome != mutation_fd::MoveOutcome::Moved {
             continue;
         }
-        let current_parent = mutation_fd::snapshot_parent(root, &input.move_path);
+        let current_parent = current_parents[index].as_ref().expect("moved input parent");
         let before_parent = parent_snapshots
             .get(index)
             .and_then(Option::as_ref)
@@ -189,7 +213,7 @@ pub(super) fn restore_plan(
             }
         };
         let parent_changed = match current_parent {
-            Ok(current) => current != *before_parent,
+            Ok(current) => current != before_parent,
             Err(error) => {
                 let state = match mutation_fd::restore(root, &input.aside_path, &input.move_path) {
                     mutation_fd::RestoreOutcome::AsideMissing => "aside-missing".to_string(),

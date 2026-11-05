@@ -4,10 +4,13 @@
 //! A variant changes one reply of the golden script and nothing else, so a
 //! cell's result differs from golden only where that reply reaches.
 
-use super::script::{scripted_answer, user_prompt_text};
+use super::script::{body_author_marker, judge_decision, scripted_answer, user_prompt_text};
 
 #[path = "workflow_decomposition_offline_server_large.rs"]
 pub mod large;
+
+#[path = "workflow_decomposition_offline_server_r17.rs"]
+pub mod r17;
 
 /// A secret-shaped token (an Anthropic key prefix). Redaction of public
 /// copies replaces such a word with `<redacted>`.
@@ -24,6 +27,9 @@ pub const HEREDOC_SCRIPT: &str = "set -eu\npython3 - src/beta.json <<'PY'\nimpor
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
     Golden,
+    /// Only the r17 test binary builds it.
+    #[allow(dead_code)]
+    R17(r17::Cell),
     /// The AC-X-001 author reply carries a secret-shaped word after its entry.
     SecretInAcceptanceReply,
     /// SUP-REQ-X-001 is authored as a check block with CRLF line ends.
@@ -42,6 +48,9 @@ pub enum Variant {
 }
 
 pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {
+    if let Variant::R17(cell) = variant {
+        return r17::answer(prompt, cell);
+    }
     if let Variant::Large(n) = variant {
         return large::answer(prompt, n);
     }
@@ -144,10 +153,7 @@ pub fn refute_first_judge_answer(
         if decision["id"] != "AC-X-001" {
             continue;
         }
-        decision["verdict"] = serde_json::Value::String("refuted".into());
-        decision["counterexample"] =
-            serde_json::Value::String("a passing state where the criterion is false".into());
-        decision["reason"] = serde_json::Value::String("the check admits that state".into());
+        *decision = judge_decision("AC-X-001", true);
     }
     reply.to_string()
 }
@@ -183,13 +189,7 @@ pub fn request_key(role: &str, prompt: &str) -> String {
                 '.'
             )
         ),
-        "body" => format!(
-            "body:{}",
-            after(
-                "Author the complete TASK body for host-frozen task_id ",
-                '.'
-            )
-        ),
+        "body" => format!("body:{}", after(body_author_marker(), '.')),
         "judge" => {
             let kind = if text
                 .starts_with("Each acceptance check below already ran on the evidence tree")

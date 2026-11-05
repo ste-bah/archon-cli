@@ -447,3 +447,45 @@ fn site_parity_interpreter_directory_changes_are_unknown() {
         );
     }
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn R8_1_missing_sibling_root_is_checked_only_for_scoped_reads() {
+    // Input: identical missing-looking words in data and in required reads.
+    // Expected: data is accepted; test -e refuses the missing sibling root.
+    // A later assertion keeps fixed-success policy independent of path scoping.
+    let set = frozen_set(&[("AC-X-001", "./verify input", true)]);
+    let root = set.project.path();
+    for cwd in [TrustedCwd::ProjectRoot, TrustedCwd::RepoRoot] {
+        for (command, accepted) in [
+            ("echo ../missing/item", true),
+            ("grep ../missing/item input", true),
+            ("cat <<'EOF'\nopen('../missing/item')\nEOF", true),
+            ("python3 -c 'print(\"../missing/item\")'", true),
+            ("test -e ../missing/item", false),
+        ] {
+            let mut candidate = set.contract().acceptance[0].clone();
+            candidate.check = AcceptanceCheck::Command {
+                command: command.into(),
+                cwd,
+            };
+            let scope = AuthorScope::for_task_set(root, &set.tasks, &set.prd, false).unwrap();
+            assert_eq!(
+                archon_workflow::task_set_contract::acceptance_site_path_defect(
+                    &candidate,
+                    root,
+                    &scope.repository_root,
+                    false,
+                )
+                .is_none(),
+                accepted,
+                "path scoping: {command}"
+            );
+            assert_eq!(
+                decisions(&set, root, &format!("{command}\ntest -f input"), cwd),
+                [accepted; 3],
+                "{command}"
+            );
+        }
+    }
+}

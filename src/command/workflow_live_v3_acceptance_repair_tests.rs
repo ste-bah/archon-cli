@@ -301,8 +301,7 @@ async fn enforce_unaccepted_repair_keeps_pending_and_publishes_accepted_siblings
     let (contract, _, _) = crate::command::workflow_live::workflow_live_v2::workflow_live_v3_acceptance::exec::load_contract(&context).unwrap();
     let base =
         crate::command::workflow_task_set::executability::Baseline::head_of(run.set.project.path())
-            .unwrap()
-            .commit;
+            .unwrap();
     let client = ScriptedAuthorJudge::new(
         |entry, _| command_entry(entry, "test -f present && test -s present"),
         |id, _| id == "AC-X-001",

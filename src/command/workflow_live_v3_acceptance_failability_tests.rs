@@ -18,6 +18,16 @@ fn passes_unchanged() -> ScriptedAuthorJudge {
 
 #[tokio::test]
 async fn a_frozen_check_that_passes_on_the_base_commit_is_repaired_before_it_counts() {
+    recorded_base_stage().await;
+}
+
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn P1_R7_a_v3_stage_with_recorded_base_names_pre_implementation_tree() {
+    recorded_base_stage().await;
+}
+
+async fn recorded_base_stage() {
     let run = run_fixture_with(&[("AC-F-001", VACUOUS, true)]);
     record_baseline(&run);
     let client = ScriptedAuthorJudge::new(|entry, _| command_entry(entry, FIXED), |_, _| true);

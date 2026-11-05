@@ -28,14 +28,27 @@ pub async fn cannot_fail_findings(
     }
     let short: String = baseline.commit.chars().take(12).collect();
     let run = tree_results(probe, baseline, contract, digest, refs, known, false).await;
+    findings.extend(
+        test_inventory::findings(
+            probe,
+            baseline,
+            contract,
+            &run.results.values().cloned().collect::<Vec<_>>(),
+        )
+        .await,
+    );
     let mut passing = Vec::new();
     for reference in refs {
         let id = &reference.acceptance_id;
+        if findings.contains_key(id) {
+            continue;
+        }
         let result = run.results.get(id);
         if result.is_some_and(|result| timed_out(&result.result)) {
-            let diagnostic = format!("CHECK_TIMED_OUT on the pre-implementation tree at {short}");
+            let diagnostic = run_text(baseline.origin, &short, RunText::Timeout);
             if let Some(finding) = silent::settle_timed_out_with_diagnostics(
                 probe,
+                baseline.origin,
                 &baseline.commit,
                 contract,
                 id,
@@ -52,10 +65,8 @@ pub async fn cannot_fail_findings(
             } else {
                 check_fault::of_result(result.map(|result| &result.result))
             };
-            let unproven = format!(
-                "it could not be run on the pre-implementation tree at {short} ({reason}), so it is not proven able to fail"
-            );
-            let at = format!("on the pre-implementation tree at {short}");
+            let unproven = run_text(baseline.origin, &short, RunText::Unrun(&reason));
+            let at = run_text(baseline.origin, &short, RunText::At);
             let key = (Some(baseline.commit.as_str()), contract, id.as_str());
             if let Some(finding) = check_fault::settle(probe, key, fault, &at, unproven) {
                 findings.insert(id.clone(), finding);
@@ -78,7 +89,7 @@ pub async fn cannot_fail_findings(
                 Err(error) => {
                     probe.unproven(
                         id,
-                        format!("it ran on the pre-implementation tree at {short}, but the host could not decide whether its setup path was missing ({error})"),
+                        run_text(baseline.origin, &short, RunText::Setup(&error.to_string())),
                     );
                     continue;
                 }
@@ -90,7 +101,8 @@ pub async fn cannot_fail_findings(
                 // so again on the same base goes to the author.
                 let commit = &baseline.commit;
                 let why = (why.as_str(), cause);
-                if let Some(finding) = silent::settle_as(probe, commit, contract, result, why, &at)
+                if let Some(finding) =
+                    silent::settle_as(probe, baseline.origin, commit, contract, result, why, &at)
                 {
                     findings.insert(id.clone(), finding);
                 }
@@ -151,6 +163,8 @@ pub async fn newly_passing_findings(
         (Some(known), _) => TreeRun::known(known, "it did not run at the probe's site"),
         (None, Some(commit)) => {
             let at = Baseline {
+                origin:
+                    crate::command::workflow_task_set::executability::BaselineOrigin::ProbedTree,
                 commit: commit.clone(),
                 repository: probe.repository.clone(),
             };
@@ -164,6 +178,21 @@ pub async fn newly_passing_findings(
     for reference in &held {
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
+        if result.is_some_and(|result| timed_out(&result.result)) {
+            let diagnostic =
+                format!("CHECK_TIMED_OUT on the tree its original failed on ({short})");
+            if let Some(finding) = silent::settle_timed_out_with_diagnostics(
+                probe,
+                BaselineOrigin::ProbedTree,
+                tree.commit.as_deref().unwrap_or(&short),
+                contract,
+                id,
+                &diagnostic,
+            ) {
+                findings.insert(id.clone(), finding);
+            }
+            continue;
+        }
         if let Some(reason) = run.unrun(id) {
             let fault = if result.is_none() {
                 check_fault::Fault::Availability(run.fault_class)
@@ -179,6 +208,12 @@ pub async fn newly_passing_findings(
                 findings.insert(id.clone(), finding);
             }
         } else if let Some(result) = result {
+            silent::ran(
+                probe,
+                tree.commit.as_deref().unwrap_or(&short),
+                contract,
+                id,
+            );
             let at = silent::baseline_context(probe, contract, result.copy_layout.as_ref());
             if let Some((reason, cause)) =
                 silent::silent_failure_off_thread(contract, result, &at).await
@@ -201,4 +236,54 @@ pub async fn newly_passing_findings(
         }
     }
     findings
+}
+
+#[derive(Clone, Copy)]
+enum RunText<'a> {
+    Timeout,
+    Unrun(&'a str),
+    At,
+    Setup(&'a str),
+}
+
+fn run_text(origin: BaselineOrigin, short: &str, text: RunText<'_>) -> String {
+    let tree = origin.tree_name();
+    match text {
+        RunText::Timeout => format!("CHECK_TIMED_OUT on the {tree} at {short}"),
+        RunText::Unrun(reason) => format!(
+            "it could not be run on the {tree} at {short} ({reason}), so it is not proven able to fail"
+        ),
+        RunText::At => format!("on the {tree} at {short}"),
+        RunText::Setup(error) => format!(
+            "it ran on the {tree} at {short}, but the host could not decide whether its setup path was missing ({error})"
+        ),
+    }
+}
+
+#[cfg(test)]
+#[test]
+#[allow(non_snake_case)]
+fn P1_N7_baseline_run_texts_name_each_origin() {
+    for origin in [
+        BaselineOrigin::RecordedBase,
+        BaselineOrigin::HeadFallback,
+        BaselineOrigin::ProbedTree,
+    ] {
+        for text in [
+            RunText::Timeout,
+            RunText::Unrun("unavailable"),
+            RunText::At,
+            RunText::Setup("io"),
+        ] {
+            let text = run_text(origin, "abc", text);
+            assert!(
+                text.contains(&format!("on the {} at abc", origin.tree_name())),
+                "{text}"
+            );
+            assert_eq!(
+                text.contains("pre-implementation tree"),
+                origin == BaselineOrigin::RecordedBase
+            );
+        }
+    }
 }

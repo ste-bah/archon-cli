@@ -1,6 +1,32 @@
+#[path = "workflow_decomposition_judge_reply.rs"]
+mod judge_reply;
+pub(super) use judge_reply::judge_decision;
+
+// Read the product marker's value rather than duplicating its prompt sentence.
+fn skeleton_author_marker() -> &'static str {
+    include_str!("../../src/command/workflow_decompose_v1_frozen.js")
+        .split_once("const SKELETON_AUTHOR_MARKER = \"")
+        .unwrap()
+        .1
+        .split_once('"')
+        .unwrap()
+        .0
+}
+
+// Read the product marker's value rather than duplicating its prompt sentence.
+pub(super) fn body_author_marker() -> &'static str {
+    include_str!("../../src/command/workflow_decompose_v1_body.js")
+        .split_once("const BODY_AUTHOR_MARKER = \"")
+        .unwrap()
+        .1
+        .split_once('"')
+        .unwrap()
+        .0
+}
+
 pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
     let text = user_prompt_text(prompt).unwrap_or_default();
-    // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton/body src/command/workflow_decompose_v1.js:164/231;
+    // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton SKELETON_AUTHOR_MARKER in workflow_decompose_v1_frozen.js; body BODY_AUTHOR_MARKER in workflow_decompose_v1_body.js;
     // judge src/command/workflow_task_set_judge.rs:50; passability judge
     // src/command/workflow_acceptance_passability.rs:55; fidelity crates/archon-workflow/src/fidelity_audit.rs:200.
     if text.contains("You are auditing whether a task decomposition is faithful to its PRD.")
@@ -30,14 +56,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
         }
         let decisions = ids
             .into_iter()
-            .map(|id| {
-                serde_json::json!({
-                    "id": id,
-                    "verdict": "accepted",
-                    "counterexample": "None found: a missing or false outcome makes the command exit non-zero.",
-                    "reason": "The command directly checks the declared outcome and exits non-zero when it is false."
-                })
-            })
+            .map(|id| judge_decision(id, false))
             .collect::<Vec<_>>();
         return (
             "judge",
@@ -113,7 +132,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
             }).to_string(),
         );
     }
-    if text.contains("Author one complete task-skeleton JSON artifact") {
+    if text.contains(skeleton_author_marker()) {
         return (
             "skeleton",
             serde_json::json!({
@@ -135,9 +154,9 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
             }).to_string(),
         );
     }
-    if text.contains("Author the complete TASK body for host-frozen task_id ") {
+    if text.contains(body_author_marker()) {
         let Some(id) = text
-            .split_once("Author the complete TASK body for host-frozen task_id ")
+            .split_once(body_author_marker())
             .and_then(|(_, rest)| rest.split_once('.').map(|(id, _)| id.trim()))
         else {
             return unknown_prompt();

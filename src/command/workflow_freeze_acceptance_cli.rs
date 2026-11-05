@@ -175,6 +175,9 @@ pub(super) async fn reauthor_acceptance(
             ids: &ids,
             gate: ReauthorGate {
                 probe: &probe,
+                // This explicit-id command has no prior gate findings.
+                // reauthor_partial_with_cache holds accepted originals first
+                // and seeds their defects; refusals use judge::author_note.
                 seeds: &BTreeMap::new(),
             },
             trigger: "workflow freeze-acceptance --reauthor",

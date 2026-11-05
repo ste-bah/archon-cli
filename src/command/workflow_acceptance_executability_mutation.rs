@@ -42,38 +42,11 @@ mod repository_alias;
 pub(super) const GUARD_STATUS: i32 = 97;
 /// What every finding for a check that passes before any implementation
 /// says, so a stalled re-author can escalate it.
-pub(crate) const CANNOT_FAIL: &str = "passed on the pre-implementation tree";
+pub(crate) const CANNOT_FAIL: &str = "so it is not yet shown able to fail";
 
-/// Build and package manifests: a check fails without them for no reason
-/// its criterion gives.
-const MANIFESTS: [&str; 26] = [
-    "Cargo.toml",
-    "Cargo.lock",
-    "package.json",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "pyproject.toml",
-    "setup.py",
-    "setup.cfg",
-    "requirements.txt",
-    "go.mod",
-    "go.sum",
-    "Makefile",
-    "makefile",
-    "GNUmakefile",
-    "CMakeLists.txt",
-    "build.gradle",
-    "build.gradle.kts",
-    "pom.xml",
-    "Gemfile",
-    "Gemfile.lock",
-    "composer.json",
-    "deno.json",
-    "tsconfig.json",
-    "meson.build",
-    "Package.swift",
-];
+#[path = "workflow_acceptance_executability_mutation_manifests.rs"]
+mod manifests;
+use manifests::MANIFESTS;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ExclusionReason {
@@ -304,11 +277,10 @@ pub(super) fn input_discovery_for_check(
                 let resolved = resolved.as_ref()?;
                 let source = sibling.source.canonicalize().ok()?;
                 let within = resolved.strip_prefix(&source).ok()?;
-                Some(
-                    paths::relative_path(&cwd, &source.join(within))
-                        .to_string_lossy()
-                        .into_owned(),
-                )
+                Some(archon_shell::paths::stored_text(&paths::relative_path(
+                    &cwd,
+                    &source.join(within),
+                )))
             });
             let manifest_sibling = commands
                 .iter()

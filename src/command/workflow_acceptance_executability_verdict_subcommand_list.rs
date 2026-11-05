@@ -75,19 +75,15 @@ pub(super) fn last_listing(program: &Path) -> Option<Listing> {
         .cloned()
 }
 
+#[path = "workflow_acceptance_executability_subcommand_list_cache.rs"]
+mod cache;
+
 /// `program`'s built-in commands at `at`'s site (see the module docs).
 pub(super) fn listing(program: &Path, at: &Context) -> Listing {
     let lock = || LISTED.lock().unwrap_or_else(|poison| poison.into_inner());
-    let Ok(resolved) = std::fs::canonicalize(program) else {
+    let Some(key) = cache::key(program, at) else {
         return Listing::NoAnswer(format!("`{}` could not be resolved", program.display()));
     };
-    let meta = std::fs::metadata(&resolved).ok();
-    let identity = (
-        resolved,
-        meta.as_ref().map_or(0, std::fs::Metadata::len),
-        meta.and_then(|meta| meta.modified().ok()),
-    );
-    let key = (identity, at.environment.clone());
     if let Some(known) = lock().get(&key) {
         return known.clone();
     }

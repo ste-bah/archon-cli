@@ -22,6 +22,9 @@
 
 use std::path::{Component, Path};
 
+#[path = "workflow_acceptance_executability_setup_flow.rs"]
+pub(crate) mod flow;
+
 use super::super::verdict_shell::{Simple, expands};
 
 /// Builtins that enter the directory they are given.
@@ -64,6 +67,7 @@ impl SiteTree {
 /// `tree` gave no verdict under this rule; never on the live tree (`None`).
 pub(super) fn refusal(
     code: i32,
+    text: &str,
     commands: &[Simple],
     output: &str,
     tree: Option<&SiteTree>,
@@ -84,9 +88,13 @@ pub(super) fn refusal(
             .collect();
         named.extend(path_options(command, name));
         for (how, path) in named {
-            if !expands(path) && outside(path, depth, tree) && reported_missing(output, path) {
+            if !expands(path)
+                && outside(path, depth, tree)
+                && reported_missing(output, path)
+                && flow::decisive(text, &command.word, &command.args)
+            {
                 return Some(format!(
-                    "it names the path `{path}` ({how}), which the site does not create because it lies outside the tree it ran in; its output reports the path absent: a setup failure of its site, not a failure of its criterion"
+                    "it names the path `{path}` ({how}), which the site does not create because it lies outside the tree it ran in; its output reports the path absent: a setup failure of its site, not a failure of its criterion; name only paths under the selected root or ../<repository dir>/"
                 ));
             }
         }
@@ -111,6 +119,7 @@ pub(crate) fn failure(
     }
     refusal(
         result.exit_code?,
+        command,
         &super::simple_commands(command),
         &super::output(result),
         at.tree.as_ref(),

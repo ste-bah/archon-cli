@@ -20,7 +20,7 @@
 // author loop follows (workflow_decompose_v1_progress.js, Issue 261): a round
 // makes progress when its distinct defect count sets a new best, a
 // round of SET_GATE_ESCALATE_AFTER without progress escalates the repair to a
-// skeleton re-author with every open finding, and STALL_ATTEMPTS rounds
+// skeleton re-author with skeleton findings, and STALL_ATTEMPTS rounds
 // without progress advance the authored repair rung.
 const SET_GATE_ESCALATE_AFTER = 2;
 
@@ -116,7 +116,8 @@ function runBounded(count, cap, window, launch, failed = () => false) {
 // failure in skeleton order (lowest index, not first to land) is raised
 // after all started calls settle. A body fails only by throwing, so there is
 // no failed value for a rejection to outrank.
-async function authorBodies(w, work, bodies) {
+async function authorBodies(w, work, bodies, chain) {
+  const skeleton = chain?.outcome;
   const { settled } = await runBounded(work.length, authorBatchSize(), false,
     (index) => {
       const policy = bodyPolicy(work[index][0], work[index][1]);
@@ -128,7 +129,7 @@ async function authorBodies(w, work, bodies) {
   settled.forEach((result, index) => {
     if (result && result.status === "fulfilled") {
       if (result.value?.pendingAuthor) pending.push([work[index][0], result.value.findings, work[index][1] || [], result.value.pendingRung]);
-      else bodies.set(work[index][0].fileName, result.value);
+      else if (!result.value?.skeletonFindings) bodies.set(work[index][0].fileName, result.value);
     }
   });
   const failure = settled.find((result) => result && result.status === "rejected");
@@ -142,7 +143,43 @@ async function authorBodies(w, work, bodies) {
     });
     await authorBodies(w, pending.map(([subject, findings, priorFeedback, rung]) => [
       subject, [...priorFeedback, ...findings], rung
-    ]), bodies);
+    ]), bodies, chain);
+  }
+  const shadows = settled.filter((r) => r?.status === "fulfilled" && r.value?.skeletonFindings);
+  if (shadows.length > 0) {
+    // A pending sibling may have repaired the skeleton. Recheck these bodies
+    // against that skeleton before acting on findings from its predecessor.
+    if (chain.outcome !== skeleton) return await authorBodies(w, work.flatMap(([subject, feedback, rung], i) =>
+      settled[i]?.value?.skeletonFindings
+        ? [[chain.subjects.find((s) => s.taskId === subject.taskId), feedback, rung]] : []), bodies, chain);
+    const repairBodies = settled.flatMap((r, index) => r?.status === "fulfilled" && r.value?.skeletonFindings
+      ? [...r.value.bodyFindings, { text: BODY_FROZEN_RULE, subject: work[index][0].taskId }] : []);
+    const findings = shadows.flatMap((r) => r.value.skeletonFindings);
+    // Shadow repairs progress only when the open count beats its best.
+    // Stable count slots keep text, subjects, locations and stages from
+    // crediting a trade; recordAttempt owns the same stall window as elsewhere.
+    const measured = findings.map((_, i) => ({ text: "skeleton shadow", subject: "body-skeleton",
+      deterministic_defect: { provenance: "host_validator", code: "skeleton_shadow", location: String(i) } }));
+    if (!chain.bodyShadowRepair) {
+      const progress = newProgress([]);
+      recordAttempt(progress, 0, measured, false);
+      chain.bodyShadowRepair = { progress, rung: 1, cycle: 1 };
+    }
+    const repair = chain.bodyShadowRepair, progress = repair.progress;
+    progress.calls += 1;
+    recordAttempt(progress, progress.calls, measured);
+    const stall = stallReason(progress);
+    if (stall) await pauseAuthorLoop(w, "body-skeleton", progress, stall, findings.map(findingText));
+    repair.rung = Math.max(repair.rung, ...settled.flatMap((r, i) => r?.value?.skeletonFindings ? [r.value.shadowRung || work[i][2] || 1] : []));
+    repair.rung = repair.rung === 4 ? 2 : repair.rung + 1;
+    if (repair.rung === 2) repair.cycle += 1;
+    chain.bodyShadowRound = (chain.bodyShadowRound || 0) + 1;
+    await repairEvent(w, `body-skeleton-${chain.bodyShadowRound}`, repair.rung, repair.cycle, progress.calls, progress.calls);
+    await reauthorSkeleton(w, chain, bodies, findings,
+      repairBodies, repair.rung);
+    // Only the frame that observed shadows may finish their progress window;
+    // a pending-only nested retry has no evidence that those shadows cleared.
+    chain.bodyShadowRepair = null;
   }
 }
 
@@ -166,13 +203,6 @@ async function runSetGateLoop(w, chain, bodies) {
       const authoredReply = failed.routed.operationalKind === "authored_judge_reply";
       if (!authoredReply) recordOperational(progress, round, failed.routed.operational, false, NO_ROUND, failed.capability);
       if (authoredReply) recordAnswered(progress, round, "authored_judge_reply", false, true, NO_ROUND);
-      const lead = authoredReply ? "set gate judge reply unusable" : "host gate operational failure";
-      if (authoredReply) {
-        await reauthorSkeleton(w, chain, bodies, [{
-          text: `${lead}: ${failed.routed.operational}`,
-          remediation_scope: "skeleton"
-        }], [], repairRung);
-      }
       const stall = stallReason(progress);
       if (stall === "operational_no_progress") {
         await pauseAuthorLoop(w, "set-gates", progress, stall, [`${failed.capability}: ${failed.routed.operational}`], { rounds: round });
@@ -211,6 +241,7 @@ async function runSetGateLoop(w, chain, bodies) {
       // frozen task is the skeleton's to repair.
       (findSubject(finding, chain.subjects) ? bodyFindings : skeletonFindings).push(finding);
     }
+    await routeUnattributed(w, bodyFindings, skeletonFindings, chain.subjects, round);
     const stall = stallReason(progress);
     if (stall) {
       await pauseAuthorLoop(w, "set-gates", progress, stall, open, { rounds: round });
@@ -231,8 +262,9 @@ async function runSetGateLoop(w, chain, bodies) {
     }
     if (!escalated && progress.stalled >= SET_GATE_ESCALATE_AFTER) {
       escalated = true;
-      await reauthorSkeleton(w, chain, bodies, gates.flatMap((gate) => gate.routed.allFindings), bodyFindings, repairRung);
-      continue;
+      if (skeletonFindings.length > 0) {
+        skeletonFindings.push({ text: `${bodyFindings.length} body findings remain open; they are re-authored by the bodies` });
+      }
     }
     if (skeletonFindings.length > 0) {
       await reauthorSkeleton(w, chain, bodies, skeletonFindings, bodyFindings, repairRung);
@@ -245,7 +277,7 @@ async function runSetGateLoop(w, chain, bodies) {
       const subject = chain.subjects.find((candidate) => candidate.fileName === fileName);
       work.push([subject, findings.map((finding) => findingText(finding)), repairRung]);
     }
-    await authorBodies(w, work, bodies);
+    await authorBodies(w, work, bodies, chain);
   }
 }
 
@@ -261,6 +293,7 @@ async function runSetGateLoop(w, chain, bodies) {
 // skeleton's frozen fields are unknown to the script (a launch argument
 // without them, or a candidate it cannot read), every body is re-authored.
 async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repairRung) {
+  await routeUnattributed(w, bodyFindings, findings, chain.subjects, "body");
   const prior = SKELETON_TASKS.get(chain.outcome);
   const outcome = await authorCandidate(w, skeletonPolicy(
     findings.map((finding) => findingText(finding)), repairRung, skeletonCandidateContent(chain.outcome)));
@@ -279,18 +312,18 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
   chain.outcome = outcome;
   chain.subjects = outcome.subjects;
   const next = SKELETON_TASKS.get(outcome);
-  const grouped = new Map(groupFindingsBySubject(bodyFindings, chain.subjects));
+  const grouped = new Map(groupFindingsBySubject([...bodyFindings, ...findings], chain.subjects));
   const onDisk = frozenChain().bodies;
   const dependencies = changedDependencySubjects(prior, next);
   const reached = (subject) => dependencies.has(subject.taskId) || !prior || !next
     || !(bodies.has(subject.fileName) || onDisk.has(subject.fileName))
     || grouped.has(subject.fileName) || !prior.has(subject.taskId)
     || prior.get(subject.taskId) !== next.get(subject.taskId);
-  const note = "The frozen skeleton was re-authored to repair set-gate findings; copy this task's frozen fields from the current skeleton exactly.";
+  const note = BODY_FROZEN_RULE;
   await authorBodies(w, chain.subjects.filter(reached).map((subject) => [
     subject,
     [note, ...(grouped.get(subject.fileName) || []).map((finding) => findingText(finding))], repairRung
-  ]), bodies);
+  ]), bodies, chain);
 }
 
 // Each committed skeleton outcome's frozen fields per task id, read from
@@ -368,12 +401,13 @@ function committed(outcome) {
 }
 
 // Findings keyed by the frozen file name of the task each one names, in
-// subject order. A finding that names no frozen task stops the run: silently
-// dropping it would accept a set the gate refused.
+// subject order. Unattributed findings are routed to skeleton context before
+// grouping, so no open defect is discarded.
 function groupFindingsBySubject(findings, subjects) {
   const grouped = new Map();
   for (const finding of findings) {
     const subject = resolveFindingSubject(finding, subjects);
+    if (!subject) continue;
     if (!grouped.has(subject.fileName)) grouped.set(subject.fileName, []);
     grouped.get(subject.fileName).push(finding);
   }
@@ -388,8 +422,7 @@ function groupFindingsBySubject(findings, subjects) {
 function resolveFindingSubject(finding, subjects) {
   const subject = findSubject(finding, subjects);
   if (subject) return subject;
-  const path = typeof finding?.source_path === "string" ? finding.source_path : "";
-  throw new Error(`set gate finding names no frozen task (source_path=${path || "none"}, subject=${finding?.subject ?? "none"}): ${findingText(finding)}`);
+  return null;
 }
 
 // The frozen subject a finding names, or null.
@@ -424,4 +457,20 @@ function bodyEvidence(subjects, bodies) {
     if (bodies.has(subject.fileName)) evidence.push(bodies.get(subject.fileName));
   }
   return evidence;
+}
+
+// Keep unattributed defects open as skeleton context, and record their route.
+let unattributedEvent = 0;
+async function routeUnattributed(w, bodyFindings, skeletonFindings, subjects, round) {
+  for (let i = bodyFindings.length - 1; i >= 0; i -= 1) {
+    const finding = bodyFindings[i];
+    if (findSubject(finding, subjects)) continue;
+    bodyFindings.splice(i, 1);
+    skeletonFindings.push(finding);
+    if (typeof w.checkpoint === "function") {
+      await w.checkpoint(`finding_unattributed-${round}-${++unattributedEvent}-${i}`, {
+        task: `finding_unattributed: ${findingText(finding)}`
+      });
+    }
+  }
 }

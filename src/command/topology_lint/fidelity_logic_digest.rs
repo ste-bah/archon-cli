@@ -88,7 +88,10 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 // #527 re-pin only: the sources-digest env name became a named constant; no verdict meaning changed.
 // #572/#573 re-pin, version unchanged: obligation_constraints.rs (a module of obligation_ids.rs) is listed; PRD constraint extraction, a definition-form sub-bullet ending a parent obligation's text, and tab-indented REQ- bullets change which obligation ids and texts are asked, and every record is keyed by its obligation id and text, so no stored verdict means something else.
 // #574/#575 re-pin, version unchanged: prd_sections.rs (a module of obligation_ids.rs) is listed; id-keyed table-row constraints and PRD section keys are not obligations, so the obligation ids and texts the critic is asked, and every stored verdict's meaning, are unchanged.
-pub const SOURCES_DIGEST: &str = "ba9fbfe829980cd377f51dd7ee4e648fd837f86bcdc306a532d2da6be49acefc";
+// #584 P5 re-pin only: section citation remedy text changes no obligation question or stored verdict meaning; keep critic version 2. Digest recomputed with digest_of length-framed SHA-256.
+// #587 re-pin only: whole-set repair routing uses verified weakening evidence;
+// the critic question, reply validation and stored verdict meaning are unchanged.
+pub const SOURCES_DIGEST: &str = "e074ac5ccc345c62b300ac283e22bebcda29dc12a8e8c53da0595bc66f247777";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

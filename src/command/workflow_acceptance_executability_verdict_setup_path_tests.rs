@@ -219,8 +219,8 @@ fn git_dash_c_names_a_setup_path_and_tar_dash_c_does_not() {
 }
 
 #[cfg(unix)]
-#[test]
-fn a_mutated_check_failing_only_on_an_absent_sibling_has_no_verdict() {
+#[tokio::test]
+async fn a_mutated_check_failing_only_on_an_absent_sibling_has_no_verdict() {
     let (_parent, tree) = tree();
     let original = "cd ../archon-420-absent-root && test -f fixture.txt";
     use crate::command::workflow_task_set::executability::mutation::{Markers, wrap};
@@ -235,8 +235,23 @@ fn a_mutated_check_failing_only_on_an_absent_sibling_has_no_verdict() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(output.contains("archon-420-absent-root"), "{output}");
+    let mut authored = contract();
+    authored.acceptance.push(
+        crate::command::workflow_task_set::republish::test_fixture::criterion(
+            "AC-420", original, true,
+        ),
+    );
+    // Match prove's production call: authored contract plus wrapped run output.
+    let refusal =
+        crate::command::workflow_task_set::executability::silent::setup_path_failure_off_thread(
+            &authored,
+            &result,
+            &host(),
+        )
+        .await
+        .unwrap();
     assert!(
-        no_verdict(&wrapped, &result, &host()).is_some(),
+        refusal.is_some(),
         "the mutation's site setup failure must not prove the check can fail: {output}"
     );
 }
@@ -292,4 +307,86 @@ fn after_cd_dash_relative_paths_are_not_decided_and_pushd_is_followed() {
     } else {
         assert_eq!(why, None, "{output}");
     }
+}
+
+#[cfg(unix)]
+fn setup(command: &str) -> Option<String> {
+    let mut result = real("false", &std::env::temp_dir());
+    result.stderr = b"../missing: no such file or directory".to_vec();
+    super::failure(command, &result, &host())
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn P2_11_unguarded_errexit_setup_names_remedy() {
+    for command in [
+        "set -e; cd ../missing; false",
+        "set -e; git -C ../missing status; false",
+        "set -e; tool --manifest-path ../missing; false",
+    ] {
+        let why = setup(command).unwrap();
+        assert!(why.contains("name only paths under the selected root or ../<repository dir>/"));
+    }
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn P2_12_guarded_or_pre_errexit_setup_is_a_verdict() {
+    // Unmodeled compound setup cannot supply a can-fail proof (S4).
+    assert!(setup("set -e; if cd ../missing; then true; fi; false").is_some());
+    for command in [
+        "set -e; cd ../missing || true; false",
+        "set -e; cd ../missing || :; false",
+        "set -e; cd ../missing && true; false",
+        "cd ../missing; set -e; false",
+    ] {
+        assert!(setup(command).is_none(), "{command}");
+    }
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn P2_13_later_status_decides_without_errexit() {
+    assert!(setup("cd ../missing; false").is_none());
+    assert!(setup("cd ../missing").is_some());
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn P2_14_mutation_uses_same_setup_status_rule() {
+    let why = setup("set -e; cd ../missing; test -f moved-input").unwrap();
+    assert!(why.contains("setup failure"));
+    assert!(setup("set -e; cd ../missing || true; test -f moved-input").is_none());
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn R1_final_and_list_setup_failure_gives_no_verdict() {
+    assert!(setup("cd ../missing && test -f x").is_some());
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn R1_or_exit_setup_failure_gives_no_verdict() {
+    assert!(setup("cd ../missing || exit 1").is_some());
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn R1_if_setup_with_unconditional_later_test_is_conservative() {
+    // The compound construct is not modeled, so withhold the can-fail proof.
+    assert!(setup("if cd ../missing; then true; fi; test -f y").is_some());
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn R1_errexit_setup_failure_gives_no_verdict() {
+    assert!(setup("set -e; cd ../missing; test -f y").is_some());
+}
+#[cfg(unix)]
+#[test]
+#[allow(non_snake_case)]
+fn R1_redirected_setup_before_later_test_is_guarded() {
+    assert!(setup("cd ../missing 2>/dev/null; test -f y").is_none());
 }

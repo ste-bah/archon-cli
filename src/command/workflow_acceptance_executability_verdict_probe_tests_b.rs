@@ -132,7 +132,7 @@ async fn issue557_a_host_unproven_check_unproven_again_on_the_same_base_goes_to_
     assert!(probe.take_unproven().is_empty(), "never the host's");
     let finding = findings.get("AC-D").expect("its author's at once");
     assert!(
-        finding.contains("cannot be proven on the base commit")
+        finding.contains("cannot be proven on the pre-implementation tree")
             && finding.contains("fail by its own assertion")
             && finding.contains("archon-issue-328-absent-tool"),
         "{finding}"
@@ -159,7 +159,7 @@ async fn issue557_a_host_unproven_check_unproven_again_on_the_same_base_goes_to_
     assert!(second.take_unproven().is_empty(), "no longer the host's");
     let finding = findings.get("AC-D").expect("the author's finding");
     assert!(
-        finding.contains("cannot be proven on the base commit")
+        finding.contains("cannot be proven on the pre-implementation tree")
             && finding.contains("fail by its own assertion")
             && finding.contains("did not build"),
         "{finding}"

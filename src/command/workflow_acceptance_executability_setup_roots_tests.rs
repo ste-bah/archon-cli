@@ -135,6 +135,7 @@ async fn setup_path_context_agrees_with_cached_site_roots() {
     let run = super::super::sites::run_at(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.head.clone(),
             repository: trees.repo.clone(),
         },

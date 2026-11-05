@@ -1,135 +1,14 @@
+#[path = "workflow_host_command_logic_catalog_history.rs"]
+mod history;
+
 use super::{CONTRACT, CapabilityLogic, FREEZE, GATE, LINT, TRACE, VERIFY};
 // Windows CPU fix re-pin only (freeze, land/lint and verify digests): utf8Bytes counts bytes with native string calls and namedFilesContext sizes the file list incrementally; same bytes, no verdict rule changed.
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
-        // 2: #366 live-root rule (sibling paths pass; a bad repository lock
-        // is an error) changes acceptance freeze verdicts.
-        // 3: #288 acceptance checks rerun only when their input closure
-        // changed; a reused check verdict binds normalized literal paths,
-        // their filesystem state, the shell, environment and this logic.
-        // 4: #380 complete wrapped obligation text changes freeze verdicts.
-        // #385's re-ask improves recovery from an unusable provider reply;
-        // it does not change the verdict for a usable reply. #392 changes
-        // which authored reply shapes can supply an acceptance entry.
-        // #392 accepts a sole unnamed check block when command_block is omitted.
-        // #399 fixes resume seed reconstruction; identical gate input keeps its verdict.
-        // 9: #400 validates incremental subsets independently, allowing supplementary-only updates to pass.
-        // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // 10: #374 resolves existing aliases by identity; unresolved paths on the live volume fail closed.
-        // 11: #417 #418 #419 freeze-owned outputs leave check inputs; passability and judge verdicts reuse by scoped input keys.
-        // #421 changes when a recorded freeze is reused (a later publication extends its pin), not how it is judged.
-        // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
-        // 14: #417 task-root exclusions and copies use the same project-relative input set as its digest.
-        // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
-        // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        // 16: #440 the scratch copy skips a repository nested inside a project input, as the probe digest does, so a check can no longer read that live tree and its verdict can change.
-        // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
-        // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
-        // 18: #446 direct-site baseline runs use their hermetic copy's layout when applying that rule.
-        // 19: #402 missing provider stop reasons cannot complete acceptance authoring; #419 pinned restoration requires identical check and covers fields after a fresh refusal.
-        // #446 review 2, same unreleased version 18
-        // 20: #374 reconstructs unresolved paths from the longest existing
-        // ancestor before comparing with the live root; only an unresolvable
-        // same-volume path fails closed. Sibling paths can now pass.
-        // 21: #420 copies named sibling inputs into each temporary check site;
-        // absent named siblings are refused at author time and copied paths
-        // are inside the setup-path tree, changing passability verdicts.
-        // 21, reverify acceptance: finished runs execute this frozen check set
-        // in the same copy and judge setup failures with freeze's passability rule.
-        // 22: reverify follows freeze's baseline classification, accepting a
-        // missing-implementation failure while preserving setup findings.
-        // 21: #366 joins shell-word paths and carries shell assignments into
-        // later commands when detecting live-root acceptance checks.
-        // #366 Windows fix: POSIX path comparison stays case-sensitive on Windows.
-        // 24: sibling discovery and copies use plain canonical paths, so
-        // verbatim Windows paths do not break containment, git, or root names.
-        // 25: every native check applies its resolved cargo limits, including
-        // observations without a configured build cache.
-        // 26: only meaning-preserving Windows verbatim paths reach Git;
-        // unsafe plain spellings are refused, changing acceptance findings.
-        // 27: freeze persists reusable probe observations and resumes their
-        // judge verdicts across passability failures; reuse identity and
-        // which probe/judge results complete authoring can differ.
-        // 28: baseline-passing checks use a stored semantic judgment only
-        // when its frozen contract and exact command digests still match;
-        // otherwise the input-mutation proof and findings still apply.
-        // 29: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
-        // 30: sibling mutation inputs must be named in the check's actual
-        // relative context, changing can-fail proof verdicts.
-        // 31: literal file reads in recognized inline interpreter programs
-        // are included in mutation inputs, changing can-fail proof verdicts.
-        // 32: every program following a recognized inline-program flag is
-        // scanned, changing can-fail proof verdicts for repeated flags.
-        // 33: mutation wrappers preserve named sibling setup paths, so their
-        // copy layout matches baseline and absent-sibling failures give no verdict.
-        // 37: #468 mutation verdicts route every final or transiently recreated input to the author, and are saved or memoized only when that run's markers show every moved input was restored.
-        // 38: saved re-author candidates skip only authoring and candidate judging; every reuse reruns host proof and passability gates. Prompt and judge instruction sources bind the key; freeze logic version and digest do not.
-        // 39: baseline no-verdict strikes identify the failure cause, so re-authoring the same missing setup path still reaches its author.
-        // 40: alias inputs can change mutation proof verdicts.
-        // 41: passability finding selection and baseline-pass recognition
-        // change the findings returned by a freeze gate.
-        // Re-pinned only (verdict rules unchanged): #483
-        // 42: batch judging includes bounded contents of existing named check inputs, preventing refutations that contradict their assertions.
-        // 43: #486 nested repository sibling aliases reuse the repository copy
-        // without creating a conflicting build target, changing scratch verdicts.
-        // 44: #487 partial judge replies retain valid decisions and ask only
-        // for missing checks, which can change the acceptance verdict set.
-        // 45: #488 named-file assertions make their regression guards valid; move-aside and duplicate-implementation states cannot refute them. #489 separator trimming preserves the actual sibling path for setup classification.
-        // 46: #491 acceptance reauthor verification accepts an intact predecessor skeleton as pending after a normal acceptance publish.
-        // 47: mutation checks attribute recreated inputs to the check run;
-        // whole-set publication compares the preparation-time contract
-        // snapshot and rebuilds on change, including first-draft publication.
-        // 48: recreated inputs with an unknown writer remain unproven, and
-        // preparation binds the publication identity to the source digest.
-        // 49: merge of 48 (#493 #492) and #495: cross-root parent paths are
-        // refused before judging; one check's own setup-path failure goes to
-        // its author after host-side integrity checks.
-        // 54: #497 authored judge reply exhaustion and non-accepted re-author
-        // checks remain per-check pending; timeout and zero-work checks route
-        // back through their author, changing freeze repair outcomes.
-        // 55: #497 leaves authored timeouts and incomplete repairs pending
-        // per check, so independent checks keep their freeze verdicts.
-        // 56: #497 keeps passability-judge authored-incomplete checks pending
-        // while publishing proven siblings; typed whole-set freeze judge
-        // replies are retried without an operational no-progress strike.
-        // 57: #498 a named regression guard is valid only when its result
-        // depends on the deciding test or implementation; moved-aside host
-        // proof and file naming alone cannot establish that dependency.
-        // 58: review of #491-#498: the judge sees each named input's status
-        // and applies guard rules only to an existing deciding test; Enforce
-        // partial republish, first-stall and typed missing-program routing,
-        // stale-base rebuild and authored judge-reply retries change freeze
-        // outcomes.
-        // Same unreleased version 58: combined review of the merged fixes
-        // (typed judge-incomplete kinds, site-lacks cause, passability
-        // deferral, coverage gating of extensions, unaccepted host pending).
-        // Same unreleased version 58: exit-path audit (check-caused faults to the
-        // author or the strike, refusals authored, per-candidate judge holds,
-        // cached-candidate refusal checks, probe beside missing siblings,
-        // sibling scan of glued quoted paths).
-        // 59: #495 #501 re-author path refusals follow the site's own sibling
-        // discovery: a project_root path the site links is accepted; a path
-        // that leaves its root and comes back into it by name is refused.
-        // Same unreleased version 59: #500 a judge re-ask for missing ids uses
-        // the caller's own prompt; re-author keeps decided verdicts when the
-        // judge cannot complete.
-        // 60: #516 a toolchain usage error in a check's own invocation is refuted by the
-        // can-pass judge; #477 repository-sibling inputs are provable in the Scratch site;
-        // #497 F2 a freeze stalls only when every finding is operational.
-        // 61: #518 a path a check names only in message text no longer outranks a movable
-        // input class; #519 nested inputs prove without a false unsafe restore; #494
-        // re-author prompts prefetch inputs per attempt.
-        // 62: batch 26: #520 a pinned or cached verdict counts only under the current judge
-        // identity; #523 the host refutes external-program usage errors; #478 bare . and ..
-        // are whole-tree inputs; #490 a pending skeleton is reported, not compared.
-        // #524 the can-pass instruction names the evidence tree, not only the pre-implementation tree.
-        // 68: #534 a sibling check rebuilt after a racing writer gets a real verdict instead of
-        // host-unproven; #495 setup-path roots follow the site layout (process groups inside the
-        // scratch tree, a cached target outside it); #544 a stored result whose masked copy would
-        // decide differently is re-run, not reused.
-        // 69: #548 a check whose site lacks a program the host has goes to its author, not host-unproven. 70: #549 each check is judged in its own call with its own named-file budget; one whose own files exceed it goes to its author with the files, sizes and limit, never refuted (re-pin only for every other capability). 71: #552 a check the judge gives no usable verdict in its own replies within the no-progress window goes to its author as a not-judged finding, never an operational stop; the other checks keep their verdicts; when a later step stalls, the checks already known not judged keep their own findings; an identical undecided check reuses its saved outcome while its named-file content is unchanged (re-pin only for every other capability). 72: #554 a check whose text its shell rejects in parse-only mode (`-n`) goes to its author unrun; a mutation run with no recorded status is the check's when `-n` rejects it, otherwise ambiguous (a strike), never a host fault; checks left unproven keep their findings in a stalled outcome (re-pin only for every other capability). 73: #557 a check that starts a program neither its site nor the host has goes to its author at once on the probe path, in the same budget with no strike, with a text that says no host action makes it available (never an operational host_program_absent finding or install advice), as the re-author path already did (re-pin only for every other capability). 74: #558 the deterministic cannot-pass rule (an outside program rejects the check's own command line) runs in the same freeze for every accepted check that failed on its evidence tree and has no probe finding of its own, even while other checks have author-scoped probe findings; the model-judged part stays deferred then (re-pin only for every other capability). 75: #560 a named path the host finds no file for is shown to the judge and both authors with a detail that it may be a pattern or text argument and is not alone evidence of missing behaviour; the judge and author rules read absence as behaviour not implemented yet only when the path is established to name a deciding file, which can change acceptance verdicts (re-pin only for every other capability). 76: Issue 566 a cd to a missing directory leaves later words unresolved, binary files are not judged source (marked not_judgeable), and case and substitution scopes change probe input discovery, named-file statuses and the judge instruction, which can change acceptance verdicts. 77: Issue 573 tab-indented REQ- bullets are requirements, and Issue 572 a nested definition-form constraint sub-bullet ends its parent requirement's text; both change the requirement inventory and texts that coverage findings and supplementary criteria are built from. Issue 571 changes the covers finding text and shape hints. 78: Issue 574/575 an acceptance republish re-runs the skeleton gate (workflow_acceptance_republish.rs), which now raises uncited_section/unknown_section and lists id-keyed table-row constraints; acceptance covers stay REQ- ids only. 79: Issue 577 agent programs inherit PSMODULEPATH and SHELL and Linux Landlock grants REFER within readable trees, so a check can now pass or fail differently. 80: Issue 579 inherited MAKEFLAGS, MFLAGS, GNUMAKEFLAGS and CARGO_MAKEFLAGS keep only allowlisted make options (no NAME=value words, no --eval or -E), and a Linux agent launch is refused when a Landlock read or write ruleset cannot be built, so a check can now pass or fail differently.
-        version: 80,
+        // Earlier bump and re-pin notes: workflow_host_command_logic_catalog_history.rs.
+        version: 82, // #590: site-resolved package selectors across the whole script.
+        // #584 P5 bump: republish now refuses legacy skeleton entry and constraint defects; operator re-pins digest.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -182,7 +61,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either. #561 re-pin only: the decomposition script's acceptance progress window (workflow_decompose_v1_progress.js, new workflow_decompose_v1_failing_set.js) changes only when the loop pauses as no_progress; no verdict reads either. #559 guard re-pin only: the entry author reads the current entry with state.entries?.get (workflow_decompose_v1_acceptance.js), as the named-files context beside it does; no verdict reads it. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. #537/#531 batch re-pin only: acceptance_scratch_control.rs gains a test-only clock hook (production now() is Instant::now()) and archon-core watchers are bounded; no verdict reads either. Issue 563 re-pin only: acceptance author and re-author prompts state the check site PATH (acceptance_scratch_policy.rs check_site_path, passed as a script argument kept out of launch identity); no verdict reads it. Issue 568 re-pin only: the skeleton author prompt names the previous candidate the author submitted to freeze-skeleton in a host-written context file (path and sha256); no verdict reads it. Issue 566/568/569: freeze-acceptance bumped to 76 for Issue 566; Issue 568 and Issue 569 change only skeleton prompts, the prdObligationIds script argument and skeleton finding text here. #355 re-pin only: host child launches gain a sandbox-exec spawn preflight (a missing target is a spawn error) and read-denied credential paths gain write and ancestor denials; the verdict launches here start a resolved shell, so no verdict changes. #355 forgery fix re-pin only: the host creates missing ancestors of protected paths and the grant root (0700) before it builds the profile, and every ancestor gets a full write denial; the verdict launches here start a resolved shell, so no verdict changes. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only: no verdict rule changed. #585 re-pin only: a mutation-marker local in workflow_acceptance_executability_mutation_markers.rs was renamed (nonce to saved); no verdict reads a local name.
-        sources_digest: "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+        sources_digest: "efc0d71a63f1c7aa1e579d976fca600a705d709d35f787b56b6de7aae8c878d4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -191,7 +70,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: review of #491: an attempt with open findings stays open when its logic is stale, and a recorded skeleton without its lock stays acceptance-only. 7: Issue 569 the unknown obligation finding names a non-obligation id and the host-listed id sources; freeze reuses by version only, so a replayed outcome would keep the old text. 8: Issue 572 skeleton freeze accepts host-listed PRD constraint ids in implements and raises no unowned_obligation for them; Issue 573 tab-indented REQ- bullets become obligations a task must claim. 9: Issue 574/575 frozen skeleton tasks carry source_sections, skeleton freeze raises uncited_section/unknown_section, and id-keyed table rows under a header with no obligation word become host-listed PRD constraints.
-        version: 9,
+        version: 10, // #584 P5 bump: constraint ownership and entry defects change refusal; operator re-pins digest.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -229,7 +108,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: freeze-skeleton runs no check, so the probe path's routing and text of a program neither the site nor the host has never reach it. #558 re-pin only: freeze-skeleton runs no check and judges no baseline failure, so the passability stage's routing never reaches it. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either. #561 re-pin only: the decomposition script's acceptance progress window (workflow_decompose_v1_progress.js, new workflow_decompose_v1_failing_set.js) changes only when the loop pauses as no_progress; no verdict reads either. #559 guard re-pin only: the entry author reads the current entry with state.entries?.get (workflow_decompose_v1_acceptance.js), as the named-files context beside it does; no verdict reads it. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. #560 re-pin only: freeze-skeleton judges no acceptance check, so the named-file absence detail and the judge and author absent-path rules never reach it. #537/#531 batch re-pin only: acceptance_scratch_control.rs gains a test-only clock hook (production now() is Instant::now()) and archon-core watchers are bounded; no verdict reads either. Issue 563 re-pin only: acceptance author and re-author prompts state the check site PATH (acceptance_scratch_policy.rs check_site_path, passed as a script argument kept out of launch identity); no verdict reads it. Issue 568 re-pin only: the skeleton author prompt names the previous candidate the author submitted to freeze-skeleton in a host-written context file (path and sha256); no verdict reads it. Issue 566/568/569: freeze-skeleton bumped to 7 for Issue 569; Issue 566 changes acceptance probe inputs and the acceptance judge only. #355 re-pin only: host child launches gain a sandbox-exec spawn preflight (a missing target is a spawn error) and read-denied credential paths gain write and ancestor denials; the verdict launches here start a resolved shell, so no verdict changes. #355 forgery fix re-pin only: the host creates missing ancestors of protected paths and the grant root (0700) before it builds the profile, and every ancestor gets a full write denial; the verdict launches here start a resolved shell, so no verdict changes. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only: no verdict rule changed. Issue 579 re-pin only: build-flag variables and the Linux agent-launch refusal reach check commands, and freeze-skeleton runs no check, so no verdict changes. #585 re-pin only: a mutation-marker local in workflow_acceptance_executability_mutation_markers.rs was renamed (nonce to saved); no verdict reads a local name.
-        sources_digest: "036895febcb9775dcf18aa73bf3bcbe35186f001be13bd207000c5a875f6ec65",
+        sources_digest: "efc0d71a63f1c7aa1e579d976fca600a705d709d35f787b56b6de7aae8c878d4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -271,7 +150,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // body gating; bumped so no body verdict is reused across it.
         // 29: batch 26 (#490 landing reconcile, #521 per-agent cutoffs) shares sources with
         // body gating; bumped so no body verdict is reused across it. 30: Issue 572 body lint of a draft or pending skeleton accepts PRD constraint ids and raises no unowned_obligation for them; Issue 573 tab-indented REQ- bullets become obligations. 31: Issue 574/575 body lint of a draft or pending skeleton raises uncited_section/unknown_section, the frozen source_sections are stamped into bodies and compared, and id-keyed table rows become PRD constraints.
-        version: 31,
+        version: 32, // #584 P5 bump: pending skeleton defects and normalized equality change findings; operator re-pins digest.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -304,7 +183,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either. #561 re-pin only: the decomposition script's acceptance progress window (workflow_decompose_v1_progress.js, new workflow_decompose_v1_failing_set.js) changes only when the loop pauses as no_progress; no verdict reads either. #559 guard re-pin only: the entry author reads the current entry with state.entries?.get (workflow_decompose_v1_acceptance.js), as the named-files context beside it does; no verdict reads it. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. #560 re-pin only: the body critic reads no named-file view and no acceptance judge or author rule; only the shared judge rule text, named-file view and author rule text in this closure changed. Issue 563 re-pin only: acceptance author and re-author prompts state the check site PATH (acceptance_scratch_policy.rs check_site_path, passed as a script argument kept out of launch identity); no verdict reads it. Issue 568 re-pin only: the skeleton author prompt names the previous candidate the author submitted to freeze-skeleton in a host-written context file (path and sha256); no verdict reads it. Issue 566/568/569 re-pin only: decomposition script prompts, the acceptance judge instruction and the unknown obligation message text (wording only, as #472); no verdict rule changed. #355 re-pin only: host child launches gain a sandbox-exec spawn preflight (a missing target is a spawn error) and read-denied credential paths gain write and ancestor denials; the verdict launches here start a resolved shell, so no verdict changes. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only: no verdict rule changed.
-        sources_digest: "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+        sources_digest: "748efaaa6579a927ffd55089561604399c2b82b9b31c7bfbf44d51a5d6949eb0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -335,7 +214,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // with set gating; bumped so no set verdict is reused across it.
         // 23: batch 25 (#494) shares sources with set gating; bumped likewise.
         // 24: batch 26 (#520 #521) shares sources with set gating; bumped likewise. 25: Issue 572 set coverage defines PRD constraint ids and raises one unowned_constraint finding per constraint no task names; Issue 573 tab-indented REQ- bullets become obligations. 26: Issue 574/575 set coverage raises one uncited_section per uncited PRD section and one unknown_section per bad citation, and id-keyed table rows become PRD constraints.
-        version: 26,
+        version: 28, // #587: critic findings without verified body quotes route to the skeleton.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -365,7 +244,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either. #561 re-pin only: the decomposition script's acceptance progress window (workflow_decompose_v1_progress.js, new workflow_decompose_v1_failing_set.js) changes only when the loop pauses as no_progress; no verdict reads either. #559 guard re-pin only: the entry author reads the current entry with state.entries?.get (workflow_decompose_v1_acceptance.js), as the named-files context beside it does; no verdict reads it. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. #560 re-pin only: the set critic reads no named-file view and no acceptance judge or author rule; only the shared judge rule text, named-file view and author rule text in this closure changed. Issue 563 re-pin only: acceptance author and re-author prompts state the check site PATH (acceptance_scratch_policy.rs check_site_path, passed as a script argument kept out of launch identity); no verdict reads it. Issue 568 re-pin only: the skeleton author prompt names the previous candidate the author submitted to freeze-skeleton in a host-written context file (path and sha256); no verdict reads it. Issue 566/568/569 re-pin only: decomposition script prompts, the acceptance judge instruction and the unknown obligation message text (wording only, as #472); no verdict rule changed. #355 re-pin only: host child launches gain a sandbox-exec spawn preflight (a missing target is a spawn error) and read-denied credential paths gain write and ancestor denials; the verdict launches here start a resolved shell, so no verdict changes. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only: no verdict rule changed.
-        sources_digest: "a3af30df0b347eec95744ac31ade8a04456a4296225037ce5b36f2b8d9b61d09",
+        sources_digest: "748efaaa6579a927ffd55089561604399c2b82b9b31c7bfbf44d51a5d6949eb0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -380,7 +259,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, TRACE],
         // #464 re-pin only: review 4's verdict change is already counted in version 6.
         // 7: exit-path audit: shared judge and critic sources changed with the typed reply kinds; bumped so no record judged by the previous logic is replayed. 8: Issue 572 constraint ids are defined (no phantom citation) and not reported unclaimed; Issue 573 tab-indented REQ- bullets become obligations. 9: #355 the falsify verifier's launch passes the sandbox-exec spawn preflight, so a claimed program that is missing or not executable is a spawn error, not a sandbox-exec exit code; a verdict can change. 10: Issue 574/575 requirements trace raises uncited_section/unknown_section from the task files' source_sections, and id-keyed table rows become PRD constraints. 11: Issue 577 the same environment and REFER change reaches the falsify verifier's commands. 12: Issue 579 the same build-flag allowlist and Linux launch refusal reach the falsify verifier's commands.
-        version: 12,
+        version: 14,
         // Re-pinned only (verdict rules unchanged): #434 #417 #438 #441 #424 #369 #383 #440 #420 #447 #446 #464 #466 #469
         // Batch 25 re-pin only: the shared Scratch path helper moved; trace verdicts do not read mutation proofs.
         // Batch 27 re-pin only (#525 read note, #527 ARCHON_* constants, #528 reuse key, #529/#530 author loop, passability file split, test-only named-file digests): no verdict rule changed.
@@ -391,7 +270,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. Issue 569 re-pin only: the unknown obligation message text in task_skeleton.rs; requirements-trace does not produce it. #355 bump to 9 (see the version note): the falsify verifier launch passes the sandbox-exec spawn preflight. #355 forgery fix, same unreleased version 9: the host creates missing ancestors and every ancestor gets a full write denial; no verdict changes beyond the version 9 note. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only, same version 9.
-        sources_digest: "3171c973a3c1f01e70034176dd530d95b003c58348d33675dc9c228098642360",
+        sources_digest: "bcda0a686ead9ec59a998519a0d01251c1f05423345f3337e667ddae0caaba21",
         build_bound: true,
     },
     CapabilityLogic {
@@ -417,7 +296,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #518 and #519 change which inputs a frozen-check mutation proof moves
         // and how it restores them.
         // 18: batch 26 #523 host refutation and #520 judge identity can change reverify verdicts.
-        version: 20,
+        version: 21, // #590 re-pin only: frozen verification runs no probe.
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -451,7 +330,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: frozen verification runs no probe; only the probe path's routing and text of a program neither the site nor the host has changed. #558 re-pin only: only this catalog's freeze-acceptance version and notes changed in this closure; frozen verification judges no baseline failure. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either. #561 re-pin only: the decomposition script's acceptance progress window (workflow_decompose_v1_progress.js, new workflow_decompose_v1_failing_set.js) changes only when the loop pauses as no_progress; no verdict reads either. #559 guard re-pin only: the entry author reads the current entry with state.entries?.get (workflow_decompose_v1_acceptance.js), as the named-files context beside it does; no verdict reads it. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. #560 re-pin only: frozen-chain verification does not call the acceptance judge or an author; only the named-file view text, the rule texts and this catalog's freeze-acceptance version changed in this closure. #537/#531 batch re-pin only: acceptance_scratch_control.rs gains a test-only clock hook (production now() is Instant::now()) and archon-core watchers are bounded; no verdict reads either. Issue 563 re-pin only: acceptance author and re-author prompts state the check site PATH (acceptance_scratch_policy.rs check_site_path, passed as a script argument kept out of launch identity); no verdict reads it. Issue 568 re-pin only: the skeleton author prompt names the previous candidate the author submitted to freeze-skeleton in a host-written context file (path and sha256); no verdict reads it. Issue 566/568/569 re-pin only: frozen verification reads stored judgments and runs no probe, judge or skeleton set validation. Issue 571/572/573 re-pin only: frozen verification validates acceptance ids and stored judgments and runs no requirement, constraint, covers or skeleton set validation; only catalog versions, id extraction and finding text changed in this closure. #355 re-pin only: host child launches gain a sandbox-exec spawn preflight (a missing target is a spawn error) and read-denied credential paths gain write and ancestor denials; the verdict launches here start a resolved shell, so no verdict changes. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only: no verdict rule changed. Issue 574/575 re-pin only: frozen acceptance verification reads no source_sections, PRD section or constraint, so no verdict changes. #585 re-pin only: a mutation-marker local in workflow_acceptance_executability_mutation_markers.rs was renamed (nonce to saved); no verdict reads a local name.
-        sources_digest: "a594cf9abdea513d8e37b0d33c788b11eaced879a6000a5423c4ccf032924042",
+        sources_digest: "328cea0edddc6acfa2ef0ab9feb1e64630cc389df740f8e6b9d42cfe9e8782bf",
         build_bound: true,
     },
     CapabilityLogic {
@@ -460,7 +339,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: #491 a skeleton bound to the prior acceptance is pending and skipped by the frozen snapshot.
         // 6: review of #491: a recorded skeleton without its lock stays acceptance-only, and open findings keep a stale-logic stage open. 8: Issue 574/575 the frozen skeleton task shape (workflow_freeze_schema.rs, FrozenTask) gains source_sections.
-        version: 8,
+        version: 9, // #584 P5 bump: normalized sets change frozen equality; operator re-pins digest.
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -494,7 +373,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integ-1029 re-pin only (#288 item 2 env closure, #534/#536, #527 item 5 constants, #494 author named-file prefetch): no verdict rule changed.
         // #538 provider diagnostics, #534 teardown fix and package B (#495 #492 #522 #532 #542 #544) integration re-pin: freeze-acceptance counts its verdict changes in version 68; for every other capability no verdict rule changed.
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #555 re-pin only: entry author prompts in the decomposition scripts carry only their own and phase-level findings, with bounded earlier sections, and the phase seed's criterion reader (workflow_decompose_seed_record.rs) ends at those sections; no verdict reads either. #557 re-pin only: frozen verification runs no probe; only the probe path's routing and text of a program neither the site nor the host has changed. #558 re-pin only: only this catalog's freeze-acceptance version and notes changed in this closure; frozen verification judges no baseline failure. #559 re-pin only: an entry author prompt states the entry's current covers, a reply with no covers key keeps them, and the phase seed (workflow_decompose_seed_record.rs) takes them from that call's own recorded prompt line; no verdict reads either. #561 re-pin only: the decomposition script's acceptance progress window (workflow_decompose_v1_progress.js, new workflow_decompose_v1_failing_set.js) changes only when the loop pauses as no_progress; no verdict reads either. #559 guard re-pin only: the entry author reads the current entry with state.entries?.get (workflow_decompose_v1_acceptance.js), as the named-files context beside it does; no verdict reads it. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. #560 re-pin only: frozen-chain verification does not call the acceptance judge or an author; only the named-file view text, the rule texts and this catalog's freeze-acceptance version changed in this closure. #537/#531 batch re-pin only: acceptance_scratch_control.rs gains a test-only clock hook (production now() is Instant::now()) and archon-core watchers are bounded; no verdict reads either. Issue 563 re-pin only: acceptance author and re-author prompts state the check site PATH (acceptance_scratch_policy.rs check_site_path, passed as a script argument kept out of launch identity); no verdict reads it. Issue 568 re-pin only: the skeleton author prompt names the previous candidate the author submitted to freeze-skeleton in a host-written context file (path and sha256); no verdict reads it. Issue 566/568/569 re-pin only: frozen verification reads stored judgments and runs no probe, judge or skeleton set validation. Issue 571/572/573 re-pin only: frozen verification validates acceptance ids and stored judgments and runs no requirement, constraint, covers or skeleton set validation; only catalog versions, id extraction and finding text changed in this closure. #355 re-pin only: host child launches gain a sandbox-exec spawn preflight (a missing target is a spawn error) and read-denied credential paths gain write and ancestor denials; the verdict launches here start a resolved shell, so no verdict changes. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only: no verdict rule changed. #585 re-pin only: a mutation-marker local in workflow_acceptance_executability_mutation_markers.rs was renamed (nonce to saved); no verdict reads a local name.
-        sources_digest: "a594cf9abdea513d8e37b0d33c788b11eaced879a6000a5423c4ccf032924042",
+        sources_digest: "328cea0edddc6acfa2ef0ab9feb1e64630cc389df740f8e6b9d42cfe9e8782bf",
         build_bound: true,
     },
 ];

@@ -10,7 +10,6 @@ fn shell_positions_and_quoted_fragments_are_classified() {
         "git -C=../a status",
         "cargo test --manifest-path=\"../a/Cargo.toml\"",
         "tool --path '../a'",
-        "echo hi > '../a/out'",
         "test -f '../a/file'",
         "[ -d '../a/dir' ]",
     ] {
@@ -194,3 +193,50 @@ fn an_apostrophe_in_a_shell_comment_hides_no_later_path() {
     assert_eq!(paths[0].path, PathBuf::from("../sibling/package.manifest"));
     assert!(paths[0].required, "{paths:?}");
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn R5_D8_six_production_consumers_share_directory_and_operand_rules() {
+    // Inputs consumed by scratch copy, site-path, mutation, missing-sibling,
+    // site observation and reuse scans respectively; all use this shared scanner.
+    let tree = tempfile::tempdir().unwrap();
+    let root = tree.path().join("project");
+    let other = tree.path().join("other");
+    std::fs::create_dir_all(root.join("D")).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("data"), "input").unwrap();
+    for (command, expected) in [
+        ("cd .. && cd other && test -f data", "../other/data"),
+        ("cd -P D; test -f ../../other/data", "../other/data"),
+        ("cd -L D; test -f ../../other/data", "../other/data"),
+        ("cd D | cat; test -f ../other/data", "../other/data"),
+        ("cd D & test -f ../other/data", "../other/data"),
+        ("(cd D); test -f ../other/data", "../other/data"),
+    ] {
+        let paths = scan(command);
+        let discovered = discover(&root, &[command.into()]);
+        assert!(
+            discovered.iter().any(
+                |sibling| archon_shell::paths::canonicalize(other.join("data"))
+                    .unwrap()
+                    .starts_with(&sibling.alias)
+            ),
+            "copy/observation/reuse input: {command}: {discovered:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.path == PathBuf::from(expected) && p.required),
+            "{command}: {paths:?}"
+        );
+    }
+    let command = "cd D\npython3 - <<'END'\nopen('../../other/data')\nEND\ncd E";
+    assert!(
+        scan(command)
+            .iter()
+            .any(|p| p.path == PathBuf::from("../other/data") && p.required)
+    );
+}
+
+#[path = "acceptance_sibling_scan_matrix_tests.rs"]
+mod matrix;

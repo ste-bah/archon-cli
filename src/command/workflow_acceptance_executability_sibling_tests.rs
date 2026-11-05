@@ -75,11 +75,12 @@ fn probe_copy_materializes_tracked_sibling_at_the_same_relative_path() {
 }
 
 #[test]
-fn a_missing_sibling_is_an_author_finding_with_path_and_check_id() {
+#[allow(non_snake_case)]
+fn P2_19_missing_sibling_names_existing_path_remedy() {
     // EXPECTED before running: the absent sibling is refused during author
     // validation, with both its path and acceptance check id in the finding.
     let project = tempfile::tempdir().unwrap();
-    let command = "cargo test --manifest-path ../absent/Cargo.toml";
+    let command = "test -f ../real/missing";
     let contract: AcceptanceContract = serde_json::from_value(serde_json::json!({
         "schema_version": 1, "prd": {"path":"p.md", "digest":"d"},
         "gap_policy": {"permitted_acceptance_ids":[], "forbidden_phrases":[], "required_fields":[]},
@@ -94,7 +95,8 @@ fn a_missing_sibling_is_an_author_finding_with_path_and_check_id() {
         "EVIDENCE #420 missing-sibling BEFORE: check AC-420-MISSING would run; AFTER: author refusal={finding}"
     );
     assert!(finding.contains("AC-420-MISSING"));
-    assert!(finding.contains("../absent/Cargo.toml"));
+    assert!(finding.contains("../real"));
+    assert!(finding.contains("name an existing directory"));
 }
 
 #[test]
@@ -477,3 +479,6 @@ fn empty_sibling_layout_serializes_like_the_original_layout_shape() {
 
 #[path = "workflow_acceptance_executability_sibling_extra_tests.rs"]
 mod extra_tests;
+
+#[path = "workflow_acceptance_executability_sibling_root_tests.rs"]
+mod root_review;

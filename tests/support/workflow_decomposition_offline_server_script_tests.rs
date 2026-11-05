@@ -60,7 +60,7 @@ fn unknown_prompt_and_unknown_acceptance_id_fail_closed() {
 
 #[test]
 fn skeleton_and_body_answers_use_the_fixture_requirement_ids() {
-    let (_, skeleton) = scripted_answer("Author one complete task-skeleton JSON artifact");
+    let (_, skeleton) = scripted_answer(&skeleton_prompts()[0]);
     assert!(skeleton.contains("REQ-X-001"), "{skeleton}");
     assert!(skeleton.contains("REQ-X-002"), "{skeleton}");
     assert!(skeleton.contains("AC-X-001"), "{skeleton}");
@@ -125,7 +125,7 @@ fn golden_answers_make_the_outcome_check_executable_and_owned() {
         "{entry}"
     );
 
-    let (_, skeleton) = scripted_answer("Author one complete task-skeleton JSON artifact");
+    let (_, skeleton) = scripted_answer(&skeleton_prompts()[0]);
     let skeleton: serde_json::Value = serde_json::from_str(&skeleton).unwrap();
     let contracts = skeleton["tasks"][0]["deliverable_contracts"]
         .as_array()
@@ -309,4 +309,96 @@ fn acceptance_answer_requires_the_criterion_authored_for_the_id() {
     );
     let (role, _) = scripted_answer(&prompt);
     assert_eq!(role, "unknown");
+}
+
+fn skeleton_prompts() -> Vec<String> {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/workflow_decomposition_offline_skeleton_prompt.cjs"
+        ))
+        .output()
+        .expect("node runs the real skeleton prompt builder");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn M1_current_skeleton_author_and_reauthor_land_tasks_then_reply_with_receipt() {
+    use super::super::skeleton_reply::skeleton_message;
+    for prompt in skeleton_prompts() {
+        let (role, answer) = scripted_answer(&prompt);
+        assert_eq!(role, "skeleton");
+        let mut request = serde_json::json!({
+            "messages": [{"role":"user", "content":prompt}],
+            "tools": [{"name":"land_task", "input_schema":{"properties":{"task":{}}}}]
+        });
+        let landed = skeleton_message(&request, &answer);
+        assert_eq!(landed["stop_reason"], "tool_use");
+        let events = super::super::skeleton_reply::stream_message(&landed);
+        assert_eq!(events.matches("event: content_block_start").count(), 2);
+        assert_eq!(events.matches("input_json_delta").count(), 2);
+        assert!(events.contains("event: message_stop"));
+        let calls = landed["content"].as_array().unwrap();
+        assert_eq!(calls.len(), 2);
+        for call in calls {
+            assert_eq!(call["name"], "land_task");
+            assert_eq!(call["input"]["subject"], call["input"]["task"]["task_id"]);
+            assert_eq!(call["input"]["replace"], true);
+        }
+        request["messages"].as_array_mut().unwrap().push(serde_json::json!({
+            "role":"user", "content":[{"type":"tool_result", "tool_use_id":"skeleton-1", "content":"Records landed: 2"}]
+        }));
+        let done = skeleton_message(&request, &answer);
+        assert_eq!(done["stop_reason"], "end_turn");
+        assert_eq!(done["content"][0]["text"], r#"{"records_landed":2}"#);
+    }
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn R6_R1_offline_judges_share_the_production_reply_schema() {
+    use super::super::variants::{self, Variant};
+    let prompt = "Adversarially judge every acceptance check below. The toolchain is fixed: Checks: [{\"id\":\"AC-X-001\"}]";
+    let (role, normal) = scripted_answer(prompt);
+    let (_, large) = variants::answer(prompt, Variant::Large(3));
+    let refuted = variants::refute_first_judge_answer(
+        role,
+        prompt,
+        normal.clone(),
+        Variant::RefuteFirstJudge,
+        1,
+    );
+    for (reply, verdict, kind) in [
+        (normal, "accepted", "other"),
+        (large, "accepted", "other"),
+        (refuted, "refuted", "state"),
+    ] {
+        let reply: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        let decisions = reply["decisions"].as_array().unwrap();
+        assert!(!decisions.is_empty());
+        for decision in decisions {
+            assert_eq!(decision["kind"], kind);
+            assert_eq!(decision["cited_paths"], serde_json::json!([]));
+            assert_eq!(decision["verdict"], verdict);
+        }
+    }
+}
+
+#[test]
+fn current_body_author_marker_is_answered_for_authors_and_repairs() {
+    for feedback in [
+        "",
+        "\nRepair these exact authoritative findings:\n- body finding",
+    ] {
+        let prompt = format!("{}TASK-X-010.{feedback}", super::body_author_marker());
+        let (role, answer) = scripted_answer(&prompt);
+        assert_eq!(role, "body");
+        assert!(answer.contains("task_id: TASK-X-010"));
+    }
 }

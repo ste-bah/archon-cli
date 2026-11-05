@@ -1,0 +1,60 @@
+//! Rejected landings remain the author's responsibility in this session.
+use super::*;
+
+impl RecordLanding {
+    pub fn land(&self, value: Value) -> WorkflowResult<()> {
+        let _lock = self.lock.lock().map_err(invalid)?;
+        let subject = value
+            .get("subject")
+            .and_then(Value::as_str)
+            .filter(|id| !id.trim().is_empty())
+            .map(str::to_owned);
+        let removes = value.get("remove").and_then(Value::as_bool) == Some(true);
+        // Only a subject this call can land can owe a corrected record.
+        // Skeleton authors establish their ids, but must name the same id in task.
+        // task is also accepted as a JSON-encoded object by prepare_payload.
+        let task_id = value.get("task").and_then(|task| match task {
+            Value::String(text) => serde_json::from_str::<Value>(text)
+                .ok()?
+                .get("task_id")
+                .cloned(),
+            _ => task.get("task_id").cloned(),
+        });
+        let trackable = subject.as_ref().is_some_and(|subject| {
+            if self.kind == RecordKind::Skeleton {
+                task_id.as_ref().and_then(Value::as_str) == Some(subject.as_str())
+            } else {
+                self.subjects.contains(subject)
+            }
+        });
+        let result = self.land_record(value);
+        if let Some(subject) = subject {
+            let mut rejected = self.rejected.lock().map_err(invalid)?;
+            match &result {
+                Ok(()) => {
+                    rejected.remove(&subject);
+                }
+                Err(error) if !removes && trackable => {
+                    rejected.insert(subject, vec![error.to_string()]);
+                }
+                Err(_) => {}
+            }
+        }
+        result
+    }
+
+    pub(crate) fn require_repaired(&self) -> WorkflowResult<()> {
+        let rejected = self.rejected.lock().map_err(invalid)?;
+        if rejected.is_empty() {
+            return Ok(());
+        }
+        let errors = rejected
+            .iter()
+            .map(|(subject, errors)| format!("{subject}: {}", errors.join("\n")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Err(invalid(format!(
+            "rejected record subjects must be re-landed before completion:\n{errors}"
+        )))
+    }
+}

@@ -18,6 +18,7 @@ fn key_under(
     identity: serde_json::Value,
 ) -> String {
     let tree = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         repository: trees.repo.clone(),
         commit: git_head(&trees.repo).unwrap(),
     };
@@ -78,6 +79,7 @@ fn unbounded_check_still_executes_after_redeploy() {
 fn freeze_logic_digest_change_invalidates_verdict() {
     let trees = trees(&[("AC-I-004", "test -f feature.txt", TrustedCwd::RepoRoot)]);
     let tree = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         repository: trees.repo.clone(),
         commit: git_head(&trees.repo).unwrap(),
     };
@@ -110,6 +112,7 @@ fn changed_file_in_the_bounded_repository_closure_changes_key() {
     let before = check_key(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             repository: trees.repo.clone(),
             commit,
         },
@@ -144,6 +147,7 @@ fn changed_file_in_the_bounded_repository_closure_changes_key() {
     let after = check_key(
         &probe,
         &Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             repository: trees.repo.clone(),
             commit: git_head(&trees.repo).unwrap(),
         },
@@ -158,6 +162,7 @@ fn changed_file_in_the_bounded_repository_closure_changes_key() {
 fn unbounded_checks_keep_the_full_closure_reuse_key() {
     let trees = trees(&[("AC-I-003", "cargo test", TrustedCwd::RepoRoot)]);
     let tree = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         repository: trees.repo.clone(),
         commit: git_head(&trees.repo).unwrap(),
     };
@@ -171,6 +176,7 @@ fn real_check_keys_ignore_pipeline_and_harness_outputs_but_track_archon_project_
 
     let trees = trees(&[("CHECK-KEY", "cargo test", TrustedCwd::RepoRoot)]);
     let tree = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         repository: trees.repo.clone(),
         commit: git_head(&trees.repo).unwrap(),
     };

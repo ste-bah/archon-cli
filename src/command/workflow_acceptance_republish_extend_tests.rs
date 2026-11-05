@@ -46,21 +46,30 @@ fn an_extension_that_leaves_a_requirement_uncovered_is_refused_by_its_gate() {
         new_obligations: ["REQ-F-001".to_string(), "REQ-F-002".to_string()].into(),
     };
     let ids: BTreeSet<String> = ["SUP-REQ-F-001".to_string()].into();
-    let error = extend_and_republish(
-        ReauthorRequest {
-            project_root: set.project.path(),
-            tasks_root: &set.tasks,
-            prd_path: &set.prd,
-            ids: &ids,
-            gate: ReauthorGate {
-                probe: &set.probe,
-                seeds: &NO_SEEDS,
+    let attempt = |seeds| {
+        extend_and_republish(
+            ReauthorRequest {
+                project_root: set.project.path(),
+                tasks_root: &set.tasks,
+                prd_path: &set.prd,
+                ids: &ids,
+                gate: ReauthorGate {
+                    probe: &set.probe,
+                    seeds,
+                },
+                trigger: "test extension",
             },
-            trigger: "test extension",
-        },
-        &extension,
-    )
-    .expect_err("REQ-F-002 is still covered by no check");
+            &extension,
+        )
+        .expect_err("REQ-F-002 is still covered by no check")
+    };
+    let error = attempt(&NO_SEEDS);
+    let unused = BTreeMap::from([("SUP-REQ-F-001".into(), "must never reach an author".into())]);
+    assert_eq!(
+        format!("{error:#}"),
+        format!("{:#}", attempt(&unused)),
+        "the extension publisher does not consume author seeds"
+    );
     assert!(format!("{error:#}").contains("REQ-F-002"), "{error:#}");
     assert_eq!(set.chain_bytes(), before, "nothing published");
 }

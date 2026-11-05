@@ -131,6 +131,7 @@ pub(super) async fn prove_once(
     let digest = contract_digest(&contract).unwrap();
     let refs = refs_for(&contract, &digest, &trees.ids());
     let baseline = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: trees.repo.clone(),
     };
@@ -252,4 +253,63 @@ fn a_typed_fault_cause_is_judged_by_the_cause_not_the_text() {
         check_fault::of_result(Some(&result)),
         check_fault::Fault::Check { .. }
     ));
+}
+
+#[allow(non_snake_case)]
+#[test]
+fn P1_30_check_fault_keeps_trigger_and_remedy() {
+    let trees = trees(&[("AC-X-001", "true", TrustedCwd::ProjectRoot)]);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let f = check_fault::settle(
+        &probe,
+        (Some(&trees.base), &trees.contract(), "AC-X-001"),
+        check_fault::Fault::Check {
+            trigger: "output limit",
+            remedy: "bound the output",
+            error: "overflow".into(),
+        },
+        "on the tree",
+        "unproven".into(),
+    )
+    .unwrap();
+    assert_eq!(
+        f,
+        "check 'AC-X-001': its own run on the tree gave no verdict because output limit (overflow); the host cannot repair or retry that, so the check must change: bound the output"
+    );
+}
+#[allow(non_snake_case)]
+#[test]
+fn P1_31_ambiguous_signal_keeps_assertion_remedy() {
+    let trees = trees(&[("AC-X-001", "true", TrustedCwd::ProjectRoot)]);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let contract = trees.contract();
+    for attempt in 0..2 {
+        let f = check_fault::settle(
+            &probe,
+            (Some(&trees.base), &contract, "AC-X-001"),
+            check_fault::Fault::Ambiguous("signal TERM".into()),
+            "on the tree",
+            "unproven".into(),
+        );
+        if attempt == 0 {
+            assert!(f.is_none());
+        } else {
+            assert!(
+                f.unwrap()
+                    .ends_with("make it end by its own assertion without being stopped")
+            );
+        }
+    }
+}
+#[allow(non_snake_case)]
+#[test]
+fn P1_32_unrestored_input_has_path_specific_remedy() {
+    let trees = trees(&[("AC-X-001", "true", TrustedCwd::ProjectRoot)]);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let contract = trees.contract();
+    let mut finding = None;
+    for _ in 0..2 {
+        finding = check_fault::settle(&probe, (Some(&trees.base), &contract, "AC-X-001"), check_fault::Fault::Ambiguous("the mutation run left input state unproven; input states: data/x=aside-missing; check status/signal: exit status 1".into()), "on the tree", "unproven".into());
+    }
+    assert!(finding.unwrap().contains("it left `data/x` in state aside-missing; do not create, replace, link or remove data/x while it runs"));
 }

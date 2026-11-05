@@ -66,6 +66,14 @@ pub(super) fn copy_key(
 }
 
 pub(super) async fn run_layout(layout: &str, layout_index: usize) {
+    run_layout_with_write(layout, layout_index, None).await;
+}
+
+pub(super) async fn run_write_target(command: &str) {
+    run_layout_with_write("neutral", 0, Some(command)).await;
+}
+
+async fn run_layout_with_write(layout: &str, layout_index: usize, write: Option<&str>) {
     fn git(root: &std::path::Path, args: &[&str]) {
         let result = std::process::Command::new("git")
             .arg("-C")
@@ -190,7 +198,6 @@ pub(super) async fn run_layout(layout: &str, layout_index: usize) {
         std::fs::create_dir_all(&other_git).unwrap();
         std::fs::write(other_git.join("item"), "other git sibling").unwrap();
         let external = base.join("external");
-        let missing = base.join("missing");
         std::fs::create_dir_all(&external).unwrap();
         std::fs::write(external.join("item"), "external input").unwrap();
         if layout == "site_names" {
@@ -201,7 +208,7 @@ pub(super) async fn run_layout(layout: &str, layout_index: usize) {
                 std::os::unix::fs::symlink(external.join("sub"), project.join("alias")).unwrap();
             }
         }
-        std::fs::create_dir_all(&missing).unwrap();
+        // Keep ../missing absent: B1 refuses missing roots, not missing descendants.
         if !repository.join(".git").exists() {
             git(&repository, &["init", "-q"]);
             git(
@@ -352,6 +359,10 @@ pub(super) async fn run_layout(layout: &str, layout_index: usize) {
                 }
             }
         }
+        if let Some(command) = write {
+            std::fs::create_dir_all(project.parent().unwrap().join("a")).unwrap();
+            commands = vec![(command.into(), TrustedCwd::ProjectRoot)];
+        }
         let mut groups = std::collections::BTreeMap::new();
         let mut expected = Vec::with_capacity(commands.len());
         for (case_index, (command, cwd)) in commands.into_iter().enumerate() {
@@ -362,6 +373,12 @@ pub(super) async fn run_layout(layout: &str, layout_index: usize) {
             };
             let author_accepts =
                 check_defects::check_defects(&set.contract(), entry.clone(), &scope).is_ok();
+            if write.is_some() {
+                assert!(
+                    author_accepts,
+                    "existing sibling write must be accepted: {command}"
+                );
+            }
             expected.push((author_accepts, entry.check.clone()));
             groups
                 .entry(path_matrix_helpers::copy_key(

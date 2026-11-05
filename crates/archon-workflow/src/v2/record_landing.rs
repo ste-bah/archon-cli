@@ -1,6 +1,6 @@
 //! Typed evidence records scoped to one host invocation, never repository writes.
 use super::record_landing_merge::fold_landed_commands;
-pub use super::record_landing_schema::{EnumNames, enum_names, schema_hint};
+pub use super::record_landing_schema::{EnumNames, enum_names, schema_hint, task_schema};
 use super::record_landing_schema::{field_list, prepare_payload};
 use crate::{
     WorkflowError, WorkflowResult, WorkflowV2AgentRequest, WorkflowV2CommandRecord,
@@ -38,6 +38,8 @@ pub struct StageRecord {
     /// Issue-36: a write-time instruction, never persisted state. When true the record supersedes the earlier landing for its subject instead of unioning with it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     replace: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    remove: bool,
 }
 /// Issue-39: the verdicts a verify record may land; `validate` and the tool schema both read this list so the enum the model sees is the set the host accepts.
 pub const VERIFY_VERDICTS: [WorkflowV2Status; 5] = [
@@ -78,6 +80,8 @@ pub struct RecordLanding {
     subjects: Vec<String>,
     subjects_are_tasks: bool,
     lock: Mutex<()>,
+    frozen_tasks: Mutex<Option<BTreeMap<String, String>>>,
+    rejected: Mutex<BTreeMap<String, Vec<String>>>,
 }
 fn invalid(e: impl std::fmt::Display) -> WorkflowError {
     WorkflowError::ArtifactInvalid(e.to_string())
@@ -118,6 +122,8 @@ impl RecordLanding {
             subjects,
             subjects_are_tasks,
             lock: Mutex::new(()),
+            frozen_tasks: Mutex::new(None),
+            rejected: Mutex::new(BTreeMap::new()),
         })
     }
     pub fn kind(&self) -> RecordKind {
@@ -152,6 +158,7 @@ impl RecordLanding {
                 tasks: vec![task.clone()],
             };
             crate::task_skeleton::validate_skeleton(&skeleton, "pending").map_err(invalid)?;
+
             // Issue-38: a live run landed 15 `{task_id,file_name}` stubs that passed here, so the host froze a skeleton with zero obligations and the judge raised 126 findings; a task naming nothing it implements or delivers is unownable.
             if task.implements.is_empty() && task.deliverable_contracts.is_empty() {
                 return Err(invalid(
@@ -235,8 +242,7 @@ impl RecordLanding {
         }
         Ok(())
     }
-    pub fn land(&self, mut value: Value) -> WorkflowResult<()> {
-        let _lock = self.lock.lock().map_err(invalid)?;
+    fn land_record(&self, mut value: Value) -> WorkflowResult<()> {
         // Issue-39: the agent envelope fills a missing command kind, derives status from exit_code and synthesises output_summary, while a landed record rejected the same entry with `missing field kind`; apply the one normaliser here so the two paths agree, and let the Issue-35 path error name whatever it cannot fill.
         if let Some(object) = value.as_object_mut() {
             super::agent_output_normalize::normalize_commands(object);
@@ -245,8 +251,24 @@ impl RecordLanding {
         }
         let mut record: StageRecord =
             serde_path_to_error::deserialize(value).map_err(|e| describe(e, self.kind))?;
+        self.validate_patch(&record)?;
+        if record.remove {
+            return self.remove_task(&record.subject);
+        }
         self.validate(&record)
             .map_err(|e| with_schema(e, self.kind))?;
+        if self.kind == RecordKind::Skeleton
+            && let Some(task) = &record.task
+        {
+            let skeleton = crate::task_skeleton::TaskSkeleton {
+                schema_version: 1,
+                acceptance_digest: "pending".into(),
+                tasks: vec![task.clone()],
+            };
+            if let Some(finding) = crate::task_skeleton::entry_findings(&skeleton).first() {
+                return Err(with_schema(invalid(&finding.message), self.kind));
+            }
+        }
         use sha2::{Digest, Sha256};
         let path = self.root.join(format!(
             "record-{:x}.json",
@@ -332,6 +354,7 @@ impl RecordLanding {
     }
     pub fn assemble(&self, completion: &Value) -> WorkflowResult<Value> {
         let _lock = self.lock.lock().map_err(invalid)?;
+        self.require_repaired()?;
         let records = self.records()?;
         let missing = self
             .subjects
@@ -458,3 +481,9 @@ pub(crate) fn expand_result(
     }
     Ok(())
 }
+
+#[path = "record_landing_patch.rs"]
+mod patch;
+
+#[path = "record_landing_rejected.rs"]
+mod rejected;

@@ -40,7 +40,7 @@ pub(crate) fn manifest_relative_input(token: &str, command: &str, cwd: &Path) ->
             exact_path_exists(&root.join(relative)).then(|| {
                 format!(
                     "{}/{}",
-                    named.path.parent().expect("manifest parent").display(),
+                    archon_shell::paths::stored_text(named.path.parent().expect("manifest parent")),
                     token
                 )
             })
@@ -269,22 +269,6 @@ fn relative_path(from: &Path, to: &Path) -> Option<PathBuf> {
     Some(relative)
 }
 
-fn lexical(path: PathBuf) -> Option<PathBuf> {
-    let mut result = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !result.pop() {
-                    return None;
-                }
-            }
-            other => result.push(other.as_os_str()),
-        }
-    }
-    Some(result)
-}
-
 pub(crate) fn missing_for_checks(
     project: &Path,
     repository: &Path,
@@ -307,24 +291,10 @@ pub(crate) fn missing_for_checks(
                 archon_workflow::task_set_contract::TrustedCwd::ProjectRoot => &project,
                 archon_workflow::task_set_contract::TrustedCwd::RepoRoot => &repository,
             };
-            for named in archon_workflow::acceptance_sibling_paths::scan(command)
-                .into_iter()
-                .filter(|path| path.required)
+            if let Some(reason) =
+                archon_workflow::acceptance_sibling_paths::missing_root(root, command)
             {
-                let Some(path) = lexical(root.join(&named.path)) else {
-                    continue;
-                };
-                if !path.starts_with(root) && !path.exists() {
-                    missing.insert(
-                        entry.id.clone(),
-                        format!(
-                            "check {} names missing sibling path {}",
-                            entry.id,
-                            named.path.display()
-                        ),
-                    );
-                    break;
-                }
+                missing.insert(entry.id.clone(), format!("check {} {reason}", entry.id));
             }
         }
     }

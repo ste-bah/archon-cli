@@ -29,7 +29,7 @@ macro_rules! or_skip {
     };
 }
 
-const NOWHERE: &str = "passes only if the deliverable adds it";
+const NOWHERE: &str = "the check must use an available program or the deliverable must add it";
 
 // ---- R1: a subcommand no program anywhere provides.
 
@@ -54,10 +54,10 @@ fn a_plugin_installed_nowhere_is_never_a_proof() {
         assert_eq!(run.exit_code, Some(101), "{command}: {run:?}");
         let why = no_verdict(command, &run, &bin.context()).unwrap_or_else(|| panic!("{command}"));
         assert!(
-            why.contains("`cargo nextest`") && why.contains(NOWHERE),
+            why.contains("`cargo nextest`") && why.contains("neither the site nor the host has it"),
             "{why}"
         );
-        assert!(why.contains("grep -qw nextest"), "how to show it: {why}");
+        assert!(!why.contains("grep -qw nextest"), "how to show it: {why}");
         let warned = bin.warned(command);
         assert!(
             warned.len() == 1 && warned[0].starts_with(warned_as) && warned[0].contains(NOWHERE),
@@ -168,7 +168,7 @@ async fn the_verdict_path_lists_off_the_async_thread() {
     let silent = super::super::super::silent::silent_failure_off_thread;
     let why = silent(&check, &odd, &bin.context()).await;
     let during = ticks.load(Ordering::SeqCst);
-    assert!(why.is_some_and(|(why, _)| why.contains(NOWHERE)));
+    assert!(why.is_some_and(|(why, _)| why.contains("neither the site nor the host has it")));
     // The originals a repair holds, at a site of its own (another
     // variable), so the tool is listed there too.
     let site = bin.context_with(&[("ARCHON_333_SITE", "repair")]);

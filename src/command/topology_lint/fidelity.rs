@@ -34,12 +34,12 @@ use archon_workflow::llm_client_port::WorkflowLlmClient;
 use archon_workflow::obligation_ids::obligation_texts;
 use archon_workflow::task_universe::parsing::parse_task_file;
 
-use super::LintSource;
 use super::fidelity_critic::CRITIC_MODEL_ALIAS;
 #[cfg(test)]
 use super::fidelity_critic::FIDELITY_NO_PROGRESS_WINDOW;
 use super::fidelity_resume::{Cluster, LintIncomplete, resolve};
 use super::fidelity_store::{Standing, StoreIdentity, VerdictStore, store_dir};
+use super::{LintSource, fidelity_candidate_fallback::finding_scope};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;
 use crate::command::workflow_freeze_budget::FreezeResume;
 use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId, GateStage};
@@ -51,6 +51,8 @@ pub(super) struct FidelityFinding {
     pub(super) text: String,
     pub(super) subject: String,
     pub(super) source_path: PathBuf,
+    pub(super) remediation_scope: archon_workflow::RemediationScope,
+    pub(super) task_id: String,
 }
 
 pub(super) struct FidelityAudit {
@@ -106,18 +108,12 @@ pub(crate) async fn evaluate_lint_with_fidelity_resumable(
     match outcome {
         Ok(audit) => {
             evaluation.report.push_str(&audit.report);
-            evaluation
-                .findings
-                .extend(audit.findings.into_iter().map(|finding| {
-                    GateFinding::new(
-                        GateId::WorkflowLintTaskSet,
-                        finding.text,
-                        finding.subject,
-                        Some(finding.source_path),
-                        archon_workflow::RemediationScope::Body,
-                    )
-                    .judged_at(GateStage::Critic, None)
-                }));
+            evaluation.findings.extend(
+                audit
+                    .findings
+                    .into_iter()
+                    .map(super::fidelity_candidate_fallback::set_finding),
+            );
             Ok(evaluation)
         }
         Err(mut error) if LintIncomplete::caused(&error).is_some() => {
@@ -136,8 +132,8 @@ pub(crate) async fn evaluate_lint_with_fidelity_resumable(
 /// on disk, is judged for the obligations it claims, against the bodies
 /// already landed beside it. A false verdict is a `Body` finding on the
 /// claiming task only when that task is also the weakest task. A verdict
-/// naming another weakest task is noted for the set gate, which routes it to
-/// that task. A critic that cannot be built or cannot answer is an error the
+/// naming another weakest task is noted for the set gate, which chooses Body
+/// only with verified weakening evidence and otherwise chooses Skeleton. A critic that cannot be built or cannot answer is an error the
 /// caller must record as operational.
 pub(crate) async fn audit_task_file_candidate(
     cwd: &Path,
@@ -449,6 +445,8 @@ async fn audit_scoped(
             report.push_str(&format!("  BLOCKING {text}\n"));
             findings.push(FidelityFinding {
                 text,
+                remediation_scope: finding_scope(&verdict, &task_texts),
+                task_id: verdict.weakest_task_id,
                 subject: verdict.obligation_id,
                 source_path,
             });

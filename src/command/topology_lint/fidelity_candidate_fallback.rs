@@ -81,3 +81,45 @@ pub(super) async fn resolve_whole_set(
     }
     Ok(result)
 }
+
+/// Route only verified weakening evidence to the named body's author.
+pub(super) fn finding_scope(
+    verdict: &archon_workflow::fidelity_audit::FidelityVerdict,
+    task_texts: &BTreeMap<String, (String, PathBuf)>,
+) -> archon_workflow::RemediationScope {
+    if !verdict.weakening_quotes.is_empty()
+        && task_texts
+            .get(&verdict.weakest_task_id)
+            .is_some_and(|(body, _)| {
+                verdict
+                    .weakening_quotes
+                    .iter()
+                    .all(|quote| archon_workflow::fidelity_audit::task_contains_quote(body, quote))
+            })
+    {
+        archon_workflow::RemediationScope::Body
+    } else {
+        archon_workflow::RemediationScope::Skeleton
+    }
+}
+
+/// Keep the decided obligation as critic evidence while naming the body
+/// author's task as the subject of a verified body defect.
+pub(super) fn set_finding(
+    finding: super::fidelity::FidelityFinding,
+) -> crate::command::workflow_gate::GateFinding {
+    use crate::command::workflow_gate::{GateFinding, GateId, GateStage};
+    let subject = if finding.remediation_scope == archon_workflow::RemediationScope::Body {
+        finding.task_id
+    } else {
+        finding.subject.clone()
+    };
+    GateFinding::new(
+        GateId::WorkflowLintTaskSet,
+        finding.text,
+        subject,
+        Some(finding.source_path),
+        finding.remediation_scope,
+    )
+    .judged_at(GateStage::Critic, Some(finding.subject))
+}

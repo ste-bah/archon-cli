@@ -38,7 +38,7 @@ impl Unresolved {
             "event": "toolchain_unresolved",
             "toolchain_path": self.toolchain_path,
             "checks": self.checks,
-            "effect": "a warning only: the run goes on, but these checks cannot pass until the toolchain path provides what they run",
+            "effect": "a warning only: the run goes on, but these checks cannot pass until the toolchain path, or for marked items the deliverable, provides them",
         })
     }
 
@@ -47,7 +47,7 @@ impl Unresolved {
             .map(|(id, commands)| format!("{id}: {}", commands.join(", ")))
             .collect();
         format!(
-            "Warning: {} acceptance check(s) run commands the configured toolchain_path ({}) does not resolve; they cannot pass until it provides them: {}\n",
+            "Warning: {} acceptance check(s) run commands the configured toolchain_path ({}) does not resolve; they cannot pass until the toolchain path, or for marked items the deliverable, provides them: {}\n",
             self.checks.len(),
             self.toolchain_path,
             checks.join("; ")

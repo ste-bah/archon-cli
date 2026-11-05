@@ -362,6 +362,30 @@ fn an_end_to_end_run_whose_verifier_ignores_the_mutation_reports_decoration() {
     assert!(!guard::backup_path(&path).exists());
 }
 
+/// #355: require the real host profile, rather than accepting the fallback
+/// when a nested sandbox cannot launch sandbox-exec's availability probe.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires a macOS operator host outside a sandbox"]
+fn issue_355_anchored_falsify_verifier_launches_under_host_sandbox() {
+    assert_eq!(
+        archon_shell::write_boundary::mechanism(),
+        Ok(archon_shell::write_boundary::Mechanism::SandboxExec)
+    );
+    let (dir, path) = repo_with_committed_file("fn a() {}\nfn b() {}\n");
+    let before = std::fs::read(&path).unwrap();
+    let plan = plan_for(dir.path(), "git diff --quiet -- src/a.rs");
+    let outcome = attempt(dir.path(), &plan).expect("anchored verifier launched");
+    assert_eq!(
+        outcome,
+        FalsificationOutcome::DependencyShown {
+            mutated_exit: Some(1)
+        }
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!guard::backup_path(&path).exists());
+}
+
 /// The whole pipeline, including the only promotion it can produce.
 ///
 /// `git diff --quiet -- src/a.rs` is a real verifier that is genuinely sensitive

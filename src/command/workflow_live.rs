@@ -67,6 +67,8 @@ mod workflow_live_v2;
 #[cfg(test)]
 pub(crate) use workflow_live_v2::execute_fixed_decomposition_v2_run;
 #[cfg(test)]
+pub(crate) use workflow_live_v2::stage_landing_scope;
+#[cfg(test)]
 pub(crate) use workflow_live_v2::workflow_run_end_snapshot::recover_bound_task_set;
 pub(crate) use workflow_live_v2::{
     execute_fixed_decomposition_v2_run_with_config, reobserve, save_fixed_decomposition_metadata,

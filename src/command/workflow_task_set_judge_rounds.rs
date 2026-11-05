@@ -64,6 +64,7 @@ pub(super) async fn judge_prompted_with_roots(
         partial,
         roots,
         |_| false,
+        true,
     )
     .await
 }
@@ -86,6 +87,7 @@ pub(crate) async fn judge_refutations(
         None,
         &super::JudgeRoots::default(),
         refutes,
+        false,
     )
     .await
 }
@@ -99,6 +101,7 @@ async fn judge_rounds(
     partial: Option<&PartialReply<'_>>,
     roots: &super::JudgeRoots,
     refutes: impl Fn(&AcceptanceContract) -> bool,
+    screen_refutations: bool,
 ) -> Result<AcceptanceContract> {
     let task = prompt(&contract)?;
     let mut messages = vec![serde_json::json!({"role":"user","content":task})];
@@ -113,6 +116,7 @@ async fn judge_rounds(
     let mut last_kind: JudgeIncompleteKind;
     // The ids this call decided, so an incomplete end hands them back.
     let mut decided = BTreeSet::new();
+    let mut screen = screen::Screen::default();
     loop {
         attempts += 1;
         let reply = complete_reply(client, &messages, model, partial)
@@ -151,13 +155,26 @@ async fn judge_rounds(
         // of slip as one that will not parse, so it is re-asked rather than
         // ending the freeze: the judged shape is what makes a batch usable.
         let mut attempt = pending_contract.clone();
-        let judged = apply_judgments(&mut attempt, &content).and_then(|missing| {
+        let judged = (if screen_refutations {
+            screen.apply(&mut attempt, &content, roots)
+        } else {
+            screen::apply_unscreened(&mut attempt, &content)
+        })
+        .and_then(|missing| {
             let missing_set = missing;
             let answered = subset_without_ids(&attempt, &missing_set);
             // The final round is validated as the whole judged contract, so a
             // structure check that needs every id sees the merged decisions,
             // not only the ids this round answered.
-            let validation = if missing_set.is_empty() {
+            let completes_contract = missing_set.is_empty()
+                && undecided(&judged_contract, &decided).iter().all(|id| {
+                    answered
+                        .acceptance
+                        .iter()
+                        .chain(&answered.supplementary)
+                        .any(|entry| &entry.id == id)
+                });
+            let validation = if completes_contract {
                 let mut merged = judged_contract.clone();
                 merge_judged_entries(&mut merged, &answered);
                 validate(&merged)
@@ -174,13 +191,15 @@ async fn judge_rounds(
             partial.spent();
         }
         match judged {
-            Ok((missing, answered)) => {
+            Ok((_missing, answered)) => {
                 merge_judged_entries(&mut judged_contract, &answered);
                 decided.extend(
                     (answered.acceptance.iter())
                         .chain(&answered.supplementary)
                         .map(|entry| entry.id.clone()),
                 );
+                let missing: BTreeSet<_> =
+                    undecided(&judged_contract, &decided).into_iter().collect();
                 last_kind = JudgeIncompleteKind::AuthoredReply;
                 if missing.is_empty() {
                     for entry in judged_contract
@@ -215,8 +234,14 @@ async fn judge_rounds(
                         .collect();
                     return Err(incomplete.into());
                 }
-                pending_contract = subset_with_ids(&judged_contract, &missing);
-                current_task = prompt(&pending_contract)?;
+                pending_contract = subset_with_ids(&judged_contract, &screen.next_ids(&missing));
+                let correction = screen.instruction(&pending_contract);
+                if !correction.is_empty()
+                    && let Some(partial) = partial
+                {
+                    partial.spent();
+                }
+                current_task = format!("{}{}", prompt(&pending_contract)?, correction);
                 messages = vec![serde_json::json!({"role":"user","content":current_task})];
                 last = format!(
                     "acceptance judge left decisions missing={:?}; retry only those checks",

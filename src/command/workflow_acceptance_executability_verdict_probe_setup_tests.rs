@@ -16,7 +16,10 @@ async fn a_missing_repository_sibling_path_is_an_author_finding() {
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = probe.take_unproven();
     let finding = findings.get("AC-420-001").expect("missing path finding");
-    assert!(finding.contains("../absent/Cargo.toml"), "{finding}");
+    assert!(
+        finding.contains("sibling directory ../absent, which does not exist"),
+        "{finding}"
+    );
     assert!(
         unproven.is_empty(),
         "author findings are not probe verdicts"
@@ -40,6 +43,7 @@ async fn a_same_commit_known_copy_result_keeps_its_layout_for_judgment() {
     let copies = tempfile::tempdir().unwrap();
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
         .with_baseline(super::Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.head.clone(),
             repository: trees.repo.clone(),
         })
@@ -91,6 +95,7 @@ async fn a_hermetic_memo_hit_keeps_its_layout_for_judgment() {
     let resume = FreezeResume::saving(FreezeBudget::unlimited(), true);
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
         .with_baseline(super::Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
             commit: trees.head.clone(),
             repository: trees.repo.clone(),
         })
@@ -149,7 +154,7 @@ async fn an_absent_sibling_setup_path_is_refused_but_an_internal_path_is_not() {
         unproven.is_empty(),
         "missing sibling paths are refused before a probe: {unproven:?}"
     );
-    assert!(findings["AC-420-020"].contains("../absent/Cargo.toml"));
+    assert!(findings["AC-420-020"].contains("sibling directory ../absent, which does not exist"));
     assert!(!findings.contains_key("AC-420-021"), "{findings:?}");
     trees.assert_live_untouched(copies.path());
 }
@@ -271,9 +276,9 @@ async fn a_missing_sibling_path_never_lets_the_other_checks_publish_unprobed() {
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = probe.take_unproven();
     assert!(
-        findings
-            .get("AC-X-001")
-            .is_some_and(|finding| finding.contains("../absent/fixture.txt")),
+        findings.get("AC-X-001").is_some_and(
+            |finding| finding.contains("sibling directory ../absent, which does not exist")
+        ),
         "{findings:?}"
     );
     // `true` passes on the pre-implementation tree and names no input, so

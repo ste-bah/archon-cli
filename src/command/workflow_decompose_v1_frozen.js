@@ -124,7 +124,7 @@ function constraintContext(author = "skeleton") {
   const listed = json.length <= 4096 ? json
     : `Read the JSON object at ${contextFile("json", json).path} (host-written context for this call: read it by its exact path).`;
   const rule = author === "skeleton"
-    ? "Each host-listed PRD constraint applies to the tasks whose work it restricts (all tasks if it restricts all work); name each applicable constraint id in the task's implements."
+    ? "Every host-listed constraint id is in the implements of at least one task. Each host-listed PRD constraint applies to the tasks whose work it restricts (all tasks if it restricts all work); name each applicable constraint id in the task's implements."
     : author === "body"
       ? "Read the host-listed PRD constraint texts; this task's work must keep every listed constraint its frozen implements names."
       : null;
@@ -143,7 +143,7 @@ function sectionContext(subject) {
       .map(([number, section]) => `${JSON.stringify(number)}: ${section.title}`).join("\n");
     const compact = utf8Bytes(listed) <= 4096 ? listed
       : `Read ${contextFile("txt", listed).path} (host-written context for this call: read it by its exact path).`;
-    return ["Cite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). Every host-listed qualifying PRD section must be cited by source_sections of at least one task whose work it justifies; a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.",
+    return ["Cite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). For every host-listed qualifying PRD section, cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements); a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.",
       `Qualifying PRD sections (key: title):\n${compact}`,
       `Full PRD section texts: Read ${contextFile("json", JSON.stringify(sections)).path} (host-written context for this call: read it by its exact path).`];
   }
@@ -162,6 +162,8 @@ function sectionContext(subject) {
 // re-authors it because the set gate found an obligation no task claims or
 // a claim the PRD does not define (Batch O). `initialFeedback` carries the
 // set gate's exact findings into the first attempt.
+const SKELETON_AUTHOR_MARKER = "Land task records for the frozen acceptance contract.";
+
 function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
   return {
     phase: "skeleton",
@@ -171,7 +173,7 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
     initialFeedback,
     ...(Number.isInteger(initialRung) ? { initialRung } : {}),
     prompt: (previous) => [
-      "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
+      SKELETON_AUTHOR_MARKER,
       `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
       groundingRules(),
       "Stop reading once you can name what your entries assert.",
@@ -180,8 +182,8 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       skeletonObligationContext(),
       ...constraintContext(),
       ...sectionContext(),
-      "The document must deserialize into this exact shape:",
-      SKELETON_SHAPE,
+      "Each landed task must deserialize into this shape:",
+      JSON.stringify(JSON.parse(SKELETON_SHAPE).tasks[0]),
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
       "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
       "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.",
@@ -189,10 +191,8 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
       "The consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.",
       "The deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.",
-      "The host overwrites acceptance_digest: send the placeholder shown.",
       "Generate large or repetitive fixture data with code rather than writing it literally.",
-      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
-      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+      "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt.",
       "Do not run commands or write files."
     ].join("\n") + previousSkeletonContext(previous)
   };
@@ -204,7 +204,8 @@ function previousSkeletonContext(content) {
   if (typeof content !== "string" || content.length === 0) return "";
   const file = contextFile("json", content);
   return `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
-    + "\nWhatever you restructure, keep every task, implements id, deliverable and edge of the previous candidate that no current finding names. Return the whole document.";
+    + "\nWhatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Re-land only changed tasks; unlisted tasks are retained. "
+    + (frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null ? "Keep every frozen task_id and file_name." : "Use remove:true to drop a draft task.");
 }
 
 // #554: the operational findings of a freeze outcome whose subject is an
@@ -248,7 +249,7 @@ function attributeEntryFindings(findings, ids, published, candidate, held) {
     }
     for (const id of owners || []) {
       const open = own.get(id) || [];
-      if (!open.includes(finding.text)) open.push(finding.text);
+      pushGateFinding(open, finding, id);
       own.set(id, open);
     }
   }
@@ -257,7 +258,7 @@ function attributeEntryFindings(findings, ids, published, candidate, held) {
 
 // #555 review: the phase-level findings of the latest gate are current; an
 // earlier one it no longer reports is kept as one not to regress, and one it
-// reports again is current again, as settleGateFindings keeps an entry's.
+// reports again is current again, as settleGateFindings keeps an entry's by defect identity.
 function settlePhaseFindings(state, latest) {
   const earlier = (state.earlierPhaseFindings || []).slice();
   for (const text of state.phaseFindings || []) if (!latest.includes(text) && !earlier.includes(text)) earlier.push(text);
@@ -411,4 +412,28 @@ function inheritAcceptanceCovers(entry, prior) {
   if (!Object.prototype.hasOwnProperty.call(entry, "covers") && Array.isArray(prior?.covers)) {
     entry.covers = prior.covers.slice();
   }
+}
+
+// Verified frozen stages can carry host-read entries without an authored candidate.
+function skeletonLandingSeed(previous) {
+  if (parsedSkeletonCandidate(previous)) return previous;
+  const tasks = CURRENT_SKELETON_TASKS || frozenChain().tasks;
+  return tasks ? JSON.stringify({ schema_version: 1, acceptance_digest: "", tasks: [...tasks.values()].map(text => JSON.parse(text)) }) : null;
+}
+
+// Candidate-artifact refusals never become setup inputs for the next author.
+function parsedSkeletonCandidate(content) {
+  try { return Array.isArray(JSON.parse(content).tasks); } catch (_) { return false; }
+}
+function acceptedSkeletonCandidate(content, outcome) {
+  return parsedSkeletonCandidate(content) && !!outcome?.gateEnvelope
+    && !outcome.gateEnvelope.operational_error
+    && !(outcome.gateEnvelope.policy_findings || []).some(f => f.remediation_scope === "candidate_artifact");
+}
+
+function skeletonPreviousCandidate(policy, previous, seeded) {
+  if (policy.phase !== "skeleton") return previous;
+  const seed = args.phaseSeed?.subjects?.skeleton;
+  if (seeded && seed?.candidate === previous && (!seed?.gate || (seed.gate.findings || []).some(f => f.remediation_scope === "candidate_artifact"))) return undefined;
+  return parsedSkeletonCandidate(previous) ? previous : undefined;
 }

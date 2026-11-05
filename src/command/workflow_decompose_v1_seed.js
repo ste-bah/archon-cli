@@ -186,7 +186,7 @@ function seedEntries(seed, policy, state) {
   // #555: each entry starts with only its own findings of the last gate, and
   // an invalid carried entry with its own refusal; a sibling's is not its own.
   // Earlier gates settle in order as the live loop settles them, so what they
-  // raised and the last gate no longer reports is kept as not to regress. A
+  // raised and the last gate no longer reports by defect identity is kept as not to regress. A
   // pointer into an earlier candidate names an entry this seed cannot resolve.
   gates.forEach((gate, index) => {
     const isLast = index === gates.length - 1;

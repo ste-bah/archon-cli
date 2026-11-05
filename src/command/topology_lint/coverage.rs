@@ -85,7 +85,15 @@ pub(super) fn unclaimed_requirements(tasks_root: Option<&Path>) -> Vec<String> {
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn section(tasks_root: Option<&Path>) -> String {
+    section_with_mode(tasks_root, archon_core::config::GateMode::Enforce)
+}
+
+pub(super) fn section_with_mode(
+    tasks_root: Option<&Path>,
+    mode: archon_core::config::GateMode,
+) -> String {
     let mut out = String::from("\n## requirement coverage\n");
     let Some(root) = tasks_root else {
         out.push_str(
@@ -98,7 +106,7 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
     // this whole section down, so nothing was reported about the eighteen that
     // parsed. What was skipped is named, because a partial answer that looks
     // complete is worse than no answer at all.
-    let (claims, skipped) = match task_requirement_claims_tolerant(root) {
+    let (mut claims, skipped) = match task_requirement_claims_tolerant(root) {
         Ok(pair) => pair,
         Err(error) => {
             out.push_str(&format!("  could not read the task directory: {error}\n"));
@@ -113,6 +121,30 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         for reason in &skipped {
             out.push_str(&format!("    {reason}\n"));
         }
+    }
+    if let Ok(bytes) = fs::read(root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE))
+        && let Ok(skeleton) =
+            serde_json::from_slice::<archon_workflow::task_skeleton::TaskSkeleton>(&bytes)
+    {
+        claims = skeleton
+            .tasks
+            .into_iter()
+            .map(|task| TaskRequirementClaims {
+                task_id: task.task_id,
+                source_path: root.join(task.file_name).display().to_string(),
+                implements: task.implements,
+                source_sections: task.source_sections,
+            })
+            .collect();
+    } else if root
+        .join(archon_workflow::task_set_contract::TASK_SKELETON_FILE)
+        .exists()
+    {
+        out.push_str("  task skeleton did not parse; coverage is not available.\n");
+        return out;
+    } else if !skipped.is_empty() {
+        out.push_str("  coverage is incomplete; skipped bodies cannot establish a coverage gap.\n");
+        return out;
     }
     if claims.is_empty() {
         out.push_str("  no task file parsed; nothing to check coverage against.\n");
@@ -144,26 +176,46 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         }
     };
     out.push_str(&render(&prd_path, &prd, &claims));
+    out.push_str(match mode {
+        archon_core::config::GateMode::Observe => "  observe: exits 0 for policy findings.\n",
+        archon_core::config::GateMode::Enforce => "  enforce: policy findings exit non-zero.\n",
+        archon_core::config::GateMode::Off => "",
+    });
     out
 }
 
 fn render(prd_path: &Path, prd: &str, claims: &[TaskRequirementClaims]) -> String {
     let mut defined = obligation_ids(prd);
-    defined.extend(archon_workflow::obligation_ids::constraint_ids(prd));
+    let constraints = archon_workflow::obligation_ids::constraint_ids(prd);
+    let obligation_count = defined.len();
+    defined.extend(constraints.iter().cloned());
     let claimed_by = claimed_by_task(claims);
     let claimed: BTreeSet<&String> = claimed_by.keys().collect();
 
     let mut out = format!(
         "  {} obligation(s) in {}, {} claimed across {} task(s).\n",
-        defined.len(),
+        obligation_count,
         prd_path.display(),
-        claimed.len(),
+        claimed
+            .iter()
+            .filter(|id| !constraints.contains(**id))
+            .count(),
         claims.len()
     );
 
+    if !constraints.is_empty() {
+        out.push_str(&format!(
+            "  {} constraint(s), {} claimed.\n",
+            constraints.len(),
+            constraints
+                .iter()
+                .filter(|id| claimed_by.contains_key(*id))
+                .count()
+        ));
+    }
     let unclaimed: Vec<&String> = defined
         .iter()
-        .filter(|id| !claimed_by.contains_key(*id))
+        .filter(|id| !constraints.contains(*id) && !claimed_by.contains_key(*id))
         .collect();
     if unclaimed.is_empty() {
         out.push_str("  every obligation is claimed by at least one task.\n");
@@ -171,10 +223,24 @@ fn render(prd_path: &Path, prd: &str, claims: &[TaskRequirementClaims]) -> Strin
         out.push_str(&format!(
             "  {} obligation(s) claimed by no task — a decomposition gap. Either a \
              task's `implements:` is missing an ID, or the work is undecomposed and needs \
-             a task. This EXITS NON-ZERO: work nobody claims is work nobody does:\n",
+             a task. Work nobody claims is work nobody does:\n",
             unclaimed.len()
         ));
         for id in unclaimed {
+            out.push_str(&format!("    {id}\n"));
+        }
+    }
+
+    let unowned_constraints: Vec<_> = constraints
+        .iter()
+        .filter(|id| !claimed_by.contains_key(*id))
+        .collect();
+    if !unowned_constraints.is_empty() {
+        out.push_str(&format!(
+            "  {} constraint(s) claimed by no task:\n",
+            unowned_constraints.len()
+        ));
+        for id in unowned_constraints {
             out.push_str(&format!("    {id}\n"));
         }
     }
@@ -410,3 +476,14 @@ mod contract_tests;
 #[cfg(test)]
 #[path = "constraint_coverage_tests.rs"]
 mod constraint_tests;
+
+// Shared skeleton checks can arrive through both the draft and coverage paths.
+pub(super) fn deduplicate(findings: &mut Vec<crate::command::workflow_gate::GateFinding>) {
+    let mut seen = BTreeSet::new();
+    findings.retain(|finding| {
+        finding
+            .deterministic_defect
+            .as_ref()
+            .is_none_or(|id| seen.insert(id.clone()))
+    });
+}

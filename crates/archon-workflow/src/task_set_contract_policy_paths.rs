@@ -1,8 +1,7 @@
 //! Path refusals shared by acceptance authors and rooted publication policy.
+use crate::acceptance_sibling_paths::commands;
 use crate::task_set_contract::AcceptanceCriterion;
 use std::path::Path;
-#[path = "task_set_contract_policy_paths_commands.rs"]
-mod commands;
 
 pub fn acceptance_site_path_defect(
     candidate: &AcceptanceCriterion,
@@ -23,8 +22,36 @@ pub fn acceptance_site_path_defect(
             crate::task_set_contract::TrustedCwd::ProjectRoot => project,
             crate::task_set_contract::TrustedCwd::RepoRoot => repository,
         };
-        let named_paths = commands::parent_paths(command, root);
-        let scoped_command = commands::path_command(&named_paths);
+        // Keep required operand roles after scoping has excluded data words
+        // and paths whose reading directory cannot be established.
+        let mut named_paths = commands::parent_paths(command, root);
+        if crate::acceptance_sibling_paths::missing_root(root, command).is_some() {
+            // Preserve normal || scoping; only absent directory targets need
+            // the B1 exception, before their conditional change of directory.
+            for path in commands::missing_root_paths(command, root) {
+                let scoped = format!(
+                    "test -e {}",
+                    commands::path_command(std::slice::from_ref(&path))
+                );
+                if crate::acceptance_sibling_paths::missing_root(root, &scoped).is_some()
+                    && !named_paths.contains(&path)
+                {
+                    named_paths.push(path);
+                }
+            }
+            named_paths.sort_by_key(|path| {
+                let scoped = format!(
+                    "test -e {}",
+                    commands::path_command(std::slice::from_ref(path))
+                );
+                crate::acceptance_sibling_paths::missing_root(root, &scoped).is_none()
+            });
+        }
+        let mut scoped_command = commands::path_command(&named_paths);
+        for path in &named_paths {
+            scoped_command.push_str("; test -e ");
+            scoped_command.push_str(&commands::path_command(std::slice::from_ref(path)));
+        }
         for named in named_paths {
             if let Err(refusal) = crate::acceptance_scratch::site_path_alone(
                 project,
@@ -44,15 +71,18 @@ pub fn acceptance_site_path_defect(
                     .and_then(|reason| reason.split_once(" resolves to ").map(|(path, _)| path))
                     .map(str::to_owned)
                     .unwrap_or_else(|| archon_shell::paths::stored_text(&named));
-                let reason = refusal.reason.unwrap_or_else(|| {
+                let mut reason = refusal.reason.unwrap_or_else(|| {
                     format!(
                         "alone in its site, `{}` from {root_name} resolves to `{}`, which the site does not create",
                         archon_shell::paths::stored_text(&named),
                         archon_shell::paths::stored_text(&refusal.site_target),
                     )
                 });
+                if reason.starts_with("names sibling directory ") {
+                    reason.push_str("; the site does not create this absent sibling directory");
+                }
                 return Some(format!(
-                    "it names `{}` from the {root_name}; {reason} (site target `{}`).",
+                    "it names `{}` from the {root_name}; {reason} (site target `{}`). From repo_root name repository paths without `..`; when the repository directory sits beside the project, reach it from project_root using cwd project_root and ../<repository dir>/",
                     refused_path,
                     archon_shell::paths::stored_text(&refusal.site_target),
                 ));

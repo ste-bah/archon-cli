@@ -156,3 +156,13 @@ mod tests {
         assert!(built.covered_inputs.is_empty());
     }
 }
+
+#[cfg(test)]
+pub(crate) fn mutation_plan(
+    names: &[String],
+    discovery: &mutation::InputDiscovery,
+    entry: &AcceptanceCriterion,
+    markers: &mutation::Markers,
+) -> archon_workflow::acceptance_scratch::MutationPlan {
+    plan(names, discovery, entry, markers).plan
+}

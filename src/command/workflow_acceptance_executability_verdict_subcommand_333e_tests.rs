@@ -207,7 +207,7 @@ fn each_cell_tells_its_author_what_to_do() {
         ("archon333cb", rejects_list, true, Some(false)),
         ("archon333cc", fails, true, Some(false)),
         ("archon333cd", fails, false, Some(false)),
-        ("archon333ce", lists, false, Some(true)),
+        ("archon333ce", lists, false, Some(false)),
         ("archon333cf", lists_lint, false, Some(false)),
         ("archon333cg", rejects_list, false, None),
         ("archon333ch", lists_lint, true, Some(false)),
@@ -227,9 +227,12 @@ fn each_cell_tells_its_author_what_to_do() {
                 let transient = tool == "archon333cd";
                 assert_eq!(
                     why.contains(MUST_NOT),
-                    !guard && !transient,
+                    !guard && !transient && tool != "archon333ce",
                     "{tool}: {why}"
                 );
+                if tool == "archon333ce" {
+                    assert!(why.contains("replace `archon333ce lint` with what the site provides; neither the site nor the host has it"), "{why}");
+                }
                 if transient {
                     assert_eq!(
                         no_verdict_cause(&text, &run, &bin.context()).unwrap().1,
@@ -247,7 +250,11 @@ fn each_cell_tells_its_author_what_to_do() {
         let warned = bin.warned(&text);
         if let (Some(guard), [warned]) = (expected, warned.as_slice()) {
             assert_eq!(warned.contains(GUARD), guard, "{tool}: {warned}");
-            assert_eq!(warned.contains(MUST_NOT), !guard, "{tool}: {warned}");
+            assert_eq!(
+                warned.contains(MUST_NOT),
+                !guard && tool != "archon333ce",
+                "{tool}: {warned}"
+            );
         }
     }
 }
@@ -358,7 +365,7 @@ fn a_similar_name_cargo_suggests_never_takes_its_rejection_away() {
     let odd = result(Some(101), b"", &similar("nextest", "test"));
     let why = no_verdict(text, &odd, &bin.context()).expect("never a proof");
     assert!(
-        why.contains("`cargo nextest`") && why.contains("--list | grep -qw nextest"),
+        why.contains("`cargo nextest`") && why.contains("replace `cargo nextest`"),
         "{why}"
     );
     // A command the host lists that a pinned toolchain lacks: `cargo` is

@@ -6,7 +6,7 @@ async fn publication_permit_cannot_authorize_a_different_prepared_freeze() {
     let (first_tasks, first_prd, _) = seed(&first);
     let second = tempfile::tempdir().unwrap();
     let (second_tasks, second_prd, _) = seed(&second);
-    let response = r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"false state","reason":"weak"}]}"#;
+    let response = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"false state","reason":"weak"}]}"#;
 
     let first_prepared = prepare_acceptance_freeze(
         first.path(),
@@ -80,7 +80,7 @@ async fn malformed_prd_obligation_is_rejected_by_shared_phase_zero() {
         &prd,
         archon_core::config::GateMode::Observe,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"rejects"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted","reason":"rejects"}]}"#.into()),
         }),
     )
     .await
@@ -106,7 +106,7 @@ async fn duplicate_prd_acceptance_id_is_rejected_by_shared_phase_zero() {
         &prd,
         archon_core::config::GateMode::Observe,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"rejects"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted","reason":"rejects"}]}"#.into()),
         }),
     )
     .await

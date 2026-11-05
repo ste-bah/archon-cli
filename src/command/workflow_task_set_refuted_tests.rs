@@ -115,7 +115,7 @@ async fn a_refuted_check_is_never_staged_and_its_finding_returns_to_the_author()
         GateMode::Observe,
         candidate,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"a passing false state","reason":"weak"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"a passing false state","reason":"weak"}]}"#.into()),
         }),
     )
     .await
@@ -183,7 +183,7 @@ async fn a_judge_refutation_reaches_its_author_while_a_sibling_is_host_unproven_
     .unwrap();
 
     let client = Arc::new(JudgeClient {
-        result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"a passing false state","reason":"the check misses a case"},{"id":"AC-X-002","verdict":"accepted","counterexample":"none constructible","reason":"the check observes the criterion"}]}"#.into()),
+        result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"a passing false state","reason":"the check misses a case"},{"id":"AC-X-002","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none constructible","reason":"the check observes the criterion"}]}"#.into()),
     });
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
     let prepared = prepare_acceptance_freeze_resumable(
@@ -300,7 +300,7 @@ async fn placeholder_refutations_do_not_prevent_a_stall_when_the_judge_accepts_e
     // accepts both checks, so no authored finding may be manufactured from
     // the placeholder values.
     let client = Arc::new(JudgeClient {
-        result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"accepted"},{"id":"AC-X-002","verdict":"accepted","counterexample":"none","reason":"accepted"}]}"#.into()),
+        result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"accepted"},{"id":"AC-X-002","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"accepted"}]}"#.into()),
     });
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
     let error = prepare_acceptance_freeze_resumable(
@@ -327,7 +327,7 @@ async fn uncovered_requirement_reaches_author_while_sibling_is_host_unproven() {
     let (tasks, prd, _) = seed(&temp);
     let candidate = staged_host_unproven_fixture(&tasks, &prd, false);
     let client = Arc::new(JudgeClient {
-        result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"accepted"},{"id":"AC-X-002","verdict":"accepted","counterexample":"none","reason":"accepted"}]}"#.into()),
+        result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"accepted"},{"id":"AC-X-002","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"none","reason":"accepted"}]}"#.into()),
     });
     let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
     let prepared = prepare_acceptance_freeze_resumable(

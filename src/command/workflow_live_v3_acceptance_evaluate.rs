@@ -29,12 +29,12 @@ pub(super) async fn evaluate(
     record.execution = Some(context.execution_record());
     // A5: every authored or repaired check must fail on the tree before
     // implementation: the one its freeze recorded (Issue 328).
-    let base = Baseline::round_commit(&context.repository, &context.task_root, run_dir);
+    let base = Baseline::for_run(&context.repository, &context.task_root, run_dir);
     let site = author::Site {
         llm,
         context: &context,
         run_dir,
-        base: base.as_deref(),
+        base: base.as_ref(),
         store,
         run_id,
         call_id,
@@ -131,7 +131,7 @@ pub(super) async fn evaluate(
         &mut contract,
         &mut chain_digest,
         record,
-        base.as_deref(),
+        base.as_ref(),
     )
     .await?
     else {
@@ -185,7 +185,7 @@ pub(super) async fn evaluate(
         run_id,
         call_id,
         evidence_dir: &evidence_dir,
-        base: base.as_deref(),
+        base: base.as_ref(),
     };
     (repair::repair_crashed(
         &round,

@@ -119,7 +119,7 @@ pub(crate) fn run(script: &str) -> serde_json::Value {
     serde_json::from_slice(&out.stdout).expect("driver json")
 }
 
-pub(crate) const UNCLAIMED: &str = r#"[[{ "text": "PRD obligation 'REQ-X-009' is claimed by no task; add it to at least one TASK file's implements list", "subject": "REQ-X-009", "source_path": "/p/prd.md", "remediation_scope": "skeleton" }], []]"#;
+pub(crate) const UNCLAIMED: &str = r#"[[{ "text": "PRD obligation 'REQ-X-009' is claimed by no task; add it to at least one frozen skeleton task's implements list", "subject": "REQ-X-009", "source_path": "/p/prd.md", "remediation_scope": "skeleton" }], []]"#;
 
 pub(crate) fn calls(out: &serde_json::Value, key: &str) -> Vec<String> {
     (out[key].as_array().expect(key).iter())

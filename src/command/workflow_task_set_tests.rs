@@ -124,7 +124,7 @@ async fn malformed_judgment_leaves_no_partial_freeze_552() {
 async fn refuting_judgment_is_never_published_in_observe_or_enforce() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, _) = seed(&temp);
-    let response = r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"a passing false state","reason":"weak"}]}"#;
+    let response = r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"refuted","counterexample":"a passing false state","reason":"weak"}]}"#;
     let prepared = prepare_acceptance_freeze(
         temp.path(),
         &tasks,
@@ -193,7 +193,7 @@ async fn accepted_judgment_publishes_contract_lock_and_pin_together() {
         &tasks,
         &prd,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted false state","reason":"command rejects it"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted false state","reason":"command rejects it"}]}"#.into()),
         }),
     )
     .await
@@ -255,7 +255,7 @@ async fn whole_set_freeze_prepares_from_the_current_contract_bytes() {
         &prd,
         archon_core::config::GateMode::Observe,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"the false state is rejected","reason":"the command checks both fields"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"the false state is rejected","reason":"the command checks both fields"}]}"#.into()),
         }),
     )
     .await
@@ -283,7 +283,7 @@ async fn a_first_whole_set_draft_publishes_when_no_contract_exists() {
     crate::command::workflow_task_set::passability_tests_support::commit_project(temp.path());
     let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
         temp.path(), &tasks, &prd, GateMode::Observe, candidate.clone(),
-        Arc::new(JudgeClient { result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()) }),
+        Arc::new(JudgeClient { result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()) }),
     ).await.unwrap();
     assert_eq!(prepared.live_contract_digest, None);
     assert_eq!(prepared.result.candidate_digest, content_digest(&candidate));
@@ -303,7 +303,7 @@ async fn contract_changed_after_prepare_rebuilds_without_overwriting_the_new_con
     crate::command::workflow_task_set::passability_tests_support::commit_project(temp.path());
     let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
         temp.path(), &tasks, &prd, GateMode::Observe, original.clone(),
-        Arc::new(JudgeClient { result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()) }),
+        Arc::new(JudgeClient { result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"false is rejected","reason":"checks validity"}]}"#.into()) }),
     ).await.unwrap();
     let mut newer_value: serde_json::Value = serde_json::from_slice(&original).unwrap();
     newer_value["acceptance"][0]["check"]["command"] =
@@ -334,7 +334,7 @@ async fn contract_changed_after_prepare_rebuilds_without_overwriting_the_new_con
         GateMode::Observe,
         newer.clone(),
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"false is rejected","reason":"checks validity and repair"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"false is rejected","reason":"checks validity and repair"}]}"#.into()),
         }),
     )
     .await
@@ -353,7 +353,7 @@ async fn publication_error_preserves_the_original_contract_and_pin() {
         &tasks,
         &prd,
         Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted false state","reason":"command rejects it"}]}"#.into()),
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted false state","reason":"command rejects it"}]}"#.into()),
         }),
     )
     .await
@@ -376,7 +376,7 @@ fn seed_frozen_acceptance(temp: &tempfile::TempDir) -> (std::path::PathBuf, Acce
             &tasks,
             &prd,
             Arc::new(JudgeClient {
-                result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted false state","reason":"command rejects it"}]}"#.into()),
+                result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted false state","reason":"command rejects it"}]}"#.into()),
             }),
         )
         .await
@@ -464,7 +464,7 @@ async fn per_entry_candidate_reaches_real_preflight_and_judge() {
         serde_json::to_vec(&serde_json::json!({"entries":contract["acceptance"]})).unwrap();
     let prepared = prepare_acceptance_freeze_from_candidate(temp.path(), &tasks, &prd,
         GateMode::Observe, candidate, Arc::new(JudgeClient {
-            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"checked"}]}"#.into())
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","kind":"state","cited_paths":[],"verdict":"accepted","counterexample":"attempted","reason":"checked"}]}"#.into())
         })).await.expect("entry envelope reaches the actual freeze path");
     assert!(prepared.findings.is_empty(), "{:?}", prepared.findings);
     assert_eq!(

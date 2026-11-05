@@ -64,6 +64,16 @@ async fn a_published_site_path_breach_goes_to_its_author_and_siblings_are_verifi
         0,
     );
     crate::command::workflow_task_set::passability_tests_support::commit_project(root);
+    let record = archon_workflow::repository_record::RepositoryRecordV1 {
+        schema_version: archon_workflow::repository_record::REPOSITORY_RECORD_SCHEMA_VERSION,
+        repository_root: root.canonicalize().unwrap().display().to_string(),
+        base_commit: crate::command::workflow_task_set::executability::Baseline::head_of(root)
+            .unwrap()
+            .commit,
+        decomposition_run_id: "fixture".into(),
+        recorded_at: "2026-09-01T00:00:00Z".into(),
+    };
+    archon_workflow::repository_record::write_repository_record(&set.tasks, &record).unwrap();
     let env_vars = archon_core::env_vars::load_env_vars_from(&Default::default());
     let checks = reverify_checks(
         root,
@@ -231,7 +241,7 @@ impl archon_workflow::WorkflowLlmClient for RecordingJudge {
             .iter()
             .map(|check| {
                 serde_json::json!({
-                    "id": check["id"], "verdict": "accepted", "counterexample": "none",
+                    "id": check["id"], "kind":"state","cited_paths":[],"verdict": "accepted", "counterexample": "none",
                     "reason": "the absent file is the missing feature"
                 })
             })

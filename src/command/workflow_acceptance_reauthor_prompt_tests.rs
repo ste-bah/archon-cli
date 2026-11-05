@@ -20,9 +20,9 @@ fn write_task_declaration(tasks: &Path, files: &str, implements: &str) {
 
 #[test]
 #[rustfmt::skip]
-fn baseline_prompt_leads_with_guard_template_and_verified_candidates() {
+#[allow(non_snake_case)]
+fn P1_N10_baseline_note_appears_once_with_guard_template_and_verified_candidates() {
     use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
-
     let root = tempfile::tempdir().unwrap();
     let repository = root.path().join("repository");
     let project = root.path().join("project");
@@ -59,8 +59,8 @@ fn baseline_prompt_leads_with_guard_template_and_verified_candidates() {
     let note = "check 'AC-F-001': the criterion already holds on the pre-implementation tree; write a regression guard; data the check writes itself is never evidence";
     let prompt = super::author::author_prompt(&scope, &frozen, &[note.into()], 1);
     let first = prompt.lines().next().unwrap();
-    assert!(first.starts_with("The criterion already holds on the pre-implementation tree"));
-    assert!(first.contains("Write a regression guard"));
+    assert_eq!(prompt.matches(note).count(), 1);
+    assert!(first.starts_with("Make the check fail on the pre-implementation tree if it does not exercise what the work must add. Otherwise, write a regression guard"));
     assert!(first.contains("name the deciding file by its literal path relative to the check's working directory"));
     assert!(first.contains("The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails"));
     assert!(first.contains("Naming a file or asserting that it exists does not make it the deciding assertion."));
@@ -118,11 +118,12 @@ fn non_baseline_prompt_keeps_the_refused_check_verbatim() {
             &author_scope.repository_root.display().to_string(),
             &author_scope.project_root.display().to_string(),
         ),
-        "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
+        "Return one JSON object with id, criterion, check, gap_permitted, judgment. The examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
         super::ENTRY_SHAPES.to_string(),
+        super::COMMAND_CWD_EXAMPLES.to_string(),
         "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.".to_string(),
         "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
-        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name the deciding file by its literal path relative to the check's working directory. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. The host moves aside only inputs it actually moves, never the check's own script, a program it runs, a directory it changes into or a build manifest; the check must still fail on its own assertion, not by crashing, and a move-aside failure proves the guard and is never a counterexample. The named file's assertions are known to the judge only when its content is supplied in named_files; supplied content is a redacted, UTF-8-lossy copy that can be read in place of opening the original file. A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Read the deciding file by its named path only when its content was not supplied.".to_string(),
+        "The host also runs the check on the tree before any implementation, where it must fail. If it passes there, data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name the deciding file by its literal path relative to the check's working directory. The check is a valid regression guard only when its pass or fail is decided by that test and it fails whenever the test fails. When the criterion is false, the check must still fail on its own assertion. The host moves aside only inputs it actually moves, never the check's own script, a program it runs, a directory it changes into or a build manifest; a failure of the deciding assertion after the move proves the guard; a build failure at or naming a moved input also proves it, while any other build failure leaves the check unproven; a move-aside failure is never a counterexample. The named file's assertions are known to the judge only when its content is supplied in named_files; supplied content is a redacted, UTF-8-lossy copy that can be read in place of opening the original file. A named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content. Read the deciding file by its named path only when its content was not supplied.".to_string(),
         format!(
             "Use the exact id {}. Criterion and judgment are host-owned placeholders; gap_permitted stays {}.",
             frozen.id, frozen.gap_permitted
@@ -246,8 +247,11 @@ fn repository_candidate_only_in_live_tree_is_dropped_from_baseline_candidates() 
     let set = frozen_set(&[("AC-F-001", "run", false)]);
     let mut scope = scope(&set);
     scope.repository_root = repository.clone();
-    scope.baseline =
-        Some(crate::command::workflow_task_set::executability::Baseline { commit, repository });
+    scope.baseline = Some(crate::command::workflow_task_set::executability::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
+        commit,
+        repository,
+    });
     scope.task_universe = WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],
@@ -301,8 +305,11 @@ fn absolute_repository_candidate_is_relative_and_absolute_outside_roots_is_dropp
     std::fs::create_dir_all(scope.project_root.join("src")).unwrap();
     std::fs::write(scope.project_root.join("src/project.rs"), "project").unwrap();
     scope.repository_root = repository.clone();
-    scope.baseline =
-        Some(crate::command::workflow_task_set::executability::Baseline { commit, repository });
+    scope.baseline = Some(crate::command::workflow_task_set::executability::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
+        commit,
+        repository,
+    });
     scope.task_universe = WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],
@@ -397,8 +404,11 @@ fn nested_repository_candidate_uses_forward_slashes() {
     let set = frozen_set(&[("AC-F-001", "run", false)]);
     let mut scope = scope(&set);
     scope.repository_root = repository.clone();
-    scope.baseline =
-        Some(crate::command::workflow_task_set::executability::Baseline { commit, repository });
+    scope.baseline = Some(crate::command::workflow_task_set::executability::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
+        commit,
+        repository,
+    });
     scope.task_universe = WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],

@@ -33,6 +33,7 @@ async fn scratch_mutation_covers_a_child_named_before_its_parent() {
     assert!(matches!(probe.site, Site::Scratch(_)));
     let contract = trees.contract();
     let baseline = Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: trees.repo.clone(),
     };
@@ -86,7 +87,10 @@ async fn scratch_mutation_covers_a_child_named_before_its_parent() {
             })
             .collect(),
     )]);
-    let live_roots = [project.canonicalize().unwrap(), trees.repo.canonicalize().unwrap()];
+    let live_roots = [
+        project.canonicalize().unwrap(),
+        trees.repo.canonicalize().unwrap(),
+    ];
     let mutated = super::super::mutation::mutated(
         &contract,
         &input_map,
@@ -112,7 +116,11 @@ async fn scratch_mutation_covers_a_child_named_before_its_parent() {
     let evidence = run.results.into_iter().next().unwrap();
     let result = &evidence.result;
     assert_eq!(result.exit_code, Some(1));
-    assert!(result.operational_error.is_none(), "{:?}", result.operational_error);
+    assert!(
+        result.operational_error.is_none(),
+        "{:?}",
+        result.operational_error
+    );
     let states = super::super::prove::input_states(result, &markers, &names);
     assert_eq!(
         states.get("tests").map(String::as_str),
@@ -121,7 +129,9 @@ async fn scratch_mutation_covers_a_child_named_before_its_parent() {
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(super::super::prove::all_moved_inputs_restored(result, &markers, &names));
+    assert!(super::super::prove::all_moved_inputs_restored(
+        result, &markers, &names
+    ));
     let move_states = markers.move_states(result, &names);
     let child_diagnostics = super::super::prove::describe_candidates_with_run_state(
         &discovery.candidates,
@@ -137,14 +147,16 @@ async fn scratch_mutation_covers_a_child_named_before_its_parent() {
         child_diagnostics.contains("covered by moved ancestor 'tests': tests/focused.rs"),
         "{child_diagnostics}"
     );
-    assert!(super::super::prove::mutation_host_or_author_finding(
-        &evidence,
-        &markers,
-        &names,
-        None,
-        "the check passed before mutation",
-    )
-    .is_none());
+    assert!(
+        super::super::prove::mutation_host_or_author_finding(
+            &evidence,
+            &markers,
+            &names,
+            None,
+            "the check passed before mutation",
+        )
+        .is_none()
+    );
     let original_digest = super::super::contract_digest(&contract).unwrap();
     let original_refs = super::super::refs_for(&contract, &original_digest, &ids);
     let findings = super::super::prove::prove(

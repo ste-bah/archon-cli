@@ -380,6 +380,20 @@ pub(crate) fn bounded(text: &str, budget: usize) -> String {
     format!("{}…", &text[..cut])
 }
 
+/// A deterministic host refusal has no model-judge provenance.
+pub(crate) fn host_finding_text(
+    id: &str,
+    cannot_pass: &str,
+    evidence: &Evidence,
+    rule: &str,
+    reason: &str,
+) -> String {
+    finding_text(id, cannot_pass, evidence, rule, reason).replace(
+        "the host judge found that failure caused by the check's own setup breaking a rule a correct implementation keeps, not by its criterion's feature being absent",
+        "the host found that failure caused by the check's own setup",
+    )
+}
+
 /// The author's finding for check `id`, which cannot pass as written.
 pub(crate) fn finding_text(
     id: &str,

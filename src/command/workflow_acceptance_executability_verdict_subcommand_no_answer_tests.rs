@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::super::super::{ExecutabilityProbe, HostProbe, UnprovenCause, silent};
+use super::super::super::{BaselineOrigin, ExecutabilityProbe, HostProbe, UnprovenCause, silent};
 use super::super::no_verdict_cause;
 use super::tests::Bin;
 use super::tests_333b::contract;
@@ -46,7 +46,15 @@ fn no_answer(host_has_plugin: bool) {
     let root = tempfile::tempdir().unwrap();
     for _ in 0..2 {
         let probe = HostProbe::at(root.path().into(), root.path().into(), None);
-        let finding = silent::settle_as(&probe, &"0".repeat(40), &check, &run, (&why, cause), &at);
+        let finding = silent::settle_as(
+            &probe,
+            BaselineOrigin::RecordedBase,
+            &"0".repeat(40),
+            &check,
+            &run,
+            (&why, cause),
+            &at,
+        );
         assert_eq!(finding.is_some(), host_has_plugin, "{finding:?}");
         let held = probe.take_unproven_causes();
         if host_has_plugin {
@@ -73,7 +81,7 @@ fn no_answer_with_a_host_plugin_is_site_lacks_and_reaches_its_author() {
     no_answer(true);
 }
 
-fn scratch_overrun(host_has_plugin: bool) {
+pub(super) fn scratch_overrun(host_has_plugin: bool) {
     let installed = [("fixture-item", "#!/bin/sh\nexit 0\n")];
     let bin = Bin::with_host(
         Path::new("/bin/sh"),
@@ -111,7 +119,15 @@ fn scratch_overrun(host_has_plugin: bool) {
     for _ in 0..2 {
         let finding = silent::silent_failure(&check, &run, &at).and_then(|why| {
             let (_, cause) = no_verdict_cause(text, &run, &at).unwrap();
-            silent::settle_as(&probe, &"0".repeat(40), &check, &run, (&why, cause), &at)
+            silent::settle_as(
+                &probe,
+                BaselineOrigin::RecordedBase,
+                &"0".repeat(40),
+                &check,
+                &run,
+                (&why, cause),
+                &at,
+            )
         });
         assert_eq!(finding.is_some(), host_has_plugin, "{finding:?}");
         assert!(probe.take_unproven_causes().is_empty());

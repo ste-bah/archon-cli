@@ -94,7 +94,7 @@ pub(super) fn task_with(id: &str, implements: &str, deliverables: &str, body: &s
     )
 }
 
-fn run(tasks: &[(&str, &str)]) -> ClaimTrace {
+pub(super) fn run(tasks: &[(&str, &str)]) -> ClaimTrace {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("repo");
     std::fs::create_dir_all(&root).unwrap();

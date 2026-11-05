@@ -160,3 +160,19 @@ async fn author_path_decisions_agree_with_one_check_site_for_project_inside_repo
 async fn author_path_decisions_agree_with_one_check_site_for_same_path_layout() {
     path_matrix_helpers::run_layout("same_path", 4).await;
 }
+
+#[cfg(unix)]
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn N9_redirect_existing_sibling_agrees_at_author_and_site() {
+    // Input: write below existing ../a -> author accepts, actual copied site passes.
+    path_matrix_helpers::run_write_target("echo x > ../a/out && test -f item").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn N9_tee_existing_sibling_agrees_at_author_and_site() {
+    // Input: tee below existing ../a -> author accepts, actual copied site passes.
+    path_matrix_helpers::run_write_target("echo x | tee ../a/log && test -f item").await;
+}

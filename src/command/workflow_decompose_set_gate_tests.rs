@@ -44,7 +44,8 @@ let traceCalls = 0;
 globalThis.__archonHost = async (_method, payload) => {{ throw new Error(JSON.parse(payload).reason); }};
 let finalInputs = null;
 const pauses = [];
-const w = {{ checkpoint: async () => {{}},
+const checkpoints = [];
+const w = {{ checkpoint: async (id, options) => checkpoints.push({{id, ...options}}),
   pause: async (id, evidence) => {{
     pauses.push({{ id, evidence }});
     if ((globalThis.args.resumedPauses || []).includes(id)) return {{ resumed: true, pause_id: id }};
@@ -82,7 +83,7 @@ const w = {{ checkpoint: async () => {{}},
   finalReport: async (_id, options) => {{ finalInputs = options.inputs; return {{}}; }},
 }};
 workflow(w).then(
-  () => console.log(JSON.stringify({{ agentCalls, hostCalls, prompts, pauses, evidence: finalInputs.length, {tail} }})),
+  () => console.log(JSON.stringify({{ agentCalls, hostCalls, prompts, checkpoints, pauses, evidence: finalInputs.length, {tail} }})),
   (error) => console.log(JSON.stringify({{ agentCalls, hostCalls, pauses, error: String(error && error.message) }})),
 );
 "##
@@ -186,7 +187,7 @@ fn a_set_gate_body_finding_re_authors_the_task_it_names_with_the_finding_then_re
 /// without progress, and the third such round PAUSES the run with the
 /// findings as evidence. It used to fail the run.
 #[test]
-fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_listed() {
+fn a_body_only_plateau_reauthors_bodies_then_pauses_with_the_open_findings_listed() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver("{}", &format!("[[{finding}]]"), ""));
     let error = out["error"].as_str().expect("the run must stop");
@@ -206,13 +207,13 @@ fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_l
     assert_eq!(count(&out, "hostCalls", "requirements-trace"), 4);
     assert_eq!(
         count(&out, "hostCalls", "freeze-skeleton"),
-        2,
-        "the first freeze and one escalation: {out}"
+        1,
+        "only the initial skeleton freeze: {out}"
     );
     assert_eq!(
         count(&out, "hostCalls", "land-task-body"),
-        2 + 1 + 1 + 2,
-        "two bodies, one re-author per round, both bodies at the escalation: {out}"
+        2 + 1 + 1 + 1,
+        "two bodies, then only the named body each round: {out}"
     );
 }
 
@@ -256,7 +257,7 @@ fn a_resumed_set_gate_pause_starts_a_fresh_window_and_can_accept() {
     ));
     assert!(out.get("error").is_none(), "{out}");
     assert_eq!(out["pauses"].as_array().unwrap().len(), 1, "{out}");
-    assert_eq!(count(&out, "hostCalls", "freeze-skeleton"), 2, "{out}");
+    assert_eq!(count(&out, "hostCalls", "freeze-skeleton"), 1, "{out}");
     assert_eq!(count(&out, "hostCalls", "task-set-lint"), 6);
 }
 
@@ -307,7 +308,7 @@ fn rounds_continue_while_the_open_findings_keep_shrinking() {
 /// shadowed past and accepted.
 #[test]
 fn an_unclaimed_obligation_re_authors_the_skeleton_then_every_body() {
-    let unclaimed = r#"{ "text": "PRD obligation 'REQ-X-009' is claimed by no task; add it to at least one TASK file's implements list", "subject": "REQ-X-009", "source_path": "/p/prd.md", "remediation_scope": "skeleton" }"#;
+    let unclaimed = r#"{ "text": "PRD obligation 'REQ-X-009' is claimed by no task; add it to at least one frozen skeleton task's implements list", "subject": "REQ-X-009", "source_path": "/p/prd.md", "remediation_scope": "skeleton" }"#;
     let out = run(&driver(
         &format!(r#"{{ gateMode: "observe", traceRounds: [[{unclaimed}], []] }}"#),
         "[[]]",
@@ -377,123 +378,5 @@ fn a_finding_without_a_resolvable_path_falls_back_to_the_task_it_quotes_then_its
     );
 }
 
-#[test]
-fn a_finding_naming_no_frozen_task_stops_the_run_instead_of_being_dropped() {
-    let stray = r#"{ "text": "obligation AC-X-001 is hollow — task TASK-Z-999: \"x\"", "subject": "AC-X-001", "source_path": "/elsewhere/TASK-Z-999.md", "remediation_scope": "body" }"#;
-    let out = run(&driver("{}", &format!("[[{stray}], []]"), ""));
-    let error = out["error"].as_str().expect("the run must stop");
-    assert!(
-        error.contains("names no frozen task") && error.contains("TASK-Z-999"),
-        "{error}"
-    );
-    assert_eq!(
-        count(&out, "hostCalls", "land-task-body"),
-        2,
-        "nothing is re-authored: {out}"
-    );
-}
-
-const FROZEN_SUBJECTS: &str = r#"[{ taskId: "TASK-X-010", fileName: "TASK-X-010.md" }, { taskId: "TASK-X-020", fileName: "TASK-X-020.md" }]"#;
-
-#[test]
-fn a_fully_frozen_chain_is_verified_not_authored_before_the_set_gate() {
-    let args = format!(
-        r#"{{ frozenChain: {{ acceptance: true, skeleton: true, subjects: {FROZEN_SUBJECTS}, bodies: ["TASK-X-010.md", "TASK-X-020.md"] }} }}"#
-    );
-    let out = run(&driver(&args, "[[]]", ""));
-    assert!(out.get("error").is_none(), "{out}");
-    assert_eq!(
-        out["agentCalls"],
-        serde_json::json!([]),
-        "no author call at all: {out}"
-    );
-    assert_eq!(
-        out["hostCalls"],
-        serde_json::json!([
-            "verify-frozen-acceptance",
-            "verify-frozen-skeleton",
-            "task-set-lint",
-            "requirements-trace"
-        ]),
-        "{out}"
-    );
-    assert_eq!(
-        out["evidence"], 4,
-        "acceptance + skeleton + the two gates; frozen bodies carry no author outcome: {out}"
-    );
-}
-
-#[test]
-fn a_frozen_chain_with_one_body_missing_authors_only_that_body() {
-    let args = format!(
-        r#"{{ frozenChain: {{ acceptance: true, skeleton: true, subjects: {FROZEN_SUBJECTS}, bodies: ["TASK-X-010.md"] }} }}"#
-    );
-    let out = run(&driver(&args, "[[]]", ""));
-    assert!(out.get("error").is_none(), "{out}");
-    assert_eq!(
-        out["agentCalls"],
-        serde_json::json!(["body-TASK-X-020-author-1"]),
-        "{out}"
-    );
-    assert_eq!(
-        out["hostCalls"],
-        serde_json::json!([
-            "verify-frozen-acceptance",
-            "verify-frozen-skeleton",
-            "land-task-body",
-            "task-set-lint",
-            "requirements-trace"
-        ]),
-        "{out}"
-    );
-    assert_eq!(out["evidence"], 5, "{out}");
-}
-
-#[test]
-fn a_frozen_body_the_set_gate_sends_back_is_re_authored_like_any_other() {
-    let args = format!(
-        r#"{{ frozenChain: {{ acceptance: true, skeleton: true, subjects: {FROZEN_SUBJECTS}, bodies: ["TASK-X-010.md", "TASK-X-020.md"] }} }}"#
-    );
-    let finding = body_finding("TASK-X-010", &format!("\"{TASK_ROOT}/TASK-X-010.md\""));
-    let out = run(&driver(&args, &format!("[[{finding}], []]"), ""));
-    assert!(out.get("error").is_none(), "{out}");
-    assert_eq!(
-        out["agentCalls"],
-        serde_json::json!(["body-TASK-X-010-author-1"]),
-        "{out}"
-    );
-    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 2);
-    assert_eq!(
-        out["evidence"], 5,
-        "the re-authored frozen body now carries an author outcome: {out}"
-    );
-}
-
-#[test]
-fn a_frozen_acceptance_contract_alone_skips_only_the_acceptance_author() {
-    let out = run(&driver(
-        r#"{ frozenChain: { acceptance: true, skeleton: false, subjects: [], bodies: [] } }"#,
-        "[[]]",
-        "",
-    ));
-    assert!(out.get("error").is_none(), "{out}");
-    let agent_calls = out["agentCalls"].as_array().unwrap();
-    assert!(
-        agent_calls
-            .iter()
-            .all(|id| !id.as_str().unwrap().starts_with("acceptance-author-")),
-        "{out}"
-    );
-    assert_eq!(out["hostCalls"][0], "verify-frozen-acceptance", "{out}");
-    assert_eq!(out["hostCalls"][1], "freeze-skeleton", "{out}");
-    assert_eq!(out["evidence"], 6, "{out}");
-}
-
-#[test]
-fn a_frozen_chain_whose_subjects_differ_at_verification_stops_the_run() {
-    let args = r#"{ frozenChain: { acceptance: true, skeleton: true, subjects: [{ taskId: "TASK-X-010", fileName: "TASK-X-010.md" }], bodies: ["TASK-X-010.md"] } }"#;
-    let out = run(&driver(args, "[[]]", ""));
-    let error = out["error"].as_str().expect("the run must stop");
-    assert!(error.contains("changed underneath the run"), "{error}");
-    assert_eq!(out["agentCalls"], serde_json::json!([]), "{out}");
-}
+#[path = "workflow_decompose_set_gate_continuation_tests.rs"]
+mod continuation;

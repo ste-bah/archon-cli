@@ -170,3 +170,65 @@ fn excluded_numbers_are_defined_but_not_citable() {
         }));
     }
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn P5_11_cited_section() {
+    assert!(
+        section_citation_findings(
+            "## 1 Work\nRequired.\n",
+            [("TASK-X-001", &["1".into()][..])]
+        )
+        .is_empty()
+    );
+}
+#[test]
+#[allow(non_snake_case)]
+fn P5_12_uncited_section() {
+    let findings = section_citation_findings("## 1 Work\nRequired.\n", []);
+    assert_eq!(
+        findings[0].message,
+        "PRD section '1' (Work) is cited by no task's source_sections; cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements)"
+    );
+}
+#[test]
+#[allow(non_snake_case)]
+fn P5_13_preamble_requires_citation() {
+    let findings = section_citation_findings(
+        "Introduction.\n## 1 Work\nRequired.\n",
+        [("TASK-X-001", &["1".into()][..])],
+    );
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].identity.subject, "0");
+}
+#[test]
+#[allow(non_snake_case)]
+fn P5_14_parent_only_heading() {
+    assert!(
+        section_citation_findings(
+            "## 1 Work\n### 1.1 Details\nRequired.\n",
+            [("TASK-X-001", &["1.1".into()][..])]
+        )
+        .is_empty()
+    );
+}
+#[test]
+#[allow(non_snake_case)]
+fn P5_15_excluded_section() {
+    let findings = section_citation_findings(
+        "## 1 Non-Goals\nExcluded.\n",
+        [("TASK-X-001", &["1".into()][..])],
+    );
+    assert_eq!(findings[0].identity.code, "unknown_section");
+    assert!(findings[0].message.contains("excludes"));
+}
+#[test]
+#[allow(non_snake_case)]
+fn P5_17_trace_shares_section_text() {
+    let source = include_str!("../../../src/command/requirement_trace/evaluation.rs");
+    assert!(source.contains("section_citation_findings"));
+    let findings = section_citation_findings("## 1 Closing\nGuidance.\n", []);
+    assert!(findings[0].message.ends_with(
+        "or any one task when it justifies none (metadata, guidance or closing statements)"
+    ));
+}

@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::command::workflow_task_set::live_root;
-
 #[path = "workflow_acceptance_executability_stalled_tree.rs"]
 mod stalled_tree;
 
@@ -138,16 +137,16 @@ impl HostProbe {
                 let cancel = Arc::new(AtomicBool::new(false));
                 let mut results = Vec::new();
                 for reference in refs {
-                    match run_check_direct(&site, contract, digest, reference, cancel.clone())
-                        .await
+                    match run_check_direct(&site, contract, digest, reference, cancel.clone()).await
                     {
-                    Ok(result) => results.push(super::hermetic::CheckEvidence {
-                        result,
-                        copy_layout: None,
-                    }),
+                        Ok(result) => results.push(super::hermetic::CheckEvidence {
+                            result,
+                            copy_layout: None,
+                        }),
                         Err(error) => self.note(format!(
-                            "executability probe of '{}' could not run ({error}); it is proven on the hermetic trees instead",
-                            reference.acceptance_id
+                            "executability probe of '{}' could not run ({error}); {}",
+                            reference.acceptance_id,
+                            direct_fallback_note()
                         )),
                     }
                 }
@@ -166,6 +165,7 @@ impl HostProbe {
             };
         };
         let tree = Baseline {
+            origin: crate::command::workflow_task_set::executability::BaselineOrigin::ProbedTree,
             commit: head,
             repository: self.repository.clone(),
         };
@@ -214,6 +214,16 @@ impl HostProbe {
             return BTreeMap::new();
         }
         let mut findings = self.live_root_findings(contract, &all);
+        if let Some(base) = &self.baseline {
+            let packages = super::super::passability::package_findings(
+                contract,
+                &self.repository,
+                &self.project,
+                &base.commit,
+                matches!(&self.site, Site::Scratch(binding) if binding.policy.combined),
+            );
+            findings.extend(packages.into_iter().filter(|(id, _)| ids.contains(id)));
+        }
         let refs: Vec<FrozenCommandRef> = (all.into_iter())
             .filter(|reference| !findings.contains_key(&reference.acceptance_id))
             .filter(|reference| !self.is_unproven(&reference.acceptance_id))
@@ -258,6 +268,11 @@ impl HostProbe {
             run.results.iter().map(|evidence| &evidence.result),
             binding,
         ));
+        if let Some(base) = &self.baseline
+            && self.site_commit().as_deref() == Some(base.commit.as_str())
+        {
+            findings.extend(test_inventory::findings(self, base, contract, &run.results).await);
+        }
         // A4/A5: what did not crash must also be able to fail, and a repair
         // must keep its original's verdict. A check the site could not run
         // is still proven on the hermetic trees: it is never published on
@@ -312,6 +327,14 @@ impl HostProbe {
             let known = on_site(&baseline.commit).then_some(run.results.as_slice());
             let sound: Vec<FrozenCommandRef> = (sound.into_iter())
                 .filter(|reference| !findings.contains_key(&reference.acceptance_id))
+                // The failed-tree pass already settled this observation this round.
+                .filter(|reference| {
+                    !self
+                        .unproven
+                        .lock()
+                        .expect("unproven lock")
+                        .contains_key(&reference.acceptance_id)
+                })
                 .collect();
             findings.extend(
                 baseline::cannot_fail_findings(self, baseline, contract, &digest, &sound, known)
@@ -359,6 +382,16 @@ impl HostProbe {
         (self.unproven.lock().expect("unproven lock")).retain(|id, _| !ids.contains(id));
         let all = refs_for(contract, &digest, ids);
         let mut findings = self.live_root_findings(contract, &all);
+        if let Some(base) = &self.baseline {
+            let packages = super::super::passability::package_findings(
+                contract,
+                &self.repository,
+                &self.project,
+                &base.commit,
+                matches!(&self.site, Site::Scratch(binding) if binding.policy.combined),
+            );
+            findings.extend(packages.into_iter().filter(|(id, _)| ids.contains(id)));
+        }
         let sound: Vec<FrozenCommandRef> = (all.iter())
             .filter(|reference| !findings.contains_key(&reference.acceptance_id))
             .filter(|reference| !self.is_unproven(&reference.acceptance_id))
@@ -461,3 +494,7 @@ impl ExecutabilityProbe for HostProbe {
 
 #[path = "workflow_acceptance_executability_reverify.rs"]
 mod reverify;
+
+pub(super) fn direct_fallback_note() -> &'static str {
+    "it is proven on the hermetic trees when a pre-implementation tree exists; otherwise unproven"
+}

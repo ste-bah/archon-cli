@@ -174,3 +174,129 @@ async fn the_set_gate_reports_an_unreachable_critic_as_operational_never_a_pass(
     );
     assert!(error.contains("critic client"), "{error}");
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn P6_6_unparseable_body_has_only_a_parse_finding() {
+    let dir = tempfile::tempdir().unwrap();
+    let raw = "```yaml\nimplements: [REQ-X-001\n```\n";
+    assert!(
+        crate::command::requirement_trace::body_claim_findings(dir.path(), ws(), raw).is_empty()
+    );
+    let path = dir.path().join("TASK-WS-001.md");
+    let evaluation = crate::command::topology_lint::evaluate_task_file_candidate(
+        dir.path(),
+        &path,
+        raw.as_bytes(),
+        archon_core::config::GateMode::Enforce,
+    )
+    .unwrap();
+    assert_eq!(evaluation.findings.len(), 1);
+    assert_eq!(
+        evaluation.findings[0]
+            .deterministic_defect
+            .as_ref()
+            .unwrap()
+            .code,
+        "unparseable_task_file"
+    );
+}
+
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn P6_2_handle_staged_task_file_lint_blocks_yaml_only_claim_before_critic() {
+    const CHILD: &str = "ARCHON_P6_BODY_GATE_CHILD";
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = std::env::var_os(CHILD)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| dir.path().to_path_buf());
+    let tasks = cwd.join("tasks");
+    let path = tasks.join("TASK-WS-001.md");
+    let staging = cwd.join("staging");
+    let envelope = staging.join("gate-envelope.json");
+    if std::env::var_os(CHILD).is_some() {
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.workflow.gate_mode = archon_core::config::GateMode::Enforce;
+        let env = archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new());
+        handle_staged_task_file_lint(
+            &cwd,
+            Some(&path),
+            None,
+            None,
+            None,
+            true,
+            None,
+            Some(&staging),
+            Some(&envelope),
+            Some("p6-body"),
+            &config,
+            &env,
+        )
+        .await
+        .unwrap();
+        return;
+    }
+    std::fs::create_dir(&tasks).unwrap();
+    let raw = "```yaml\ntask_id: TASK-WS-001\ntitle: T\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [REQ-WS-001]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- src/lib.rs\n\n## Focused Tests\n\n- `cargo test -p w`\n";
+    let clean = crate::command::topology_lint::evaluate_task_file_candidate(
+        &cwd,
+        &path,
+        raw.as_bytes(),
+        archon_core::config::GateMode::Enforce,
+    )
+    .unwrap();
+    assert!(clean.findings.is_empty(), "{}", clean.report);
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            concat!(
+                module_path!(),
+                "::P6_2_handle_staged_task_file_lint_blocks_yaml_only_claim_before_critic"
+            )
+            .split_once("::")
+            .unwrap()
+            .1,
+            "--nocapture",
+        ])
+        .env(CHILD, &cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(raw.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"),
+        "the child must run the staged lint test: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let written: archon_workflow::GateEnvelopeV1 =
+        serde_json::from_slice(&std::fs::read(envelope).unwrap()).unwrap();
+    assert!(
+        written.operational_error.is_none(),
+        "critic was skipped: {written:?}"
+    );
+    assert_eq!(written.policy_findings.len(), 1, "{written:?}");
+    assert!(
+        written.policy_findings[0]
+            .text
+            .contains("never names REQ-WS-001 outside its implements list")
+    );
+    assert_eq!(
+        written.policy_findings[0].remediation_scope,
+        archon_workflow::RemediationScope::Body
+    );
+    assert!(!path.exists(), "the body remains unpublished");
+}

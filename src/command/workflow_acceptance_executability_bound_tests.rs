@@ -28,6 +28,7 @@ fn round(trees: &Trees, copies: &std::path::Path) -> HostProbe {
         None,
     )
     .with_baseline(Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: trees.repo.clone(),
     })

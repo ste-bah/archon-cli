@@ -286,10 +286,15 @@ pub(super) fn inspect_raw(
                     .filter(|finding| !(finding.identity.code == "unowned_obligation"
                         && expected_ids.constraints.contains(&finding.identity.subject)))
                     .map(|finding| {
-                        let text = format!("{}: {}", finding.field, finding.message);
+                        let text = finding.message;
                         deterministic.entry(text.clone()).or_default().push_back(finding.identity);
                         text
                     }));
+                for finding in archon_workflow::task_skeleton::constraint_owner_findings(
+                    &draft, &archon_workflow::obligation_ids::constraint_texts(&expected_ids.prd_text),
+                ) {
+                    block(&mut blockers, &mut deterministic, finding.message, finding.identity);
+                }
                 for finding in archon_workflow::obligation_ids::section_citation_findings(
                     &expected_ids.prd_text,
                     draft.tasks.iter().map(|task| (task.task_id.as_str(), task.source_sections.as_slice())),

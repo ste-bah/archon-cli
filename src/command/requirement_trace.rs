@@ -33,6 +33,7 @@
 //! happens on every path out of a mutation.
 
 mod claims;
+pub(crate) use claims::body_claim_findings;
 mod evaluation;
 mod evidence;
 mod falsify;

@@ -109,7 +109,24 @@ pub(super) fn expands(word: &str) -> bool {
 }
 
 /// The words of each simple command of `text`, quotes removed.
-fn lex(text: &str) -> Vec<Vec<String>> {
+pub(super) fn lex(text: &str) -> Vec<Vec<String>> {
+    lex_with_heredocs(text, |_, _| {})
+}
+
+/// Blank heredoc data before splitting shell control flow, using the lexer's ranges.
+pub(super) fn without_heredoc_bodies(text: &str) -> String {
+    let mut chars: Vec<char> = text.chars().collect();
+    lex_with_heredocs(text, |start, end| {
+        for c in &mut chars[start..end] {
+            if *c != '\n' {
+                *c = ' ';
+            }
+        }
+    });
+    chars.into_iter().collect()
+}
+
+fn lex_with_heredocs(text: &str, mut skipped: impl FnMut(usize, usize)) -> Vec<Vec<String>> {
     let chars: Vec<char> = text.chars().collect();
     let (mut commands, mut words, mut word) = (Vec::new(), Vec::new(), String::new());
     let mut heredocs: Vec<(String, bool)> = Vec::new();
@@ -205,7 +222,9 @@ fn lex(text: &str) -> Vec<Vec<String>> {
                 }
                 at += 1;
                 if c == '\n' {
+                    let start = at;
                     at = skip_heredocs(&chars, at, &mut heredocs);
+                    skipped(start, at);
                 }
                 continue;
             }

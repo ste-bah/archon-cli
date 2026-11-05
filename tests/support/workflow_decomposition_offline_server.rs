@@ -7,6 +7,8 @@ use std::time::Duration;
 
 #[path = "workflow_decomposition_offline_server_http.rs"]
 mod http;
+#[path = "workflow_decomposition_offline_server_skeleton_reply.rs"]
+mod skeleton_reply;
 use http::next_request;
 
 #[derive(Clone, Debug, Default)]
@@ -193,6 +195,13 @@ impl FakeProvider {
         self.counts.0.lock().unwrap().clear();
         self.requests.0.lock().unwrap().clear();
     }
+
+    /// Resume cells assert exact totals across both CLI launches.
+    /// Only the r17 test binary calls it.
+    #[allow(dead_code)]
+    pub fn set_variant_preserving_history(&self, variant: Variant) {
+        *self.variant.lock().unwrap() = variant;
+    }
 }
 
 fn serve_connection(
@@ -239,6 +248,15 @@ fn serve_connection(
             *count
         };
         let answer = variants::refute_first_judge_answer(role, &prompt, answer, variant, nth);
+        let answer = if let Variant::R17(cell) = variant {
+            if role == "fidelity" {
+                variants::r17::critic(&prompt, answer, cell, &requests.snapshot())
+            } else {
+                answer
+            }
+        } else {
+            answer
+        };
         requests.0.lock().unwrap().push(RequestRecord {
             method: request.method,
             path: request.path,
@@ -267,6 +285,14 @@ fn serve_connection(
             }
         }
 
+        let stop = if matches!(variant, Variant::R17(variants::r17::Cell::V4))
+            && role == "fidelity"
+            && (answer == "{\"verdicts\":[" || answer.is_empty())
+        {
+            "max_tokens"
+        } else {
+            "end_turn"
+        };
         let escaped = serde_json::to_string(&answer).unwrap();
         let (status, content_type, response) = if !known_path {
             (
@@ -286,6 +312,17 @@ fn serve_connection(
                 "application/json",
                 answer.clone(),
             )
+        } else if role == "skeleton" {
+            let message = skeleton_reply::skeleton_message(&body, &answer);
+            if body["stream"] == false {
+                ("200 OK", "application/json", message.to_string())
+            } else {
+                (
+                    "200 OK",
+                    "text/event-stream",
+                    skeleton_reply::stream_message(&message),
+                )
+            }
         } else if body["stream"] == false {
             (
                 "200 OK",
@@ -293,7 +330,7 @@ fn serve_connection(
                 serde_json::json!({
                     "id": "msg-local", "type": "message", "role": "assistant",
                     "content": [{"type": "text", "text": answer}], "model": "offline",
-                    "stop_reason": "end_turn", "stop_sequence": null,
+                    "stop_reason": stop, "stop_sequence": null,
                     "usage": {"input_tokens": 1, "output_tokens": 1}
                 })
                 .to_string(),
@@ -309,7 +346,7 @@ fn serve_connection(
                 "200 OK",
                 "text/event-stream",
                 format!(
-                    "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg-local\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"offline\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\nevent: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":{escaped}}}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}},\"usage\":{{\"output_tokens\":1}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
+                    "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg-local\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"offline\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\nevent: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":{escaped}}}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"{stop}\",\"stop_sequence\":null}},\"usage\":{{\"output_tokens\":1}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 ),
             )
         };

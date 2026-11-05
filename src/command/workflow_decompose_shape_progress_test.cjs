@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
+const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
   'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const shape = (field, text = `${field} invalid`) => ({
@@ -194,7 +194,7 @@ function skeletonPromptAndShape() {
     repositoryRoot:'/repo', projectRoot:'/project', prdObligationIds:ids}});
   vm.createContext(ctx); vm.runInContext(source, ctx);
   const prompt = ctx.skeletonPolicy([]).prompt();
-  assert.ok(prompt.startsWith('Author one complete task-skeleton JSON artifact'));
+  assert.ok(prompt.startsWith('Land task records for the frozen acceptance contract.'));
   for (const line of [
     'Every PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids.',
     'Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work.',
@@ -207,7 +207,7 @@ function skeletonPromptAndShape() {
   ]) assert.ok(prompt.includes(line), `skeleton prompt lacks: ${line}`);
   assert.ok(!prompt.includes('ids the PRD defines'));
   const shape = JSON.parse(vm.runInContext('SKELETON_SHAPE', ctx));
-  assert.deepEqual(shape.tasks[0].implements, ['<obligation id the host lists>']);
+  assert.deepEqual(shape.tasks[0].implements, ['<obligation or constraint id the host lists>']);
   assert.deepEqual(shape.tasks[0].deliverable_contracts[0], {
     kind:'<short stable name for what this task produces>',
     artifact_path:'<path this task produces, exactly as its dependents consume it>',

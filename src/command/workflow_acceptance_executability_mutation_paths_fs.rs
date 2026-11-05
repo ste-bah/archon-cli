@@ -11,14 +11,12 @@ pub fn diagnostic_path(
         if mapped.as_os_str().is_empty() {
             ".".into()
         } else {
-            mapped.to_string_lossy().into_owned()
+            archon_shell::paths::stored_text(&mapped)
         }
     } else {
-        mapped_sibling.or(manifest_sibling).unwrap_or_else(|| {
-            relative_path(paths.0, paths.1)
-                .to_string_lossy()
-                .into_owned()
-        })
+        mapped_sibling
+            .or(manifest_sibling)
+            .unwrap_or_else(|| archon_shell::paths::stored_text(&relative_path(paths.0, paths.1)))
     }
 }
 

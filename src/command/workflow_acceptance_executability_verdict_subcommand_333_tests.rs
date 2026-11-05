@@ -91,7 +91,7 @@ fn a_hanging_listing_is_asked_once_for_every_check_and_command() {
 }
 
 #[test]
-fn a_tool_with_no_dispatched_program_anywhere_is_never_listed() {
+fn a_tool_without_plugins_is_listed_to_establish_builtins() {
     let calls_file = tempfile::NamedTempFile::new().unwrap();
     let listing = "printf 'Commands:\\n    build    Build\\n'; exit 0";
     let tool = counting_tool("archon333count", calls_file.path(), listing);
@@ -103,8 +103,9 @@ fn a_tool_with_no_dispatched_program_anywhere_is_never_listed() {
         "archon333count --color never lint",
     ];
     let warned = unresolved_on_path(&texts, &bin.context());
-    assert!(warned.iter().all(Vec::is_empty), "{warned:?}");
-    assert_eq!(calls(calls_file.path()), 0, "never asked");
+    // S5: a fresh run start must establish the same listing as the verdict.
+    assert!(warned.iter().all(|items| items.len() == 1), "{warned:?}");
+    assert_eq!(calls(calls_file.path()), 1, "listed once for all checks");
 }
 
 #[test]
@@ -319,12 +320,14 @@ fn an_alias_the_deliverable_adds_counts_once_the_check_shows_it() {
     );
     let why = no_verdict(plain, &run, &bin.context()).expect("never a proof");
     assert!(
-        why.contains("passes only if the deliverable adds it"),
+        why.contains("neither the site nor the host has it"),
         "{why}"
     );
     let warned = bin.warned(plain);
     assert!(
-        warned.len() == 1 && warned[0].contains("passes only if the deliverable adds it"),
+        warned.len() == 1
+            && warned[0]
+                .contains("the check must use an available program or the deliverable must add it"),
         "{warned:?}"
     );
     let shown = "cargo --list | grep -qw archon333alias && cargo archon333alias";

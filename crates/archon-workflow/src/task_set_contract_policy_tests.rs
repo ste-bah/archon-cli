@@ -128,3 +128,23 @@ fn judge_prose_is_capped() {
     let expected = format!("reason: \"{}…\"", "é".repeat(JUDGE_PROSE_CAP));
     assert!(message.contains(&expected), "{message}");
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn P4_18_site_path_remedy_is_shared_with_reauthor() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    let repository = root.path().join("repository");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&repository).unwrap();
+    let candidate: super::super::AcceptanceCriterion = serde_json::from_value(serde_json::json!({
+        "id":"AC-X-001", "criterion":"exercise a real input",
+        "check":{"kind":"command", "cwd":"repo_root", "command":"cat ../repository/input"},
+        "gap_permitted":false,
+        "judgment":{"verdict":"accepted", "counterexample":"none", "reason":"sound", "host_call_id":"test"}
+    })).unwrap();
+    let defect = acceptance_site_path_defect(&candidate, &project, &repository, false).unwrap();
+    assert!(defect.contains("From repo_root name repository paths without `..`; when the repository directory sits beside the project, reach it from project_root using cwd project_root and ../<repository dir>/"));
+    let mirror = include_str!("../../../src/command/workflow_acceptance_reauthor_check_defects.rs");
+    assert!(mirror.contains("task_set_contract::acceptance_site_path_defect("));
+}

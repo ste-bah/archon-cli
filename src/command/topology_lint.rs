@@ -35,6 +35,7 @@ mod fidelity;
 mod fidelity_candidate_fallback;
 mod fidelity_critic;
 mod fidelity_resume;
+mod finding_scope;
 pub(crate) use fidelity_resume::LintIncomplete;
 pub(crate) mod fidelity_store;
 mod fidelity_waivers;
@@ -45,7 +46,7 @@ mod preflight;
 mod render;
 mod repository_claims;
 mod repository_observations;
-mod scope_declarations;
+pub(crate) mod scope_declarations;
 mod task_file;
 mod task_set;
 mod tool_obligations;
@@ -178,7 +179,7 @@ fn run_lint_with_mode(
             load_graph(cwd, source).unwrap_err()
         ),
     };
-    out.push_str(&coverage::section(tasks_root.as_deref()));
+    out.push_str(&coverage::section_with_mode(tasks_root.as_deref(), mode));
     // Fifth section, and like coverage it is not a graph analysis: it asks
     // whether each task's frontmatter accounts for the commands that task
     // declares it will run. Advisory for the same reason the others are —
@@ -363,19 +364,12 @@ pub(crate) fn evaluate_lint(
                 source_path.clone(),
                 remediation_scope,
             );
-            if identity
-                .as_ref()
-                .is_some_and(|id| matches!(id.code.as_str(), "uncited_section" | "unknown_section"))
-            {
-                finding.remediation_scope = archon_workflow::RemediationScope::Skeleton;
-                let root = source_path.as_deref().map(|path| match source {
-                    LintSource::TaskFile(_) => path.parent().unwrap_or(cwd),
-                    _ => path,
-                });
-                finding.source_path = root
-                    .map(|path| path.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE));
-            }
             finding.deterministic_defect = identity;
+            let root = source_path.as_deref().map(|path| match source {
+                LintSource::TaskFile(_) => path.parent().unwrap_or(cwd),
+                _ => path,
+            });
+            finding_scope::route(&mut finding, root);
             finding
         })
         .collect::<Vec<_>>();
@@ -447,6 +441,7 @@ pub(crate) fn evaluate_lint(
                 gate
             }),
     );
+    coverage::deduplicate(&mut findings);
     let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);
     let operational = match (graph_error, repository_error) {
         (Some(graph), Some(repository)) => Some(format!("{graph}; {repository}")),
@@ -468,7 +463,6 @@ pub(crate) fn evaluate_lint(
         None => evaluation,
     })
 }
-
 fn describe(source: &LintSource) -> String {
     match source {
         LintSource::TaskFile(path) => {
@@ -483,7 +477,6 @@ fn describe(source: &LintSource) -> String {
         LintSource::Graph(id) => format!("recorded graph {id}"),
     }
 }
-
 fn absolute(cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()

@@ -134,7 +134,7 @@ async fn issue557_a_scratch_freeze_sends_an_unguarded_alias_to_its_author_and_pr
     );
     let why = findings.get("AC-333-001").expect("never a proof");
     assert!(
-        why.contains("passes only if the deliverable adds it"),
+        why.contains("neither the site nor the host has it"),
         "{why}"
     );
     assert!(why.contains("no host action makes it available"), "{why}");

@@ -33,7 +33,6 @@
 // entry's strictly better shape measure cancels only the no-progress attempts
 // of its episode; attempts before the episode still count, so a candidate
 // that keeps coming back refuted still pauses.
-
 // Independent consecutive windows: author attempts exclude operational
 // failures, which the author cannot repair.
 const STALL_ATTEMPTS = 3;
@@ -41,7 +40,6 @@ const STALL_ATTEMPTS = 3;
 const PAUSE_EVIDENCE_FINDINGS = 20;
 const PAUSE_EVIDENCE_HISTORY = 64;
 const PAUSE_EVIDENCE_TEXT = 500;
-
 // How far an attempt's artifact got. A reply the host could not parse at all
 // (packaging) is below one it parsed and refused without a judge, which is
 // below one it judged: fewer findings at a lower tier is not an improvement.
@@ -65,16 +63,13 @@ const STAGE_CODES = {
   freeze: ["acceptance_digest_mismatch", "frozen_field_changed", "missing_frozen_task", "extra_task", "unreadable_acceptance_pin", "prd_identity_mismatch", "task_absent_from_skeleton", "partial_skeleton_freeze", "predecessor_findings", "invalid_acceptance_bundle", "invalid_skeleton_chain"],
 };
 const REFUSED_PREFIX = "candidate artifact was refused:";
-
 function progressText(finding) {
   return typeof finding === "string" ? finding : String((finding && finding.text) || "");
 }
-
 function hostDefect(finding) {
   const defect = finding && finding.deterministic_defect;
   return defect && defect.provenance === "host_validator" && typeof defect.code === "string" ? defect : null;
 }
-
 // A finding the host decided, not the judge: a structured host identity, or
 // one of the host's own refusal texts from an envelope that predates them.
 function isDeterministic(finding) {
@@ -82,7 +77,6 @@ function isDeterministic(finding) {
   const text = progressText(finding);
   return text.includes(PACKAGING_REFUSAL) || text.startsWith(REFUSED_PREFIX);
 }
-
 // A refusal whose shape is wrong was parsed: it is refused, not packaging.
 function findingTier(findings) {
   const tiers = findings.map((finding) => {
@@ -99,7 +93,6 @@ function findingTier(findings) {
   // Mixed validator/judge reports reached the strongest reported tier.
   return tiers.reduce((tier, next) => Math.max(tier, next), PACKAGING_TIER);
 }
-
 // A host defect's stage, or its code's stage when the envelope predates
 // stages. A host text refusal without an identity never claims a later stage
 // than the first.
@@ -111,7 +104,6 @@ function stageOf(finding) {
   const staged = Object.keys(STAGE_CODES).find((stage) => STAGE_CODES[stage].includes(defect.code));
   return DEFECT_STAGES.indexOf(staged || "contracts");
 }
-
 function attemptMeasure(findings) {
   const tier = findingTier(findings);
   const deterministic = findings.filter(isDeterministic);
@@ -121,14 +113,12 @@ function attemptMeasure(findings) {
     failingSubjects: new Set(findings.map(failingSubjectKey))
   };
 }
-
 function isBetter(measure, best) {
   if (!best) return true;
   if (measure.tier !== best.tier) return measure.tier > best.tier;
   if (measure.stage !== best.stage) return measure.stage > best.stage;
   return measure.count < best.count;
 }
-
 // Host-produced deterministic identities never use diagnostic prose or rejected
 // values. Older envelopes and judged findings retain a conservative text key:
 // rewording can change identity, but cannot count as progress at the same count.
@@ -144,7 +134,6 @@ function findingKey(finding) {
   const path = typeof finding === "object" && finding && typeof finding.source_path === "string" ? finding.source_path : "";
   return JSON.stringify([subject, path, words]);
 }
-
 function newProgress(_seed) {
   return {
     best: null,
@@ -163,7 +152,6 @@ function newProgress(_seed) {
     answered: 0
   };
 }
-
 function newRepairEpisode(stalled) {
   return {
     bests: new Map(),
@@ -173,12 +161,10 @@ function newRepairEpisode(stalled) {
     stalled
   };
 }
-
 // Opens the repair episode that follows a measured candidate.
 function openRepairEpisode(progress) {
   progress.repair = newRepairEpisode(progress.stalled);
 }
-
 function recordStep(progress, entry, gateSucceeded = false) {
   const operational = entry.kind === "operational" || entry.outage === true;
   if (entry.progress) {
@@ -194,12 +180,10 @@ function recordStep(progress, entry, gateSucceeded = false) {
   progress.history.push(entry);
   return entry.progress;
 }
-
 // What one author round reports to the window: the entries that passed in
 // it and whether any of its calls failed in transport. A loop without an
 // entry author has no rounds (NO_ROUND).
 const NO_ROUND = Object.freeze({ passed: Object.freeze([]), outage: false });
-
 function authorRoundReport(policy, state) {
   if (!policy.author) return NO_ROUND;
   if (!Array.isArray(state.roundPassed) || typeof state.roundOutage !== "boolean") {
@@ -207,7 +191,6 @@ function authorRoundReport(policy, state) {
   }
   return { passed: state.roundPassed, outage: state.roundOutage };
 }
-
 // Only a strict subset of the baseline failing-subject set, a better #562 ratchet
 // (gateStageStep) or a measure that beats every
 // earlier attempt is progress. Trading defects cannot shrink the set, and
@@ -243,10 +226,8 @@ function recordAttempt(progress, call, findings, answered = true, round = NO_ROU
   if (round.outage) entry.outage = true;
   return recordStep(progress, entry, true);
 }
-
 // The measure of an entry that passed the author step: better than any refusal.
 const PASSED_MEASURE = { tier: JUDGED_TIER, stage: PASSED_STAGE, count: 0 };
-
 // Credits each entry that passed this round and was measured (refused) in
 // the current repair episode: its first pass beats its best. A pass is the
 // maximum, so each entry is credited at most once per episode. An entry with
@@ -263,7 +244,6 @@ function creditPassed(episode, passed) {
   }
   return credited;
 }
-
 // Closes one author round. `advanced` (a previously missing entry was
 // completed) empties the window. An entry that beat its own best restores the
 // window to where the repair episode opened, never below it, so attempts
@@ -279,11 +259,9 @@ function recordRound(progress, entry, better, advanced, outage, gateSucceeded = 
   progress.history.push(entry);
   return true;
 }
-
 function restoreFloor(progress) {
   progress.stalled = Math.min(progress.stalled, progress.repair.stalled);
 }
-
 // Records one author round that refused entries for their shape. Each refused
 // entry is measured against its own best in the current repair episode (a
 // first measure beats nothing), and each entry that passed this round is
@@ -363,7 +341,6 @@ function recordRepairs(progress, call, refusals, round = NO_ROUND, answered = tr
     progress: false, entries
   }, better || credited.length > 0, advanced, round.outage);
 }
-
 // Malformed replies have stable refusal classes (wrong id, missing end_turn,
 // parse-error kind and source location). Parse errors with known locations
 // progress only when their source position moves beyond this entry's furthest
@@ -376,7 +353,6 @@ function creditedRound(progress, entry, round, advanced) {
   if (credited.length > 0) entry.entries = credited;
   return recordRound(progress, entry, credited.length > 0, advanced, round.outage && entry.kind !== "operational");
 }
-
 // Records an attempt the provider answered but nothing measured: an
 // incomplete reply, or an acceptance round that ended on malformed replies.
 // `advanced` is true only when the round completed a previously missing
@@ -385,7 +361,6 @@ function recordAnswered(progress, call, kind, advanced = false, answered = true,
   if (answered) progress.answered += 1;
   return creditedRound(progress, { call, kind, findings: null, progress: false }, round, advanced);
 }
-
 // Records an author call the provider never answered, or a gate that never
 // judged the candidate; `round` is the author round that made the attempt. A
 // pass in it, or a previously missing entry it added (`advanced`), is
@@ -395,19 +370,16 @@ function recordOperational(progress, call, summary, advanced = false, round = NO
   return creditedRound(progress, { call, kind: "operational", findings: null, progress: false,
     summary: `${component}: ${boundText(summary)}` }, round, advanced);
 }
-
 // Why the loop must stop now, or null while it may make another attempt.
 function stallReason(progress) {
   if (progress.stalledOperational >= STALL_ATTEMPTS) return "operational_no_progress";
   if (progress.stalled >= STALL_ATTEMPTS) return "no_progress";
   return null;
 }
-
 function boundText(text) {
   const value = String(text === undefined || text === null ? "" : text);
   return value.length > PAUSE_EVIDENCE_TEXT ? `${value.slice(0, PAUSE_EVIDENCE_TEXT)}...` : value;
 }
-
 function boundFindings(findings) {
   return (findings || []).slice(0, PAUSE_EVIDENCE_FINDINGS).map(boundText);
 }
@@ -481,15 +453,45 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
 // latest gate result (`latest`, by entry id). An earlier finding it no longer
 // reports moves to that entry's do-not-regress list; one that reopens is
 // current again.
+const GATE_FINDING_KEYS = new WeakMap();
+function gateFindingKey(id, finding, list, index) {
+  const defect = finding && typeof finding === "object" && finding.deterministic_defect;
+  if (defect) return JSON.stringify([defect.code, defect.location]);
+  const text = finding && typeof finding === "object" ? finding.text : finding;
+  return GATE_FINDING_KEYS.get(list)?.[index] || JSON.stringify([id, String(text).split(";", 1)[0]]);
+}
+function keepGateFinding(list, text, key) {
+  const keys = GATE_FINDING_KEYS.get(list) || [];
+  keys[list.length] = key;
+  GATE_FINDING_KEYS.set(list, keys);
+  list.push(text);
+}
+function pushGateFinding(list, finding, id) {
+  const key = gateFindingKey(id, finding);
+  if (!list.some((text, index) => gateFindingKey(id, text, list, index) === key))
+    keepGateFinding(list, String(finding.text || "unnamed policy finding"), key);
+}
 function settleGateFindings(state, latest) {
   const earlier = state.earlierGateFindings || new Map();
   for (const [id, prior] of state.gateFindings || new Map()) {
     const kept = earlier.get(id) || [];
-    for (const text of prior) if (!(latest.get(id) || []).includes(text) && !kept.includes(text)) kept.push(text);
+    const open = latest.get(id) || [];
+    const openKeys = new Set(open.map((text, index) => gateFindingKey(id, text, open, index)));
+    prior.forEach((text, index) => {
+      const key = gateFindingKey(id, text, prior, index);
+      if (!openKeys.has(key) && !kept.some((held, at) => gateFindingKey(id, held, kept, at) === key))
+        keepGateFinding(kept, text, key);
+    });
     if (kept.length > 0) earlier.set(id, kept);
   }
   for (const [id, open] of latest) {
-    const kept = (earlier.get(id) || []).filter(text => !open.includes(text));
+    const prior = earlier.get(id) || [];
+    const kept = [];
+    const openKeys = new Set(open.map((text, index) => gateFindingKey(id, text, open, index)));
+    prior.forEach((text, index) => {
+      const key = gateFindingKey(id, text, prior, index);
+      if (!openKeys.has(key)) keepGateFinding(kept, text, key);
+    });
     if (kept.length > 0) earlier.set(id, kept);
     else earlier.delete(id);
   }

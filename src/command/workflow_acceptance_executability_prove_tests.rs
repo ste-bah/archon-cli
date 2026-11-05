@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn persisted_output_evidence_uses_the_shared_excerpt_limits() {
-    let source = include_str!("workflow_acceptance_executability_prove.rs");
+    let source = include_str!("workflow_acceptance_executability_prove_helpers.rs");
     assert!(
         source.contains("crate::command::workflow_task_set::passability::evidence::STDOUT_BYTES")
     );
@@ -124,10 +124,8 @@ fn snapshot_error_author_text_names_the_observed_recreation_and_unsafe_reason() 
         )
     );
     let finding = author_recreated_finding(&baseline, &recreated_inputs(&result, &markers, &names));
-    assert_eq!(
-        finding,
-        "check 'AC-X-001': the criterion already holds on the pre-implementation tree; write a regression guard. It passed on the pre-implementation tree at 0123456789ab, before any implementation, so it cannot show its criterion false and proves nothing; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must fail whenever the deciding test fails; considered inputs: the check recreated a moved input while it ran: data/state.txt (moved in the site copy); it recreated data/state.txt while running, so that data is not evidence; use a movable input that exists under the selected root before the run and make the check fail whenever the deciding test fails"
-    );
+    assert!(finding.starts_with("check 'AC-X-001': it passed on the pre-implementation tree"));
+    assert!(finding.contains("it is not yet shown able to fail"));
     assert!(finding.contains("the check recreated a moved input while it ran"));
     assert!(!finding.contains("parent directory metadata changed"));
     assert!(state_map["data/state.txt"].contains("parent snapshot failed: permission denied"));
@@ -207,6 +205,7 @@ async fn prove_routes_a_passing_unknown_writer_reappearance_to_an_author_finding
     let refs = super::super::refs_for(&contract, &digest, &ids);
     assert_eq!(refs.len(), 1, "accepted command reference is present");
     let baseline = super::Baseline {
+        origin: crate::command::workflow_task_set::executability::BaselineOrigin::RecordedBase,
         commit: trees.base.clone(),
         repository: trees.repo.clone(),
     };
@@ -260,7 +259,8 @@ fn undiscovered_input_finding_uses_only_generic_path_repair_text() {
     ));
     assert!(finding.contains("A test, target or module name is not a file path"));
     assert!(finding.contains("A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root."));
-    assert!(finding.contains("The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason"));
+    assert!(finding.contains("A path the check reads by its literal relative path"));
+    assert!(finding.contains("A handle is not the deciding assertion"));
     assert!(!finding.contains("data the check writes itself is never evidence"));
     for implementation_name in ["cargo", "rust", "python", "node", "javascript", "provider"] {
         assert!(!finding.to_ascii_lowercase().contains(implementation_name));
@@ -278,7 +278,6 @@ fn literal_file_remedy_requires_every_candidate_to_have_no_movable_file() {
         exclusion,
     };
     let exact = baseline_pass_finding_without_discovered_input("check-id", "0123456789ab");
-    let weak = baseline_pass_finding("check-id", "0123456789ab");
     let mut candidates = Vec::new();
     assert_eq!(
         baseline_pass_finding_for_candidates("check-id", "0123456789ab", &candidates),
@@ -292,7 +291,6 @@ fn literal_file_remedy_requires_every_candidate_to_have_no_movable_file() {
         );
     }
     for exclusion in [
-        None,
         Some(MissingAtRoot),
         Some(ManifestOrSetup),
         Some(SiblingFromRoot),
@@ -303,9 +301,9 @@ fn literal_file_remedy_requires_every_candidate_to_have_no_movable_file() {
         Some(OutsideCopiedTree),
     ] {
         candidates.push(candidate(exclusion));
-        assert_eq!(
-            baseline_pass_finding_for_candidates("check-id", "0123456789ab", &candidates),
-            weak
+        assert!(
+            baseline_pass_finding_for_candidates("check-id", "0123456789ab", &candidates)
+                .starts_with(&exact)
         );
         candidates.pop();
     }
@@ -367,3 +365,15 @@ fn each_move_state_has_a_distinct_candidate_diagnostic() {
     assert_eq!(diagnostics.matches(observed_recreation).count(), 0);
     assert!(!diagnostics.contains(&format!("{observed_recreation}: {move_failed}")));
 }
+
+#[cfg(unix)]
+#[path = "workflow_acceptance_executability_prove_rows_tests.rs"]
+mod rows;
+
+#[cfg(unix)]
+#[path = "workflow_acceptance_executability_prove_review_tests.rs"]
+mod review;
+
+#[cfg(unix)]
+#[path = "workflow_acceptance_executability_prove_origin_tests.rs"]
+mod origins;

@@ -39,8 +39,7 @@ async fn provider_refusal_keeps_its_category_in_the_round_record() {
     let contract = exec::load_contract(&context).unwrap().0;
     let base =
         crate::command::workflow_task_set::executability::Baseline::head_of(run.set.project.path())
-            .unwrap()
-            .commit;
+            .unwrap();
     let (repair, _) = repair_unaccepted(Some(&OtherProvider), &context, &contract, Some(&base))
         .await
         .unwrap()

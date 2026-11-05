@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = [
-  'workflow_decompose_v1.js',
+  'workflow_decompose_v1.js', 'workflow_decompose_v1_body.js',
   'workflow_decompose_reply_blocks.js',
   'workflow_decompose_v1_acceptance.js',
   'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js',

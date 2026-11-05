@@ -148,10 +148,12 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 571: the acceptance shape and covers rule name the REQ- requirement prefix.
     // Issue 572: the skeleton and body authors get the host-listed PRD constraint texts and their placement and keep rules.
     // Issue 574/575: constraint wording names table rows; the skeleton shape gains source_sections, the skeleton author gets the qualifying PRD section keys and texts, and the body author its frozen source_sections and their texts.
+    // #584 P1-P6 integration: acceptance, skeleton and body author scripts changed.
+    // #587: named Skeleton findings also reach their body author after re-freeze.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "1531a58561aa2b8e12673e73f0e1dc2377aefb007f3aa435f58c3d775db56f20"
+        "a9ad815e4cf78d021024a3577d32594d6382d963e7a45ec10883d85bd4f703f8"
     );
 }

@@ -137,7 +137,7 @@ impl FaultCause {
                 "name only the sibling files or directories it reads, and keep bulky data out of them",
             ),
             Self::SiblingShapeRefused => check(
-                "it names a path outside its working directory that is not a directory where one is needed, or that collides with a path of the site",
+                "it names a path outside its working directory whose sibling root is absent, is not a directory where one is needed, or collides with a path of the site",
                 "name only existing sibling files or directories beside its working directory, by the path they have",
             ),
             Self::OutputLimitExceeded => check(

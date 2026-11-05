@@ -21,7 +21,15 @@ impl RecordLanding {
         records: &BTreeMap<String, StageRecord>,
     ) -> WorkflowResult<String> {
         // Before the first landing there is no count to state yet.
-        let last = if records.is_empty() {
+        let pending = self.require_repaired().err();
+        let last = if let Some(error) = pending {
+            let action = if self.skeleton_is_frozen()? {
+                "Re-land valid tasks under these subject ids, preserving frozen task ids and file names, before replying."
+            } else {
+                "Correct or withdraw these tasks before replying."
+            };
+            format!("Completion is pending: {error}. {action}")
+        } else if records.is_empty() {
             "Land each task as one record; every landing receipt ends with the exact final reply."
                 .to_owned()
         } else {
@@ -64,6 +72,7 @@ impl RecordLanding {
         if self.kind != RecordKind::Skeleton {
             return Ok(None);
         }
+        self.require_repaired()?;
         let retained = self.records()?.len();
         Ok((retained > 0).then(|| json!({"records_landed": retained})))
     }

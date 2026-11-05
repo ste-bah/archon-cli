@@ -189,7 +189,8 @@ async fn workflow_decompose_launch_repair_task_set_error_transient_judge_recover
     let error = format!(
         "{:#}",
         tokio::time::timeout(
-            std::time::Duration::from_secs(30),
+            // Four real host-probe rounds plus retry backoff must fit under parallel gates.
+            std::time::Duration::from_secs(120),
             launch_with(&fixture, &JudgeRepairFactory(client.clone()))
         )
         .await

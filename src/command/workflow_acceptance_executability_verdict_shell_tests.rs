@@ -54,3 +54,39 @@ fn shell_option_refusal_wordings_are_classified_without_running_a_shell() {
 
 #[path = "evidence_423_shell_tests.rs"]
 mod evidence_423;
+
+#[test]
+#[allow(non_snake_case)]
+fn P2_8_shell_rejects_its_own_argv() {
+    assert!(
+        no_verdict(
+            "bash -z -c :",
+            &run(Some(2), "", "bash: -z: invalid option"),
+            &host()
+        )
+        .is_some()
+    );
+}
+#[test]
+#[allow(non_snake_case)]
+fn P2_9_script_getopts_is_a_verdict() {
+    assert!(
+        no_verdict(
+            "bash ./script.sh",
+            &run(Some(2), "", "bash: illegal option -- z"),
+            &host()
+        )
+        .is_none()
+    );
+}
+#[test]
+#[allow(non_snake_case)]
+fn P2_10_first_set_option_refusal_keeps_its_text() {
+    let why = no_verdict(
+        "set -o bogus\ntest -f deliverable",
+        &run(Some(2), "", "bash: set: bogus: invalid option"),
+        &host(),
+    )
+    .unwrap();
+    assert!(why.contains("before any criterion could run"));
+}

@@ -41,16 +41,19 @@ async fn recover(stalled_body: bool) {
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_open_timeout_recovers_before_response_headers() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     recover(false).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_stalled_error_body_preserves_retry_after() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     recover(true).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_session_deadline_survives_partial_retries_without_outer_clock() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     use super::recovery_tests::{Fault, harness, transport};
     let _lock = archon_tools::subagent_executor::executor_test_lock::lock();
     let root = tempfile::tempdir().unwrap();
@@ -79,6 +82,7 @@ async fn workflow_live_v2_session_deadline_survives_partial_retries_without_oute
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_error_body_disconnect_preserves_status_and_retry_after() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     for alternate in [false, true] {
         let _lock = archon_tools::subagent_executor::executor_test_lock::lock();
         let root = tempfile::tempdir().unwrap();
@@ -102,6 +106,7 @@ async fn workflow_live_v2_error_body_disconnect_preserves_status_and_retry_after
 
 #[tokio::test(start_paused = true)]
 async fn workflow_live_v2_rate_limit_without_header_uses_shared_initial_delay() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     for alternate in [false, true] {
         let _lock = archon_tools::subagent_executor::executor_test_lock::lock();
         let root = tempfile::tempdir().unwrap();

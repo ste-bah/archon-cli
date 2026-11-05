@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 const { authorContext, withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
+const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
   'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js',
   'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
@@ -30,7 +30,7 @@ function assertPrevious(prompt, files, content) {
   assert(prompt.includes(`The previous candidate is in ${path} (sha256 ${sha256}; host-written context for this call: read it by its exact path).`));
   assert.equal(files.get(path), content);
   assert(!prompt.includes(content), 'candidate bytes never inline');
-  assert(prompt.includes('Whatever you restructure, keep every task, implements id, deliverable and edge of the previous candidate that no current finding names. Return the whole document.'));
+  assert(prompt.includes('Whatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Re-land only changed tasks; unlisted tasks are retained.'));
   assert(!prompt.includes('Repair the previous candidate.'));
   assert(!prompt.includes('Change only what the current findings name.'));
   assert(Buffer.byteLength(prompt) <= 262144);
@@ -49,12 +49,13 @@ async function run(ctx, replies, gates, policy = ctx.skeletonPolicy([]), onPause
   return {prompts, stdins, outcome};
 }
 
-test('skeleton retries reference the latest judged candidate; the first prompt is byte-identical', async () => {
+test('skeleton retries reference the latest judged candidate; the first prompt pins the incremental contract', async () => {
   const {ctx, files} = context();
   const replies = [candidate(1), candidate(2), candidate(3)];
   const out = await run(ctx, replies, [refused(), refused(), clean()]);
   // SHA-256 of the dispatched first prompt without #568 (main plus #569, the #572 obligation sentence, the #574 table-row constraint wording and the #575 source_sections shape field), with these exact args.
-  assert.equal(digest(out.prompts[0]), 'c5f9f5aa94dab4a99c5e5ae7b665baecf1704df86c05dd11127c4a7117308b40');
+  // P5 replaces the whole-document prompt with one-task landing and exact receipt wording.
+  assert.equal(digest(out.prompts[0]), 'b77df0c75c00a4e2ba35d9b5bced2c5222acc073280b0982324057e3d7c74967');
   assert(!out.prompts[0].includes('The previous candidate is in'));
   assert.equal(files.size, 2);
   assertPrevious(out.prompts[1], files, replies[0]);
@@ -144,3 +145,53 @@ test('carried seed reaches freeze without writing context or calling the author'
   assert.deepEqual(out.prompts, []);
   assert.deepEqual(out.stdins, [previous]);
 });
+
+for (const scope of ['skeleton', 'body']) {
+  for (const skeletonChanges of scope === 'skeleton' ? [false, true] : [false]) {
+    test(`#587 ${scope} finding, skeleton ${skeletonChanges ? 'changes' : 'unchanged'}: named body receives omission and converges without pause`, async () => {
+      const {ctx} = context();
+      const previous = candidate(0);
+      const outcome = clean();
+      ctx.recordSkeletonTasks(outcome, previous);
+      const chain = {outcome, subjects:outcome.subjects};
+      const bodies = new Map([['TASK-X-001.md', {content:'a temporary root leaves the shared store empty'}]]);
+      const text = 'task TASK-X-001: require the shared store entry; a temporary root leaves the shared store empty';
+      const defect = {text, subject:'AC-X-001', source_path:'/project/tasks/TASK-X-001.md', remediation_scope:scope};
+      let skeletonAuthors = 0, bodyAuthors = 0, lintCalls = 0, repaired = false;
+      const w = {
+        agent:async (id, options) => {
+          if (id.startsWith('skeleton-')) {
+            skeletonAuthors++;
+            assert.equal(scope, 'skeleton');
+            assert(options.task.includes(text), 'skeleton receives the finding');
+            // A valid existing skeleton has nothing to change for a body omission.
+            const next = JSON.parse(previous);
+            if (skeletonChanges) next.tasks[0].source_sections = ['1'];
+            return {status:'accepted', stopReason:'end_turn', content:JSON.stringify(next)};
+          }
+          bodyAuthors++;
+          assert(options.task.includes(text), 'named body receives the finding even with identical frozen fields');
+          repaired = true;
+          return {status:'accepted', stopReason:'end_turn', content:'# Require the shared store entry'};
+        },
+        hostCommand:async capability => {
+          const result = clean();
+          if (capability === 'task-set-lint') {
+            assert(++lintCalls <= 3, 'bound a regression that fails to reach the body');
+            // Scripted critic stays false until the body changes, regardless of skeleton edits.
+            result.gateEnvelope.policy_findings = repaired ? [] : [defect];
+          }
+          return result;
+        },
+        checkpoint:async () => ({}),
+        pause:async () => { throw new Error('body omission must converge without pause'); }
+      };
+      await ctx.runSetGateLoop(w, chain, bodies);
+      assert.equal(lintCalls, 2);
+      assert.equal(skeletonAuthors, scope === 'skeleton' ? 1 : 0);
+      assert.equal(bodyAuthors, 1);
+      assert.equal(ctx.skeletonCandidateContent(chain.outcome), scope === 'body' ? previous
+        : skeletonChanges ? JSON.stringify({...JSON.parse(previous), tasks:[{...JSON.parse(previous).tasks[0], source_sections:['1']}]}) : previous);
+    });
+  }
+}

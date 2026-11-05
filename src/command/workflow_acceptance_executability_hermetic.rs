@@ -12,6 +12,10 @@ use archon_workflow::acceptance_scratch::{nested_repository, nested_repository_s
 
 use super::*;
 
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_offline_replay_tests.rs"]
+mod offline_replay_tests;
+
 #[path = "workflow_acceptance_executability_siblings.rs"]
 pub(super) mod siblings;
 

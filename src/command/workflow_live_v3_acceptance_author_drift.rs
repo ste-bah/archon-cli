@@ -134,6 +134,9 @@ pub(super) async fn heal_drift(
         Ok(probe) => probe,
         Err(why) => return blocked(why),
     };
+    // author_owed already forwarded staged.feedback through ReauthorGate
+    // and staged only judged, probed entries. extend_and_republish is a
+    // synchronous publisher: it never calls an author or reads gate.seeds.
     let seeds = Default::default();
     let published = extend_and_republish(
         ReauthorRequest {

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::mutation;
+use super::{BaselineOrigin, mutation};
 
 pub(crate) fn baseline_pass_finding_for_candidates(
     id: &str,
@@ -8,38 +8,62 @@ pub(crate) fn baseline_pass_finding_for_candidates(
     candidates: &[mutation::CandidateDiagnostic],
 ) -> String {
     use mutation::ExclusionReason::*;
-
-    if candidates.iter().all(|candidate| {
-        matches!(
-            candidate.exclusion,
-            Some(CheckMechanics | RepositoryRoot | WholeDirectoryTree)
-        )
-    }) {
-        baseline_pass_finding_without_discovered_input(id, short)
-    } else {
-        baseline_pass_finding(id, short)
+    let mut finding = baseline_pass_finding_without_discovered_input(id, short);
+    let mut reasons = BTreeSet::new();
+    for candidate in candidates {
+        let clause = match candidate.exclusion {
+            Some(ManifestOrSetup) => "manifests never move".to_string(),
+            Some(SiblingFromRoot) => {
+                "a sibling tree other than ../<repository dir>/ is never moved".into()
+            }
+            Some(OutsideCopiedTree) => {
+                format!("`{}` is a path outside the copied tree", candidate.path)
+            }
+            Some(CheckWritesPathInText) => {
+                format!("`{}` is a path the check itself writes", candidate.path)
+            }
+            Some(RepositoryAliasUnverified) => format!(
+                "the host could not verify `{}` as the repository alias",
+                candidate.path
+            ),
+            _ => continue,
+        };
+        reasons.insert(clause);
     }
+    for reason in reasons {
+        finding.push_str(&format!("; {reason}"));
+    }
+    finding
 }
 
 pub(crate) fn baseline_pass_finding(id: &str, short: &str) -> String {
     format!(
-        "{}; data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must fail whenever the deciding test fails",
+        "{} data the check writes itself is never evidence; movable inputs must exist under the check's selected root before the run; to guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root; the check must fail whenever the deciding test fails",
         baseline_pass_lead(id, short)
     )
 }
 
 pub(crate) fn baseline_pass_finding_without_discovered_input(id: &str, short: &str) -> String {
     format!(
-        "{}; the command names no file that the host can move aside under the selected root. A test, target or module name is not a file path. A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root. The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. Put the relative path of the file that decides the criterion literally in the command text only as an input the check reads (for example, an operand of the command that reads it), not also in printed text, so that moving that file aside makes the check fail; the considered inputs that follow list each excluded path and its reason",
+        "{} the command names no file that the host can move aside under the selected root. A test, target or module name is not a file path. A program or script the check runs is never moved. Neither are a directory it changes into, values of -C/--manifest-path/--directory/--cwd/--project/--prefix, paths classified as command output (echo/printf/fail/die), the repository root or a whole directory tree at or above the selected root. The deciding file must be inside the selected root or inside the repository reached from project_root through ../<repository dir>/; a file in any other sibling tree is never moved. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. Use a handle, for example `test -f <path>` before the run that the file decides; the considered inputs that follow list each excluded path and its reason",
         baseline_pass_lead(id, short)
     )
 }
 
-fn baseline_pass_lead(id: &str, short: &str) -> String {
-    format!(
-        "check '{id}': the criterion already holds on the pre-implementation tree; write a regression guard. It {} at {short}, before any implementation, so it cannot show its criterion false and proves nothing",
-        mutation::CANNOT_FAIL
-    )
+pub(super) fn baseline_pass_lead(id: &str, short: &str) -> String {
+    baseline_pass_lead_for_tree(id, short, BaselineOrigin::RecordedBase)
+}
+
+pub(super) fn baseline_pass_lead_for_tree(id: &str, short: &str, origin: BaselineOrigin) -> String {
+    let tree = origin.tree_name();
+    let advice = match origin {
+        BaselineOrigin::RecordedBase => {
+            "Either it does not exercise what the work must add (make it fail on that tree), or the criterion already holds there and it must be proven a regression guard"
+        }
+        _ => "The check must fail on the pre-implementation tree, or be proven a regression guard",
+    };
+    let cannot_fail = mutation::CANNOT_FAIL;
+    format!("check '{id}': it passed on the {tree} at {short}, {cannot_fail}. {advice}:")
 }
 
 pub(crate) fn describe_candidates(candidates: &[mutation::CandidateDiagnostic]) -> String {
@@ -116,4 +140,18 @@ pub(crate) fn describe_candidates_with_run_state(
         .map(|(reason, paths)| format!("{reason}: {}", paths.join(", ")))
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// Change only host-authored wording; never rewrite captured check output.
+pub(super) fn label_findings(
+    findings: &mut BTreeMap<String, String>,
+    short: &str,
+    origin: BaselineOrigin,
+) {
+    for (id, finding) in findings {
+        let old = baseline_pass_lead(id, short);
+        if let Some(tail) = finding.strip_prefix(&old) {
+            *finding = format!("{}{tail}", baseline_pass_lead_for_tree(id, short, origin));
+        }
+    }
 }

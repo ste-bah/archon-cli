@@ -16,7 +16,6 @@
 // findings are never cut: they are what the author repairs. A prompt whose
 // own text still passes AUTHOR_PROMPT_LIMIT is not sent: the loop pauses and
 // says why (requireDispatchable).
-
 const HISTORY_SHARE = 8192;
 const PRIOR_SHARE = 14336;
 const CATALOGUE_SHARE = 10240;
@@ -27,7 +26,6 @@ const RECORD_BYTES = 320;
 const HISTORY_RECORD_BYTES = 600;
 const CUT_MARK = " [cut]";
 const AUTHOR_PROMPT_LIMIT = 262144;
-
 function utf8Bytes(text) {
   const value = String(text);
   // Each UTF-16 unit costs 1/2/3 bytes; a valid pair costs 4, not 6.
@@ -35,7 +33,6 @@ function utf8Bytes(text) {
     + value.replace(/[^\u0800-\uffff]/g, "").length
     - 2 * (value.match(/[\ud800-\udbff][\udc00-\udfff]/g) || []).length;
 }
-
 // `text` cut to at most `max` UTF-8 bytes, CUT_MARK included, at a character
 // boundary. Text that fits is returned unchanged.
 function clipBytes(text, max) {
@@ -52,7 +49,6 @@ function clipBytes(text, max) {
   }
   return out + CUT_MARK;
 }
-
 // The longest prefix of `lines` whose list form ("\n- " before each line)
 // fits `budget` bytes.
 function fitLines(lines, budget) {
@@ -66,7 +62,6 @@ function fitLines(lines, budget) {
   }
   return shown;
 }
-
 // The file the host wrote `text` to, as {path, sha256}. A missing binding is
 // a host fault and throws. A write the host could not make throws an error
 // marked `authorContext`, which the caller reports as an outage of the call
@@ -92,12 +87,10 @@ function contextFile(extension, text) {
   CONTEXT_FILES.set(key, file);
   return file;
 }
-
 function contextDir(file) {
   const cut = file.path.lastIndexOf("/");
   return cut < 0 ? "." : file.path.slice(0, cut);
 }
-
 // `items` nearest `id` first, by position in `order` (the sorted entry ids);
 // ties go to the earlier position. Deterministic in its inputs alone.
 function nearestFirst(items, idOf, id, order) {
@@ -105,11 +98,9 @@ function nearestFirst(items, idOf, id, order) {
   const here = at(id);
   return items.slice().sort((a, b) => Math.abs(at(idOf(a)) - here) - Math.abs(at(idOf(b)) - here) || at(idOf(a)) - at(idOf(b)));
 }
-
 function oneLine(value) {
   return String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim();
 }
-
 function checkSummary(check) {
   const value = check && typeof check === "object" && !Array.isArray(check) ? check : {};
   if (value.kind === "floor") {
@@ -119,7 +110,6 @@ function checkSummary(check) {
   }
   return `${oneLine(value.kind) || "check"} cwd=${oneLine(value.cwd)}: ${oneLine(value.command)}`;
 }
-
 // Issue 288: the completed entries an entry author keeps consistent with.
 // Each is one record line; its exact JSON is a host-written file.
 function priorText(prior, id, order) {
@@ -133,14 +123,13 @@ function priorText(prior, id, order) {
   const count = fitLines(ranked.map((record) => record.line), PRIOR_SHARE).length;
   // Listed in the order they were completed: earlier rounds first.
   const shown = ranked.slice(0, count).sort((a, b) => a.index - b.index);
-  let text = `Previously completed entries: ${prior.length}, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at ${contextDir(records[0].file)}/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).`;
+  let text = `Previously completed entries: ${prior.length}, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep names, flags and formats consistent; a regression guard still names its own deciding file. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. Duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at ${contextDir(records[0].file)}/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).`;
   if (count < records.length) {
     const index = contextFile("jsonl", records.map((record) => `${JSON.stringify({ id: record.id, sha256: record.file.sha256, path: record.file.path })}\n`).join(""));
     text += ` The ${count} nearest this entry are listed; ${records.length - count} more are not, and every one is listed in ${index.path}.`;
   }
   return `${text}\n- ${shown.map((record) => record.line).join("\n- ")}`;
 }
-
 // The criterion catalogue, whole while it fits its share; otherwise the
 // criteria nearest this entry, one line each, and the exact catalogue file.
 function catalogueText(criteria, id, order) {
@@ -153,13 +142,11 @@ function catalogueText(criteria, id, order) {
   const file = contextFile("json", whole);
   return `${head} ${ids.length} criteria; the ${count} nearest this entry are listed, one line each, and the exact catalogue is ${file.path} (sha256 ${file.sha256}).\n- ${shown.map((value) => clipBytes(`${value}: ${oneLine(criteria[value])}`, RECORD_BYTES)).join("\n- ")}`;
 }
-
 // Whitespace only: findings that differ by case, a sign, a digit or
 // punctuation are different findings (a path or a flag can differ by case).
 function historyKey(text) {
   return String(text).replace(/\s+/g, " ").trim();
 }
-
 // Each distinct earlier finding once, with how often and when it occurred.
 // The findings the phase was opened with (attempt 0) come first; a finding
 // of the current attempt that earlier attempts also triggered is reported as
