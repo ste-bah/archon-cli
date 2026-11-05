@@ -92,7 +92,7 @@ console.log(JSON.stringify([...acceptanceRepairIds(findings, ids, false)]));
 /// Issue-551: a repair prompt lists only the findings open in the latest gate
 /// result as the ones to repair. Findings earlier attempts raised and the
 /// latest result no longer reports are shown once, after them, as findings
-/// not to regress, at every rung: the rung-2 fresh-context step keeps the
+/// not to regress, at every rung: the rung-4 fresh-context step keeps the
 /// history, so the open finding still carries its repeat marker.
 #[test]
 fn issue551_repair_prompt_names_only_open_findings_as_current_and_keeps_resolved_ones_as_do_not_regress()
@@ -129,7 +129,7 @@ authorCandidate(w, policy).then(
     assert!(value.get("error").is_none(), "{out}");
     let prompts = value["prompts"].as_array().expect("prompts");
     assert_eq!(prompts.len(), 5, "{out}");
-    // Calls 3 (rung 3) and 5 (rung 2 again, fresh context) follow results
+    // Calls 3 (rung 3) and 5 (rung 2 again, bounded edit) follow results
     // where only OPEN-GAMMA is open. One subject per finding: the second
     // result is progress, so the loop reaches call 5 without a pause.
     for index in [2, 4] {
@@ -153,13 +153,13 @@ authorCandidate(w, policy).then(
         }
         assert!(earlier.contains("Do not regress"), "{index}: {prompt}");
     }
-    let rung_two = prompts[4].as_str().unwrap();
+    let fresh = prompts[3].as_str().unwrap();
     assert!(
-        rung_two.contains("Re-author a complete replacement from fresh context"),
-        "{rung_two}"
+        fresh.contains("Re-author a complete replacement from fresh context"),
+        "{fresh}"
     );
     assert!(
-        rung_two.contains("finding OPEN-GAMMA (a repeat: seen in 3 earlier attempts"),
-        "the open finding keeps its repeat marker at rung 2: {rung_two}"
+        fresh.contains("finding OPEN-GAMMA (a repeat: seen in 2 earlier attempts"),
+        "the open finding keeps its repeat marker at rung 4: {fresh}"
     );
 }

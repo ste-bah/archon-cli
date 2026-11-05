@@ -47,3 +47,60 @@ function bodyPolicy(subject, initialFeedback) {
   };
 }
 
+// The durable author replies and gate outcomes already live in the run journal.
+// Like progress, this index is rebuilt by replay, including across pool pauses
+// and set-gate retries. No score can stand in for a committed gate outcome.
+const BODY_CANDIDATES = new Map();
+const BODY_PUBLISHED = new Map();
+
+function retainBodyCandidate(phase, body, findings, history = []) {
+  const score = findings.length;
+  const prior = BODY_CANDIDATES.get(phase);
+  if (!prior || score <= prior.score) {
+    BODY_CANDIDATES.set(phase, { body, findings: findings.slice(), score, history: history.slice() });
+  }
+}
+
+function publishBodyCandidate(phase, body) {
+  BODY_PUBLISHED.set(phase, body);
+  BODY_CANDIDATES.delete(phase);
+}
+
+// A set gate judges the published body. Start its repair episode from those
+// bytes and those findings. An ongoing repair keeps its best rejected draft;
+// successful publication cleared the draft from any older episode.
+function retainSetBodyCandidate(subject, findings) {
+  const phase = `body-${subject.taskId}`;
+  if (BODY_CANDIDATES.has(phase)) return;
+  const body = BODY_PUBLISHED.get(phase);
+  if (body !== undefined) {
+    BODY_CANDIDATES.delete(phase);
+    retainBodyCandidate(phase, body, findings);
+  }
+}
+
+function dropBodyCandidate(subject) {
+  const phase = `body-${subject.taskId}`;
+  BODY_CANDIDATES.delete(phase);
+  BODY_PUBLISHED.delete(phase);
+}
+
+function bodyRepairContext(policy, rung) {
+  if (policy.capability !== "land-task-body") return null;
+  const best = BODY_CANDIDATES.get(policy.phase);
+  if (!best) return null;
+  const instruction = rung === 4
+    ? "Re-author a complete replacement from fresh context after the bounded-edit attempts failed. Use the retained candidate and its findings as reference; keep the subject contract."
+    : "Correct the retained candidate below. Change only what its findings require and keep every other line exactly. Return the complete corrected file, never a patch.";
+  const details = JSON.stringify({ body: best.body, findings: best.findings, blocking_findings: best.score });
+  let reference = `Retained candidate and exact gate findings (JSON):\n${details}`;
+  if (utf8Bytes(details) > 16384) {
+    try {
+      reference = `Read the retained candidate and exact gate findings at ${contextFile("json", details).path} (host-written context for this call: read it by its exact path, even under an excluded directory).`;
+    } catch (error) {
+      error.retainedBodyContext = true;
+      throw error;
+    }
+  }
+  return { text: `\n${instruction}\n${reference}`, feedback: best.findings.map(findingText), history: best.history };
+}

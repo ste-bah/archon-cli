@@ -237,7 +237,9 @@ async function authorCandidate(w, policy) {
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
         const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
+        const bodyRepair = bodyRepairContext(policy, repairRung);
+        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${bodyRepair ? bodyRepair.text : rungInstruction}${operation}${bodyRepair ? "" : group}`, attempt + 1,
+          bodyRepair ? bodyRepair.feedback : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history);
         // Context writes are not journaled. Reserve no ordinal until the
         // complete prompt is ready, so recovery and replay dispatch identically.
         const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
@@ -258,6 +260,11 @@ async function authorCandidate(w, policy) {
         }
       }
     } catch (error) {
+      if (error?.retainedBodyContext === true) {
+        const message = `retained body candidate context failed for ${policy.phase}: ${error.message}`;
+        await w.checkpoint(`${policy.phase}-context-failed-${nextCall}`, { task: message });
+        throw new Error(message);
+      }
       if (!error || error.authorContext !== true) throw error;
       authorState.roundCalls = 0;
       authorState.roundAnswered = 0;
@@ -309,6 +316,9 @@ async function authorCandidate(w, policy) {
     if (policy.phase === "skeleton" && acceptedSkeletonCandidate(authored.content, outcome)) previousCandidate = authored.content;
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
+    if (policy.capability === "land-task-body" && !routed.operational && routed.all.length > 0) {
+      retainBodyCandidate(policy.phase, authored.content, routed.allFindings, [...history, { attempt: attempt + 1, findings: routed.all.slice() }]);
+    }
     if (policy.capability === "land-task-body" && routed.shadow.length > 0 && routed.fatal.length === 0 && !routed.operational) {
       return { ...outcome, skeletonFindings: routed.shadowFindings, bodyFindings: routed.retryFindings, shadowRung: repairRung };
     }
@@ -444,6 +454,7 @@ async function authorCandidate(w, policy) {
     if (routed.retry.length === 0) {
       requireCommitted(outcome, policy.phase);
       if (policy.phase === "skeleton") recordSkeletonTasks(outcome, authored.content);
+      if (policy.capability === "land-task-body") publishBodyCandidate(policy.phase, authored.content);
       return outcome;
     }
     attempt += 1;

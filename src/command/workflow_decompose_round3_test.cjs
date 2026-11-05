@@ -98,7 +98,7 @@ async function midLadderReplayPreservesCallsThroughOneAttemptWindowPause() {
   assert.deepEqual(resumed.logs, uninterrupted.logs, 'the rung and cycle reconstruct by replay');
   const firstNew = resumed.calls[interrupted.calls.length].request;
   assert.equal(firstNew.id, 'body-author-3');
-  assert.match(firstNew.options.task, /Work through the findings in smaller groups/);
+  assert.match(firstNew.options.task, /Change only what its findings require and keep every other line exactly/);
   assert.deepEqual(resumed.logs.map(line => line.match(/r\d+/)[0]), ['r2', 'r3', 'r4']);
 }
 

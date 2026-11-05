@@ -275,6 +275,7 @@ async function runSetGateLoop(w, chain, bodies) {
     const work = [];
     for (const [fileName, findings] of groupFindingsBySubject(bodyFindings, chain.subjects)) {
       const subject = chain.subjects.find((candidate) => candidate.fileName === fileName);
+      retainSetBodyCandidate(subject, findings);
       work.push([subject, findings.map((finding) => findingText(finding)), repairRung]);
     }
     await authorBodies(w, work, bodies, chain);
@@ -319,6 +320,11 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
     || !(bodies.has(subject.fileName) || onDisk.has(subject.fileName))
     || grouped.has(subject.fileName) || !prior.has(subject.taskId)
     || prior.get(subject.taskId) !== next.get(subject.taskId);
+  for (const subject of chain.subjects) {
+    if (!prior || !next || dependencies.has(subject.taskId)
+      || prior.get(subject.taskId) !== next.get(subject.taskId)) dropBodyCandidate(subject);
+    else if (grouped.has(subject.fileName)) retainSetBodyCandidate(subject, grouped.get(subject.fileName));
+  }
   const note = BODY_FROZEN_RULE;
   await authorBodies(w, chain.subjects.filter(reached).map((subject) => [
     subject,
