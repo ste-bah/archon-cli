@@ -170,7 +170,7 @@ fn focused_test_workflow_stages_can_execute_commands_without_write_tools() {
         stage_id: "focused_tests-8".into(),
         stage_kind: StageKind::Agent,
         task: "Run focused cargo test evidence for TASK-TRL-011".into(),
-        ..request(json!({}))
+        ..request(json!({"stage_extra": {"tools": ["Bash"]}}))
     };
     let tools = allowed_tools(&req);
 
@@ -215,7 +215,7 @@ fn post_remediation_test_stages_can_execute_commands_without_write_tools() {
         stage_id: "wave2_post_tests".into(),
         stage_kind: StageKind::Agent,
         task: "Run focused post-remediation tests for T010/T020/T030 and capture exact commands/results.".into(),
-        ..request(json!({}))
+        ..request(json!({"stage_extra": {"commands": true}}))
     };
     let tools = allowed_tools(&req);
 
@@ -231,7 +231,7 @@ fn command_stage_prompt_uses_configured_bash_timeout() {
         stage_id: "wave2_post_tests".into(),
         stage_kind: StageKind::Agent,
         task: "Run focused post-remediation tests for T010/T020/T030 and capture exact commands/results.".into(),
-        ..request(json!({}))
+        ..request(json!({"stage_extra": {"commands": true}}))
     };
     let prompt = workflow_prompt(&req);
 
@@ -310,7 +310,7 @@ fn command_stage_prompt_includes_platform_cargo_policy() {
         stage_id: "wave5_tests".into(),
         stage_kind: StageKind::Agent,
         task: "Run focused tests for wave 5 and capture exact commands/results.".into(),
-        ..request(json!({}))
+        ..request(json!({"stage_extra": {"commands": true}}))
     };
     let prompt = workflow_prompt(&req);
 
@@ -327,7 +327,7 @@ fn command_stage_prompt_does_not_treat_wsl_jobs_as_macos_default() {
         stage_id: "focused_tests".into(),
         stage_kind: StageKind::Agent,
         task: "Run focused cargo tests.".into(),
-        ..request(json!({}))
+        ..request(json!({"stage_extra": {"commands": true}}))
     };
     let prompt = workflow_prompt(&req);
 

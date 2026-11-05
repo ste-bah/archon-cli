@@ -190,8 +190,7 @@ mod tests {
         let mut request = implementation_request(required);
         request.stage_id = "review".into();
         request.stage_kind = archon_workflow::StageKind::Agent;
-        // No verification vocabulary: `command_execution_stage` sniffs prose
-        // for it and would promote the stage to a shell.
+        // No shell capability is declared: command access defaults to denied.
         request.task = "Review the diff for correctness.".into();
         request
     }
