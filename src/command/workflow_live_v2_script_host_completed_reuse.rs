@@ -19,7 +19,7 @@ impl WorkflowScriptHost {
         }
         // Only v3 implement/verify calls reuse this way, and only against
         // records of the SAME v3 family — never a stale decomposed record.
-        let Some(want_family) = v3_call_family(&execution.call) else {
+        let Some(want_family) = v3_call_family(&execution.call.id) else {
             return Ok(None);
         };
         // Which completed task does this call belong to? Match by the canonical
@@ -39,7 +39,7 @@ impl WorkflowScriptHost {
             archon_workflow::v2::script::resume_drift::is_remediation_call(&execution.call);
         let mut best: Option<WorkflowV2CallRecord> = None;
         for record in self.runner.v2_store.load_call_records()? {
-            if v3_call_family(&record.call) != Some(want_family) {
+            if v3_call_family(&record.call.id) != Some(want_family) {
                 continue;
             }
             if !record.call.id.to_ascii_lowercase().contains(&task_token) {

@@ -17,8 +17,6 @@ pub struct WorkflowV2HostCall {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WorkflowV2HostOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<super::call_metadata::CallMetadata>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_command: Option<HostCommandRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_mode: Option<AgentResultMode>,

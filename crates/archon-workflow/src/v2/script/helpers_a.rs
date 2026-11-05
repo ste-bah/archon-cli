@@ -23,16 +23,9 @@ pub fn parse_script_options(
     for (key, value) in object {
         match key.as_str() {
             "role" | "tier" => options.role = string_value(value),
-            "binding" | "agent" => options.binding = string_value(value),
             "task" => options.task = string_value(value),
             "source" => options.source = string_value(value),
             "itemKind" | "item_kind" => options.item_kind = string_value(value),
-            "metadata" => {
-                options.metadata =
-                    Some(serde_json::from_value(value.clone()).map_err(|error| {
-                        WorkflowError::SpecInvalid(format!("invalid call metadata: {error}"))
-                    })?);
-            }
             "targetFiles" | "target_files" => {
                 options.target_files = string_array(value);
             }
@@ -251,7 +244,7 @@ pub fn completion_evidence_from_result(
     evidence
 }
 pub fn reusable_record_has_required_completion_evidence(record: &WorkflowV2CallRecord) -> bool {
-    !completion_evidence_call_id(&record.call) || !record.completion_evidence.is_empty()
+    !completion_evidence_call_id(&record.call.id) || !record.completion_evidence.is_empty()
 }
 
 /// True when every task this record covers is in the restart's completed set
@@ -287,20 +280,14 @@ pub enum V3CallFamily {
     Verify,
 }
 
-pub fn v3_call_family(
-    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
-) -> Option<V3CallFamily> {
-    use crate::v2::call_metadata::CallKind;
-    let metadata = call_id.metadata();
-    if !metadata.task_scoped {
-        return None;
-    }
-    match metadata.kind {
-        CallKind::Implementation | CallKind::Remediation | CallKind::ReviewRemediation => {
-            Some(V3CallFamily::Implement)
-        }
-        CallKind::FocusedVerification | CallKind::ReviewVerification => Some(V3CallFamily::Verify),
-        _ => None,
+pub fn v3_call_family(call_id: &str) -> Option<V3CallFamily> {
+    let id = call_id.to_ascii_lowercase();
+    if id.starts_with("implement-task-") || id.starts_with("remediate-task-") {
+        Some(V3CallFamily::Implement)
+    } else if id.starts_with("verification-wave-verify-task-") {
+        Some(V3CallFamily::Verify)
+    } else {
+        None
     }
 }
 
@@ -331,10 +318,14 @@ pub fn evidence_snapshot_hash(evidence: &[WorkflowV2TaskCompletionEvidence]) -> 
         .map(|value| stable_value_hash(&value))
 }
 
-pub(super) fn completion_evidence_call_id(
-    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
-) -> bool {
-    call_id.completion()
+pub(super) fn completion_evidence_call_id(call_id: &str) -> bool {
+    call_id.starts_with("noop-proof-verification-")
+        || call_id.starts_with("noop-proof-reverification-")
+        || call_id.starts_with("implementation-wave-")
+        || call_id.starts_with("remediation-wave-")
+        || call_id.starts_with("review-remediation-wave-")
+        || call_id.starts_with("verification-wave-")
+        || call_id.starts_with("review-verification-wave-")
 }
 
 pub fn is_reusable_status(status: WorkflowV2Status) -> bool {
@@ -471,22 +462,4 @@ pub fn mark_unresolved_dependency_metadata(
         ),
         severity: Some("review".to_string()),
     });
-}
-
-#[cfg(test)]
-#[test]
-fn authored_metadata_parses_and_controls_reuse_family() {
-    let (options, _) = parse_script_options(&serde_json::json!({ "metadata": {
-        "kind": "focused_verification", "task_scoped": true
-    }}))
-    .unwrap();
-    let call = WorkflowV2HostCall {
-        id: "custom-check".into(),
-        method: WorkflowV2HostMethod::Parallel,
-        write_mode: None,
-        options,
-    };
-    assert!(matches!(v3_call_family(&call), Some(V3CallFamily::Verify)));
-    assert!(completion_evidence_call_id(&call));
-    assert!(parse_script_options(&serde_json::json!({ "metadata": {"kind": "unknown"} })).is_err());
 }

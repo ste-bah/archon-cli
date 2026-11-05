@@ -448,38 +448,3 @@ mod zero_match_supersession {
         assert!(!ids.contains(&"zero_test_match_superseded"), "{ids:?}");
     }
 }
-
-#[test]
-fn renamed_typed_verification_demotes_commandless_acceptance() {
-    use crate::v2::call_metadata::{CallKind, CallMetadata};
-    use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions};
-    let call = WorkflowV2HostCall {
-        id: "custom-check".into(),
-        method: WorkflowV2HostMethod::Parallel,
-        write_mode: None,
-        options: WorkflowV2HostOptions {
-            metadata: Some(CallMetadata {
-                kind: CallKind::FocusedVerification,
-                task_scoped: true,
-                sequence: None,
-                source_graph: None,
-            }),
-            ..Default::default()
-        },
-    };
-    let mut outcome = accepted_with(vec![]);
-    outcome.result.as_mut().unwrap().commands_run.clear();
-    normalize_focused_verification_outcome(&call, &mut outcome);
-    assert_ne!(outcome.status, WorkflowV2Status::Accepted);
-    outcome.status = WorkflowV2Status::Failed;
-    outcome.result.as_mut().unwrap().status = WorkflowV2Status::Failed;
-    normalize_focused_verification_outcome(&call, &mut outcome);
-    assert!(
-        outcome
-            .result
-            .unwrap()
-            .data
-            .get("verification_failure_class")
-            .is_some()
-    );
-}

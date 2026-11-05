@@ -261,7 +261,6 @@ pub fn verification_options(items: &[Value], task: &str, focused: bool) -> Value
     let mut options = serde_json::json!({ "tier": "coder", "task": task });
     if focused {
         options["itemKind"] = Value::String("focused_verification".to_string());
-        options["metadata"] = serde_json::json!({ "kind": "focused_verification" });
     }
     // Cargo contention is no longer answered here. Pinning the WHOLE wave to
     // maxParallelism=1 because one item ran cargo serialized 27-branch waves

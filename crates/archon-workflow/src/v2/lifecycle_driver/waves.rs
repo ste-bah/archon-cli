@@ -446,7 +446,6 @@ impl LifecycleDriver {
         let call_id = format!("wave-completion-remediation-{dependency_iteration}");
         let wave = self
             .write_fanout(
-                crate::v2::call_metadata::CallKind::Remediation,
                 &call_id,
                 serde_json::json!(&outstanding),
                 prompts::WAVE_COMPLETION_REMEDIATION_TASK,

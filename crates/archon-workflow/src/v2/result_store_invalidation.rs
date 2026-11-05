@@ -38,9 +38,7 @@ fn dynamic_wave_invalidated_call_ids(
     if sources.is_empty() {
         return BTreeSet::new();
     }
-    let restart_position = sources
-        .first()
-        .and_then(|record| declared_call_position(&record.call));
+    let restart_position = generated_prd_call_position(call_id);
     let mut impacted_task_ids = sources
         .iter()
         .flat_map(|record| record_completed_or_owned_task_ids(record))
@@ -54,7 +52,7 @@ fn dynamic_wave_invalidated_call_ids(
                 continue;
             }
             let later_generated_call = restart_position
-                .zip(declared_call_position(&record.call))
+                .zip(generated_prd_call_position(&record.call.id))
                 .is_some_and(|(restart, candidate)| candidate > restart);
             if later_generated_call || source_graph_intersects_tasks(record, &impacted_task_ids) {
                 invalidated.insert(record.call.id.clone());
@@ -134,8 +132,7 @@ fn record_completed_or_owned_task_ids(record: &WorkflowV2CallRecord) -> BTreeSet
         .collect()
 }
 
-// Ordering compatibility for records written before call metadata existed.
-fn legacy_call_position(call_id: &str) -> Option<u32> {
+fn generated_prd_call_position(call_id: &str) -> Option<u32> {
     for (prefix, rank) in [
         ("noop-proof-verification-", 10),
         ("noop-evidence-repair-", 11),
@@ -191,49 +188,71 @@ fn dynamic_call_index(call_id: &str, prefix: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
-fn declared_call_position(call: &super::WorkflowV2HostCall) -> Option<u32> {
-    use super::call_metadata::CallSemantics;
-    if call.options.metadata.is_some() {
-        return call.metadata().sequence;
-    }
-    legacy_call_position(&call.id)
-}
-
 #[cfg(test)]
-#[test]
-fn typed_restart_order_is_independent_of_identity() {
-    use super::call_metadata::{CallKind, CallMetadata};
-    let mut records = Vec::new();
-    for (name, sequence) in [("omega", 1), ("alpha", 2)] {
-        let call = super::WorkflowV2HostCall {
-            id: name.into(),
-            method: super::WorkflowV2HostMethod::Agent,
-            write_mode: None,
-            options: super::WorkflowV2HostOptions {
-                metadata: Some(CallMetadata {
-                    kind: CallKind::Other,
-                    task_scoped: false,
-                    sequence: Some(sequence),
-                    source_graph: None,
-                }),
-                ..Default::default()
-            },
-        };
-        records.push(WorkflowV2CallRecord::new(
-            "test",
-            call,
-            1,
-            "input".into(),
-            super::WorkflowV2Result::accepted("done"),
-            vec![],
-        ));
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn mixed_record_formats_restart_invalidates_later_verdicts_without_task_overlap() {
+        // Records from the withdrawn metadata implementation remain readable, but
+        // metadata without sequence must not suppress the established wave order.
+        for restart_has_metadata in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let store = WorkflowV2ResultStore::new(temp.path());
+            let ids = [
+                "implementation-wave-1",
+                "implementation-wave-2",
+                "verification-wave-2",
+                "final-acceptance-gate",
+                "final-acceptance-report",
+            ];
+            for (index, id) in ids.iter().enumerate() {
+                let call = super::WorkflowV2HostCall {
+                    id: (*id).into(),
+                    method: super::WorkflowV2HostMethod::Agent,
+                    write_mode: None,
+                    options: Default::default(),
+                };
+                let record = WorkflowV2CallRecord::new(
+                    "compatibility-test",
+                    call,
+                    1,
+                    "unchanged-input".into(),
+                    super::WorkflowV2Result::accepted("done"),
+                    vec![],
+                );
+                let mut raw = serde_json::to_value(&record).unwrap();
+                if (index % 2 == 1) == restart_has_metadata {
+                    raw["call"]["options"]["metadata"] = serde_json::json!({
+                        "kind": "other", "task_scoped": false
+                    });
+                }
+                let path = store.result_path(id);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, serde_json::to_vec(&raw).unwrap()).unwrap();
+            }
+            let invalidated = store
+                .invalidate_dynamic_wave_dependents("implementation-wave-2")
+                .unwrap();
+            assert_eq!(
+                invalidated.into_iter().collect::<BTreeSet<_>>(),
+                ids[1..].iter().map(|id| (*id).to_string()).collect()
+            );
+            for id in &ids[1..] {
+                let record = store.load_call_record(id).unwrap().unwrap();
+                assert_eq!(
+                    record.invalidated_by.as_deref(),
+                    Some("implementation-wave-2")
+                );
+            }
+            assert!(
+                store
+                    .load_call_record(ids[0])
+                    .unwrap()
+                    .unwrap()
+                    .invalidated_by
+                    .is_none()
+            );
+        }
     }
-    assert_eq!(
-        dynamic_wave_invalidated_call_ids(&records, "omega"),
-        BTreeSet::from(["omega".to_string(), "alpha".to_string()])
-    );
-    assert_eq!(
-        dynamic_wave_invalidated_call_ids(&records, "alpha"),
-        BTreeSet::from(["alpha".to_string()])
-    );
 }

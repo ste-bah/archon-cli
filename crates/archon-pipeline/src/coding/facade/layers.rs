@@ -5,6 +5,7 @@ use crate::prompt_cap::{PromptLayer, TruncationPriority};
 use crate::runner::{AgentInfo, PipelineSession};
 
 use super::CodingFacade;
+use super::helpers::find_coding_agent;
 
 impl CodingFacade {
     /// Build the 11-layer prompt for a given agent.
@@ -27,7 +28,7 @@ impl CodingFacade {
         session: &PipelineSession,
         agent: &AgentInfo,
     ) -> Result<Vec<PromptLayer>> {
-        let coding_agent = self.coding_agent(&agent.key);
+        let coding_agent = find_coding_agent(&agent.key);
 
         let base_prompt = format!(
             "You are the {} agent.\n\nPhase: {}\nModel: {}\n{}",

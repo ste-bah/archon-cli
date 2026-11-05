@@ -1,4 +1,14 @@
-//! Built-in agent definitions and authored phase identities.
+//! 50-agent coding pipeline definitions.
+//!
+//! Ports the TypeScript coding pipeline agent configuration to Rust,
+//! mapping the original 7 TS phases into 6 Rust phases per PRD REQ-CODE-007:
+//!
+//! - Phase 1 Understanding (8): core analysis + exploration agents
+//! - Phase 2 Design (10): architecture + feasibility + reviewers
+//! - Phase 3 WiringPlan (3): integration-architect + phase-3-reviewer
+//! - Phase 4 Implementation (11): code generators + implementers
+//! - Phase 5 Testing (9): test agents + phase-4/5-reviewers
+//! - Phase 6 Refinement (9): optimization + coordination + sign-off
 
 use serde::{Deserialize, Serialize};
 
@@ -9,33 +19,18 @@ mod agent_definitions;
 // Types
 // ---------------------------------------------------------------------------
 
-/// Built-in phase names remain compatible; authored sequences use `Custom`.
+/// Pipeline phase (6 phases per PRD REQ-CODE-007).
 ///
 /// Phases 1-3 (Understanding, Design, WiringPlan) use ReadOnly tool access.
 /// Phases 4-6 (Implementation, Testing, Refinement) use Full tool access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Phase {
-    Understanding,
-    Design,
-    WiringPlan,
-    Implementation,
-    Testing,
-    Refinement,
-    Custom(u32),
-}
-
-impl Phase {
-    pub fn ordinal(self) -> u32 {
-        match self {
-            Self::Understanding => 1,
-            Self::Design => 2,
-            Self::WiringPlan => 3,
-            Self::Implementation => 4,
-            Self::Testing => 5,
-            Self::Refinement => 6,
-            Self::Custom(ordinal) => ordinal,
-        }
-    }
+    Understanding = 1,
+    Design = 2,
+    WiringPlan = 3,
+    Implementation = 4,
+    Testing = 5,
+    Refinement = 6,
 }
 
 /// Tool access level for an agent.
@@ -239,17 +234,4 @@ pub fn get_agents_by_phase(phase: Phase) -> Vec<&'static CodingAgent> {
 /// Total number of agents in the pipeline.
 pub fn agent_count() -> usize {
     AGENTS.len()
-}
-
-#[cfg(test)]
-mod authored_phase_tests {
-    use super::*;
-    #[test]
-    fn authored_phases_round_trip_in_any_order() {
-        let phases = [Phase::Custom(42), Phase::Custom(1), Phase::Custom(8)];
-        let encoded = serde_json::to_value(phases).unwrap();
-        let restored: [Phase; 3] = serde_json::from_value(encoded).unwrap();
-        assert_eq!(restored, phases);
-        assert_eq!(restored.map(Phase::ordinal), [42, 1, 8]);
-    }
 }

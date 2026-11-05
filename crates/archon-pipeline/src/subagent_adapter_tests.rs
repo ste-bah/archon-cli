@@ -434,13 +434,3 @@ async fn continuing_a_session_the_pipeline_does_not_hold_is_a_typed_refusal() {
         "the refusal is not typed: {error}"
     );
 }
-
-#[test]
-fn declared_tools_are_rendered_without_alias_mappings_or_family_bans() {
-    let mut request = request(ToolAccessLevel::ReadOnly);
-    request.allowed_tools = vec!["custom_lookup".into(), "custom_delegate".into()];
-    let prompt = SubagentPipelineClient::prompt_for_request(&request).prompt;
-    assert!(prompt.contains("custom_lookup, custom_delegate"));
-    assert!(!prompt.contains("Map code search"));
-    assert!(!prompt.contains("Never call"));
-}

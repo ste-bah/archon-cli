@@ -23,7 +23,6 @@ impl LifecycleDriver {
         let contract = self.contract();
         let wave = self
             .write_fanout(
-                crate::v2::call_metadata::CallKind::Implementation,
                 &format!("implementation-wave-{wave_index}"),
                 serde_json::json!(ready_implementation_items),
                 prompts::IMPLEMENTATION_WAVE_TASK,
@@ -152,7 +151,6 @@ impl LifecycleDriver {
 
         let mut remediation_wave = self
             .write_fanout(
-                crate::v2::call_metadata::CallKind::Remediation,
                 &format!("remediation-wave-{wave_index}"),
                 serde_json::json!(support::array(remediation_inventory.get("items"))),
                 prompts::REMEDIATION_WAVE_TASK,
@@ -219,7 +217,6 @@ impl LifecycleDriver {
             }
             let followup_wave = self
                 .write_fanout(
-                    crate::v2::call_metadata::CallKind::Remediation,
                     &format!("remediation-wave-{wave_index}-{remediation_attempt}"),
                     serde_json::json!(support::array(followup_inventory.get("items"))),
                     prompts::FOLLOWUP_REMEDIATION_WAVE_TASK,
@@ -296,7 +293,6 @@ impl LifecycleDriver {
                 if expansion_ready {
                     let expansion_wave = self
                         .write_fanout(
-                            crate::v2::call_metadata::CallKind::Remediation,
                             &format!(
                                 "remediation-wave-{wave_index}-ownership-{remediation_attempt}"
                             ),

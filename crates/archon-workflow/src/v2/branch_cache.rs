@@ -172,7 +172,7 @@ pub fn split_reusable_branch_outcomes(
             && (!is_remediation_call(&item.call)
                 || remediation::lands_as_asked(current.as_ref(), &landing, &item))
             && reusable_branch_outcome(&landing)
-            && (!completion_evidence_call_id(&item.call) || !landing.completion_evidence.is_empty())
+            && (!completion_evidence_call_id(call_id) || !landing.completion_evidence.is_empty())
         {
             if current.as_ref() != Some(&landing) {
                 v2_store.save_branch_outcome(call_id, &landing)?;
@@ -294,12 +294,12 @@ pub fn reusable_branch_outcome(outcome: &WorkflowV2BranchOutcome) -> bool {
 }
 
 fn reusable_branch_outcome_for_item(
-    _call_id: &str,
+    call_id: &str,
     outcome: &WorkflowV2BranchOutcome,
     item: &WorkflowV2FanoutItem,
 ) -> bool {
     (reusable_branch_outcome(outcome) || completed_review_branch(&item.call, outcome))
-        && (!completion_evidence_call_id(&item.call) || !outcome.completion_evidence.is_empty())
+        && (!completion_evidence_call_id(call_id) || !outcome.completion_evidence.is_empty())
         && outcome
             .item_input_hash
             .as_deref()
@@ -438,10 +438,13 @@ fn manifest_landed(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &st
     })
 }
 
-fn completion_evidence_call_id(
-    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
-) -> bool {
-    call_id.completion()
+fn completion_evidence_call_id(call_id: &str) -> bool {
+    call_id.starts_with("noop-proof-verification-")
+        || call_id.starts_with("implementation-wave-")
+        || call_id.starts_with("remediation-wave-")
+        || call_id.starts_with("review-remediation-wave-")
+        || call_id.starts_with("verification-wave-")
+        || call_id.starts_with("review-verification-wave-")
 }
 
 /// Positional index of every item, so reused and freshly run outcomes can be

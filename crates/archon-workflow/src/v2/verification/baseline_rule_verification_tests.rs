@@ -359,12 +359,3 @@ fn assert_demoted(outcome: &WorkflowV2BranchOutcome) {
         json!([COMMAND])
     );
 }
-
-#[test]
-fn baseline_rule_recognizes_renamed_typed_verification() {
-    let call = crate::v2::call_metadata_tests::call(
-        "custom-check",
-        crate::v2::call_metadata::CallKind::FocusedVerification,
-    );
-    assert!(super::is_focused_verification_call(&call));
-}

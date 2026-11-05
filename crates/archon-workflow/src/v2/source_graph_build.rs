@@ -26,20 +26,41 @@ impl std::fmt::Display for DynamicSourceKind {
 pub(super) fn dynamic_source_kind(
     execution: &WorkflowV2CallExecution,
 ) -> Option<DynamicSourceKind> {
-    use crate::v2::call_metadata::{CallKind, CallSemantics};
-    let metadata = execution.call.metadata();
-    if metadata.source_graph == Some(false) {
+    if execution.call.id.starts_with("noop-proof-verification-")
+        || execution.call.id.starts_with("noop-proof-reverification-")
+    {
+        return Some(DynamicSourceKind::NoopProof);
+    }
+    if execution.call.id.starts_with("verification-wave-") {
+        return Some(DynamicSourceKind::FocusedVerification);
+    }
+    if execution.call.id.starts_with("review-verification-wave-") {
+        return Some(DynamicSourceKind::ReviewVerification);
+    }
+    let write_fanout = execution.call.method == WorkflowV2HostMethod::Fanout
+        && matches!(
+            execution.call.write_mode,
+            Some(WorkflowV2WriteMode::Coordinated | WorkflowV2WriteMode::Worktree)
+        )
+        && execution
+            .call
+            .options
+            .item_kind
+            .as_deref()
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("implementation"));
+    if !write_fanout {
         return None;
     }
-    match metadata.kind {
-        CallKind::NoopProof => Some(DynamicSourceKind::NoopProof),
-        CallKind::Implementation => Some(DynamicSourceKind::Implementation),
-        CallKind::Remediation => Some(DynamicSourceKind::Remediation),
-        CallKind::ReviewRemediation => Some(DynamicSourceKind::ReviewRemediation),
-        CallKind::FocusedVerification => Some(DynamicSourceKind::FocusedVerification),
-        CallKind::ReviewVerification => Some(DynamicSourceKind::ReviewVerification),
-        CallKind::Other => None,
+    if execution.call.id.starts_with("implementation-wave-") {
+        return Some(DynamicSourceKind::Implementation);
     }
+    if execution.call.id.starts_with("remediation-wave-") {
+        return Some(DynamicSourceKind::Remediation);
+    }
+    if execution.call.id.starts_with("review-remediation-wave-") {
+        return Some(DynamicSourceKind::ReviewRemediation);
+    }
+    None
 }
 
 #[derive(Debug, Clone, Default)]
@@ -324,20 +345,4 @@ fn is_project_artifact_target(target: &str) -> bool {
     std::path::Path::new(target)
         .components()
         .any(|component| component.as_os_str() == ".archon")
-}
-
-#[cfg(test)]
-#[test]
-fn declared_source_kind_ignores_call_identity() {
-    use crate::v2::call_metadata::CallKind;
-    use crate::v2::call_metadata_tests::call;
-    let execution = WorkflowV2CallExecution {
-        call: call("custom-inspection", CallKind::ReviewVerification),
-        input: serde_json::json!({}),
-        depends_on: vec![],
-    };
-    assert!(matches!(
-        dynamic_source_kind(&execution),
-        Some(DynamicSourceKind::ReviewVerification)
-    ));
 }

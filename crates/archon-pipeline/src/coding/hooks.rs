@@ -1,7 +1,7 @@
 //! Pre/PostToolUse hook policies for the coding pipeline.
 //!
-//! Evaluates declared tool access before and after execution.
-//! Enforces capability-based tool restrictions, dangerous command blocking,
+//! Implements REQ-IMPROVE-011 (PreToolUse) and REQ-IMPROVE-012 (PostToolUse).
+//! Enforces phase-based tool restrictions, dangerous command blocking,
 //! affected-file scope, and post-execution quality checks.
 
 use std::path::PathBuf;
@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use regex::Regex;
 use serde_json::Value;
 
-use super::agents::ToolAccess;
 use super::gates::ForbiddenPatternScanner;
 
 // ---------------------------------------------------------------------------
@@ -82,19 +81,19 @@ fn is_write_tool(tool_name: &str) -> bool {
 /// Hook that evaluates tool calls BEFORE execution.
 ///
 /// Enforces:
-/// - Read-only access: deny Write, Edit, Bash
+/// - Phase 1-3: deny Write, Edit, Bash
 /// - All phases: deny dangerous Bash commands
 /// - Scope: deny/warn on files outside affected_files
 pub struct PreToolUseHook {
-    tool_access: ToolAccess,
+    current_phase: u8,
     affected_files: Vec<String>,
     dangerous_patterns: Vec<Regex>,
 }
 
 impl PreToolUseHook {
-    pub fn new(tool_access: ToolAccess, affected_files: Vec<String>) -> Self {
+    pub fn new(phase: u8, affected_files: Vec<String>) -> Self {
         Self {
-            tool_access,
+            current_phase: phase,
             affected_files,
             dangerous_patterns: compile_dangerous_patterns(),
         }
@@ -107,10 +106,13 @@ impl PreToolUseHook {
             return HookDecision::Allow;
         }
 
-        // 2. Declared read-only access blocks write tools
-        if self.tool_access == ToolAccess::ReadOnly && is_write_tool(tool_name) {
+        // 2. Phase 1-3: block all write tools
+        if self.current_phase <= 3 && is_write_tool(tool_name) {
             return HookDecision::Block {
-                reason: format!("{} denied by read-only tool access", tool_name),
+                reason: format!(
+                    "{} denied in Phase {} (read-only)",
+                    tool_name, self.current_phase
+                ),
             };
         }
 
@@ -136,7 +138,7 @@ impl PreToolUseHook {
             && !self.affected_files.is_empty()
             && !self.affected_files.iter().any(|af| file_path.contains(af))
         {
-            if self.tool_access == ToolAccess::ReadOnly {
+            if self.current_phase <= 3 {
                 return HookDecision::Block {
                     reason: format!("File '{}' is outside affected_files scope", file_path),
                 };
@@ -208,9 +210,9 @@ impl PostToolUseHook {
         self.edit_counter.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    /// Check declared write capability before scheduling an edit check.
-    pub fn should_run_compilation_check(&self, tool_access: ToolAccess) -> bool {
-        if tool_access != ToolAccess::Full {
+    /// Check if a compilation check should run (every 5th edit in Phase 4+).
+    pub fn should_run_compilation_check(&self, phase: u8) -> bool {
+        if phase < 4 {
             return false;
         }
         let count = self.edit_counter.load(Ordering::Relaxed);

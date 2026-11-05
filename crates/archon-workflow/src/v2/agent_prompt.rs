@@ -40,9 +40,7 @@ fn build_stable_prefix(
     let stable_input = compact_json(stable_input);
     let (write_rules, final_output_rule) = if request.is_write_capable() {
         (IMPLEMENTATION_RULES, FINAL_OUTPUT_RULE)
-    } else if (crate::v2::call_metadata::CallSemantics::verification(&request.call)
-        || crate::stage_command_policy::v2_call_runs_commands("", &request.input))
-    {
+    } else if crate::stage_command_policy::v2_call_runs_commands(&request.call.id, &request.input) {
         // REM-16: the rules say what the host granted.
         (READ_ONLY_COMMAND_RULES, "")
     } else {

@@ -414,12 +414,3 @@ fn a_foreign_file_under_branches_does_not_fail_an_unrelated_stages_fanout() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].id, next.id);
 }
-
-#[test]
-fn typed_custom_calls_require_completion_evidence() {
-    let call = crate::v2::call_metadata_tests::call(
-        "custom-write",
-        crate::v2::call_metadata::CallKind::Implementation,
-    );
-    assert!(super::completion_evidence_call_id(&call));
-}

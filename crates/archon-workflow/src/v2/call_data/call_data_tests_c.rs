@@ -29,7 +29,7 @@ fn focused_verification_duplicate_cargo_harness_pass_is_accepted() {
                 .as_array()
                 .is_some_and(
                     |items| items.iter().any(|item| item["task_id"] == "TASK-TDL-010"
-                        && item["source_fingerprint"] == crate::v2::completion_evidence::FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION)
+                        && item["source_fingerprint"] == "focused-verification-evidence-v2")
                 )
         ),
         "{outcomes:#?}"

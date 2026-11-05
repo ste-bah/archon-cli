@@ -1,16 +1,32 @@
 //! KB Q&A query engine — retrieve, gather context, synthesize, file answers.
 //!
-//! There is one answering capability and one command:
+//! Implements REQ-KB-003, which `PRD-ARCHON-DOCS-001` specifies again as
+//! REQ-DOCS-013/014/015. There is one capability, so there is one command:
 //! `archon docs answer` drives this engine when a provider is configured and
 //! falls back to `archon_docs::answer`'s extractive path when none is.
 //!
 //! NFR: search < 500ms, Q&A < 5s.
 //!
-//! Retrieval uses the document store's chunks. Synthesized answers are filed
-//! as searchable documents with `DerivedFrom` edges to their cited chunks.
+//! # Where the evidence comes from and where answers go
 //!
-//! Streaming attaches [`AnswerStreamSink`] to show generated text early.
-//! Filing, citations, and the returned result are identical to non-streaming queries.
+//! Retrieval runs over the chunks the shipping ingest path writes
+//! (`doc_chunks`, via [`archon_docs::retrieval`]) — the same corpus
+//! `kb search` and `docs search` rank, so the three verbs cannot disagree about
+//! what is in the knowledge base. A filed answer is stored as an ordinary
+//! document with `DerivedFrom` edges to the chunks it cited, which makes it
+//! searchable in its own right.
+//!
+//! What this engine adds over `docs answer` — which is extractive and
+//! discards its text — is LLM synthesis through [`QaSynthesizer`] and the
+//! filing step.
+//!
+//! # Streaming
+//!
+//! [`QueryEngine::query_streaming`] is [`QueryEngine::query`] with an
+//! [`AnswerStreamSink`] attached. It exists because synthesis is ~99% of the
+//! command's wall clock, so a caller that can show text early should. Filing,
+//! citations and the returned result are identical either way — see
+//! [`AnswerStreamSink`].
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,6 +42,10 @@ use super::compile::{CONCEPT_SOURCE_PREFIX, SUMMARY_SOURCE_PREFIX};
 #[path = "query_types.rs"]
 mod query_types;
 pub use query_types::*;
+
+#[path = "query_helpers.rs"]
+mod query_helpers;
+use query_helpers::{format_context, truncate_chars};
 
 /// `source_path` prefix for an answer filed back into the knowledge base.
 pub const ANSWER_SOURCE_PREFIX: &str = "archon-kb://answer/";
@@ -464,33 +484,6 @@ fn synthesis_prompt(question: &str, formatted_context: &str) -> String {
          Cite your sources by chunk ID. If the context is insufficient, say so.\n\n\
          Question: {question}\n\nContext:\n{formatted_context}"
     )
-}
-
-fn format_context(context: &AnswerContext) -> String {
-    let mut parts = Vec::new();
-    for chunk in &context.primary {
-        parts.push(format!(
-            "### [{}] {} (relevance: {:.2})\n{}",
-            chunk.chunk_id, chunk.source_path, chunk.score, chunk.content
-        ));
-    }
-    if !context.summaries.is_empty() {
-        parts.push("\n### Compiled summaries:".to_string());
-        parts.extend(context.summaries.iter().cloned());
-    }
-    if !context.concepts.is_empty() {
-        parts.push("\n### Related concepts:".to_string());
-        parts.extend(context.concepts.iter().cloned());
-    }
-    parts.join("\n\n")
-}
-
-fn truncate_chars(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let prefix: String = text.chars().take(max).collect();
-    format!("{prefix}...")
 }
 
 #[cfg(test)]

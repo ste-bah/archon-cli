@@ -65,7 +65,7 @@ impl CompletionCredit {
     /// regression. The intersection with the verification set is unchanged, so
     /// no task is credited that was not also verified.
     fn record_v3_implementation(&mut self, record: &WorkflowV2CallRecord) {
-        if !is_v3_implementation_call(&record.call) {
+        if !is_v3_implementation_call(&record.call.id) {
             return;
         }
         if !matches!(
@@ -114,15 +114,12 @@ impl CompletionCredit {
     }
 }
 
-/// Task-scoped writes carry implementation credit across renamed calls.
-fn is_v3_implementation_call(call: &super::host_api::WorkflowV2HostCall) -> bool {
-    use super::call_metadata::{CallKind, CallSemantics};
-    let metadata = call.metadata();
-    metadata.task_scoped
-        && matches!(
-            metadata.kind,
-            CallKind::Implementation | CallKind::Remediation | CallKind::ReviewRemediation
-        )
+/// True for v3 authored-script implement/remediate call ids. These are the
+/// runtime's own v3 call-id scheme (not PRD-specific); the same prefixes gate
+/// ordinal-drift reuse in the script host.
+fn is_v3_implementation_call(call_id: &str) -> bool {
+    let id = call_id.to_ascii_lowercase();
+    id.starts_with("implement-task-") || id.starts_with("remediate-task-")
 }
 
 pub fn prepare_resume_credit(
@@ -343,14 +340,4 @@ fn resume_archive_dir(store: &WorkflowV2ResultStore) -> PathBuf {
         .root()
         .join("archived-resume-terminals")
         .join(attempt.to_string())
-}
-
-#[cfg(test)]
-#[test]
-fn typed_task_writes_receive_legacy_coverage_credit_under_any_name() {
-    let call = super::call_metadata_tests::call(
-        "custom-write",
-        super::call_metadata::CallKind::Implementation,
-    );
-    assert!(is_v3_implementation_call(&call));
 }

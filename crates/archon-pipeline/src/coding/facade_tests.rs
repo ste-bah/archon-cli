@@ -29,7 +29,7 @@ fn coding_test_project_root() -> &'static std::path::Path {
     })
 }
 
-pub(super) fn make_result(output: &str) -> AgentResult {
+fn make_result(output: &str) -> AgentResult {
     AgentResult {
         output: output.to_string(),
         tool_use_log: Vec::new(),

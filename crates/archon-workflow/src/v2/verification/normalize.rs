@@ -12,16 +12,11 @@ use crate::v2::{
 // completion evidence cannot drift apart.
 use crate::v2::completion_evidence::FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION;
 
-fn is_focused_verification_call(
-    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
-) -> bool {
-    call_id.verification()
+fn is_focused_verification_call(call_id: &str) -> bool {
+    call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
 }
 
-pub fn stamp_focused_verification_input(
-    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
-    input: &mut serde_json::Value,
-) {
+pub fn stamp_focused_verification_input(call_id: &str, input: &mut serde_json::Value) {
     if !is_focused_verification_call(call_id) {
         return;
     }
@@ -35,7 +30,7 @@ pub fn stamp_focused_verification_input(
 }
 
 pub fn normalize_focused_verification_outcome(
-    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
+    call_id: &str,
     outcome: &mut WorkflowV2BranchOutcome,
 ) {
     if !is_focused_verification_call(call_id) || is_terminal_runtime_or_safety(outcome) {
@@ -103,7 +98,7 @@ pub fn normalize_focused_verification_outcome(
     }
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Test,
-        "canonical focused verification accepted duplicate test harness pass sections as one successful targeted check",
+        "canonical focused verification accepted duplicate cargo harness pass sections as one successful targeted check",
     ));
     if let Some(object) = result.data.as_object_mut() {
         object.insert(
@@ -112,7 +107,7 @@ pub fn normalize_focused_verification_outcome(
         );
         object.insert(
             "verification_evidence_normalization_reason".to_string(),
-            serde_json::json!("duplicate test harness pass sections collapsed into one canonical focused verification pass"),
+            serde_json::json!("duplicate cargo harness pass sections collapsed into one canonical focused verification pass"),
         );
     }
     outcome.status = WorkflowV2Status::Accepted;
