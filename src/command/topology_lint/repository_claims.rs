@@ -69,11 +69,10 @@ pub(crate) fn inspect(
         return Ok(Vec::new());
     };
     let tree = RepositoryTree::load(&record).context("loading the recorded repository tree")?;
-    Ok(body_findings(&tree, project_root, task_id, path, text))
+    body_findings(&tree, project_root, task_id, path, text)
 }
 
-/// Both sections for one body: every deliverable path's observation
-/// (Issue-56), then every other claim the prose makes. A path the
+/// Both sections for one body: explicit observations, then other prose claims. A path the
 /// observation section already reports is not reported twice — the finding
 /// that names the line count is the one the author needs.
 pub(crate) fn body_findings(
@@ -82,19 +81,18 @@ pub(crate) fn body_findings(
     task_id: &str,
     path: &Path,
     text: &str,
-) -> Vec<String> {
+) -> Result<Vec<String>> {
     // An unparsable body has no deliverable lists; the preflight reports it.
-    let observed = parse_task_file(path, text)
-        .map(|task| {
-            super::repository_observations::findings_against(
-                tree,
-                project_root,
-                task_id,
-                text,
-                &task,
-            )
-        })
-        .unwrap_or_default();
+    let observed = match parse_task_file(path, text) {
+        Ok(task) => super::repository_observations::findings_against(
+            tree,
+            project_root,
+            task_id,
+            text,
+            &task,
+        )?,
+        Err(_) => Vec::new(),
+    };
     let reported: std::collections::BTreeSet<&str> =
         observed.iter().map(|(p, _)| p.as_str()).collect();
     let claims = claim_findings(tree, project_root, task_id, text)
@@ -102,11 +100,11 @@ pub(crate) fn body_findings(
         .filter(|(paths, _)| !paths.iter().any(|p| reported.contains(p.as_str())))
         .map(|(_, text)| text)
         .collect::<Vec<_>>();
-    observed
+    Ok(observed
         .into_iter()
         .map(|(_, text)| text)
         .chain(claims)
-        .collect()
+        .collect())
 }
 
 /// `project_root` is where a relative path that is not repository source (a
@@ -300,7 +298,7 @@ pub(crate) fn set_findings(project_root: &Path, root: &Path) -> Result<Vec<GateF
             continue;
         };
         findings.extend(
-            body_findings(&tree, project_root, &task.canonical_task_id, &path, &raw)
+            body_findings(&tree, project_root, &task.canonical_task_id, &path, &raw)?
                 .into_iter()
                 .map(|text| {
                     GateFinding::new(

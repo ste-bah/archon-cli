@@ -67,8 +67,25 @@ fn declared_task_section_items_with_separator(
     let mut items: Vec<String> = Vec::new();
     let mut in_section = false;
     let mut current: Option<String> = None;
+    let mut fence: Option<(char, usize)> = None;
     for line in raw.lines() {
         let trimmed = line.trim();
+        let marker = trimmed.chars().next().unwrap_or(' ');
+        let width = trimmed.chars().take_while(|c| *c == marker).count();
+        if matches!(marker, '`' | '~') && width >= 3 {
+            if let Some((open, size)) = fence {
+                if marker == open && width >= size && trimmed[width..].trim().is_empty() {
+                    fence = None;
+                }
+            } else {
+                push_section_item(&mut items, current.take());
+                fence = Some((marker, width));
+            }
+            continue;
+        }
+        if fence.is_some() {
+            continue;
+        }
         if let Some(heading) = trimmed.strip_prefix('#') {
             push_section_item(&mut items, current.take());
             in_section = heading_matches_section(heading.trim_start_matches('#'), section);

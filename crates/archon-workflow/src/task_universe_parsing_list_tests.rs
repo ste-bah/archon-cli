@@ -189,3 +189,26 @@ fn focused_tests_declared_by_a_real_body() {
         println!("DECLARED: {command}");
     }
 }
+
+#[test]
+fn fenced_examples_do_not_contribute_section_items_or_headings() {
+    for (open, close) in [("````markdown", "````"), ("~~~~markdown", "~~~~")] {
+        let raw = format!(
+            "## Files Expected to Change\n- `src/real.rs`\n{open}\n## Notes\n- `src/example.rs`\n```\n{close}\n- `src/other.rs`\n"
+        );
+        assert_eq!(
+            declared_task_section_items(&raw, "files expected to change"),
+            ["`src/other.rs`", "`src/real.rs`"]
+        );
+    }
+}
+
+#[test]
+fn fenced_bullets_are_not_criteria_but_focused_commands_remain_declared() {
+    let raw = "## Acceptance Criteria\n- Real criterion.\n```text\n- Example criterion.\n```\n## Focused Tests\n```sh\ntest -f src/a.txt\n```\n";
+    assert_eq!(
+        declared_task_section_items(raw, "acceptance criteria"),
+        ["Real criterion."]
+    );
+    assert_eq!(super::declared_focused_tests(raw), ["test -f src/a.txt"]);
+}

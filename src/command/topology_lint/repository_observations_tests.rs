@@ -72,6 +72,7 @@ fn findings(tasks: &Path, project: &Path, tree: &RepositoryTree, raw: &str) -> V
     let path = tasks.join("TASK-X-001.md");
     let task = archon_workflow::task_universe::parsing::parse_task_file(&path, raw).unwrap();
     findings_against(tree, project, "TASK-X-001", raw, &task)
+        .unwrap()
         .into_iter()
         .map(|(_, text)| text)
         .collect()
@@ -133,27 +134,13 @@ fn the_grammar_parses_exactly_three_observations() {
 }
 
 #[test]
-fn a_deliverable_with_no_observation_is_a_blocking_finding_naming_the_path() {
+fn missing_author_observations_are_not_findings() {
     let (_temp, project, tasks, tree) = grounded();
     let raw = body(
         "[]",
         "- `src/lib.rs`: add the module declaration\n- `src/new.rs`",
     );
-    let found = findings(&tasks, &project, &tree, &raw);
-    assert_eq!(found.len(), 2, "{found:?}");
-    assert!(
-        found[0]
-            .starts_with("TASK-X-001: deliverable path `src/lib.rs` has no verifiable observation"),
-        "{}",
-        found[0]
-    );
-    assert!(found[0].contains("exists (N lines)"), "{}", found[0]);
-    assert!(
-        found[1]
-            .starts_with("TASK-X-001: deliverable path `src/new.rs` has no verifiable observation"),
-        "{}",
-        found[1]
-    );
+    assert!(findings(&tasks, &project, &tree, &raw).is_empty());
 }
 
 #[test]
@@ -193,38 +180,20 @@ fn a_description_relative_path_is_not_a_deliverable_path() {
 }
 
 #[test]
-fn every_path_in_a_head_list_is_checked() {
-    let (_temp, project, tasks, tree) = grounded();
-    let raw = body("[]", "- `src/missing_a.rs`, `src/missing_b.rs`");
-    let found = findings(&tasks, &project, &tree, &raw);
-    assert_eq!(found.len(), 2, "{found:?}");
-    assert!(
-        found
-            .iter()
-            .any(|finding| finding.contains("`src/missing_a.rs`"))
-    );
-    assert!(
-        found
-            .iter()
-            .any(|finding| finding.contains("`src/missing_b.rs`"))
+fn every_path_in_a_head_list_is_declared() {
+    assert_eq!(
+        paths_in_item("`src/a.rs`, `src/b.rs`"),
+        ["src/a.rs", "src/b.rs"]
     );
 }
 
 #[test]
-fn wrapped_head_lists_keep_paths_until_the_description_starts() {
-    let (_temp, project, tasks, tree) = grounded();
-    let raw = body(
-        "[]",
-        "- `src/missing_a.rs`,\n  `src/missing_b.rs` (create).\n- Module wiring:\n  `src/missing_c.rs`.",
+fn wrapped_head_lists_stop_at_the_first_description() {
+    assert_eq!(
+        paths_in_item("`src/a.rs`,\n `src/b.rs` (create) with `c.rs`"),
+        ["src/a.rs", "src/b.rs"]
     );
-    let found = findings(&tasks, &project, &tree, &raw);
-    assert_eq!(found.len(), 3, "{found:?}");
-    for path in ["src/missing_a.rs", "src/missing_b.rs", "src/missing_c.rs"] {
-        assert!(
-            found.iter().any(|finding| finding.contains(path)),
-            "{found:?}"
-        );
-    }
+    assert!(paths_in_item("Module wiring:\n `src/c.rs`").is_empty());
 }
 
 #[test]
@@ -240,57 +209,28 @@ fn wrapped_description_does_not_add_a_path_after_an_observed_head() {
 
 #[test]
 fn absent_inside_a_filename_is_not_an_observation_marker() {
-    let (_temp, project, tasks, tree) = grounded();
-    let raw = body("[]", "- `src/path-absent.rs`\n- `src/absent_handler.rs`");
-    let found = findings(&tasks, &project, &tree, &raw);
-    assert_eq!(found.len(), 2, "{found:?}");
-    assert!(
-        found
-            .iter()
-            .any(|finding| finding.contains("src/path-absent.rs"))
-    );
-    assert!(
-        found
-            .iter()
-            .any(|finding| finding.contains("src/absent_handler.rs"))
+    assert_eq!(
+        paths_in_item("`src/path-absent.rs`"),
+        ["src/path-absent.rs"]
     );
 }
 
 #[test]
-fn an_unobserved_head_path_is_found_without_treating_its_description_as_a_path() {
-    let (_temp, project, tasks, tree) = grounded();
-    let raw = body(
-        "[]",
-        "- `src/new.rs`\n  describe output using `src/description.rs`",
+fn an_unobserved_head_does_not_include_description_paths() {
+    assert_eq!(
+        paths_in_item("`src/new.rs`\n describe `src/description.rs`"),
+        ["src/new.rs"]
     );
-    let found = findings(&tasks, &project, &tree, &raw);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].contains("deliverable path `src/new.rs` has no verifiable observation"));
 }
 
 #[test]
-fn unobserved_wording_is_a_blocking_finding_even_with_the_literal_grammar_in_it() {
+fn unobserved_wording_does_not_require_author_transcription() {
     let (_temp, project, tasks, tree) = grounded();
-    let repo = tree.root().display();
     let raw = body(
         "[]",
-        &format!(
-            "- `{repo}/src/lib.rs` — not observed from this authoring run (repository root outside this run's allowed tool directories) — implementer must record exists (N lines) or absent"
-        ),
+        "- `src/lib.rs` — not observed; implementer must record exists (N lines)",
     );
-    let found = findings(&tasks, &project, &tree, &raw);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0]
-            .starts_with("TASK-X-001: deliverable path `src/lib.rs` is described as unobserved"),
-        "{}",
-        found[0]
-    );
-    assert!(
-        found[0].contains("not observed from this authoring run"),
-        "{}",
-        found[0]
-    );
+    assert!(findings(&tasks, &project, &tree, &raw).is_empty());
 }
 
 #[test]
@@ -382,7 +322,8 @@ fn the_body_lint_and_set_gate_report_each_path_once() {
     let raw = body("[]", "- `src/existing.rs` — absent");
     let path = tasks.join("TASK-X-001.md");
     let found =
-        super::super::repository_claims::body_findings(&tree, &project, "TASK-X-001", &path, &raw);
+        super::super::repository_claims::body_findings(&tree, &project, "TASK-X-001", &path, &raw)
+            .unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(
         found[0].contains("rewrite the observation as exists (3 lines)"),
@@ -452,7 +393,7 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
     }
     // Issue-367: the lint reads a pure wrapper as the document inside it, so
     // the raw reply gets the same findings as the unwrapped one (below).
-    let raw_findings = findings_against(&tree, &project, task_id, LANDED, &task);
+    let raw_findings = findings_against(&tree, &project, task_id, LANDED, &task).unwrap();
 
     // Unwrapped: every observation is found and matches the checkout.
     let unwrapped = super::super::fences::unwrap_outer_fence(LANDED).expect("outer fence removed");
@@ -465,18 +406,9 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
             "{relative}"
         );
     }
-    let found = findings_against(&tree, &project, task_id, unwrapped, &task);
+    let found = findings_against(&tree, &project, task_id, unwrapped, &task).unwrap();
     assert_eq!(raw_findings, found);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(
-        found[0].0, "registry-migration-report.json",
-        "the one path the body names without observing"
-    );
-    assert!(
-        found[0].1.contains("has no verifiable observation"),
-        "{}",
-        found[0].1
-    );
+    assert!(found.is_empty(), "{found:?}");
 }
 
 #[path = "repository_observations_list_tests.rs"]
@@ -484,3 +416,6 @@ mod list_tests;
 
 #[path = "repository_observations_shape_tests.rs"]
 mod shape_tests;
+
+#[path = "repository_observations_host_tests.rs"]
+mod host_tests;

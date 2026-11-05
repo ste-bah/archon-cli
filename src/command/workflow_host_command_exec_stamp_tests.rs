@@ -294,3 +294,47 @@ authorCandidate(w, bodyPolicy({{ taskId: "TASK-X-010", fileName: "TASK-X-010.md"
         "the finding reaches the author: {second}"
     );
 }
+
+#[test]
+fn landing_stamps_repository_facts_after_frozen_fields() {
+    use archon_workflow::repository_record::{RepositoryRecordV1, write_repository_record};
+    let temp = tempfile::tempdir().unwrap();
+    let context = chain(temp.path(), true);
+    let repo = temp.path().join("repository");
+    std::fs::create_dir_all(&repo).unwrap();
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["init", "-q"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    std::fs::write(repo.join("existing.txt"), "a\nb").unwrap();
+    write_repository_record(
+        &context.task_root,
+        &RepositoryRecordV1 {
+            schema_version: 1,
+            repository_root: repo.display().to_string(),
+            base_commit: "unborn".into(),
+            decomposition_run_id: "test".into(),
+            recorded_at: "now".into(),
+        },
+    )
+    .unwrap();
+    let candidate = format!(
+        "{}\n## Files Expected to Change\n\n- `existing.txt`\n- `new.txt`\n",
+        whole()
+    );
+    let mut request = HostCommandRequest::new("land-task-body", Some(candidate)).unwrap();
+    super::stamp_request(&mut request, &context)
+        .unwrap()
+        .unwrap();
+    let stamped = request.stdin.clone().unwrap();
+    assert!(stamped.contains("\"lines\": 2"));
+    assert!(stamped.contains("\"kind\": \"absent\""));
+    assert!(stamped.contains("\"checkout_revision\": \"unborn\""));
+    super::stamp_request(&mut request, &context)
+        .unwrap()
+        .unwrap();
+    assert_eq!(request.stdin.unwrap(), stamped);
+}
