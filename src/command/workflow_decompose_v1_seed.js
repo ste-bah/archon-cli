@@ -97,7 +97,7 @@ function seedEntries(seed, policy, state) {
     : []);
   const owed = owedSupplementary();
   for (const entry of listed) {
-    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
+    const requirement = supplementaryRequirement(entry.id);
     if (requirement) owed.set(entry.id, { requirement, text: currentRequirementText(requirement) });
     state.entries.set(entry.id, entry);
   }
@@ -128,7 +128,7 @@ function seedEntries(seed, policy, state) {
   const currentCriterion = (id) => {
     const criteria = args.acceptanceCriteria || {};
     if (Object.prototype.hasOwnProperty.call(criteria, id)) return criteria[id];
-    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(id)?.[1];
+    const requirement = supplementaryRequirement(id);
     return requirement ? (args.prdRequirementTexts || {})[requirement] : undefined;
   };
   // A reply authored after that gate is the entry's latest version, and a

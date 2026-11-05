@@ -20,8 +20,7 @@
 //! - tool-call syntax, an identifier followed by `(`, is not a command;
 //! - the first word must be a program word: the shell operators `!`, `(`,
 //!   `{`, `[`, `[[` and the builtins `:` and `.`; or `[A-Za-z0-9_+./:@%$-]`
-//!   characters, not starting with an uppercase letter (sentence prose) or
-//!   `-`, not ending in `:` (a `key:` label, as in `enabled: true`), and not
+//!   characters, not starting with `-` or ending in `:` (a `key:` label), and not
 //!   a bare file name (`notes.rs`, `.ext`: a `.` outside a `./`/`../` path,
 //!   unless every character after the last `.` is a digit, as in
 //!   `python3.11`);
@@ -31,11 +30,11 @@
 //!   proves ``).
 //!
 //! Well-formed items (`` `cargo test -p x` ``, fenced command lines) parse
-//! exactly as they did. Known limits: a lowercase prose item with no code
+//! exactly as they did. Known limits: a prose item with no code
 //! span ("run the suite"), or a leading lone identifier (`` `some_word` is
 //! recorded ``), still reads as a command (the host baseline then records
-//! it as a non-command when the shell finds no such program), and a
-//! program whose name starts with an uppercase letter does not.
+//! it as a non-command when the shell finds no such program). Capitalization
+//! does not identify whether a word is prose or an executable.
 //!
 //! A fenced command a shell would continue onto the next line (an open
 //! quote, a trailing `\`) is one command, joined with its continuation
@@ -194,8 +193,8 @@ fn program_word(word: &str) -> bool {
     let Some(first) = word.chars().next() else {
         return false;
     };
-    // Sentence prose, an option, or a `key:` label (`enabled: true`).
-    if first.is_ascii_uppercase() || first == '-' || word.ends_with(':') {
+    // An option or a `key:` label (`enabled: true`).
+    if first == '-' || word.ends_with(':') {
         return false;
     }
     if !word

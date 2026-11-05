@@ -35,7 +35,7 @@ pub(super) fn policy_findings(
     if report.coverage.requirements_total == 0 {
         findings.push(TracePolicyFinding {
             text: format!(
-                "PRD {} defines zero obligations; add a line-leading REQ-<AREA>-<NNN> bullet or a row under an obligation table, then re-run the same trace command",
+                "PRD {} defines zero obligations recognizable by the host; the harness could not derive an inventory from this source document; retain its authored identifiers while resolving extraction before re-running the same trace command",
                 report.prd_path
             ),
             subject: "PRD".into(),
@@ -149,7 +149,7 @@ pub(super) fn blocking_findings(
     let task_population_complete = input_findings.is_empty();
     if report.coverage.requirements_total == 0 {
         input_findings.push(format!(
-            "PRD {} defines zero obligations; add a line-leading REQ-<AREA>-<NNN> bullet or a row under an obligation table, then re-run the same trace command",
+            "PRD {} defines zero obligations recognizable by the host; the harness could not derive an inventory from this source document; retain its authored identifiers while resolving extraction before re-running the same trace command",
             report.prd_path
         ));
     }

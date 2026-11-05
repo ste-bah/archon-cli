@@ -1,5 +1,10 @@
-// Keep in sync with Rust acceptance_stage::coverage::REQUIREMENT_PREFIX.
-const REQUIREMENT_PREFIX = "REQ-";
+// The host-derived inventory is the sole authority for authored identities.
+function supplementaryRequirement(id) {
+  if (typeof id !== "string" || !id.startsWith("SUP-")) return null;
+  const requirement = id.slice(4);
+  return Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, requirement)
+    ? requirement : null;
+}
 
 const COMMAND_EXAMPLES = 'Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.';
 
@@ -22,7 +27,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         }
       },
       gap_permitted: false,
-      covers: [`<${REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>`],
+      covers: [`<exact requirement id from the PRD whose violation makes this check fail>`],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     },
     {
@@ -35,7 +40,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         cwd: "<repo_root or project_root>"
       },
       gap_permitted: false,
-      covers: [`<${REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>`],
+      covers: [`<exact requirement id from the PRD whose violation makes this check fail>`],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     }
   ],

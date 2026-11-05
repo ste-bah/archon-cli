@@ -72,9 +72,6 @@ fn is_block_start(line: &str) -> bool {
 fn starts_with_obligation_id(line: &str) -> bool {
     let body = list_item_body(line);
     super::constraints::leading_id(body).is_some()
-        || ["REQ-", "AC-", "G-", "DONE-"]
-            .iter()
-            .any(|prefix| body.starts_with(prefix))
 }
 
 pub(super) fn list_item_body(line: &str) -> &str {

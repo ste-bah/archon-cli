@@ -306,7 +306,7 @@ async function repairFrozenStage(w, verified, findings) {
       initialized = true;
       state.entries = new Map(listed.map((entry) => [entry.id, entry]));
       for (const entry of contract?.supplementary || []) {
-        const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
+        const requirement = supplementaryRequirement(entry.id);
         if (requirement) owedSupplementary().set(entry.id, { requirement, text: currentRequirementText(requirement) });
       }
       state.retryIds = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract, state.entries);

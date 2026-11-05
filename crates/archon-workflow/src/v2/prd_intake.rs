@@ -116,12 +116,16 @@ fn global_hard_rules(
         .chain(context_paths.iter().map(PathBuf::as_path))
     {
         let body = read_to_string(path)?;
-        for rule in extract_sections(&body, &["Hard Rules", "Constraints"]) {
+        for rule in source_rules(&body) {
             rules.insert(rule);
         }
     }
     Ok(rules.into_iter().collect())
 }
+
+#[path = "prd_intake_rules.rs"]
+mod rules;
+use rules::source_rules;
 
 fn ordered_task_files(
     task_dir: &Path,
@@ -157,7 +161,7 @@ fn parse_task_file(
     let task_id = task_id(path, &body)
         .ok_or_else(|| WorkflowV2PrdIntakeError::MissingTaskId { path: path.into() })?;
     let mut hard_rules = global_hard_rules.to_vec();
-    hard_rules.extend(extract_sections(&body, &["Hard Rules", "Constraints"]));
+    hard_rules.extend(source_rules(&body));
     hard_rules.sort();
     hard_rules.dedup();
 
@@ -238,7 +242,15 @@ fn dependencies(body: &str) -> Vec<String> {
 }
 
 fn acceptance_criteria(body: &str) -> Vec<String> {
-    let mut criteria = extract_sections(body, &["Acceptance Criteria", "Definition of Done"]);
+    let mut criteria: Vec<_> = crate::obligation_ids::acceptance_criteria(body)
+        .into_values()
+        .collect();
+    criteria.extend(crate::obligation_ids::obligation_texts(body).into_values());
+    criteria.extend(extract_sections(
+        body,
+        &["Acceptance Criteria", "Definition of Done"],
+    ));
+    criteria.extend(source_rules(body));
     criteria.extend(list_values(body, "acceptance_criteria"));
     criteria.sort();
     criteria.dedup();
@@ -282,71 +294,9 @@ fn status_from_task_file(body: &str) -> WorkflowV2TaskFileStatus {
     }
 }
 
-fn extract_sections(body: &str, headings: &[&str]) -> Vec<String> {
-    extract_raw_sections(body, headings)
-        .into_iter()
-        .flat_map(markdown_list_items)
-        .collect()
-}
-
-fn extract_raw_sections<'a>(body: &'a str, headings: &[&str]) -> Vec<&'a str> {
-    let mut sections = Vec::new();
-    let lines = body
-        .split_inclusive('\n')
-        .scan(0usize, |offset, line| {
-            let start = *offset;
-            *offset += line.len();
-            Some((start, line))
-        })
-        .collect::<Vec<_>>();
-
-    let mut idx = 0usize;
-    while idx < lines.len() {
-        let (start, line) = lines[idx];
-        let Some((level, title)) = markdown_heading(line.trim()) else {
-            idx += 1;
-            continue;
-        };
-        if !headings
-            .iter()
-            .any(|heading| title.eq_ignore_ascii_case(heading))
-        {
-            idx += 1;
-            continue;
-        }
-
-        let content_start = start + line.len();
-        let mut end = body.len();
-        for (next_start, next_line) in lines.iter().skip(idx + 1) {
-            if let Some((next_level, _)) = markdown_heading(next_line.trim())
-                && next_level <= level
-            {
-                end = *next_start;
-                break;
-            }
-        }
-        sections.push(body[content_start..end].trim());
-        idx += 1;
-    }
-    sections
-}
-
-fn markdown_heading(line: &str) -> Option<(usize, &str)> {
-    let hashes = line.chars().take_while(|ch| *ch == '#').count();
-    if hashes < 2 || !line.get(hashes..)?.starts_with(' ') {
-        return None;
-    }
-    Some((hashes, line[hashes..].trim()))
-}
-
-fn markdown_list_items(section: &str) -> Vec<String> {
-    section
-        .lines()
-        .map(|line| line.trim().trim_start_matches('-').trim())
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect()
-}
+#[path = "prd_intake_sections.rs"]
+mod sections;
+use sections::{extract_raw_sections, extract_sections};
 
 fn line_value(body: &str, key: &str) -> Option<String> {
     body.lines().find_map(|line| {
@@ -481,3 +431,7 @@ fn read_to_string(path: &Path) -> Result<String, WorkflowV2PrdIntakeError> {
         message: err.to_string(),
     })
 }
+
+#[cfg(test)]
+#[path = "prd_intake_format_tests.rs"]
+mod format_tests;

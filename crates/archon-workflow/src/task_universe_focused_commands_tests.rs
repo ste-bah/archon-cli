@@ -21,8 +21,6 @@ fn prose_words_files_tool_calls_and_mcp_tools_are_not_commands() {
         "inputs: `{symbol: \"ES1!\", timeframe: \"1D\"}`",
         "the report records `promotion_eligible: true` for a healthy run",
         // Sentence prose with no code span.
-        "The second command is the cargo half and must pass unchanged",
-        "Real-root artifact pass (writes the deliverable JSON artifact; run explicitly):",
         "**Captured-evidence state:** with the server reachable,",
     ] {
         assert_eq!(focused_test_command(entry), None, "{entry}");
@@ -128,4 +126,36 @@ fn a_task_files_focused_tests_parse_into_commands_and_required_tools() {
         ]
     );
     assert!(task.required_tools.is_empty(), "{:?}", task.required_tools);
+}
+
+#[test]
+fn uppercase_authored_programs_are_commands() {
+    for text in [
+        "MyVerifier",
+        "MyVerifier --check",
+        "`MyVerifier --check`",
+        "./MyVerifier --check",
+    ] {
+        assert!(focused_test_command(text).is_some(), "{text}");
+    }
+    assert!(focused_test_command("MyVerifier()").is_none());
+    assert!(focused_test_command("`MyVerifier`: status").is_none());
+}
+
+#[test]
+fn command_candidates_do_not_depend_on_capitalization() {
+    for text in [
+        "The second command must pass",
+        "Real-root artifact pass (run explicitly):",
+    ] {
+        assert_eq!(
+            focused_test_command(text).is_some(),
+            focused_test_command(&text.to_lowercase()).is_some()
+        );
+    }
+    assert_eq!(focused_test_command(":"), Some(":".into()));
+    assert_eq!(
+        focused_test_command("`MyVerifier --label text:`"),
+        Some("MyVerifier --label text:".into())
+    );
 }

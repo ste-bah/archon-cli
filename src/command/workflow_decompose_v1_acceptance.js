@@ -27,7 +27,7 @@ function acceptanceAuthorPrompt() {
     "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
     "Every check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every file (source, test or data) it reads by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.",
     "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
-    `covers lists every one of the PRD's ${REQUIREMENT_PREFIX} requirement ids (requirement bullets or obligation-table rows that start with ${REQUIREMENT_PREFIX}) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD ${REQUIREMENT_PREFIX} requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.`,
+    `covers lists every one of the PRD's requirement ids in the host inventory whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.`,
     "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.",
     "For a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.",
     "Do not run commands or write files."
@@ -40,7 +40,7 @@ function acceptanceReplyFormat() {
     COMMAND_EXAMPLES,
     "A complete reply looks exactly like this (each fence line alone on its line):",
     "```json",
-    "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",
+    "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<authored requirement id>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",
     "```",
     "```check",
     "set -eu",
@@ -348,7 +348,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
 function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntries) {
   const retry = new Set();
   // A supplementary check the host says is owed is known from then on.
-  const supFinding = /^check '(SUP-(REQ-[A-Za-z0-9-]+))': PRD requirement \2 is covered by no acceptance check;[^:]*:\s*([\s\S]*)$/;
+  const supFinding = /^check '(SUP-(.+))': PRD requirement \2 is covered by no acceptance check;[^:]*:\s*([\s\S]*)$/;
   if (!acceptanceRepairIds.owed) acceptanceRepairIds.owed = new Map();
   const owed = acceptanceRepairIds.owed;
   const heldOmissions = new Set();
@@ -356,18 +356,18 @@ function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntri
     const match = supFinding.exec(String(finding.text || ""));
     const defect = finding && finding.deterministic_defect;
     const defectId = defect?.code === "uncovered_requirement" && typeof defect.subject === "string"
-      ? /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(defect.subject)
+      ? supplementaryRequirement(defect.subject)
       : null;
     const omissionSubject = defect?.code === "uncovered_requirement"
       && typeof defect.subject === "string" ? defect.subject : null;
     const id = match?.[1] || omissionSubject;
-    const requirement = match?.[2] || (defectId ? defectId[1] : null);
-    if (id && requirement) owed.set(id, { requirement, text: currentRequirementText(requirement) });
+    const requirement = match?.[2] || defectId;
+    if (id && requirement && supplementaryRequirement(id)) owed.set(id, { requirement, text: currentRequirementText(requirement) });
     if (id && heldEntries && typeof heldEntries.has === "function" && heldEntries.has(id)) {
       heldOmissions.add(id);
       continue;
     }
-    if (!id || !requirement) continue;
+    if (!id || !requirement || !supplementaryRequirement(id)) continue;
     retry.add(id);
   }
   const known = { has: (id) => knownIds.has(id) || owed.has(id) };
@@ -375,7 +375,7 @@ function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntri
     const defect = finding && finding.deterministic_defect;
     if (defect?.code === "uncovered_requirement" && heldOmissions.has(defect.subject)) continue;
     if (supFinding.test(String(finding.text || ""))
-      || (defect?.code === "uncovered_requirement" && /^SUP-REQ-[A-Za-z0-9-]+$/.test(defect.subject || ""))) continue;
+      || (defect?.code === "uncovered_requirement" && supplementaryRequirement(defect.subject))) continue;
     // #552: a finding names its entry as data; an unpublished set (a check
     // refuted or not judged) is routed by it too. The text is the fallback.
     if (known.has(finding.subject)) {
@@ -428,8 +428,8 @@ function refreshFromCurrentContract(state, report, others, ids, candidate) {
   }
   const owed = owedSupplementary();
   for (const entry of current.supplementary) {
-    const sup = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(String(entry && entry.id));
-    if (sup && !owed.has(entry.id)) owed.set(entry.id, { requirement: sup[1], text: currentRequirementText(sup[1]) });
+    const sup = supplementaryRequirement(entry && entry.id);
+    if (sup && !owed.has(entry.id)) owed.set(entry.id, { requirement: sup, text: currentRequirementText(sup) });
   }
   const supplied = new Set();
   const drafts = state.drafts || new Map();

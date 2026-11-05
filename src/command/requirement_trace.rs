@@ -40,6 +40,7 @@ mod falsify;
 mod leann_source;
 #[cfg(test)]
 pub(crate) use leann_source::with_test_embedder;
+mod inventory;
 mod persist;
 mod render;
 mod slash;
@@ -60,9 +61,11 @@ use anyhow::anyhow;
 use anyhow::{Context, Result};
 use archon_knowledge::traceability::anchors::{AnchorGap, check_freshness};
 use archon_knowledge::traceability::report::{AnchorVerdict, find_shared_anchors, strongest_level};
+#[cfg(test)]
+use archon_knowledge::traceability::requirements;
 use archon_knowledge::traceability::{
     Anchor, AnchorFreshness, CodeSearch, CommandEvidence, ProofLevel, ReadEvidence, Requirement,
-    RequirementRow, TaskBinding, TraceReport, coverage, falsification, ladder, requirements, tasks,
+    RequirementRow, TaskBinding, TraceReport, coverage, falsification, ladder, tasks,
 };
 #[cfg(test)]
 use verdict::TraceVerdict;
@@ -221,7 +224,7 @@ fn build_report_with_input_findings(
     let prd_path = absolute(cwd, &options.prd);
     let prd = std::fs::read_to_string(&prd_path)
         .with_context(|| format!("reading PRD at {}", prd_path.display()))?;
-    let requirements = requirements::extract_requirements(&prd);
+    let requirements = inventory::extract_requirements(&prd);
     let mut obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
     let constraints = archon_workflow::obligation_ids::constraint_ids(&prd);
     obligations.extend(constraints.iter().cloned());
