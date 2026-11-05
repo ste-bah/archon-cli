@@ -195,7 +195,7 @@ fn replacing_a_schema3_provisional_record_keeps_its_original_bytes() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&std::fs::read(provisional).unwrap()).unwrap()
             ["schema"],
-        6
+        7
     );
 }
 
@@ -285,7 +285,7 @@ async fn hermetic_old_record_is_a_miss_and_survives_rerun(schema: u32, layout: b
         assert_eq!(std::fs::read(archived).unwrap(), bytes);
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&std::fs::read(path).unwrap()).unwrap()["schema"],
-            6
+            7
         );
     }
 }

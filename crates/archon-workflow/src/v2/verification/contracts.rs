@@ -403,8 +403,15 @@ pub(super) async fn run_contract_verifier_for(
         } else {
             &output.stderr
         };
+        // A non-zero exit and a shell expansion abort that exited 0 are
+        // different facts; name the one that happened.
+        let what = if output.status.success() {
+            "aborted on a shell expansion error"
+        } else {
+            "exited non-zero"
+        };
         return failed(vec![format!(
-            "declared contract verifier failed: {}",
+            "declared contract verifier {what}: {}",
             crate::failure_evidence::failure_evidence(said, 420)
         )]);
     }
