@@ -148,3 +148,42 @@ fn P4_18_site_path_remedy_is_shared_with_reauthor() {
     let mirror = include_str!("../../../src/command/workflow_acceptance_reauthor_check_defects.rs");
     assert!(mirror.contains("task_set_contract::acceptance_site_path_defect("));
 }
+
+#[test]
+fn candidate_policy_refuses_nounset_reads_even_behind_an_earlier_assertion() {
+    let criterion = super::super::AcceptanceCriterion {
+        id: "A".into(),
+        criterion: "output is valid".into(),
+        check: AcceptanceCheck::Command {
+            command: "set -eu\ntest -f output\ngrep -q x \"$UNSETVAR-x\" || true".into(),
+            cwd: super::super::TrustedCwd::ProjectRoot,
+        },
+        gap_permitted: false,
+        covers: Vec::new(),
+        judgment: super::super::JudgeVerdict {
+            verdict: JudgeDecision::Accepted,
+            counterexample: String::new(),
+            reason: String::new(),
+            host_call_id: String::new(),
+            sampling: None,
+        },
+    };
+    let mut contract: AcceptanceContract = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "prd": {"path":"input.md", "digest":"test"},
+        "gap_policy": {}, "acceptance": [], "supplementary": []
+    }))
+    .unwrap();
+    contract.acceptance.push(criterion);
+    let findings = acceptance_policy_findings(&contract);
+    let found = findings
+        .iter()
+        .find(|f| {
+            f.identity
+                .as_ref()
+                .is_some_and(|i| i.code == "unset_shell_variable")
+        })
+        .unwrap();
+    assert_eq!(found.field, "A.check");
+    assert!(found.message.contains("line 3"));
+    assert!(found.message.contains("set UNSETVAR or remove that line"));
+}

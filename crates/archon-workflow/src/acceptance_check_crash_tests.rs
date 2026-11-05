@@ -297,3 +297,16 @@ fn acceptance_passes_timeouts_and_operational_errors_are_not_script_defects() {
     errored.operational_error = Some("timed out".into());
     assert_eq!(classify_check_run(HEREDOC, &errored), CheckRunClass::Failed);
 }
+
+#[test]
+fn shell_nounset_read_of_a_never_bound_name_is_a_script_defect() {
+    let command = "set -eu\ngrep -q x \"$UNSETVAR-placeholder\" 2>/dev/null || true";
+    let stderr = "sh: line 2: UNSETVAR: unbound variable\n";
+    assert!(defect(command, 1, stderr));
+    assert!(!defect("set -eu; UNSETVAR=x\necho $UNSETVAR", 1, stderr));
+    assert!(!defect(command, 1, "assertion failed\n"));
+    assert!(!defect(command, 1, &format!("{stderr}later output\n")));
+    let mut ran = result(Some(1), stderr);
+    ran.classify_raw_with_environment(command, &["UNSETVAR"]);
+    assert_eq!(ran.classification.unwrap().crash, CheckRunClass::Failed);
+}

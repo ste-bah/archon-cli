@@ -44,6 +44,21 @@ pub(crate) fn entry_defects(
     if one_value {
         let mut defects = defects;
         defects.extend(live_root_defect(entry, roots));
+        let value: Value = serde_json::from_str(entry).map_err(|error| error.to_string())?;
+        if let Some(text) = value.get("check").and_then(live_root::executed_check_text) {
+            defects.extend(
+                archon_workflow::acceptance_check_shell_unset::unset_reads(text)
+                    .into_iter()
+                    .map(|read| {
+                        ValidationDefect::new(
+                            "unset_shell_variable",
+                            &format!("{ENVELOPE_POINTER}/check"),
+                            "command",
+                            read.finding(),
+                        )
+                    }),
+            );
+        }
         Ok(defects)
     } else {
         Err("the entry argument is not exactly one JSON value".to_string())
@@ -194,3 +209,7 @@ pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs
         ),
     )
 }
+
+#[cfg(test)]
+#[path = "workflow_freeze_entry_unset_tests.rs"]
+mod unset_tests;

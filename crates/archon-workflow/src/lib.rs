@@ -7,6 +7,7 @@ pub mod acceptance;
 pub mod acceptance_check_crash;
 pub mod acceptance_check_environment;
 pub mod acceptance_check_shell;
+pub mod acceptance_check_shell_unset;
 pub mod acceptance_scratch;
 pub mod acceptance_sibling_paths;
 pub mod acceptance_world;

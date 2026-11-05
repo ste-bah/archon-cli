@@ -46,6 +46,11 @@
 //!   argument count taken from data may be the product's), and any class in
 //!   its qualified name is a class the program defines.
 //!
+//! POSIX shell nounset — the last stderr line names a never-bound variable
+//! read at that line of the check under `set -u`, with the shell's unset
+//! parameter status. The shared conservative text rule excludes environment
+//! names, bindings and default forms.
+//!
 //! POSIX shell — the error line comes from a shell reading a script from
 //! stdin (`sh: line N:`, dash's `sh: N:`; never a named script, `-c`,
 //! `eval`, or `source`), and either:
@@ -97,6 +102,10 @@ impl ScriptDefect {
 /// Classify one executed check. `command` is the exact check text the host
 /// ran (a command check's command or a floor's verifier command).
 pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass {
+    classify_with_environment(command, result, &[])
+}
+
+fn classify_with_environment(command: &str, result: &CheckResult, bound: &[&str]) -> CheckRunClass {
     if result.operational_error.is_some() {
         return CheckRunClass::Failed;
     }
@@ -113,7 +122,7 @@ pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass 
     let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
     let code = result.exit_code.unwrap_or_default();
     python_defect(command, code, &lines)
-        .or_else(|| shell_defect(command, code, &lines))
+        .or_else(|| shell_defect(command, code, &lines, bound))
         .map_or(CheckRunClass::Failed, CheckRunClass::ScriptDefect)
 }
 
@@ -133,6 +142,10 @@ pub struct CheckClassification {
 impl CheckResult {
     /// Call before changing any captured stream. The command is host-authorized.
     pub fn classify_raw(&mut self, command: &str) {
+        self.classify_raw_with_environment(command, &[]);
+    }
+
+    pub(crate) fn classify_raw_with_environment(&mut self, command: &str, bound: &[&str]) {
         if self.classification.is_some() {
             return;
         }
@@ -140,7 +153,7 @@ impl CheckResult {
             &String::from_utf8_lossy(self.verdict_stdout()),
             &String::from_utf8_lossy(self.verdict_stderr()),
         );
-        let mut crash = classify_check_run(command, self);
+        let mut crash = classify_with_environment(command, self, bound);
         if let CheckRunClass::ScriptDefect(defect) = &mut crash {
             // Raw diagnostic text belongs only in the redacted evidence.
             defect.signal = "see the fenced stderr below".into();
@@ -406,8 +419,15 @@ fn shell_rejects(command: &str) -> bool {
     crate::acceptance_check_shell::shell_parse_error(command).is_some()
 }
 
-fn shell_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefect> {
+fn shell_defect(command: &str, code: i32, lines: &[&str], bound: &[&str]) -> Option<ScriptDefect> {
     let (&last, _) = lines.split_last()?;
+    if crate::acceptance_check_shell_unset::runtime_unset(command, code, last, bound) {
+        return Some(ScriptDefect {
+            interpreter: "shell".into(),
+            rule: "read of a shell variable the check never sets under set -u".into(),
+            signal: last.trim().to_string(),
+        });
+    }
     match code {
         2 => {
             let start = lines.len().saturating_sub(2);

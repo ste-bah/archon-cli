@@ -38,7 +38,8 @@ pub(super) fn finish(
     } else if let (Some(plan), Some(moved)) = (site.mutation_plan, moved) {
         super::mutation::mark_plan_unsafe(&mut result, plan, moved);
     }
-    result.classify_raw(&String::from_utf8_lossy(command.bytes()));
+    let bound: Vec<&str> = site.environment.keys().map(String::as_str).collect();
+    result.classify_raw_with_environment(&String::from_utf8_lossy(command.bytes()), &bound);
     // Issue 544: every text-dependent fact a later reader needs is computed
     // here from the raw capture; then every stream is masked whole.
     if result.exit_code != Some(0)

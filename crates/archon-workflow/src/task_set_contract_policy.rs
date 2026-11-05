@@ -124,6 +124,20 @@ fn policy_findings(
                 }
             }
         }
+        let command = match &criterion.check {
+            AcceptanceCheck::Command { command, .. } => Some(command.as_str()),
+            AcceptanceCheck::Floor { contract } => contract.typed_verifier_command.as_deref(),
+        };
+        if let Some(command) = command {
+            for read in crate::acceptance_check_shell_unset::unset_reads(command) {
+                check_defects.push(crate::defect::ValidationDefect::new(
+                    "unset_shell_variable",
+                    &slot,
+                    "check",
+                    read.finding(),
+                ));
+            }
+        }
         findings.extend(
             check_defects
                 .into_iter()
