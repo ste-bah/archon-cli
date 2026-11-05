@@ -15,56 +15,8 @@ pub(crate) fn bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnviro
             },
         );
     }
-    for (id, endpoint, key, endpoint_env) in [
-        (
-            "anthropic",
-            config.api.base_url.clone(),
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_BASE_URL",
-        ),
-        (
-            "openai",
-            config.llm.openai.base_url.clone(),
-            "OPENAI_API_KEY",
-            "OPENAI_BASE_URL",
-        ),
-        ("local", Some(config.llm.local.base_url.clone()), "", ""),
-        (
-            "openai-codex",
-            config.providers.openai_codex.app_server_url.clone(),
-            "OPENAI_API_KEY",
-            "",
-        ),
-    ] {
-        result.insert(
-            id.into(),
-            ProviderEnvironmentConfig {
-                base_url: endpoint,
-                base_url_env: (!endpoint_env.is_empty()).then(|| endpoint_env.into()),
-                api_key_env: (!key.is_empty()).then(|| key.into()),
-                ..Default::default()
-            },
-        );
-    }
-    for (id, names) in [
-        ("anthropic", vec!["ANTHROPIC_AUTH_TOKEN"]),
-        (
-            "bedrock",
-            vec![
-                "AWS_ACCESS_KEY_ID",
-                "AWS_SECRET_ACCESS_KEY",
-                "AWS_SESSION_TOKEN",
-                "AWS_PROFILE",
-                "AWS_SHARED_CREDENTIALS_FILE",
-            ],
-        ),
-        (
-            "vertex",
-            vec!["GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT"],
-        ),
-    ] {
-        result.entry(id.into()).or_default().credential_env =
-            names.into_iter().map(str::to_string).collect();
+    for (id, binding) in include!("workflow_provider_defaults.inc.rs") {
+        result.insert(id.into(), binding);
     }
     for (id, configured) in &config.llm.provider_environment {
         let binding = result.entry(id.clone()).or_default();
@@ -92,6 +44,18 @@ pub(crate) fn bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnviro
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn runtime_config_preserves_the_configured_key_for_the_base_resolver() {
+        let mut config = ArchonConfig::default();
+        config.llm.provider = "openai".into();
+        config.llm.openai.api_key = Some("configured-fixture-key".into());
+        let runtime = runtime_config(
+            &config,
+            super::super::ProviderEndpointPolicy::ConfiguredOnly,
+        );
+        assert_eq!(runtime.openai.api_key, config.llm.openai.api_key);
+    }
+
     #[test]
     fn registry_and_explicit_environment_names_are_preserved() {
         let mut config = ArchonConfig::default();
@@ -139,13 +103,6 @@ pub(crate) fn runtime_config(
         );
         if llm.provider == "openai" {
             llm.openai.base_url = binding.base_url.clone();
-            if let Some(key) = binding
-                .api_key_env
-                .as_deref()
-                .and_then(|name| std::env::var(name).ok())
-            {
-                llm.openai.api_key = Some(key);
-            }
         }
         if llm.provider == "local" {
             if let Some(endpoint) = &binding.base_url {

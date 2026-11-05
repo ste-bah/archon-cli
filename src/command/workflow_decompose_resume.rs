@@ -1,6 +1,7 @@
 use super::*;
 use crate::command::workflow_decompose_landing_reconcile as landing_reconcile;
 use crate::command::workflow_host_command_groups::settle_before_resume;
+use crate::command::workflow_provider_route as route;
 #[path = "workflow_decompose_resume_dry_run.rs"]
 mod dry_run;
 #[path = "workflow_decompose_resume_recovery.rs"]
@@ -248,11 +249,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     );
     let persisted_route: super::super::workflow_provider_route::TrustedProviderRouteSnapshot =
         read_run_json(&store, run_id, FIXED_PROVIDER_ROUTE_PATH)?;
-    upgrade::require_equal(
-        &serde_json::to_value(&persisted_route)?,
-        &serde_json::to_value(&current_route)?,
-        "provider route",
-    )?;
+    route::validate_resume(&store, run_id, &persisted_route, &current_route)?;
     let log_path = crate::command::workflow_decompose_log::validated_fixed_log_path(
         Path::new(&state.log_path),
         &state.identity,
@@ -294,6 +291,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &catalog,
         false,
     )?;
+    route::record_upgrade(&store, run_id, &persisted_route, &current_route)?;
     let transitions = upgrade::record_upgrade(
         &store,
         run_id,

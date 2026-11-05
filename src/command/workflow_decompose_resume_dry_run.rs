@@ -162,10 +162,11 @@ pub(crate) async fn dry_run_fixed_decomposition(
     );
     let persisted_route: crate::command::workflow_provider_route::TrustedProviderRouteSnapshot =
         read_run_json(&store, run_id, FIXED_PROVIDER_ROUTE_PATH)?;
-    upgrade::require_equal(
-        &serde_json::to_value(&persisted_route)?,
-        &serde_json::to_value(&current_route)?,
-        "provider route",
+    crate::command::workflow_provider_route::validate_resume(
+        &store,
+        run_id,
+        &persisted_route,
+        &current_route,
     )?;
     let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
     let expected_metadata = policy::canonical_resume_metadata(

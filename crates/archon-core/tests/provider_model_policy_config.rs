@@ -42,3 +42,16 @@ fn existing_config_retains_provider_resolved_tier_defaults() {
     assert!(config.model_prices.is_empty());
     assert!(config.provider_environment.is_empty());
 }
+
+#[test]
+fn shipped_default_models_retain_base_estimates() {
+    let models = archon_core::config::ModelsConfig::default();
+    let prices = archon_core::config::model_policy::default_model_prices();
+    for (model, rates) in [
+        (models.anthropic.opus, [15.0, 75.0]),
+        (models.anthropic.sonnet, [3.0, 15.0]),
+        (models.anthropic.haiku, [3.0, 15.0]),
+    ] {
+        assert_eq!(prices.get(&model), Some(&rates), "{model}");
+    }
+}

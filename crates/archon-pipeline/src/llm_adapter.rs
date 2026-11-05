@@ -98,7 +98,7 @@ impl ProviderLlmAdapter {
             provider,
             max_tokens: 8192,
             tier_aliases: Default::default(),
-            model_prices: Default::default(),
+            model_prices: archon_core::config::model_policy::default_model_prices(),
             request_origin: Some("pipeline".into()),
             run_id: uuid::Uuid::new_v4().to_string(),
             session_id: uuid::Uuid::new_v4().to_string(),

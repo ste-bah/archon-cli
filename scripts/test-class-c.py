@@ -55,6 +55,7 @@ pub mod config {
     #[derive(Default)] pub struct ArchonConfig { pub llm: LlmConfig, pub api: Api, pub providers: Providers }
 ''' + f'#[path = {path("crates/archon-core/src/config/model_policy.rs")}] pub mod model_policy;\n}}' + '''
 pub mod env_vars {
+    pub fn load_env_vars_from(_: &std::collections::HashMap<String, String>) -> ArchonEnvVars { ArchonEnvVars::default() }
     #[derive(Default)]
     pub struct ArchonEnvVars {
         pub anthropic_api_key: Option<String>, pub archon_api_key: Option<String>,
@@ -68,6 +69,7 @@ pub mod providers { pub mod registry {
         vec![Descriptor { id: "groq".into(), base_url: "https://registry.invalid".into(), env_key_var: "GROQ_API_KEY".into() }]
     }
 } }
+mod test_environment { pub fn isolated() -> bool { false } }
 mod command {
     pub mod workflow_provider_route {
         #[derive(PartialEq, Eq, Clone, Copy)] pub enum ProviderEndpointPolicy { AmbientAllowed, ConfiguredOnly }
@@ -97,7 +99,7 @@ mod command {
         let ambient = runtime_config(&config, ProviderEndpointPolicy::AmbientAllowed);
         assert_eq!(ambient.provider_environment["private-service"].base_url.as_deref(), Some("ambient"));
         let frozen = decompose::environment::freeze_provider_environment(&config, &Default::default());
-        assert_eq!(frozen["CLASS_C_URL"], "ambient");
+        assert!(!frozen.contains_key("CLASS_C_URL"));
         assert_eq!(frozen["CLASS_C_KEY"], "secret");
         assert_eq!(frozen["CLASS_C_TOKEN"], "token");
     }
@@ -218,5 +220,55 @@ impl Adapter {
 #[test] fn configurable_aliases_are_delegated_to_provider() {
     let adapter = Adapter { provider: Provider, tier_aliases: std::collections::BTreeMap::from([("sonnet".into(), "haiku".into())]) };
     assert_eq!(adapter.model_for_provider("sonnet"), "custom-haiku");
+}
+''')
+
+# Budget preflight is synchronous: test the production guard before any transport.
+run_rust("budget-prices", '''
+mod runner {
+    pub trait LlmClient {
+        fn resolve_model_alias(&self, model: &str) -> String;
+        fn estimate_cost_usd(&self, model: &str, input: u64, output: u64) -> Option<f64>;
+    }
+}
+mod gametheory {
+    mod registry {
+        pub struct Agent { pub key: &'static str, pub model: &'static str, pub tier: u8 }
+        pub static GAMETHEORY_AGENTS: &[Agent] = &[
+            Agent { key: "fixture", model: "opus", tier: 1 }
+        ];
+    }
+    mod errors {
+        #[derive(Debug)]
+        pub enum GameTheoryError { SpecialistFailed { agent_key: String, message: String } }
+    }
+    mod facade {
+''' + f'#[path = {path("crates/archon-pipeline/src/gametheory/facade/costs.rs")}] mod costs;\n' + '''
+        struct Client(Option<f64>);
+        impl crate::runner::LlmClient for Client {
+            fn resolve_model_alias(&self, model: &str) -> String {
+                assert_eq!(model, "opus");
+                "configured-model".into()
+            }
+            fn estimate_cost_usd(&self, model: &str, _: u64, _: u64) -> Option<f64> {
+                assert_eq!(model, "configured-model");
+                self.0
+            }
+        }
+        #[test] fn unknown_price_names_the_resolved_model_and_refuses() {
+            let error = costs::require_budget_prices(&Client(None), &["fixture".into()], 20.0).unwrap_err();
+            let super::errors::GameTheoryError::SpecialistFailed { agent_key, message } = error;
+            assert_eq!(agent_key, "fixture");
+            assert!(message.contains("configured-model"));
+            assert!(message.contains("llm.model_prices"));
+        }
+        #[test] fn configured_price_permits_budgeted_execution() {
+            costs::require_budget_prices(&Client(Some(0.01)), &["fixture".into()], 20.0).unwrap();
+            assert_eq!(costs::estimate_llm_cost_usd(&Client(Some(0.01)), "opus", Some(1), Some(1)), Some(0.01));
+        }
+        #[test] fn missing_usage_stays_unknown() {
+            assert_eq!(costs::estimate_llm_cost_usd(&Client(Some(0.01)), "opus", None, Some(1)), None);
+        }
+    }
 }
 ''')

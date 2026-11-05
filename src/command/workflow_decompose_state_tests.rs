@@ -325,6 +325,8 @@ fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
             crate::command::workflow_decompose::FIXED_PROVIDER_ROUTE_PATH,
             &crate::command::workflow_provider_route::TrustedProviderRouteSnapshot {
                 providers: Default::default(),
+                role_models: Default::default(),
+                tier_aliases: Default::default(),
                 origin: "trusted_config".into(),
                 endpoint: Some("https://private.invalid/messages".into()),
                 endpoint_digest: Some("route-digest".into()),

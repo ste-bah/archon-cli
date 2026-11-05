@@ -117,7 +117,7 @@ impl Default for LlmConfig {
             provider: "anthropic".into(),
             role_models: Default::default(),
             tier_aliases: Default::default(),
-            model_prices: Default::default(),
+            model_prices: super::model_policy::default_model_prices(),
             provider_environment: Default::default(),
             openai: LlmOpenAiConfig::default(),
             bedrock: LlmBedrockConfig::default(),
