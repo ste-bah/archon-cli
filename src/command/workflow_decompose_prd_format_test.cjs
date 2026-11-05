@@ -25,7 +25,10 @@ for (const id of ['REQ-X-001', 'FR-001', 'R1', 'REQ-1', 'US-12', 'item_1', 'Änd
   const sup = `SUP-${id}`;
   let ctx = context(id);
   assert.equal(ctx.supplementaryRequirement(sup), id);
-  assert.equal(ctx.supplementaryRequirement('SUP-UNKNOWN-99'), null);
+  assert.throws(() => ctx.supplementaryRequirement('SUP-UNKNOWN-99'), /missing source requirement UNKNOWN-99/);
+  assert.throws(() => ctx.refreshFromCurrentContract({entries: new Map()},
+    {current_acceptance_contract: {acceptance: [], supplementary: [entry('SUP-missing')]}},
+    [], new Set(), null), /missing source requirement missing/);
   const text = `check '${sup}': PRD requirement ${id} is covered by no acceptance check; author supplementary check ${sup}: current text`;
   const finding = {text, subject: sup, remediation_scope: 'candidate_artifact'};
   assert.deepEqual([...ctx.acceptanceRepairIds([finding], new Set(), false)], [sup]);

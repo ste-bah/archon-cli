@@ -14,7 +14,7 @@ const STYLES: &[(&str, &str)] = &[
 #[test]
 fn declarations_have_equal_inventories_for_every_authored_style() {
     for &(first, second) in STYLES {
-        for title in ["## 1 Work\n", "1 Autre titre\n---\n"] {
+        for title in ["## 1 Requirements\n", "1 Other Requirements\n---\n"] {
             let source = format!("{title}\n- **{first}**: first\n  - `{second}`: second\n");
             assert_eq!(
                 obligation_texts(&source),
@@ -58,7 +58,7 @@ fn declarations_have_equal_inventories_for_every_authored_style() {
 
 #[test]
 fn emphasis_internal_punctuation_and_examples_do_not_change_declarations() {
-    let source = "- **R1:** first\n- `R2`: second\n- **R3** — third\n```text\n- R4: example\n```\n";
+    let source = "## Requirements\n- **R1:** first\n- `R2`: second\n- **R3** — third\n```text\n- R4: example\n```\n";
     assert_eq!(
         obligation_texts(source),
         BTreeMap::from([
@@ -70,27 +70,26 @@ fn emphasis_internal_punctuation_and_examples_do_not_change_declarations() {
 }
 
 #[test]
-fn completion_and_gap_declarations_do_not_depend_on_section_titles() {
-    let source =
-        "## Arbitrary\n1. first\n2. second\n\n## Another title\nForbidden phrases:\n- `later`\n";
+fn completion_and_gap_declarations_respect_section_titles() {
+    let source = "## Arbitrary\n1. ignored\n## Done Definition\n1. first\n2. second\n\n## Residual Gap Policy\nForbidden phrases:\n- `later`\n## Other\nForbidden phrases:\n- `outside`\n";
     assert_eq!(
         obligation_texts(source).into_values().collect::<Vec<_>>(),
         ["first", "second"]
     );
     assert_eq!(residual_gap_forbidden_phrases(source), ["later"]);
     let setext = source
-        .replace("## Arbitrary", "Arbitrary\n---")
-        .replace("## Another title", "Another title\n---");
+        .replace("## Done Definition", "Done Definition\n---")
+        .replace("## Residual Gap Policy", "Residual Gap Policy\n---");
     assert_eq!(obligation_texts(source), obligation_texts(&setext));
     assert_eq!(residual_gap_forbidden_phrases(&setext), ["later"]);
 }
 
 #[test]
 fn setext_sections_have_the_same_keys_and_citation_findings_as_atx() {
-    let atx = "# Source\n## 1 Work\nText.\n## 2 More\nOther text.\n```md\nFake\n---\n```\n";
+    let atx = "# Source\n## 1 Requirements\nText.\n## 2 More\nOther text.\n```md\nFake\n---\n```\n";
     let setext = atx
         .replace("# Source", "Source\n======")
-        .replace("## 1 Work", "1 Work\n---")
+        .replace("## 1 Requirements", "1 Requirements\n---")
         .replace("## 2 More", "2 More\n---");
     let left = numbered_sections(atx);
     let right = numbered_sections(&setext);
@@ -112,11 +111,11 @@ fn setext_sections_have_the_same_keys_and_citation_findings_as_atx() {
 
 #[test]
 fn source_context_follows_declarations_instead_of_matching_prose() {
-    let source = "## 1 Earlier\n- other text\n\n## 2 Work\n- R1: parent\n  - extra detail\n\n## 3 References\nR1: parent\n";
+    let source = "## 1 Earlier\n- other text\n\n## 2 Requirements\n- R1: parent\n  - extra detail\n\n## 3 References\nR1: parent\n";
     assert_eq!(obligation_source_lines(source)["R1"], 5);
     let sections = obligation_source_sections(source, &["R1".into()]);
     assert_eq!(sections.len(), 1);
-    assert!(sections[0].starts_with("## 2 Work"));
+    assert!(sections[0].starts_with("## 2 Requirements"));
     assert!(sections[0].contains("extra detail"));
 }
 

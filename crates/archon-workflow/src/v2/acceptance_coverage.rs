@@ -27,12 +27,7 @@ pub const SUPPLEMENTARY_PREFIX: &str = "SUP-";
 
 /// Every requirement id the PRD states, with its exact text.
 pub fn prd_requirement_texts(prd: &str) -> BTreeMap<String, String> {
-    let acceptance = crate::obligation_ids::acceptance_ids(prd);
-    crate::obligation_ids::obligation_texts(prd)
-        .into_iter()
-        .chain(crate::obligation_ids::constraint_texts(prd))
-        .filter(|(id, _)| !acceptance.contains(id))
-        .collect()
+    crate::obligation_ids::requirement_texts(prd)
 }
 
 /// Every requirement id the PRD states.

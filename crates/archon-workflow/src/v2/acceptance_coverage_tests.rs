@@ -172,9 +172,9 @@ fn every_authored_style_has_equal_coverage_and_supplementary_lifecycle() {
         ("feature-login", "feature-register"),
     ] {
         for source in [
-            format!("Work\n---\n- **{first}**: first\n- {second}: second\n"),
+            format!("Requirements\n---\n- **{first}**: first\n- {second}: second\n"),
             format!(
-                "## Other\n| Key | Rule |\n|---|---|\n| {first} | first |\n| {second} | second |\n"
+                "## Other\n| Key | Requirement |\n|---|---|\n| {first} | first |\n| {second} | second |\n"
             ),
         ] {
             let ids = prd_requirement_ids(&source);

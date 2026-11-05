@@ -2,8 +2,10 @@
 function supplementaryRequirement(id) {
   if (typeof id !== "string" || !id.startsWith("SUP-")) return null;
   const requirement = id.slice(4);
-  return Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, requirement)
-    ? requirement : null;
+  if (!Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, requirement)) {
+    throw new Error(`supplementary check ${id} names missing source requirement ${requirement}`);
+  }
+  return requirement;
 }
 
 const COMMAND_EXAMPLES = 'Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.';

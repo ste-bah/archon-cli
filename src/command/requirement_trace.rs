@@ -224,7 +224,7 @@ fn build_report_with_input_findings(
     let prd_path = absolute(cwd, &options.prd);
     let prd = std::fs::read_to_string(&prd_path)
         .with_context(|| format!("reading PRD at {}", prd_path.display()))?;
-    let requirements = inventory::extract_requirements(&prd);
+    let requirements = inventory::extract_requirements(&prd).map_err(|error| anyhow!(error))?;
     let mut obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
     let constraints = archon_workflow::obligation_ids::constraint_ids(&prd);
     obligations.extend(constraints.iter().cloned());

@@ -25,36 +25,15 @@ pub fn constraint_ids(prd: &str) -> BTreeSet<String> {
 /// Exact constraint text, joined using the obligation continuation rules.
 /// The first statement wins. Exclusions include all deeper subsections.
 pub fn constraint_texts(prd: &str) -> BTreeMap<String, String> {
-    let prepared = prepare_markdown(prd);
-    let mut texts = BTreeMap::new();
-    let mut exclusion = HeadingExclusion::default();
-    let mut constraint_table = false;
-    for line in prepared.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            exclusion.update(trimmed);
-        }
-        if !trimmed.starts_with('|') {
-            constraint_table = false;
-            continue;
-        }
-        if let Some(id) = table_candidate_id(trimmed) {
-            if constraint_table && !exclusion.active() {
-                let text = trimmed
-                    .trim_matches('|')
-                    .split('|')
-                    .skip(1)
-                    .map(str::trim)
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                texts.entry(id.to_string()).or_insert(text);
-            }
-        } else if !trimmed.contains("---") {
-            constraint_table =
-                !header_states_obligations(trimmed) && !heading_excludes_obligations(trimmed);
-        }
-    }
-    texts
+    let obligations = obligation_ids(prd);
+    declarations::list_rows(prd)
+        .into_iter()
+        .chain(declarations::table_rows(prd))
+        .filter(|row| row.role == declarations::Role::Constraint && !obligations.contains(&row.id))
+        .fold(BTreeMap::new(), |mut map, row| {
+            map.entry(row.id).or_insert(row.text);
+            map
+        })
 }
 
 /// Definition boundaries distinguish declarations from references in prose.

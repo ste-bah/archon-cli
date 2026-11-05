@@ -242,15 +242,7 @@ fn dependencies(body: &str) -> Vec<String> {
 }
 
 fn acceptance_criteria(body: &str) -> Vec<String> {
-    let mut criteria: Vec<_> = crate::obligation_ids::acceptance_criteria(body)
-        .into_values()
-        .collect();
-    criteria.extend(crate::obligation_ids::obligation_texts(body).into_values());
-    criteria.extend(extract_sections(
-        body,
-        &["Acceptance Criteria", "Definition of Done"],
-    ));
-    criteria.extend(source_rules(body));
+    let mut criteria = extract_sections(body, &["Acceptance Criteria", "Definition of Done"]);
     criteria.extend(list_values(body, "acceptance_criteria"));
     criteria.sort();
     criteria.dedup();

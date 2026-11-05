@@ -57,7 +57,7 @@ pub(crate) fn validate_prd_input(
     }
     if archon_workflow::obligation_ids::obligation_ids(&text).is_empty() {
         return Err(anyhow!(
-            "PRD {} defines zero obligations; add canonical REQ/AC obligation rows before decomposition",
+            "PRD {} defines zero obligations; declare identified requirements and acceptance criteria before decomposition",
             prd_path.display()
         ));
     }

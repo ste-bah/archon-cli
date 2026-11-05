@@ -86,7 +86,7 @@ fn done_items_become_positional_synthetic_obligations() {
         .collect();
     assert_eq!(
         done,
-        vec!["DONE-1", "DONE-2", "DONE-3", "DONE-4", "DONE-5"],
+        vec!["DONE-1", "DONE-2", "DONE-3", "DONE-4"],
         "{ids:?}"
     );
     let texts = obligation_texts(PRD);
@@ -100,9 +100,9 @@ fn done_items_become_positional_synthetic_obligations() {
         Some("Focused tests pass."),
         "a deeper sub-heading inside the done section does not end it"
     );
-    assert_eq!(
-        texts["DONE-5"],
-        "this numbered line is outside the done section"
+    assert!(
+        !texts.contains_key("DONE-5"),
+        "a numbered line after the next same-level heading is outside the section"
     );
 }
 
@@ -254,7 +254,7 @@ fn done_headings_need_a_qualifier_and_respect_exclusions() {
             "{heading}"
         );
     }
-    for heading in ["## Done items out of scope"] {
+    for heading in ["## What we have done", "## Done items out of scope"] {
         let prd = format!("{heading}\n\n1. first item\n");
         assert!(
             obligation_ids(&prd).is_empty(),
@@ -297,11 +297,10 @@ fn old_obligation_ids(prd: &str) -> BTreeSet<String> {
             let level = trimmed.chars().take_while(|ch| *ch == '#').count();
             let inside = section_level.is_some_and(|open| level > open);
             if !inside {
-                let lower = trimmed.to_lowercase();
-                section_level = (lower.contains("done")
+                section_level = (trimmed.to_ascii_lowercase().contains("done")
                     && ["definition", "when", "criteria"]
                         .iter()
-                        .any(|word| lower.contains(word))
+                        .any(|word| trimmed.to_ascii_lowercase().contains(word))
                     && !heading_excludes_obligations(trimmed))
                 .then_some(level);
             }
@@ -319,7 +318,7 @@ fn old_obligation_ids(prd: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn repository_inputs_retain_every_previously_discovered_id() {
+fn repository_prd_inputs_keep_the_same_ids_as_main() {
     let inputs = [
         PRD,
         include_str!("../../../tests/fixtures/decomposition-synthetic/prd.md"),
@@ -329,8 +328,9 @@ fn repository_inputs_retain_every_previously_discovered_id() {
         include_str!("../../../assets/templates/prdtospec.md"),
     ];
     for (index, input) in inputs.iter().enumerate() {
-        assert!(
-            old_obligation_ids(input).is_subset(&obligation_ids(input)),
+        assert_eq!(
+            obligation_ids(input),
+            old_obligation_ids(input),
             "PRD input {index}"
         );
     }

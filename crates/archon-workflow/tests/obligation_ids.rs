@@ -94,7 +94,7 @@ fn authored_identifier_shapes_are_preserved_without_renaming() {
         "US-12",
         "item_name",
     ] {
-        let source = format!("## Work\n- **{id}**: required work\n");
+        let source = format!("## Requirements\n- **{id}**: required work\n");
         assert_eq!(obligation_ids(&source), [id.to_string()].into());
         assert!(archon_workflow::obligation_ids::malformed_obligation_ids(&source).is_empty());
     }
