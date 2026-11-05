@@ -11,6 +11,53 @@ pub(crate) struct TrustedProviderRouteSnapshot {
     pub(crate) origin: String,
     pub(crate) endpoint: Option<String>,
     pub(crate) endpoint_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub(crate) providers: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[path = "workflow_provider_bindings.rs"]
+mod provider_bindings;
+pub(crate) use provider_bindings::{bindings, runtime_config};
+
+/// Snapshot every configured provider's endpoint and environment binding names.
+pub(crate) fn resolve_provider_routes(
+    config: &archon_core::config::ArchonConfig,
+    policy: ProviderEndpointPolicy,
+) -> TrustedProviderRouteSnapshot {
+    let mut route = resolve_anthropic_route(config.api.base_url.as_deref(), policy);
+    route.origin = config.llm.provider.clone();
+    route.endpoint = None;
+    route.endpoint_digest = None;
+    route.providers = bindings(config)
+        .into_iter()
+        .map(|(id, binding)| {
+            let ambient = binding
+                .base_url_env
+                .as_deref()
+                .and_then(|name| std::env::var(name).ok())
+                .filter(|value| !value.trim().is_empty());
+            let endpoint = archon_core::config::model_policy::endpoint(
+                binding.base_url.as_deref(),
+                ambient.as_deref(),
+                policy == ProviderEndpointPolicy::AmbientAllowed,
+            );
+            let digest =
+                |value: &str| archon_workflow::task_set_contract::content_digest(value.as_bytes());
+            (
+                id,
+                serde_json::json!({
+                        "endpoint_digest": endpoint.as_deref().map(digest),
+                        "ambient_endpoint_digest": ambient.as_deref().map(digest),
+                        "base_url_env": binding.base_url_env,
+                        "api_key_env": binding.api_key_env,
+                        "credential_env": binding.credential_env,
+                "role_models": config.llm.role_models,
+                "tier_aliases": config.llm.tier_aliases,
+                    }),
+            )
+        })
+        .collect();
+    route
 }
 
 pub(crate) fn resolve_anthropic_route(
@@ -41,6 +88,7 @@ pub(crate) fn resolve_anthropic_route(
         origin: origin.to_string(),
         endpoint,
         endpoint_digest,
+        providers: Default::default(),
     }
 }
 
@@ -107,4 +155,34 @@ mod tests {
             ))
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn snapshots_all_configured_routes_without_credentials() {
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.llm.provider = "groq".into();
+    config.llm.provider_environment.insert(
+        "private-service".into(),
+        archon_core::config::ProviderEnvironmentConfig {
+            base_url: Some("https://private.invalid/v1".into()),
+            base_url_env: Some("PRIVATE_ROUTE_URL".into()),
+            api_key_env: Some("PRIVATE_ROUTE_KEY".into()),
+            ..Default::default()
+        },
+    );
+    let before = resolve_provider_routes(&config, ProviderEndpointPolicy::ConfiguredOnly);
+    assert_eq!(before.providers.len(), 2);
+    assert_eq!(before.providers["groq"]["api_key_env"], "GROQ_API_KEY");
+    config
+        .llm
+        .provider_environment
+        .get_mut("private-service")
+        .unwrap()
+        .base_url = Some("https://changed.invalid/v1".into());
+    let after = resolve_provider_routes(&config, ProviderEndpointPolicy::ConfiguredOnly);
+    assert_ne!(before, after);
+    let serialized = serde_json::to_string(&after).unwrap();
+    assert!(!serialized.contains("https://changed.invalid"));
+    assert!(serialized.contains("PRIVATE_ROUTE_KEY"));
 }

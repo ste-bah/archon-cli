@@ -451,7 +451,7 @@ pub(super) async fn author_entry_with_prefetch(
             // `.archon/agents` defines fails to launch everywhere else.
             key: ACCEPTANCE_REAUTHOR_AGENT.into(),
             display_name: "acceptance reauthor".into(),
-            model: "sonnet".into(),
+            model: client.model_for_role("reauthor", "sonnet"),
             phase: 0,
             critical: false,
             parallelizable: false,

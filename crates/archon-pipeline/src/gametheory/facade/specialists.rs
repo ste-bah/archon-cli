@@ -20,26 +20,6 @@ use super::{GameTheoryMemoryContext, GameTheoryRunOptions};
 pub(super) use prompt::load_agent_prompt_body;
 
 #[cfg(test)]
-#[test]
-fn unknown_specialist_usage_keeps_estimated_cost_unknown() {
-    // Expected: either missing direction makes the estimate unknown, never $0.0.
-    assert_eq!(estimate_cost_for_usage("sonnet", None, Some(12)), None);
-    assert_eq!(estimate_cost_for_usage("sonnet", Some(12), None), None);
-    assert_eq!(
-        estimate_cost_for_usage("sonnet", Some(0), Some(0)),
-        Some(0.0)
-    );
-}
-
-fn estimate_cost_for_usage(
-    model: &str,
-    tokens_in: Option<u64>,
-    tokens_out: Option<u64>,
-) -> Option<f64> {
-    Some(estimate_llm_cost_usd(model, tokens_in?, tokens_out?))
-}
-
-#[cfg(test)]
 type SpecialistFixtureParts = (
     HashMap<String, String>,
     Vec<(String, String)>,
@@ -433,7 +413,7 @@ async fn execute_specialist_call(
             error: None,
             audit: recalled.audit,
             // Missing counts make the estimate unknown instead of assigning them a zero cost.
-            cost_usd: estimate_cost_for_usage(model, response.tokens_in, response.tokens_out),
+            cost_usd: estimate_llm_cost_usd(llm, model, response.tokens_in, response.tokens_out),
         },
         Err(e) => SpecialistCallOutput {
             agent_key: agent_key.to_string(),

@@ -48,7 +48,10 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         &self,
         request: StageRunRequest,
     ) -> archon_workflow::WorkflowResult<StageRunOutput> {
-        let model_alias = tier_model_alias(request.provider_tier).to_string();
+        let model_alias = self.llm.model_for_role(
+            &format!("{:?}", request.provider_tier).to_ascii_lowercase(),
+            tier_model_alias(request.provider_tier),
+        );
         let resolved_model = self.llm.resolve_model_alias(&model_alias);
         let provider_id = self
             .llm

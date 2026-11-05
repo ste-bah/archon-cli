@@ -127,7 +127,8 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
     }
 
     if config.llm.provider != "anthropic" {
-        let mut llm = config.llm.clone();
+        let mut llm =
+            crate::command::workflow_provider_route::runtime_config(config, endpoint_policy);
         if callers == TransportCallers::Workflow {
             llm.local.timeout_secs = llm
                 .local
@@ -184,11 +185,22 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
         get_or_create_device_id(),
         account_uuid,
     );
-    let route = crate::command::workflow_provider_route::resolve_anthropic_route(
-        config.api.base_url.as_deref(),
-        endpoint_policy,
+    let binding = crate::command::workflow_provider_route::bindings(config)
+        .remove("anthropic")
+        .unwrap_or_default();
+    let ambient = binding
+        .base_url_env
+        .as_deref()
+        .and_then(|name| std::env::var(name).ok());
+    let api_url = archon_core::config::model_policy::endpoint(
+        binding
+            .base_url
+            .as_deref()
+            .or(config.api.base_url.as_deref()),
+        ambient.as_deref(),
+        endpoint_policy
+            == crate::command::workflow_provider_route::ProviderEndpointPolicy::AmbientAllowed,
     );
-    let api_url = route.endpoint;
     let client = AnthropicClient::with_read_backstop(
         auth,
         identity,

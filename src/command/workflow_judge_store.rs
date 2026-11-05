@@ -93,7 +93,7 @@ impl JudgeStore {
             "acceptance-judge-batch-v1",
             super::judge::batched_judge_prompt_with_roots(subset, roots)?,
             expected,
-            client.resolve_model_alias("sonnet"),
+            client.resolve_model_alias(&client.model_for_role("judge", "sonnet")),
             client.provider_id(),
             current_logic_identity(client),
         ]);
@@ -165,7 +165,7 @@ impl JudgeStore {
             entry.judgment.sampling = None;
             crate::command::workflow_task_set::reauthor::cache::stamp_judgment_with_content_digest(
                 entry,
-                &client.resolve_model_alias("sonnet"),
+                &client.resolve_model_alias(&client.model_for_role("judge", "sonnet")),
                 client.provider_id().as_deref(),
                 &self.roots,
             );
@@ -339,7 +339,7 @@ fn current_logic_identity(client: &dyn WorkflowLlmClient) -> Option<serde_json::
         |logic| {
             crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
                 logic,
-                &client.resolve_model_alias("sonnet"),
+                &client.resolve_model_alias(&client.model_for_role("judge", "sonnet")),
                 client.provider_id().as_deref(),
             )
         },

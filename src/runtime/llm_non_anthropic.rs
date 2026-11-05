@@ -19,7 +19,7 @@ pub(crate) fn build_llm_provider_without_anthropic_fallback(
         "bedrock" => build_bedrock(llm_cfg),
         "vertex" => build_vertex(llm_cfg),
         "local" => Ok(build_local(llm_cfg)),
-        other => build_openai_compatible(other),
+        other => build_openai_compatible(other, llm_cfg),
     }
 }
 
@@ -76,12 +76,16 @@ fn build_local(llm_cfg: &LlmConfig) -> Arc<dyn LlmProvider> {
     )
 }
 
-fn build_openai_compatible(provider: &str) -> Result<Arc<dyn LlmProvider>> {
+fn build_openai_compatible(provider: &str, llm_cfg: &LlmConfig) -> Result<Arc<dyn LlmProvider>> {
+    let binding = llm_cfg.provider_environment.get(provider);
     let flat = FlatLlmConfig {
         provider: provider.to_string(),
         model: None,
-        base_url: None,
-        api_key_env: None,
+        base_url: binding
+            .and_then(|b| b.base_url.as_ref())
+            .map(|value| value.parse())
+            .transpose()?,
+        api_key_env: binding.and_then(|b| b.api_key_env.clone()),
         retry: None,
     };
     let http = Arc::new(archon_llm::transport_http::client_builder().build()?);

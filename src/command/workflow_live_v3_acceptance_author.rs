@@ -401,7 +401,10 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
         &prd_path,
         &base,
         &owed,
-        FRESH_JUDGE_MODEL,
+        &site
+            .llm
+            .map(|client| client.model_for_role("judge", FRESH_JUDGE_MODEL))
+            .unwrap_or_else(|| FRESH_JUDGE_MODEL.into()),
         &mut staged,
     )
     .await?

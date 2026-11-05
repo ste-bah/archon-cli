@@ -13,6 +13,7 @@ mod context_section;
 /// Freshness policy for writes to the working tree (#193 Phase A).
 mod filesystem;
 mod memory_open;
+pub mod model_policy;
 mod observability;
 /// Named permission/sandbox presets and the cross-field coherence check (#200).
 mod permission_presets;

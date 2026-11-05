@@ -205,3 +205,18 @@ fn source_fingerprint_changes_for_same_head_parser_edits() {
         "restoring source restores identity"
     );
 }
+
+#[test]
+fn configured_roles_select_independent_abstract_tiers() {
+    let mut config = ArchonConfig::default();
+    config.llm.role_models.insert("judge".into(), "opus".into());
+    config
+        .llm
+        .role_models
+        .insert("reauthor".into(), "haiku".into());
+    let client = client(&config);
+    assert_eq!(client.model_for_role("judge", "sonnet"), "opus");
+    assert_eq!(client.model_for_role("reauthor", "sonnet"), "haiku");
+    assert_eq!(client.model_for_role("coder", "sonnet"), "sonnet");
+    assert_ne!(client.resolve_model_alias("opus"), "opus");
+}

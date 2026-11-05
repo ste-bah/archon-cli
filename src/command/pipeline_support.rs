@@ -36,7 +36,12 @@ pub(crate) async fn build_pipeline_adapter(
     origin: &str,
 ) -> Result<archon_pipeline::llm_adapter::ProviderLlmAdapter> {
     let provider = build_configured_llm_provider(config, env_vars, origin).await?;
-    Ok(archon_pipeline::llm_adapter::ProviderLlmAdapter::new(provider).with_origin(origin))
+    Ok(
+        archon_pipeline::llm_adapter::ProviderLlmAdapter::new(provider)
+            .with_tier_aliases(config.llm.tier_aliases.clone())
+            .with_model_prices(config.llm.model_prices.clone())
+            .with_origin(origin),
+    )
 }
 
 pub(crate) struct WorkflowClientPolicy {
@@ -64,6 +69,8 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
     let raw: Arc<dyn LlmClient> = Arc::new(
         archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
             .with_max_tokens(configured_output_ceiling(config))
+            .with_tier_aliases(config.llm.tier_aliases.clone())
+            .with_model_prices(config.llm.model_prices.clone())
             .with_origin(origin),
     );
     let agent_config = workflow_cli_agent_config(config, cwd, session_id)?;

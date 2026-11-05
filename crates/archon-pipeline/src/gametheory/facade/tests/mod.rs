@@ -1,10 +1,10 @@
+use crate::gametheory::GameTheoryRunOptions;
 pub(super) use crate::gametheory::fingerprint::{
     AmbiguityNote, AxisVerdict, GameTheoryFingerprint, HiddenGameDetection,
 };
 pub(super) use crate::gametheory::routing::RoutingDecision;
 use crate::leann_searcher::LeannSearcher;
 use crate::runner::{LlmClient, LlmResponse};
-use crate::gametheory::GameTheoryRunOptions;
 use async_trait::async_trait;
 use cozo::DbInstance;
 use std::sync::Mutex;
@@ -82,6 +82,10 @@ impl MockLlmClient {
 
 #[async_trait]
 impl LlmClient for MockLlmClient {
+    fn estimate_cost_usd(&self, _model: &str, input: u64, output: u64) -> Option<f64> {
+        Some((input as f64 * 15.0 + output as f64 * 75.0) / 1_000_000.0)
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -149,6 +153,10 @@ impl CapturingLlmClient {
 
 #[async_trait]
 impl LlmClient for CapturingLlmClient {
+    fn estimate_cost_usd(&self, _model: &str, input: u64, output: u64) -> Option<f64> {
+        Some((input as f64 * 15.0 + output as f64 * 75.0) / 1_000_000.0)
+    }
+
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
@@ -352,3 +360,5 @@ fn seed_kb_pack(db: &DbInstance, pack_id: &str, content: &str) {
         )
         .unwrap();
 }
+
+mod pricing;

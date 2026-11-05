@@ -242,8 +242,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             "fixed decomposition resume paused: command-catalog.digest or starting_binary_revision differs from identity; restore the intact launch catalog before resume"
         ));
     }
-    let current_route = super::super::workflow_provider_route::resolve_anthropic_route(
-        config.api.base_url.as_deref(),
+    let current_route = super::super::workflow_provider_route::resolve_provider_routes(
+        config,
         super::super::workflow_provider_route::ProviderEndpointPolicy::ConfiguredOnly,
     );
     let persisted_route: super::super::workflow_provider_route::TrustedProviderRouteSnapshot =
@@ -377,7 +377,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
                 run_staging_root: store.run_dir(run_id).join("host-command-staging"),
                 frozen_task_id: None,
                 frozen_task_file: None,
-                freeze_provider_environment: freeze_provider_environment(env_vars),
+                freeze_provider_environment: freeze_provider_environment(config, env_vars),
                 acceptance_environment_allowlist: config
                     .workflow
                     .acceptance_execution

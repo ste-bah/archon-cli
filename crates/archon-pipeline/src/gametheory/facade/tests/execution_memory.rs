@@ -319,7 +319,7 @@ fn unknown_specialist_fails_before_provider_call() {
     assert!(llm.prompts().is_empty());
 }
 #[test]
-fn test_cost_tracked_per_specialist() {
+fn explicit_client_pricing_is_tracked_per_specialist() {
     let llm = canned_specialist_llm();
     let rd = RoutingDecision {
         run_id: "run-cost".into(),

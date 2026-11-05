@@ -345,6 +345,9 @@ impl LlmClient for SubagentPipelineClient {
             .extend(archon_tools::read_boundary::current());
         Some(archon_tools::path_guard_probe::probe_read_access(path, &context).map(|_| ()))
     }
+    fn estimate_cost_usd(&self, model: &str, input: u64, output: u64) -> Option<f64> {
+        self.fallback.estimate_cost_usd(model, input, output)
+    }
     fn resolve_model_alias(&self, model: &str) -> String {
         self.fallback.resolve_model_alias(model)
     }
@@ -387,11 +390,10 @@ impl LlmClient for SubagentPipelineClient {
             .send_message_with_progress(messages, system, tools, model, temperature, progress)
             .await
     }
-
-    async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn run_agent(&self, mut request: AgentExecutionRequest) -> Result<LlmResponse> {
+        request.agent.model = self.fallback.resolve_model_alias(&request.agent.model);
         self.execute_session(request, false).await
     }
-
     async fn continue_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
         self.execute_session(request, true).await
     }

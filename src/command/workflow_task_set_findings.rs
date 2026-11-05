@@ -332,14 +332,14 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
                 &contract,
                 &named,
                 scope,
-                super::judge::JUDGE_MODEL_ALIAS,
+                &client.model_for_role("judge", super::judge::JUDGE_MODEL_ALIAS),
                 &gate,
                 Some(tasks_root),
             )
             .await
         }
         false => {
-            let judge = super::judge::JUDGE_MODEL_ALIAS;
+            let judge = &client.model_for_role("judge", super::judge::JUDGE_MODEL_ALIAS);
             super::reauthor::reauthor(client.as_ref(), &contract, &named, scope, judge, &gate).await
         }
     };
