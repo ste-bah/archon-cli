@@ -195,11 +195,11 @@ impl FixedRunEndAcceptanceObserver {
                 if let Some(error) = &check.operational_error {
                     deferrals += 1;
                     pending_records.push(OwnedObserverRecord::deferral(&criterion.id, error));
-                } else if check.exit_code != Some(0) {
+                } else if !check.passed() {
                     findings += 1;
                     pending_records.push(OwnedObserverRecord::shadow(
                         &criterion.id,
-                        "native acceptance command exited nonzero",
+                        "native acceptance command failed",
                     ));
                     pending_shadow_events.insert(criterion.id.clone());
                 } else {

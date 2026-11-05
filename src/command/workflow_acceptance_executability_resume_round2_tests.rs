@@ -84,8 +84,8 @@ fn layoutless_current_schema_cache_is_a_miss_without_deletion() {
     )
     .unwrap();
     assert!(
-        store.load(&key, false).is_some(),
-        "schema-4 evidence remains readable before site-specific layout checks"
+        store.load(&key, false).is_none(),
+        "older classifications must be rerun"
     );
     assert!(path.exists(), "layoutless evidence must be retained");
 }
@@ -125,7 +125,7 @@ fn scratch_cache_without_site_repository_mapping_is_a_miss_without_deletion() {
 }
 
 #[test]
-fn schema3_scratch_result_is_reused_without_changing_its_file_or_verdict() {
+fn schema3_scratch_result_is_a_miss_without_changing_its_file() {
     let dir = tempfile::tempdir().unwrap();
     let store = super::ResultStore::new(
         dir.path().into(),
@@ -157,14 +157,9 @@ fn schema3_scratch_result_is_reused_without_changing_its_file_or_verdict() {
         "Hermetic rejects schema 3"
     );
     assert_eq!(std::fs::read(&path).unwrap(), legacy_bytes);
-    let loaded = store
-        .load(&key, true)
-        .expect("scratch schema-3 verdict is reusable");
-    assert!(loaded.copy_layout.is_none());
-    assert_eq!(
-        super::super::baseline::passed(&loaded),
-        super::super::baseline::passed(&result),
-        "scratch context must preserve the prior verdict"
+    assert!(
+        store.load(&key, true).is_none(),
+        "older classifications must be rerun at every site"
     );
     assert_eq!(std::fs::read(path).unwrap(), legacy_bytes);
 }
@@ -200,7 +195,7 @@ fn replacing_a_schema3_provisional_record_keeps_its_original_bytes() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&std::fs::read(provisional).unwrap()).unwrap()
             ["schema"],
-        5
+        6
     );
 }
 
@@ -290,7 +285,7 @@ async fn hermetic_old_record_is_a_miss_and_survives_rerun(schema: u32, layout: b
         assert_eq!(std::fs::read(archived).unwrap(), bytes);
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&std::fs::read(path).unwrap()).unwrap()["schema"],
-            5
+            6
         );
     }
 }
@@ -396,4 +391,31 @@ fn archive_fallback_keeps_different_bytes_when_writers_interleave() {
         std::fs::read(dir.path().join("result.previous.1")).unwrap(),
         second
     );
+}
+
+#[test]
+fn previous_masked_abort_classification_is_a_cache_miss() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::ResultStore::new(
+        dir.path().into(),
+        crate::command::workflow_task_set::passability::evidence::Redactor::from_vars(
+            Vec::new(),
+            &[],
+        ),
+    );
+    let key = "b".repeat(64);
+    let path = store.path(&key).unwrap();
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "schema": 5, "key": key,
+        "result": {"acceptance_id": "check", "exit_code": 0, "stdout": [],
+            "stderr": [], "operational_error": null,
+            "classification": {"passed": true, "zero_work": false, "crash": "Passed"}}
+    }))
+    .unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    for scratch in [false, true] {
+        assert!(store.load(&key, scratch).is_none());
+    }
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
 }

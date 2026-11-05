@@ -93,7 +93,15 @@ pub(crate) fn run_wave_verify_prepared(
         duration_ms,
     };
     persist_verify(run_root, stage_id, wave_id, &result)?;
-    if result.exit != 0 {
+    if !matches!(
+        crate::acceptance_check_crash::classify_execution(
+            cmd,
+            output.status.code(),
+            &String::from_utf8_lossy(&output.stderr),
+            &[]
+        ),
+        crate::acceptance_check_crash::CheckRunClass::Passed
+    ) {
         return Err(ApplyError::VerifyFailed {
             exit: result.exit,
             stderr_tail: result.stderr_tail.clone(),

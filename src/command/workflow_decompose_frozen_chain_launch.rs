@@ -131,11 +131,8 @@ pub(crate) fn launch_acceptance_decision(
     );
     let roots = crate::command::workflow_task_set::live_root::absolute_roots(&roots)
         .map_err(|why| anyhow!("live roots of {}: {why}", task_root.display()))?;
-    let policy = crate::command::acceptance_scratch_policy::capture(project_root, task_root)?
-        .map(|binding| {
-            archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy)
-        })
-        .unwrap_or_default();
+    let policy =
+        crate::command::acceptance_scratch_policy::authoring_policy(project_root, task_root);
     let bound = archon_workflow::acceptance_check_environment::policy_bound_names(&policy);
     let mut reauthor: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let entries = contract.acceptance.iter().chain(&contract.supplementary);

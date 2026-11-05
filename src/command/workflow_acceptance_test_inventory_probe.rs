@@ -42,9 +42,6 @@ pub(crate) async fn findings(
         &forwarded,
     );
     for result in results {
-        if result.exit_code != Some(0) || result.operational_error.is_some() {
-            continue;
-        }
         let Some(entry) = contract
             .acceptance
             .iter()
@@ -56,6 +53,12 @@ pub(crate) async fn findings(
         let Some((_, text)) = executed_text(entry) else {
             continue;
         };
+        if !matches!(
+            archon_workflow::acceptance_check_crash::classify_check_run(text, result),
+            archon_workflow::acceptance_check_crash::CheckRunClass::Passed
+        ) {
+            continue;
+        }
         let invocations = invocations(text);
         if invocations.is_empty() {
             probe.note(format!(

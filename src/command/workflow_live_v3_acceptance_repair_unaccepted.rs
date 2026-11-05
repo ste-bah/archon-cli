@@ -22,13 +22,10 @@ async fn repair_unaccepted_detailed(
     contract: &AcceptanceContract,
     base: Option<&Baseline>,
 ) -> WorkflowResult<Option<(Vec<AcceptanceContractRepairV1>, Defects)>> {
-    let policy = context
-        .binding
-        .as_ref()
-        .map(|binding| {
-            archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy)
-        })
-        .unwrap_or_default();
+    let policy = crate::command::acceptance_scratch_policy::authoring_policy(
+        &context.project,
+        &context.task_root,
+    );
     let bound = archon_workflow::acceptance_check_environment::policy_bound_names(&policy);
     let seeds = crate::command::workflow_task_set::unset_check_findings(contract, &bound);
     let mut ids = crate::command::workflow_task_set::non_accepted_ids(contract);

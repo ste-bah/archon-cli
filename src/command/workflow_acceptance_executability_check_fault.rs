@@ -219,6 +219,12 @@ pub(super) fn policy_refused(
         let prefix = format!("{}.", reference.acceptance_id);
         let defects: Vec<&str> = (policy.iter())
             .filter(|finding| finding.field.starts_with(&prefix))
+            .filter(|finding| {
+                finding
+                    .identity
+                    .as_ref()
+                    .is_none_or(|identity| identity.code != "unset_shell_variable")
+            })
             .map(|finding| finding.message.as_str())
             .collect();
         if !defects.is_empty() {

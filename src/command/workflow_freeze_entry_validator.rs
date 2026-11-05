@@ -191,14 +191,9 @@ pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs
                     .and_then(|value| {
                         let project = Path::new(value.get("project")?.as_str()?);
                         let tasks = Path::new(value.get("tasks")?.as_str()?);
-                        crate::command::acceptance_scratch_policy::capture(project, tasks)
-                            .ok()
-                            .flatten()
-                    })
-                    .map(|binding| {
-                        archon_workflow::acceptance_check_environment::CheckPolicy::configured(
-                            &binding.policy,
-                        )
+                        Some(crate::command::acceptance_scratch_policy::authoring_policy(
+                            project, tasks,
+                        ))
                     })
                     .unwrap_or_default();
                 let bound =

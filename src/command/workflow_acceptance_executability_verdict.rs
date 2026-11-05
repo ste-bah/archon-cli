@@ -307,10 +307,7 @@ pub(crate) fn no_verdict_cause(
 /// rejected subcommand, without the check's text): such a run is never remembered as a verdict, so a retry
 /// runs it again.
 pub(crate) fn may_be_host_failure(result: &CheckResult) -> bool {
-    let classification = classify_check_run(command, result);
-    if result.operational_error.is_some()
-        || (matches!(classification, CheckRunClass::Passed) && !result.reports_zero_work())
-    {
+    if result.operational_error.is_some() || (result.passed() && !result.reports_zero_work()) {
         return false;
     }
     match result.exit_code {

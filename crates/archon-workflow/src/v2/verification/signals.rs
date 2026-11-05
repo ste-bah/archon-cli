@@ -11,7 +11,15 @@ pub(super) fn is_duplicate_harness_gap(text: &str) -> bool {
 pub(super) fn focused_verification_command_passed(result: &WorkflowV2Result) -> bool {
     result.commands_run.iter().any(|command| {
         command.status == WorkflowV2CommandStatus::Succeeded
-            && command.exit_code == Some(0)
+            && matches!(
+                crate::acceptance_check_crash::classify_execution(
+                    &command.command,
+                    command.exit_code,
+                    &command.output_summary,
+                    &[]
+                ),
+                crate::acceptance_check_crash::CheckRunClass::Passed
+            )
             && command_output_has_target_pass(&command.output_summary)
             && !command_output_has_failure_marker(&command.output_summary)
     })

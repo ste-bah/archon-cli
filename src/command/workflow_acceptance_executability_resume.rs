@@ -16,7 +16,7 @@ use crate::command::workflow_freeze_budget::{
 };
 use crate::command::workflow_task_set::passability::evidence::Redactor;
 
-const SCHEMA: u32 = 5;
+const SCHEMA: u32 = 6;
 
 #[path = "workflow_acceptance_executability_resume_files.rs"]
 mod result_files;

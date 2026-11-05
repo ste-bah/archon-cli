@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 mod runtime;
 #[path = "acceptance_check_shell_unset_scan.rs"]
 mod scan;
-pub(crate) use runtime::runtime_unset;
+pub(crate) use runtime::{never_pass, runtime_unset};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct UnsetRead {

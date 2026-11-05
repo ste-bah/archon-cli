@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 // Only the body of a quoted here document is literal. Preserve its newlines.
 fn heredocs(command: &str) -> Option<(String, Vec<std::ops::Range<usize>>)> {
     static HERE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)['"]?"#).unwrap()
+        Regex::new(r#"<<(-?)[ \t]*(['"\\]?)([A-Za-z_][A-Za-z0-9_]*)['"]?"#).unwrap()
     });
     let mut bytes = command.as_bytes().to_vec();
     let mut offset = 0;
@@ -63,7 +63,7 @@ fn unquoted_operator(line: &str, at: usize) -> bool {
     while i < at {
         let ch = bytes[i];
         if ch == b'\\' && quote != b'\'' {
-            i += 2;
+            i = (i + 2).min(bytes.len());
             continue;
         }
         if quote != 0 {
@@ -142,11 +142,12 @@ pub(super) fn scan(command: &str) -> Option<Scan> {
             i += 1;
             while i < b.len() && b[i] != b'`' {
                 if b[i] == b'\\' {
+                    i = (i + 2).min(b.len());
+                } else {
                     i += 1;
                 }
-                i += 1;
             }
-            if i == b.len() {
+            if i >= b.len() {
                 return None;
             }
             i += 1;
