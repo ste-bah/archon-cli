@@ -23,33 +23,22 @@ pub enum VerifierStrengthDefect {
 
 impl fmt::Display for VerifierStrengthDefect {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let action = if matches!(self, Self::MissingExecutionObligation) {
-            "add"
-        } else {
-            "replace the verifier with"
-        };
-        let remedy = format!(
-            "set min_instances >= 1, {action} a falsifiable typed_verifier_command, or bind an instance source (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field)"
-        );
-        let replacement = format!(
-            "{remedy}; deleting the verifier does not satisfy this contract because it also removes the task's execution obligation"
-        );
         match self {
             Self::MissingExecutionObligation => write!(
                 f,
-                "deliverable contract has neither a verifier nor a positive instance obligation; {remedy}"
+                "neither a verifier nor a positive instance obligation is declared"
             ),
             Self::OwnArtifactExistenceOnly { artifact_path } => write!(
                 f,
-                "verifier only tests whether its own artifact_path '{artifact_path}' exists, which the generated deliverable gate already checks for existence and non-emptiness; {replacement}"
+                "verifier only tests whether its own artifact '{artifact_path}' exists; existence alone does not prove the declared outcome"
             ),
             Self::FixedSuccessProgram { program } => write!(
                 f,
-                "verifier's effective program '{program}' reports data but does not judge it, so its exit status cannot prove the outcome; {replacement}"
+                "verifier's effective program '{program}' reports data but does not judge it, so its exit status cannot prove the outcome"
             ),
             Self::FixedSuccessFallback { fallback } => write!(
                 f,
-                "verifier ends with '{fallback}', which converts failure into success; {replacement}"
+                "verifier ends with '{fallback}', which converts failure into success"
             ),
         }
     }
@@ -133,12 +122,32 @@ pub fn acceptance_verifier_strength_defect(
     verifier_strength_defect(command, own_artifact, None)
 }
 
-fn has_positive_instance_obligation(contract: &WorkflowV2DeliverableContract) -> bool {
+pub(crate) fn has_positive_instance_obligation(contract: &WorkflowV2DeliverableContract) -> bool {
     contract.min_instances >= 1
-        || (contract.instance_artifact_field.is_some()
-            && (contract.instance_source_path.is_some() || contract.registry_path.is_some())
-            && (contract.instance_source_records_field.is_some()
-                || contract.registry_records_field.is_some()))
+        || (contract
+            .instance_artifact_field
+            .as_deref()
+            .is_some_and(valid_obligation_value)
+            && (contract
+                .instance_source_path
+                .as_deref()
+                .is_some_and(valid_obligation_value)
+                || contract
+                    .registry_path
+                    .as_deref()
+                    .is_some_and(valid_obligation_value))
+            && (contract
+                .instance_source_records_field
+                .as_deref()
+                .is_some_and(valid_obligation_value)
+                || contract
+                    .registry_records_field
+                    .as_deref()
+                    .is_some_and(valid_obligation_value)))
+}
+
+fn valid_obligation_value(value: &str) -> bool {
+    !value.trim().is_empty() && !value.contains("${") && !value.contains('<')
 }
 
 pub fn normalized_verifier_command(raw: &str) -> String {

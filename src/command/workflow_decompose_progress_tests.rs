@@ -23,6 +23,10 @@ use super::repair_tests::script_source;
 /// `entry` is the expression the driver awaits; `subject` and `w` are in scope.
 pub(crate) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
     let source = script_source();
+    let contract_rule = serde_json::to_string(
+        archon_workflow::task_universe_contract_audit::DELIVERABLE_CONTRACT_RULE,
+    )
+    .unwrap();
     let driver = format!(
         r##"{source}
 // Scheduling fixture: the real native validator is tested by shape_tests.
@@ -35,7 +39,7 @@ globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({{ path: "/run/
 const scenario = {scenario};
 globalThis.args = Object.assign({{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "/p/tasks",
-  gateMode: "{gate_mode}", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
+  deliverableContractRule: {contract_rule}, gateMode: "{gate_mode}", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
 }}, scenario.args || {{}});
 const calls = [];
 const prompts = [];

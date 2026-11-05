@@ -34,6 +34,16 @@ pub fn task_schema() -> Value {
     edge["items"]["properties"]["task_id"]["pattern"] = json!(r"^\S(.*\S)?$");
     edge["items"]["properties"]["consumes"]["items"]["required"] = json!(["artifact_path"]);
     let contract = &mut schema["properties"]["deliverable_contracts"]["items"];
+    for field in [
+        "required_universe",
+        "registry_minimum_count",
+        "series_overlap_min_rows",
+    ] {
+        contract["properties"]
+            .as_object_mut()
+            .expect("contract properties")
+            .remove(field);
+    }
     contract["required"] = json!(["kind", "artifact_path"]);
     for field in ["kind", "artifact_path"] {
         contract["properties"][field]["minLength"] = json!(1);

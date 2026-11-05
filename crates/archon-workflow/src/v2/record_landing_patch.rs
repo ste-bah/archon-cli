@@ -23,7 +23,7 @@ impl RecordLanding {
         for task in skeleton.tasks {
             let record = json!({"subject":task.task_id,"task":task});
             let parsed: StageRecord = serde_json::from_value(record.clone())?;
-            if let Err(error) = self.validate_skeleton_record(&parsed, false) {
+            if let Err(error) = self.validate_skeleton_record(&parsed, Admission::Persisted) {
                 tracing::warn!(subject = %parsed.subject, %error, "ignored invalid skeleton seed task");
                 continue;
             }
@@ -44,7 +44,7 @@ impl RecordLanding {
     pub(super) fn validate_skeleton_record(
         &self,
         r: &StageRecord,
-        audit_contracts: bool,
+        admission: Admission,
     ) -> WorkflowResult<()> {
         if r.subject.trim().is_empty() || r.subject.len() > 4096 {
             return Err(invalid("record subject is missing or too long"));
@@ -86,7 +86,7 @@ impl RecordLanding {
             acceptance_digest: "pending".into(),
             tasks: vec![task.clone()],
         };
-        let defects = if audit_contracts {
+        let defects = if matches!(admission, Admission::NewLanding) {
             crate::task_skeleton::skeleton_defects(&skeleton, "pending")
         } else {
             crate::task_skeleton::skeleton_shape_defects(&skeleton, "pending")

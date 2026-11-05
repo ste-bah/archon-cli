@@ -2,6 +2,10 @@
 // crates/archon-workflow/src/v2/script/author_context.rs): the same SHA-256
 // naming and the same reply, with the files kept in memory.
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const policySource = fs.readFileSync(path.join(__dirname, '../../crates/archon-workflow/src/task_universe_contract_audit.rs'), 'utf8');
+const contractRule = JSON.parse(policySource.match(/pub const DELIVERABLE_CONTRACT_RULE: &str = ("[^\n]+");/)[1]);
 
 function authorContext(files = new Map()) {
   const binding = (extension, text) => {
@@ -31,6 +35,7 @@ function redactPublicTextFixture(value) {
 
 // `context` with the binding installed, unless the test installed its own.
 function withAuthorContext(context) {
+  if (context.args && !Object.hasOwn(context.args, "deliverableContractRule")) context.args.deliverableContractRule = contractRule;
   if (!Object.prototype.hasOwnProperty.call(context, '__archonAuthorContext')) context.__archonAuthorContext = authorContext();
   if (!Object.prototype.hasOwnProperty.call(context, '__archonRedactPublicText')) context.__archonRedactPublicText = redactPublicTextFixture;
   return context;

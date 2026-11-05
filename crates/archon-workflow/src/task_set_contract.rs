@@ -322,7 +322,7 @@ pub fn validate_residual_gaps(
         }
         if let Some(defect) = verifier_strength_defect(Some(&gap.fail_closed_check), None, None) {
             return invalid(format!(
-                "residual gap '{}' fail_closed_check: {defect}",
+                "residual gap '{}' fail_closed_check: {defect}; use a command that can exit non-zero when the declared outcome is false",
                 gap.id
             ));
         }

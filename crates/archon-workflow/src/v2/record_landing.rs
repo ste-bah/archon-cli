@@ -96,6 +96,12 @@ pub async fn scope<T>(
 pub fn current() -> Option<Arc<RecordLanding>> {
     RECORDS.try_with(Clone::clone).ok()
 }
+#[derive(Clone, Copy)]
+pub(super) enum Admission {
+    NewLanding,
+    Persisted,
+}
+
 impl RecordLanding {
     /// `subjects_are_tasks` says whether each subject is a canonical task id (map calls) or an opaque call id (reduce calls); it decides whether the subject may stand in for a finding's task.
     pub fn open(
@@ -136,7 +142,7 @@ impl RecordLanding {
             RecordKind::Skeleton => "land-skeleton-record",
         }
     }
-    fn validate(&self, r: &StageRecord) -> WorkflowResult<()> {
+    fn validate(&self, r: &StageRecord, admission: Admission) -> WorkflowResult<()> {
         if r.subject.trim().is_empty() || r.subject.len() > 4096 {
             return Err(invalid("record subject is missing or too long"));
         }
@@ -144,7 +150,7 @@ impl RecordLanding {
             return Err(invalid("record subject is outside this call"));
         }
         if self.kind == RecordKind::Skeleton {
-            return self.validate_skeleton_record(r, true);
+            return self.validate_skeleton_record(r, admission);
         }
         if r.evidence.is_empty() || r.evidence.iter().any(|e| e.summary.trim().is_empty()) {
             return Err(invalid("record requires concrete evidence"));
@@ -216,7 +222,7 @@ impl RecordLanding {
         if record.remove {
             return self.remove_task(&record.subject);
         }
-        self.validate(&record)
+        self.validate(&record, Admission::NewLanding)
             .map_err(|e| with_schema(e, self.kind))?;
         if self.kind == RecordKind::Skeleton
             && let Some(task) = &record.task
@@ -239,7 +245,7 @@ impl RecordLanding {
         if path.exists() && self.kind != RecordKind::Skeleton && !replace {
             let previous: StageRecord =
                 serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
-            self.validate(&previous)?;
+            self.validate(&previous, Admission::Persisted)?;
             for finding in previous.findings {
                 if !record.findings.contains(&finding) {
                     record.findings.push(finding);
@@ -264,7 +270,7 @@ impl RecordLanding {
                     record.summary = format!("{}; {}", previous.summary, record.summary);
                 }
             }
-            self.validate(&record)
+            self.validate(&record, Admission::NewLanding)
                 .map_err(|e| with_schema(e, self.kind))?;
         }
         write(&path, &record)
@@ -282,7 +288,7 @@ impl RecordLanding {
             }
             let record: StageRecord =
                 serde_json::from_slice(&std::fs::read(path).map_err(invalid)?)?;
-            self.validate(&record)?;
+            self.validate(&record, Admission::Persisted)?;
             if records.insert(record.subject.clone(), record).is_some() {
                 return Err(invalid("duplicate persisted record subject"));
             }

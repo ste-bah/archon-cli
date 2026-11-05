@@ -300,7 +300,7 @@ fn deleting_a_verifier_without_a_positive_floor_is_still_unsatisfiable() {
     assert!(
         certain
             .message
-            .contains("set min_instances >= 1, add a falsifiable typed_verifier_command")
+            .contains("set min_instances >= 1 (preferred for one concrete artifact path), add a falsifiable typed_verifier_command")
     );
 
     assert!(!certain.message.contains("replace"));
@@ -379,4 +379,79 @@ fn skeleton_and_body_share_every_contract_refusal() {
             assert!(defects[0].message.contains("min_instances"));
         }
     }
+}
+
+#[test]
+fn contract_remedies_follow_verifier_precedence_and_existing_obligations() {
+    use crate::verifier_strength::verifier_strength_defect;
+    for command in ["test -f out.json", "true", "grep -q ready out.json || true"] {
+        for binding in [false, true] {
+            for floor in [0, 1] {
+                let mut contract = verified_contract("out.json", Some(command), floor);
+                if binding {
+                    contract.instance_artifact_field = Some("path".into());
+                    contract.registry_path = Some("registry.json".into());
+                    contract.registry_records_field = Some("rows".into());
+                }
+                assert!(
+                    verifier_strength_defect(Some(command), Some("out.json"), Some(&contract))
+                        .is_some()
+                );
+                let findings = contract_defects("TASK-X-010", 2, &contract);
+                let message = &findings.last().unwrap().message;
+                assert!(
+                    message.contains("replace the verifier with a command that can exit non-zero"),
+                    "{message}"
+                );
+                assert_eq!(
+                    message.contains("or remove it"),
+                    floor > 0 || binding,
+                    "{message}"
+                );
+                assert_eq!(
+                    message.contains("deleting the verifier does not satisfy"),
+                    floor == 0 && !binding,
+                    "{message}"
+                );
+                contract.typed_verifier_command = None;
+                assert_eq!(
+                    contract_defects("TASK-X-010", 2, &contract).is_empty(),
+                    floor > 0 || binding
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn every_optional_string_rejects_blank_and_template_values_at_its_index() {
+    let fields: Vec<_> = include_str!("task_universe_deliverable.rs")
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("pub "))
+        .filter_map(|line| line.split_once(": Option<String>"))
+        .map(|(field, _)| field)
+        .collect();
+    assert!(fields.contains(&"typed_verifier_command"));
+    for field in fields {
+        for invalid in ["", "  ", "<optional: concrete value>", "${UNREPLACED}"] {
+            let mut value = serde_json::to_value(verified_contract("out.json", None, 1)).unwrap();
+            value[field] = serde_json::json!(invalid);
+            let contract = serde_json::from_value(value).unwrap();
+            let defects = contract_defects("TASK-X-010", 3, &contract);
+            assert!(
+                defects
+                    .iter()
+                    .any(|defect| defect.identity.location
+                        == format!("deliverable_contracts/3/{field}")),
+                "{field}={invalid:?}: {defects:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn prompt_keeps_the_exact_contract_remedy_field_grouping() {
+    let source = include_str!("../../../src/command/workflow_decompose_v1.js");
+    assert!(DELIVERABLE_CONTRACT_RULE.contains(INSTANCE_SOURCE_FIELDS));
+    assert!(source.contains("return args.deliverableContractRule;"));
 }

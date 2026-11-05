@@ -46,7 +46,12 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
 // the example is what made it return the whole contract (observed live).
 const ENTRY_SHAPES = JSON.stringify(JSON.parse(ACCEPTANCE_SHAPE).acceptance);
 
-const DELIVERABLE_CONTRACT_RULE = "Each deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path.";
+function deliverableContractRule() {
+  if (typeof args.deliverableContractRule !== "string" || !args.deliverableContractRule.trim()) {
+    throw new Error("host did not supply deliverableContractRule");
+  }
+  return args.deliverableContractRule;
+}
 
 const SKELETON_SHAPE = JSON.stringify({
   schema_version: 1,
@@ -70,12 +75,6 @@ const SKELETON_SHAPE = JSON.stringify({
       deliverable_contracts: [{
           kind: "<short stable name for what this task produces>",
           artifact_path: "<path this task produces, exactly as its dependents consume it>",
-          typed_verifier_command: "<optional: falsifiable command that can exit non-zero when the declared outcome is false>",
-          instance_artifact_field: "<optional: artifact path field in each source record>",
-          instance_source_path: "<optional: path to the instance source>",
-          registry_path: "<optional: path to the registry instance source>",
-          instance_source_records_field: "<optional: name of the records field in the instance source>",
-          registry_records_field: "<optional: name of the records field in the registry>",
           min_instances: 1
         }]
     }]

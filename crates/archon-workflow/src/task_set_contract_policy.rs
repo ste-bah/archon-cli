@@ -89,7 +89,7 @@ fn policy_findings(
                         strength_code(&defect),
                         &slot,
                         "check",
-                        defect.to_string(),
+                        format!("{defect}; use a command that exercises the deliverable and can exit non-zero when the declared outcome is false"),
                     ));
                 }
             }
@@ -120,7 +120,7 @@ fn policy_findings(
                 ) {
                     check_defects.push(crate::defect::ValidationDefect::new(
                         strength_code(&defect), &slot, "check/typed_verifier_command", format!(
-                            "floor is not falsifiable: {defect}; acceptance floors require typed_verifier_command that exercises the deliverable (instance counts and asserted fields alone are insufficient)")));
+                            "floor is not falsifiable: {defect}; acceptance floors require a verifier command that exercises the deliverable (instance counts and asserted fields alone are insufficient)")));
                 }
             }
         }

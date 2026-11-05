@@ -17,6 +17,10 @@ const TASK_ROOT: &str = "/p/tasks";
 /// the capability plus the call ordinal.
 fn driver(args_json: &str, lint_rounds: &str, tail: &str) -> String {
     let source = script_source();
+    let contract_rule = serde_json::to_string(
+        archon_workflow::task_universe_contract_audit::DELIVERABLE_CONTRACT_RULE,
+    )
+    .unwrap();
     format!(
         r##"{source}
 // Scheduling fixture: the real native validator is tested by shape_tests.
@@ -28,7 +32,7 @@ const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.
 globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({{ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) }});
 globalThis.args = Object.assign({{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "{TASK_ROOT}",
-  gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
+  deliverableContractRule: {contract_rule}, gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
 }}, {args_json});
 const subjects = [
   {{ taskId: "TASK-X-010", fileName: "TASK-X-010.md" }},

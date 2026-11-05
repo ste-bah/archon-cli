@@ -69,7 +69,7 @@ fn P5_23_JS_shape_matches_schema() {
         assert!(
             task_schema()["properties"]["deliverable_contracts"]["items"]["properties"]
                 .get(field)
-                .is_some()
+                .is_none()
         );
     }
     let source = include_str!("../../../../src/command/workflow_decompose_v1.js");
@@ -124,7 +124,13 @@ fn P5_24_hint_uses_exact_schema() {
             .and_then(|s| s.split_once(':'))
         {
             assert!(
-                fields.get(field.0).is_some(),
+                fields.get(field.0).is_some()
+                    != [
+                        "required_universe",
+                        "registry_minimum_count",
+                        "series_overlap_min_rows"
+                    ]
+                    .contains(&field.0),
                 "missing contract field {}",
                 field.0
             );
@@ -244,6 +250,11 @@ fn frozen_seed_retains_every_task_with_a_missing_execution_obligation() {
             json!([{"kind":"output","artifact_path":"out.json","min_instances":0}]);
     }
     records.seed_skeleton(&seed, true).unwrap();
+    // remaining(), hint(), compose(), assemble() and retained_completion() all read records().
+    assert!(records.remaining().unwrap().is_empty());
+    assert!(records.hint().unwrap().contains("Host retained 2 records"));
+    assert!(records.retained_completion().unwrap().is_some());
+    records.assemble(&json!({"records_landed":2})).unwrap();
     let composed = records.compose(&json!({"records_landed":2})).unwrap();
     let expected: archon_workflow::task_skeleton::TaskSkeleton =
         serde_json::from_value(seed).unwrap();
@@ -252,6 +263,17 @@ fn frozen_seed_retains_every_task_with_a_missing_execution_obligation() {
         serde_json::to_value(&expected.tasks).unwrap()
     );
     assert!(archon_workflow::task_skeleton::validate_skeleton(&expected, "").is_err());
+    let mut weak = task(3);
+    weak["deliverable_contracts"] =
+        json!([{"kind":"output","artifact_path":"new.json","min_instances":0}]);
+    let error = records
+        .land(json!({"subject":"TASK-X-003","task":weak}))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("neither a verifier nor a positive instance obligation"),
+        "{error}"
+    );
     assert!(
         records
             .land(json!({"subject":"TASK-X-001","remove":true}))
