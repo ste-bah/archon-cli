@@ -1,4 +1,5 @@
-//! Host-computed repository observations and verification of explicit author claims.
+//! The host refutes explicit existence/type/line-count claims that contradict
+//! the repository; it does not write observations.
 
 use std::path::Path;
 
@@ -11,6 +12,7 @@ use super::fences::prose_lines;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Observation {
     File { lines: usize },
+    UncountedFile,
     Directory,
     Absent,
 }
@@ -61,6 +63,7 @@ fn is_path_shaped(token: &str) -> bool {
 
 /// Each occurrence of a backticked token naming `relative`, with the text
 /// that follows it on its line.
+#[cfg(test)]
 fn mentions<'a>(tree: &RepositoryTree, line: &'a str, relative: &str) -> Vec<&'a str> {
     let mut found = Vec::new();
     let mut rest = line;
@@ -143,7 +146,16 @@ pub(crate) fn count_lines(bytes: &[u8]) -> usize {
 }
 
 /// One rule source for landing and lint. Only NotFound means absent.
+#[cfg(test)]
 pub(crate) fn observe(tree: &RepositoryTree, relative: &str) -> anyhow::Result<Observation> {
+    observe_claim(tree, relative, true)
+}
+
+fn observe_claim(
+    tree: &RepositoryTree,
+    relative: &str,
+    count: bool,
+) -> anyhow::Result<Observation> {
     let path = super::repository_paths::checked_path(tree, relative)?;
     let fail = |error: std::io::Error| {
         anyhow::Error::new(error).context(format!(
@@ -167,6 +179,9 @@ pub(crate) fn observe(tree: &RepositoryTree, relative: &str) -> anyhow::Result<O
         ))
         .into());
     }
+    if !count {
+        return Ok(Observation::UncountedFile);
+    }
     use std::io::Read;
     const LIMIT: u64 = 64 * 1024 * 1024;
     let mut reader = std::fs::File::open(&path).map_err(fail)?.take(LIMIT + 1);
@@ -179,10 +194,10 @@ pub(crate) fn observe(tree: &RepositoryTree, relative: &str) -> anyhow::Result<O
         }
         bytes += count as u64;
         if bytes > LIMIT {
-            anyhow::bail!(
-                "repository observation failed for {}: exceeds {LIMIT} byte limit",
-                path.display()
-            );
+            return Err(super::repository_paths::PathFault(format!(
+                "`{relative}`: line-count claim exceeds {LIMIT} byte limit; delete the claim"
+            ))
+            .into());
         }
         lines += buffer[..count].iter().filter(|b| **b == b'\n').count();
         last = Some(buffer[count - 1]);
@@ -214,37 +229,93 @@ pub(crate) fn findings_against(
     };
     let mut findings = Vec::new();
     let mut paths = deliverable_paths(task, raw);
-    for line in prose_lines(raw) {
-        let mut rest = line;
-        while let Some((_, after)) = rest.split_once('`') {
-            let Some((token, tail)) = after.split_once('`') else {
-                break;
-            };
-            if is_path_shaped(token) && parse_observation(tail).is_some() {
-                paths.push(token.to_string());
+    let mut observations = Vec::new();
+    for (section, _) in super::repository_claims::scoped_sections(raw) {
+        let parsed = super::repository_claims::extract_claims(&section);
+        for line in prose_lines(&section) {
+            let mut rest = line;
+            while let Some((_, after)) = rest.split_once('`') {
+                let Some((token, tail)) = after.split_once('`') else {
+                    break;
+                };
+                if is_path_shaped(token)
+                    && let Some(observation) = parse_observation(tail)
+                {
+                    let scoped = parsed.iter().find(|claim| {
+                        claim.scope.is_some()
+                            && archon_workflow::repository_record::normalize_relative(&claim.path)
+                                == archon_workflow::repository_record::normalize_relative(token)
+                    });
+                    let candidates = if let Some(claim) = scoped {
+                        match super::repository_claims::resolve_scoped_paths(tree, claim) {
+                            Ok(paths) => paths,
+                            Err(error)
+                                if error
+                                    .downcast_ref::<super::repository_paths::PathFault>()
+                                    .is_some() =>
+                            {
+                                if let Some(relative) =
+                                    super::repository_paths::relative_path(tree, &claim.path)?
+                                {
+                                    if !findings.iter().any(|(path, _)| path == &relative) {
+                                        findings.push((relative, format!("{task_id}: {error}")));
+                                    }
+                                }
+                                Vec::new()
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    } else if token.contains('/') {
+                        vec![token.to_string()]
+                    } else {
+                        Vec::new()
+                    };
+                    for candidate in candidates {
+                        if let Some(relative) =
+                            super::repository_paths::relative_path(tree, &candidate)?
+                        {
+                            paths.push(candidate);
+                            observations.push((relative, observation));
+                        }
+                    }
+                }
+                rest = tail;
             }
-            rest = tail;
         }
     }
     paths.sort();
     paths.dedup();
-    let mut checked = std::collections::BTreeSet::new();
+    let mut checked: std::collections::BTreeSet<_> =
+        findings.iter().map(|(path, _)| path.clone()).collect();
     for path in paths {
-        let actual = match observe(tree, &path) {
+        let Some(relative) =
+            super::repository_paths::relative_path(tree, &path)?.filter(|r| !r.is_empty())
+        else {
+            continue;
+        };
+        if !checked.insert(relative.clone()) {
+            continue;
+        }
+        let claims: Vec<_> = observations
+            .iter()
+            .filter(|(path, _)| path == &relative)
+            .map(|(_, observation)| *observation)
+            .collect();
+        let count = claims
+            .iter()
+            .any(|claim| matches!(claim, Observation::File { .. }));
+        let actual = match observe_claim(tree, &path, count) {
             Ok(actual) => actual,
             Err(error) => {
                 if error
                     .downcast_ref::<super::repository_paths::PathFault>()
                     .is_some()
                 {
-                    findings.push((path.clone(), format!("{task_id}: {error}")));
+                    findings.push((relative.clone(), format!("{task_id}: {error}")));
                     continue;
                 }
                 return Err(error);
             }
-        };
-        let Some(relative) = tree.relative_to_root(&path).filter(|r| !r.is_empty()) else {
-            continue;
         };
         let truth = archon_workflow::repository_record::PathTruth {
             at_base: tree.exists_at_base(&relative),
@@ -255,52 +326,46 @@ pub(crate) fn findings_against(
         if !path.starts_with('/') && !truth.in_checkout && project_root.join(&relative).exists() {
             continue;
         }
-        if !checked.insert(relative.clone()) {
-            continue;
-        }
         let root = tree.root().display();
         let base = tree.base_commit();
         let checkout_dir = actual == Observation::Directory;
         // Check every explicit observation, so a generated or correct claim
         // cannot hide a later contradiction in the author's prose.
-        for claimed in prose_lines(raw)
-            .flat_map(|line| mentions(tree, line, &relative))
-            .filter_map(parse_observation)
-        {
+        for claimed in claims {
             let text = match claimed {
                 Observation::Absent if truth.certainly_exists() => match actual {
                     Observation::File { lines } => format!(
-                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout ({lines} lines); rewrite the observation as exists ({lines} lines)"
+                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout ({lines} lines); correct it to exists ({lines} lines) or delete it"
+                    ),
+                    Observation::UncountedFile => format!(
+                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a file; correct the claim or delete it"
                     ),
                     _ => format!(
-                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a directory; rewrite the observation as exists (directory)"
+                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a directory; correct it to exists (directory) or delete it"
                     ),
                 },
                 Observation::File { .. } | Observation::Directory if truth.certainly_absent() => {
                     format!(
-                        "{task_id}: the body says `{relative}` exists but it is absent from repository {root} at base commit {base} and from the checkout; rewrite the observation as absent"
+                        "{task_id}: the body says `{relative}` exists but it is absent from repository {root} at base commit {base} and from the checkout; correct it to absent or delete it"
                     )
                 }
                 Observation::File { lines } if truth.in_checkout => {
                     if checkout_dir {
                         format!(
-                            "{task_id}: the body says `{relative}` exists ({lines} lines) but it is a directory in repository {root}; rewrite the observation as exists (directory)"
+                            "{task_id}: the body says `{relative}` exists ({lines} lines) but it is a directory in repository {root}; correct it to exists (directory) or delete it"
                         )
                     } else {
                         match actual {
                             Observation::File { lines: actual } if actual != lines => format!(
-                                "{task_id}: the body says `{relative}` exists ({lines} lines) but the checkout at {root} has {actual} lines; rewrite the observation as exists ({actual} lines)"
+                                "{task_id}: the body says `{relative}` exists ({lines} lines) but the checkout at {root} has {actual} lines; correct it to exists ({actual} lines) or delete it"
                             ),
                             _ => continue,
                         }
                     }
                 }
                 Observation::Directory if truth.in_checkout && !checkout_dir => {
-                    let Observation::File { lines } = actual else {
-                        continue;
-                    };
                     format!(
-                        "{task_id}: the body says `{relative}` exists (directory) but it is a file of {lines} lines in repository {root}; rewrite the observation as exists ({lines} lines)"
+                        "{task_id}: the body says `{relative}` exists (directory) but it is a file in repository {root}; correct the claim or delete it"
                     )
                 }
                 _ => continue,

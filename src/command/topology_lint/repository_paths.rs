@@ -37,27 +37,89 @@ pub(super) fn metadata_error(path: &str, error: std::io::Error) -> anyhow::Error
     }
 }
 
+/// Keep lexical members for escape checks; resolve alternate absolute root
+/// spellings through their deepest existing ancestor (including missing tails).
+pub(super) fn relative_path(tree: &RepositoryTree, named: &str) -> anyhow::Result<Option<String>> {
+    let spelling = named.replace('\\', "/");
+    let candidate = Path::new(&spelling);
+    if !candidate.is_absolute() || candidate.starts_with(tree.root()) {
+        return Ok(tree.relative_to_root(&spelling));
+    }
+    let root = tree.root().canonicalize().map_err(|error| {
+        anyhow::Error::new(error).context(format!("repository root {}", tree.root().display()))
+    })?;
+    // Preserve an aliased root's lexical tail, so a symlink below that root
+    // is still checked for escape rather than mistaken for an outside path.
+    for prefix in candidate.ancestors().collect::<Vec<_>>().into_iter().rev() {
+        match std::fs::symlink_metadata(prefix) {
+            Ok(_) => {
+                if prefix
+                    .canonicalize()
+                    .map_err(|error| metadata_error(named, error))?
+                    == root
+                {
+                    let relative = candidate.strip_prefix(prefix)?;
+                    return Ok(Some(
+                        archon_workflow::repository_record::normalize_relative(
+                            &relative.to_string_lossy(),
+                        ),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(metadata_error(named, error)),
+        }
+    }
+    let mut ancestor = candidate;
+    let mut tail = Vec::new();
+    loop {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(name) = ancestor.file_name() else {
+                    return Ok(None);
+                };
+                tail.push(name.to_os_string());
+                let Some(parent) = ancestor.parent() else {
+                    return Ok(None);
+                };
+                ancestor = parent;
+            }
+            Err(error) => return Err(metadata_error(named, error)),
+        }
+    }
+    let resolved = ancestor
+        .canonicalize()
+        .map_err(|error| metadata_error(named, error))?;
+    let Ok(relative) = resolved.strip_prefix(&root) else {
+        return Ok(None);
+    };
+    let mut relative = relative.to_path_buf();
+    relative.extend(tail.into_iter().rev());
+    Ok(Some(
+        archon_workflow::repository_record::normalize_relative(&relative.to_string_lossy()),
+    ))
+}
+
 /// Reject lexical escapes before reading the filesystem, then resolve the
 /// deepest existing ancestor. Missing descendants inherit its containment.
 /// A dangling or cyclic symlink is a path fault, never an absent declaration.
 pub(super) fn checked_path(tree: &RepositoryTree, named: &str) -> anyhow::Result<PathBuf> {
     let spelling = named.replace('\\', "/");
     let candidate = Path::new(&spelling);
-    let relative = if candidate.is_absolute() {
-        candidate
-            .strip_prefix(tree.root())
-            .map_err(|_| fault(named, "path leaves the repository"))?
-    } else {
-        candidate
-    };
-    if relative.components().any(|part| {
-        matches!(
-            part,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    }) {
+    if !candidate.is_absolute()
+        && candidate.components().any(|part| {
+            matches!(
+                part,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
         return Err(fault(named, "path leaves the repository"));
     }
+    let relative =
+        relative_path(tree, named)?.ok_or_else(|| fault(named, "path leaves the repository"))?;
+    let relative = Path::new(&relative);
     let root = tree.root().canonicalize().map_err(|error| {
         anyhow::Error::new(error).context(format!("repository root {}", tree.root().display()))
     })?;

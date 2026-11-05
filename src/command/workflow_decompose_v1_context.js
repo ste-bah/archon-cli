@@ -479,7 +479,7 @@ function groundingRules() {
 
 // Repository facts are checked by the host.
 function observationRule() {
-  return "Do not write existence or line-count observations for paths; the host checks the repository itself. Any existence or count you do state must be exact. Never claim a path exists or is absent unless you read it.";
+  return "Do not write existence or line-count observations for paths; the host refutes explicit existence/type/line-count claims that contradict the repository; it does not write observations. Any existence or count you do state must be exact. Never claim a path exists or is absent unless you read it.";
 }
 
 // Directory names the host says are not worth reading, joined for a prompt.

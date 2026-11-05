@@ -255,7 +255,7 @@ fn a_wrong_line_count_is_a_blocking_finding_carrying_the_true_count() {
         found[0]
     );
     assert!(
-        found[0].contains("has 3 lines; rewrite the observation as exists (3 lines)"),
+        found[0].contains("has 3 lines; correct it to exists (3 lines) or delete it"),
         "{}",
         found[0]
     );
@@ -285,7 +285,7 @@ fn correct_observations_in_either_spelling_pass_and_wrong_existence_does_not() {
         found[0]
     );
     assert!(
-        found[0].contains("(3 lines); rewrite the observation as exists (3 lines)"),
+        found[0].contains("as a file; correct the claim or delete it"),
         "{}",
         found[0]
     );
@@ -333,7 +333,7 @@ fn the_body_lint_and_set_gate_report_each_path_once() {
             .unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(
-        found[0].contains("rewrite the observation as exists (3 lines)"),
+        found[0].contains("correct the claim or delete it"),
         "{}",
         found[0]
     );

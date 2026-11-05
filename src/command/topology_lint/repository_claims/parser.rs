@@ -3,8 +3,10 @@
 use super::{Claim, PathClaim};
 mod predicate;
 mod reporting;
+mod sections;
 use predicate::claim_before;
 use reporting::reported_claim_clause;
+pub(crate) use sections::scoped_sections;
 
 const ABSENT_AFTER: &[&str] = &[
     "does not exist yet",
@@ -106,10 +108,7 @@ const TERMINATORS: &[&str] = &[
 /// prose and are skipped; inline backticks are read. What a specified test
 /// asserts at run time is no claim (`assertion`, #443).
 pub(crate) fn extract_claims(text: &str) -> Vec<PathClaim> {
-    super::assertion::sentences(text)
-        .into_iter()
-        .flat_map(|(sentence, carried)| claims_in_sentence(sentence, carried))
-        .collect()
+    sections::extract_claims(text)
 }
 
 fn claims_in_sentence(sentence: &str, carried: bool) -> Vec<PathClaim> {
@@ -306,6 +305,13 @@ fn scoped_predicate_at_start(rest: &str) -> Option<(&str, Claim)> {
         .find_map(|(phrases, claim)| {
             phrases.iter().find_map(|phrase| {
                 let tail = rest.strip_prefix(phrase)?.trim_start();
+                let tail = if tail.starts_with('(') {
+                    let end = tail.find(')')?;
+                    super::super::repository_observations::parse_observation(rest)?;
+                    tail[end + 1..].trim_start()
+                } else {
+                    tail
+                };
                 ["under ", "in "]
                     .iter()
                     .find_map(|scope| tail.strip_prefix(scope))

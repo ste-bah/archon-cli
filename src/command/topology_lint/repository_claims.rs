@@ -53,6 +53,7 @@ pub(crate) struct PathClaim {
 mod assertion;
 mod parser;
 pub(crate) use parser::extract_claims;
+pub(super) use parser::scoped_sections;
 
 /// The blocking findings for the task body `text` at `path`, against the
 /// repository recorded under `tasks_root`. Empty when the set has no record.
@@ -135,7 +136,11 @@ fn claim_findings(
     text: &str,
 ) -> Result<Vec<(Vec<String>, String)>> {
     let mut findings = Vec::new();
+    let mut faults = std::collections::BTreeSet::new();
     for claim in extract_claims(text) {
+        let Some(relative) = super::repository_paths::relative_path(tree, &claim.path)? else {
+            continue;
+        };
         let resolved = (|| -> Result<Vec<String>> {
             super::repository_paths::checked_path(tree, &claim.path)?;
             if let Some(scope) = &claim.scope {
@@ -150,7 +155,9 @@ fn claim_findings(
                     .downcast_ref::<super::repository_paths::PathFault>()
                     .is_some()
                 {
-                    findings.push((vec![claim.path.clone()], format!("{task_id}: {error}")));
+                    if faults.insert(relative.clone()) {
+                        findings.push((vec![relative], format!("{task_id}: {error}")));
+                    }
                     continue;
                 }
                 return Err(error);
@@ -158,7 +165,9 @@ fn claim_findings(
         };
         let Some(relatives) = paths
             .iter()
-            .map(|path| tree.relative_to_root(path))
+            .map(|path| super::repository_paths::relative_path(tree, path))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
             .collect::<Option<Vec<_>>>()
         else {
             continue;
@@ -173,7 +182,9 @@ fn claim_findings(
                         .downcast_ref::<super::repository_paths::PathFault>()
                         .is_some()
                     {
-                        findings.push((vec![relative.clone()], format!("{task_id}: {error}")));
+                        if faults.insert(relative.clone()) {
+                            findings.push((vec![relative.clone()], format!("{task_id}: {error}")));
+                        }
                         path_fault = true;
                         break;
                     }
@@ -222,7 +233,10 @@ fn claim_findings(
 /// directory: keep an existing root path, otherwise use the only scoped
 /// interpretation present in the tree. A bare name is joined to every
 /// directory the scope may name. Empty when the claim names no path.
-fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Result<Vec<String>> {
+pub(super) fn resolve_scoped_paths(
+    tree: &RepositoryTree,
+    claim: &PathClaim,
+) -> Result<Vec<String>> {
     let Some(cited) = &claim.scope else {
         return Ok(vec![claim.path.clone()]);
     };
