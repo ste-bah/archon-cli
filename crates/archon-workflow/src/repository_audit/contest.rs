@@ -5,8 +5,8 @@
 //!
 //! Issue-104 discharges an absence when the task whose single-task landing
 //! deleted the path had it verified on a commit without it. "The task whose
-//! landing deleted it" was taken as THE owner. It need not be: live on
-//! wf-0ddadd81 the task universe declares `registry-migration-report.json`
+//! landing deleted it" was taken as THE owner. It need not be: in
+//! a recorded run, the task universe declared `shared-report.json`
 //! for one task, whose fix kept and refreshed it, while another task's review
 //! remediation -- granted the path because nothing else in its wave claimed
 //! it -- deleted it as a stray, and that task's verifier accepted the tree

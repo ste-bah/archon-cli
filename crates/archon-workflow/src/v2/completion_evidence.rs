@@ -7,9 +7,8 @@
 //! with the outcome rather than being re-derived later from a result whose
 //! shape the agent controls.
 //!
-//! Attribution is keyed on the CALL ID, not on the result body: the call id is
-//! the runtime's own, so an agent cannot mint itself a completion by shaping
-//! its output. A call whose id matches no known scheme mints nothing.
+//! Attribution uses declared call semantics, never the agent-controlled result body.
+//! Older records without metadata retain their legacy interpretation.
 //!
 //! Nothing is minted for a branch that did not finish cleanly, or that names no
 //! task, or that offers no evidence — a credit with no evidence behind it is
@@ -31,14 +30,14 @@ use crate::v2::scheduler::WorkflowV2BranchOutcome;
 /// Version stamped into a focused-verification call's input and read back off
 /// its evidence, so evidence minted under an older contract is distinguishable
 /// from evidence minted under this one.
-pub const FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION: &str = "focused-verification-evidence-v2";
+pub const FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION: &str = "focused-verification-evidence-v3";
 
 /// Mint completion evidence onto `outcome` for the task(s) it speaks for.
 pub fn attach_completion_evidence_for_call(
     call: &WorkflowV2HostCall,
     outcome: &mut WorkflowV2BranchOutcome,
 ) {
-    let Some(kind) = task_completion_evidence_kind(&call.id) else {
+    let Some(kind) = task_completion_evidence_kind(call) else {
         return;
     };
     if !matches!(
@@ -101,33 +100,19 @@ pub fn attach_completion_evidence_for_call(
 
 /// Which kind of completion evidence a call id mints, if any.
 pub fn task_completion_evidence_kind(
-    call_id: &str,
+    call_id: &(impl super::call_metadata::CallSemantics + ?Sized),
 ) -> Option<WorkflowV2TaskCompletionEvidenceKind> {
-    if call_id.starts_with("noop-proof-verification-")
-        || call_id.starts_with("noop-proof-reverification-")
-    {
-        return Some(WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop);
+    use super::call_metadata::CallKind;
+    match call_id.metadata().kind {
+        CallKind::NoopProof => Some(WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop),
+        CallKind::FocusedVerification | CallKind::ReviewVerification => {
+            Some(WorkflowV2TaskCompletionEvidenceKind::FocusedVerification)
+        }
+        CallKind::Implementation | CallKind::Remediation | CallKind::ReviewRemediation => {
+            Some(WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate)
+        }
+        CallKind::Other => None,
     }
-    if call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
-    {
-        return Some(WorkflowV2TaskCompletionEvidenceKind::FocusedVerification);
-    }
-    if call_id.starts_with("implementation-wave-")
-        || call_id.starts_with("remediation-wave-")
-        || call_id.starts_with("review-remediation-wave-")
-        // v3 authored-script implement/remediate calls, symmetric with the
-        // verify calls above (which already match `verification-wave-`). Without
-        // these, an accepted v3 implementation stamps no ImplementationCandidate
-        // evidence, the implementation credit set stays empty for a pure-v3 run,
-        // and `completed = noop ∪ (implementation ∩ verification)` credits no
-        // task — so resume/restart can never skip completed work. The prefixes
-        // are the runtime's own v3 call-id scheme, not PRD-specific.
-        || call_id.starts_with("implement-task-")
-        || call_id.starts_with("remediate-task-")
-    {
-        return Some(WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate);
-    }
-    None
 }
 
 /// Every canonical task id a result speaks for, unioned across the generated

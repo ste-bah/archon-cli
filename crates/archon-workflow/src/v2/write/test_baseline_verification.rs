@@ -10,7 +10,7 @@
 //! THEIR files red. That test is on nobody's other-owner list, so
 //! `verification::enforce_baseline_tests` demotes the accepted verdict, the
 //! task is remediated for a failure it cannot fix, and the run loops
-//! remediate → verify. Live on wf-0ddadd81, docs-only TASK-TRADING-001
+//! remediate → verify. In a recorded run, a documentation task
 //! failed verification twice on three tests in other tasks' files.
 //!
 //! # What happens instead
@@ -59,7 +59,10 @@ pub async fn establish_verification_baseline(
     ctx: &VerificationBaselineContext<'_>,
     items: &mut [WorkflowV2FanoutItem],
 ) -> Option<String> {
-    if !is_focused_verification_call(ctx.call_id) || items.is_empty() {
+    if !items
+        .first()
+        .is_some_and(|item| is_focused_verification_call(&item.call))
+    {
         return None;
     }
     let base_commit = match crate::repository_record::git_head(ctx.repository_root) {
@@ -93,7 +96,7 @@ pub async fn establish_verification_baseline(
         .await;
     }
     for item in items.iter_mut() {
-        stamp_baseline_tests_input_at(ctx.call_id, ctx.store, &mut item.input, Some(&base_commit));
+        stamp_baseline_tests_input_at(&item.call, ctx.store, &mut item.input, Some(&base_commit));
     }
     Some(base_commit)
 }
@@ -107,7 +110,7 @@ pub async fn establish_verification_baseline(
 /// The commands come from the item when it carries any, and otherwise from
 /// the TASK UNIVERSE (Issue-75). A verification item is built by the
 /// workflow prelude, not by the write layer, and live it carries
-/// `"focused_verification": []` — verbatim from a wf-0ddadd81 verifier
+/// `"focused_verification": []` — verbatim from a recorded verifier
 /// prompt. With no command there was no verdict, so `establish_wave` saved
 /// no record and the stamp fell back to the task's ORIGINAL implementation
 /// record: a verifier at head `3ec9ddac` was told its filter had been run

@@ -203,6 +203,7 @@ impl LifecycleDriver {
                 });
                 let result = self
                     .write_fanout(
+                        crate::v2::call_metadata::CallKind::Implementation,
                         &format!("orchestrator-{ordinal}-coder"),
                         serde_json::json!([item]),
                         instructions,

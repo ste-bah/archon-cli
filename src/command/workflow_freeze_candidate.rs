@@ -416,8 +416,8 @@ fn assemble_acceptance(candidate: &[u8], refuse_markers: bool) -> anyhow::Result
         // the host overwrites it after judging. But the typed parse below runs
         // BEFORE the host owns it, and `verdict` is a strict enum, so an author
         // that writes the honest placeholder `""` fails the whole artifact with
-        // "unknown variant ``, expected `accepted` or `refuted`". Run
-        // wf-3d6d5f20-class (2026-09-11 17:32) had three of eleven entries do exactly that; the
+        // "unknown variant ``, expected `accepted` or `refuted`".
+        // A recorded failure had three of eleven entries do exactly that; the
         // resulting whole-artifact rejection cannot be attributed to an entry,
         // so selective re-authoring picked the wrong ones and the two empty
         // verdicts not in that batch would have failed every round.

@@ -4,7 +4,7 @@ pub(super) fn focused_verification_accepted_task_ids(
     call: &WorkflowV2HostCall,
     result: &WorkflowV2Result,
 ) -> std::collections::BTreeSet<String> {
-    if call.options.item_kind.as_deref() != Some("focused_verification") {
+    if !crate::v2::call_metadata::CallSemantics::verification(call) {
         return Default::default();
     }
     result
@@ -34,10 +34,12 @@ pub(super) fn focused_completion_evidence_valid(item: &serde_json::Value) -> boo
         item.get("status").and_then(serde_json::Value::as_str),
         Some("accepted" | "noop")
     );
-    let versioned = item
+    let fingerprint = item
         .get("source_fingerprint")
-        .and_then(serde_json::Value::as_str)
-        == Some("focused-verification-evidence-v2");
+        .and_then(serde_json::Value::as_str);
+    let versioned = fingerprint
+        == Some(crate::v2::completion_evidence::FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION)
+        || fingerprint == Some("focused-verification-evidence-v2");
     let kind = item
         .get("evidence_kind")
         .and_then(serde_json::Value::as_str)

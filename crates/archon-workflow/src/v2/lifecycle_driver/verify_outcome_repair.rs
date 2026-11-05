@@ -19,6 +19,7 @@ impl LifecycleDriver {
         let call_id = verification_remediation_wave_id(wave_index, remediation_attempt, None);
         let wave = self
             .write_fanout(
+                crate::v2::call_metadata::CallKind::Remediation,
                 &call_id,
                 serde_json::json!(items),
                 prompts::VERIFICATION_REMEDIATION_WAVE_TASK,
@@ -195,6 +196,7 @@ impl LifecycleDriver {
             verification_remediation_wave_id(wave_index, remediation_attempt, Some(repair_attempt));
         let followup = self
             .write_fanout(
+                crate::v2::call_metadata::CallKind::Remediation,
                 &call_id,
                 serde_json::json!(&items),
                 prompts::FOLLOWUP_REMEDIATION_WAVE_TASK,

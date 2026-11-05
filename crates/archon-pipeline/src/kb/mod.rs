@@ -4,8 +4,7 @@
 //!
 //! [`compile`] and [`query`] operate on the document store `archon kb ingest`
 //! actually writes (`doc_sources` / `doc_chunks`, owned by `archon-docs`), which
-//! is what `PRD-ARCHON-DOCS-001` asked for under "Extend Carefully": the KB
-//! schema evolving into document artifact lineage rather than becoming a second
+//! supports the KB schema evolving into document artifact lineage rather than becoming a second
 //! unrelated store.
 //!
 //! [`ingest`] and the `kb_nodes` / `kb_edges` / `kb_content_hashes` /

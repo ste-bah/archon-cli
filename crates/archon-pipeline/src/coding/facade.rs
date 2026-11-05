@@ -15,7 +15,7 @@ use async_trait::async_trait;
 
 use archon_core::config::{AnthropicModelsConfig, ContextConfig};
 
-use crate::coding::agents::AGENTS;
+use crate::coding::agents::{AGENTS, CodingAgent};
 use crate::coding::quality::{CodingQualityCalculator, phase_threshold};
 use crate::coding::rlm::RlmStore;
 use crate::learning::integration::LearningIntegration;
@@ -30,11 +30,12 @@ mod layers;
 
 #[cfg(test)]
 use helpers::display_name_from_key;
-use helpers::{agent_to_info, dependencies_satisfied, find_coding_agent};
+use helpers::{agent_to_info, dependencies_satisfied};
 
 /// Facade implementing the coding pipeline's 50-agent sequence with 11-layer
 /// prompt augmentation.
 pub struct CodingFacade {
+    agents: Vec<CodingAgent>,
     quality_calculator: CodingQualityCalculator,
     rlm_store: Mutex<RlmStore>,
     learning: Option<Mutex<LearningIntegration>>,
@@ -53,6 +54,7 @@ impl CodingFacade {
     /// Create a new facade with an empty RLM store.
     pub fn new() -> Self {
         Self {
+            agents: AGENTS.to_vec(),
             quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: None,
@@ -69,6 +71,7 @@ impl CodingFacade {
     /// context is available.
     pub fn with_learning(learning: LearningIntegration) -> Self {
         Self {
+            agents: AGENTS.to_vec(),
             quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: Some(Mutex::new(learning)),
@@ -87,6 +90,16 @@ impl CodingFacade {
     pub fn with_models(mut self, models: AnthropicModelsConfig) -> Self {
         self.models = models;
         self
+    }
+
+    /// Supply an authored roster; dependencies and declaration order determine execution.
+    pub fn with_agents(mut self, agents: Vec<CodingAgent>) -> Self {
+        self.agents = agents;
+        self
+    }
+
+    fn coding_agent(&self, key: &str) -> Option<&CodingAgent> {
+        self.agents.iter().find(|agent| agent.key == key)
     }
 
     pub fn with_context(mut self, context: ContextConfig) -> Self {
@@ -136,10 +149,10 @@ impl PipelineFacade for CodingFacade {
             .iter()
             .map(|(agent, _)| agent.key.as_str())
             .collect();
-        if completed.len() >= AGENTS.len() {
+        if completed.len() >= self.agents.len() {
             return Ok(NextAgent::Done);
         }
-        let Some(first) = AGENTS.iter().find(|agent| {
+        let Some(first) = self.agents.iter().find(|agent| {
             !completed.contains(agent.key) && dependencies_satisfied(agent, &completed)
         }) else {
             anyhow::bail!(
@@ -152,7 +165,8 @@ impl PipelineFacade for CodingFacade {
             return Ok(NextAgent::Continue(agent_to_info(first, &self.models)));
         }
 
-        let wave: Vec<AgentInfo> = AGENTS
+        let wave: Vec<AgentInfo> = self
+            .agents
             .iter()
             .filter(|agent| {
                 !completed.contains(agent.key)
@@ -269,7 +283,7 @@ impl PipelineFacade for CodingFacade {
         result: &AgentResult,
         quality: &QualityScore,
     ) -> Result<()> {
-        if let Some(coding_agent) = find_coding_agent(&agent.key) {
+        if let Some(coding_agent) = self.coding_agent(&agent.key) {
             let mut store = self
                 .rlm_store
                 .lock()
@@ -312,3 +326,7 @@ impl PipelineFacade for CodingFacade {
 #[cfg(test)]
 #[path = "facade_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "facade_authored_tests.rs"]
+mod authored_tests;

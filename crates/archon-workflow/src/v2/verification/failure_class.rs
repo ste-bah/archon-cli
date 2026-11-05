@@ -35,7 +35,7 @@ impl VerificationFailureClass {
 }
 
 pub(super) fn annotate_verification_failure_outcome(
-    call_id: &str,
+    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
     outcome: &mut WorkflowV2BranchOutcome,
 ) {
     if !is_focused_verification_call(call_id) || is_terminal_outcome(outcome) {
@@ -124,8 +124,10 @@ pub(super) fn classify_verification_result(result: &WorkflowV2Result) -> Verific
     VerificationFailureClass::RetryableVerificationIssue
 }
 
-fn is_focused_verification_call(call_id: &str) -> bool {
-    call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
+fn is_focused_verification_call(
+    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
+) -> bool {
+    call_id.verification()
 }
 
 fn is_terminal_outcome(outcome: &WorkflowV2BranchOutcome) -> bool {

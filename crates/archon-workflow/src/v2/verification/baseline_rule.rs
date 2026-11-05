@@ -244,19 +244,25 @@ impl BaselineStamp {
     }
 }
 
-pub(crate) fn is_focused_verification_call(call_id: &str) -> bool {
-    call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
+pub(crate) fn is_focused_verification_call(
+    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
+) -> bool {
+    call_id.verification()
 }
 
 /// Stamp the task's baseline onto a focused-verification branch input.
-pub fn stamp_baseline_tests_input(call_id: &str, store: &WorkflowV2ResultStore, input: &mut Value) {
+pub fn stamp_baseline_tests_input(
+    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
+    store: &WorkflowV2ResultStore,
+    input: &mut Value,
+) {
     stamp_baseline_tests_input_at(call_id, store, input, None);
 }
 
 /// [`stamp_baseline_tests_input`] preferring the record at `base_commit`
 /// (Issue-70); an existing stamp is replaced.
 pub fn stamp_baseline_tests_input_at(
-    call_id: &str,
+    call_id: &(impl crate::v2::call_metadata::CallSemantics + ?Sized),
     store: &WorkflowV2ResultStore,
     input: &mut Value,
     base_commit: Option<&str>,

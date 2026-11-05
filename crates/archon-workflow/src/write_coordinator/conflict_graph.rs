@@ -1,4 +1,4 @@
-//! TASK-WC-004 — Conflict graph + deterministic safe-wave scheduler (PRD-012 §10).
+//! TASK-WC-004 — Conflict graph + deterministic safe-wave scheduler.
 //!
 //! Given WritePlan items in declared order, produce ordered waves where no wave
 //! has resource-key conflicts and item-level dependencies land in earlier waves.
@@ -109,7 +109,7 @@ impl std::fmt::Display for ScheduleError {
 impl std::error::Error for ScheduleError {}
 
 /// Build the conflict graph: edge iff resource keys overlap OR both items draw
-/// targets from the shared stage-level fallback (PRD §8.1). SOLE adjacency source.
+/// targets from the shared stage-level fallback. SOLE adjacency source.
 pub fn build_conflict_graph(plans: &[WritePlan]) -> ConflictGraph {
     let mut adjacency: BTreeMap<ItemId, BTreeSet<ItemId>> = BTreeMap::new();
     for plan in plans {
@@ -184,7 +184,7 @@ pub fn build_schedule(
     ))
 }
 
-/// Place items into the earliest legal wave (PRD §10.2). Pure adjacency lookup.
+/// Place items into the earliest legal wave. Pure adjacency lookup.
 fn place_waves(
     stage_id: &str,
     ordered: &[WritePlan],

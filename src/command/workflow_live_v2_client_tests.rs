@@ -445,3 +445,19 @@ mod provider_env_tests;
 
 #[path = "workflow_raw_deadline_tests.rs"]
 mod raw_deadline_tests;
+
+#[test]
+fn stage_wrapper_preserves_typed_metadata_and_explicit_binding() {
+    let mut req = request(WorkflowV2HostMethod::Parallel, None);
+    req.call.id = "custom-check".into();
+    req.call.options.binding = Some("custom-worker".into());
+    req.call.options.metadata = Some(archon_workflow::v2::call_metadata::CallMetadata {
+        kind: archon_workflow::v2::call_metadata::CallKind::FocusedVerification,
+        task_scoped: true,
+        sequence: None,
+        source_graph: None,
+    });
+    let stage = stage_request_for_v2_agent("test", ProviderTier::Coder, None, &req);
+    assert_eq!(stage.agent.as_deref(), Some("custom-worker"));
+    assert!(archon_workflow::stage_command_policy::command_execution_stage(&stage));
+}

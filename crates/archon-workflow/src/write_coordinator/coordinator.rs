@@ -1,4 +1,4 @@
-//! TASK-WC-007 — Coordinated implementation fanout (PRD-012 §5, §7, §16).
+//! TASK-WC-007 — Coordinated implementation fanout.
 //!
 //! The single integration point. Builds per-item WritePlans, schedules
 //! non-conflicting waves, runs each item in an isolated worktree (the agent is

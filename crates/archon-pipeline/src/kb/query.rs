@@ -1,32 +1,16 @@
 //! KB Q&A query engine — retrieve, gather context, synthesize, file answers.
 //!
-//! Implements REQ-KB-003, which `PRD-ARCHON-DOCS-001` specifies again as
-//! REQ-DOCS-013/014/015. There is one capability, so there is one command:
+//! There is one answering capability and one command:
 //! `archon docs answer` drives this engine when a provider is configured and
 //! falls back to `archon_docs::answer`'s extractive path when none is.
 //!
 //! NFR: search < 500ms, Q&A < 5s.
 //!
-//! # Where the evidence comes from and where answers go
+//! Retrieval uses the document store's chunks. Synthesized answers are filed
+//! as searchable documents with `DerivedFrom` edges to their cited chunks.
 //!
-//! Retrieval runs over the chunks the shipping ingest path writes
-//! (`doc_chunks`, via [`archon_docs::retrieval`]) — the same corpus
-//! `kb search` and `docs search` rank, so the three verbs cannot disagree about
-//! what is in the knowledge base. A filed answer is stored as an ordinary
-//! document with `DerivedFrom` edges to the chunks it cited, which makes it
-//! searchable in its own right.
-//!
-//! What this engine adds over `docs answer` — which is extractive and
-//! discards its text — is LLM synthesis through [`QaSynthesizer`] and the
-//! filing step.
-//!
-//! # Streaming
-//!
-//! [`QueryEngine::query_streaming`] is [`QueryEngine::query`] with an
-//! [`AnswerStreamSink`] attached. It exists because synthesis is ~99% of the
-//! command's wall clock, so a caller that can show text early should. Filing,
-//! citations and the returned result are identical either way — see
-//! [`AnswerStreamSink`].
+//! Streaming attaches [`AnswerStreamSink`] to show generated text early.
+//! Filing, citations, and the returned result are identical to non-streaming queries.
 
 use std::sync::Arc;
 use std::time::Instant;

@@ -38,7 +38,9 @@ fn dynamic_wave_invalidated_call_ids(
     if sources.is_empty() {
         return BTreeSet::new();
     }
-    let restart_position = generated_prd_call_position(call_id);
+    let restart_position = sources
+        .first()
+        .and_then(|record| declared_call_position(&record.call));
     let mut impacted_task_ids = sources
         .iter()
         .flat_map(|record| record_completed_or_owned_task_ids(record))
@@ -52,7 +54,7 @@ fn dynamic_wave_invalidated_call_ids(
                 continue;
             }
             let later_generated_call = restart_position
-                .zip(generated_prd_call_position(&record.call.id))
+                .zip(declared_call_position(&record.call))
                 .is_some_and(|(restart, candidate)| candidate > restart);
             if later_generated_call || source_graph_intersects_tasks(record, &impacted_task_ids) {
                 invalidated.insert(record.call.id.clone());
@@ -132,7 +134,8 @@ fn record_completed_or_owned_task_ids(record: &WorkflowV2CallRecord) -> BTreeSet
         .collect()
 }
 
-fn generated_prd_call_position(call_id: &str) -> Option<u32> {
+// Ordering compatibility for records written before call metadata existed.
+fn legacy_call_position(call_id: &str) -> Option<u32> {
     for (prefix, rank) in [
         ("noop-proof-verification-", 10),
         ("noop-evidence-repair-", 11),
@@ -186,4 +189,51 @@ fn dynamic_call_index(call_id: &str, prefix: &str) -> Option<u32> {
         return None;
     }
     digits.parse().ok()
+}
+
+fn declared_call_position(call: &super::WorkflowV2HostCall) -> Option<u32> {
+    use super::call_metadata::CallSemantics;
+    if call.options.metadata.is_some() {
+        return call.metadata().sequence;
+    }
+    legacy_call_position(&call.id)
+}
+
+#[cfg(test)]
+#[test]
+fn typed_restart_order_is_independent_of_identity() {
+    use super::call_metadata::{CallKind, CallMetadata};
+    let mut records = Vec::new();
+    for (name, sequence) in [("omega", 1), ("alpha", 2)] {
+        let call = super::WorkflowV2HostCall {
+            id: name.into(),
+            method: super::WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: super::WorkflowV2HostOptions {
+                metadata: Some(CallMetadata {
+                    kind: CallKind::Other,
+                    task_scoped: false,
+                    sequence: Some(sequence),
+                    source_graph: None,
+                }),
+                ..Default::default()
+            },
+        };
+        records.push(WorkflowV2CallRecord::new(
+            "test",
+            call,
+            1,
+            "input".into(),
+            super::WorkflowV2Result::accepted("done"),
+            vec![],
+        ));
+    }
+    assert_eq!(
+        dynamic_wave_invalidated_call_ids(&records, "omega"),
+        BTreeSet::from(["omega".to_string(), "alpha".to_string()])
+    );
+    assert_eq!(
+        dynamic_wave_invalidated_call_ids(&records, "alpha"),
+        BTreeSet::from(["alpha".to_string()])
+    );
 }

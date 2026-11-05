@@ -1,8 +1,7 @@
-//! Claude-style dynamic workflow runtime boundary.
+//! Dynamic workflow runtime boundary.
 //!
 //! V2 keeps generated workflow harness orchestration separate from the legacy
-//! YAML-stage executor. The concrete runtime lands in the follow-on PRD-017
-//! tasks; this module establishes the public boundary used by those slices.
+//! YAML-stage executor. This module defines their shared public boundary.
 
 pub mod acceptance_regression;
 pub mod acceptance_routing;
@@ -24,6 +23,7 @@ pub mod branch_evidence;
 pub mod branch_stamping;
 pub mod call_data;
 pub mod call_execution;
+pub mod call_metadata;
 pub mod completion_credit;
 pub mod completion_evidence;
 pub mod continuation;
@@ -218,3 +218,6 @@ mod record_landing_schema;
 #[cfg(test)]
 #[path = "record_landing_tests.rs"]
 mod record_landing_tests;
+
+#[cfg(test)]
+mod call_metadata_tests;

@@ -1,4 +1,4 @@
-// v3 script dialect (marked by `export const meta`): Claude-Code-style
+// v3 script dialect (marked by `export const meta`): typed workflow
 // primitives layered over the host API. Call ids derive deterministically
 // from labels + ordinals so unchanged prefixes replay from cache.
 function __archonPrimitives(w) {
@@ -93,6 +93,7 @@ function __archonPrimitives(w) {
       // task declares that it may write; the host checks them at dispatch.
       if (Array.isArray(opts.residualFiles)) item.residual_expansion_paths = opts.residualFiles;
       const writeOptions = {
+        metadata: { kind: "implementation", task_scoped: true, source_graph: false },
         write: "worktree",
         itemKind: "implementation",
         tier: opts.tier || "coder",
@@ -110,7 +111,7 @@ function __archonPrimitives(w) {
       return await w.fanout(id, [item], Object.assign(writeOptions, turnBound(opts)));
     }
     // Per-task verifiers (verify:true or focusedTests) run through the
-    // HOST's verification-wave machinery: the wave id prefix grants command
+    // host's verification machinery: typed metadata grants command
     // execution and attaches every focused-verification guard (zero-test and
     // zero-command demotion, outcome normalization). commands_run is
     // agent-reported — the demotions are what keep it honest. The
@@ -141,6 +142,7 @@ function __archonPrimitives(w) {
         item.verification_requirements = [prompt];
       }
       const verifyOptions = {
+        metadata: { kind: "focused_verification", task_scoped: true },
         tier: opts.tier || "coder",
         itemKind: "focused_verification",
         task: verifierTask,
@@ -151,6 +153,7 @@ function __archonPrimitives(w) {
       return await w.parallel(`verification-wave-${id}`, [item], Object.assign(verifyOptions, turnBound(opts)));
     }
     return await w.agent(id, Object.assign({
+      metadata: { kind: "other" },
       tier: opts.tier || "coder",
       task: prompt,
       targetFiles: opts.targetFiles || [],
@@ -164,6 +167,7 @@ function __archonPrimitives(w) {
     }
     ordinal += 1;
     const id = `${slug(opts.label || "agents")}-${ordinal}`;
+    const verify = opts.verify === true || specs.every(spec => spec.verify === true || (Array.isArray(spec.focusedTests) && spec.focusedTests.length > 0));
     const cargoish = specs.some((spec) =>
       [spec.prompt, ...(spec.focusedTests || [])].join(" ").includes("cargo "));
     const items = specs.map((spec, index) => {
@@ -181,10 +185,12 @@ function __archonPrimitives(w) {
         focused_verification: spec.focusedTests || [],
         artifact_requirements: spec.artifacts || [],
         work_type: opts.write ? "implementation" : "verification",
+        ...(verify && !opts.write ? { verification_requirements: [spec.prompt], baseline_test_rule: BASELINE_TEST_RULE } : {}),
       };
     });
     if (opts.write) {
       return await w.fanout(id, items, {
+        metadata: { kind: "implementation", task_scoped: true, source_graph: false },
         write: "worktree",
         itemKind: "implementation",
         tier: opts.tier || "coder",
@@ -197,6 +203,8 @@ function __archonPrimitives(w) {
       });
     }
     return await w.parallel(id, items, {
+      metadata: { kind: verify ? "focused_verification" : "other", task_scoped: verify },
+      itemKind: verify ? "focused_verification" : undefined,
       tier: opts.tier || "coder",
       // Read-only branches share the canonical checkout (one build lock).
       maxParallelism: cargoish ? 1 : opts.maxParallelism,

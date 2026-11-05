@@ -148,6 +148,7 @@ impl LifecycleDriver {
             }
             let review_fixes = self
                 .write_fanout(
+                    crate::v2::call_metadata::CallKind::ReviewRemediation,
                     &format!("review-remediation-wave-{review_iteration}"),
                     serde_json::json!(support::array(review_remediation_inventory.get("items"))),
                     prompts::REVIEW_REMEDIATION_WAVE_TASK,

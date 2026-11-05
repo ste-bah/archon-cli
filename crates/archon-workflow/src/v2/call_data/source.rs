@@ -43,11 +43,11 @@ pub fn fanout_items_for_call(
                 "source": source,
                 "item": value,
             });
-            stamp_focused_verification_input(&execution.call.id, &mut input);
+            stamp_focused_verification_input(&execution.call, &mut input);
             // Obs-31: the task's base-commit test lists, for the verifier's
             // prompt and for the host rule that re-reads its report.
             crate::v2::verification::stamp_baseline_tests_input(
-                &execution.call.id,
+                &execution.call,
                 v2_store,
                 &mut input,
             );

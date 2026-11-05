@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::coding::agents::{AGENTS, CodingAgent, ToolAccess};
+use crate::coding::agents::{CodingAgent, ToolAccess};
 use crate::coding::quality::phase_threshold;
 use crate::runner::{AgentInfo, ToolAccessLevel};
 use archon_core::config::AnthropicModelsConfig;
@@ -39,20 +39,15 @@ pub(super) fn agent_to_info(agent: &CodingAgent, _models: &AnthropicModelsConfig
         key: agent.key.to_string(),
         display_name: display_name_from_key(agent.key),
         model: agent.model.to_string(),
-        phase: agent.phase as u32,
+        phase: agent.phase.ordinal(),
         critical: agent.critical,
         parallelizable: agent.parallelizable,
-        quality_threshold: phase_threshold(agent.phase as u32),
+        quality_threshold: phase_threshold(agent.phase.ordinal()),
         tool_access_level: match agent.tool_access {
             ToolAccess::ReadOnly => ToolAccessLevel::ReadOnly,
             ToolAccess::Full => ToolAccessLevel::Full,
         },
     }
-}
-
-/// Find a [`CodingAgent`] in the static `AGENTS` array by key.
-pub(super) fn find_coding_agent(key: &str) -> Option<&'static CodingAgent> {
-    AGENTS.iter().find(|a| a.key == key)
 }
 
 pub(super) fn dependencies_satisfied(agent: &CodingAgent, completed: &HashSet<&str>) -> bool {

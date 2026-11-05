@@ -200,7 +200,9 @@ fn record_review_verification_retry(
 }
 
 pub(crate) fn review_verification_options(items: &[Value], task: &str) -> Value {
-    lifecycle_policy::verify_options::verification_options(items, task, false)
+    let mut options = lifecycle_policy::verify_options::verification_options(items, task, false);
+    options["metadata"] = serde_json::json!({ "kind": "review_verification" });
+    options
 }
 
 pub(crate) fn review_verification_has_execution_failure(verification: &Value) -> bool {

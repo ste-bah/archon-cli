@@ -40,7 +40,7 @@ fn commit_regression(canonical: &Path) {
 }
 
 /// The item the workflow prelude builds, with whatever its
-/// `focused_verification` array holds — live on wf-0ddadd81, nothing.
+/// `focused_verification` array holds — in a recorded run, nothing.
 fn verification_item_declaring(commands: &[&str]) -> WorkflowV2FanoutItem {
     WorkflowV2FanoutItem::read_only(
         ITEM,
@@ -194,7 +194,7 @@ async fn the_verifier_is_restamped_at_the_verification_base_and_its_accepted_ver
     let verification_base = head(&canonical);
 
     // The item builder's stamp: the implementation record, nothing exempt —
-    // the stamp that demoted wf-0ddadd81's TASK-TRADING-001.
+    // the stamp that demoted a documentation task in a recorded run.
     let mut items = vec![verification_item(&command)];
     stamp_baseline_tests_input(CALL, &store, &mut items[0].input);
     let before = stamped(&items[0].input).expect("implementation stamp");

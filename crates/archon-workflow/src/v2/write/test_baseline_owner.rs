@@ -24,7 +24,7 @@
 //! all — which is what an integration binary reports. Neither falls back to
 //! the package root: `src/lib.rs` would otherwise claim every test no module
 //! path explains, and the coder would be told to fix a file that holds
-//! nothing of the sort. Live on wf-0ddadd81 three integration failures of
+//! nothing of the sort. In a recorded run, three integration failures of
 //! a crate's `tests/<target>.rs` were given to a task
 //! as that crate's `src/lib.rs`, and the only file that could green
 //! them was on that task's forbidden list. An unresolvable failure is

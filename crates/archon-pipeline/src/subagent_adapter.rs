@@ -268,7 +268,7 @@ impl SubagentPipelineClient {
         )];
 
         parts.push(format!(
-            "## Archon Tool Contract\nUse only these Archon tool names for this run: {}.\nAny `mcp__server__tool` name in that list is a PROJECT MCP tool configured for this repository: call it directly when the task asks for it. Any other name in that list that the task declared (its required_tools/tools/allowed_tools) is a native Archon tool: call it directly, and never substitute a shell command for a declared tool — the run is checked for the declared name, not for an equivalent. What is forbidden is the legacy Claude Flow, God pipeline and ruv-swarm vocabulary — do not call those names even if old imported agent text mentions them, and do not run `claude-flow` or `npx ruv-swarm` through Bash. Map code search to LeannSearch/lsp/Grep/Read, memory work to memory_recall/memory_store, research/doc work to Doc*/WebSearch/WebFetch, and delegation to Agent.",
+            "Use the tools granted for this execution: {}. Choose tools according to the task and their declared capabilities.",
             Self::allowed_tools(request)
                 .into_iter()
                 .filter(|tool| tool != EXACT_TOOL_POLICY_MARKER)

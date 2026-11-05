@@ -6,7 +6,7 @@
 //! run more than its task's declared filter -- a crate's whole library suite
 //! -- and every test that command names failing is held against the branch,
 //! including tests already failing when the run began, in files the branch
-//! may not write. Live on wf-0ddadd81 a residual round whose write scope was
+//! may not write. In a recorded run, a residual round whose write scope was
 //! one file was refused over seven such tests.
 //!
 //! What a test did is never taken from the agent's report here. The host runs

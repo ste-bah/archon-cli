@@ -170,6 +170,7 @@ impl LifecycleDriver {
 
     pub(crate) async fn write_fanout(
         &self,
+        kind: crate::v2::call_metadata::CallKind,
         id: &str,
         items: serde_json::Value,
         task: &str,
@@ -187,6 +188,7 @@ impl LifecycleDriver {
             serde_json::json!({
                 "tier": "coder",
                 "itemKind": "implementation",
+                "metadata": { "kind": kind },
                 "write": "worktree",
                 "maxParallelism": max_parallelism,
                 "targetFilesFromItem": true,

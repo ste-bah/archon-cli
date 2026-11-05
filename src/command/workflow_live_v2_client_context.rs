@@ -67,7 +67,7 @@ pub(super) fn stage_request_for_v2_agent(
         run_id: run_id.to_string(),
         stage_id: request.call.id.clone(),
         stage_kind: stage_kind_for_v2_agent(request),
-        agent: Some(request.role.clone()),
+        agent: request.call.options.binding.clone(),
         task: request.task.clone(),
         attempt: 1,
         provider_tier,
@@ -106,6 +106,7 @@ pub(super) fn stage_input_for_v2_agent(
             serde_json::json!({
                 "id": request.call.id,
                 "method": request.call.method.as_str(),
+                "options": request.call.options,
                 "role": request.role,
                 "write_mode": request.call.write_mode,
                 "target_files": request.target_files,

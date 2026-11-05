@@ -3,6 +3,7 @@
 //! Validates: phase-based Write/Edit/Bash denial, dangerous command blocking,
 //! affected_files scope, orphan warning, periodic cargo check, forbidden patterns.
 
+use archon_pipeline::coding::agents::ToolAccess;
 use archon_pipeline::coding::hooks::{HookDecision, PostToolUseHook, PreToolUseHook};
 
 // ---------------------------------------------------------------------------
@@ -10,7 +11,14 @@ use archon_pipeline::coding::hooks::{HookDecision, PostToolUseHook, PreToolUseHo
 // ---------------------------------------------------------------------------
 
 fn pre_hook(phase: u8, affected: &[&str]) -> PreToolUseHook {
-    PreToolUseHook::new(phase, affected.iter().map(|s| s.to_string()).collect())
+    PreToolUseHook::new(
+        if phase <= 3 {
+            ToolAccess::ReadOnly
+        } else {
+            ToolAccess::Full
+        },
+        affected.iter().map(|s| s.to_string()).collect(),
+    )
 }
 
 fn tool_input_file(path: &str) -> serde_json::Value {
@@ -188,8 +196,8 @@ mod post_hook_tests {
         for _ in 0..5 {
             hook.increment_edit_counter();
         }
-        assert!(!hook.should_run_compilation_check(3)); // phase 3 = no
-        assert!(hook.should_run_compilation_check(4)); // phase 4, 5th edit = yes
+        assert!(!hook.should_run_compilation_check(ToolAccess::ReadOnly)); // phase 3 = no
+        assert!(hook.should_run_compilation_check(ToolAccess::Full)); // phase 4, 5th edit = yes
     }
 
     #[test]
@@ -206,4 +214,24 @@ mod post_hook_tests {
         let _ = format!("{:?}", block);
         let _ = format!("{:?}", warn);
     }
+}
+
+#[test]
+fn declared_access_controls_checks_independently_of_phase_order() {
+    let writable = PreToolUseHook::new(ToolAccess::Full, vec![]);
+    let readonly = PreToolUseHook::new(ToolAccess::ReadOnly, vec![]);
+    assert!(matches!(
+        writable.evaluate("Edit", &serde_json::json!({})),
+        HookDecision::Allow
+    ));
+    assert!(matches!(
+        readonly.evaluate("Edit", &serde_json::json!({})),
+        HookDecision::Block { .. }
+    ));
+    let post = PostToolUseHook::new(std::path::PathBuf::from("."));
+    for _ in 0..5 {
+        post.increment_edit_counter();
+    }
+    assert!(post.should_run_compilation_check(ToolAccess::Full));
+    assert!(!post.should_run_compilation_check(ToolAccess::ReadOnly));
 }

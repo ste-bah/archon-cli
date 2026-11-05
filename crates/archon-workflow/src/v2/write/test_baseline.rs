@@ -3,7 +3,7 @@
 //!
 //! # The gap this closes
 //!
-//! Live on wf-caac2ac3 the implementation run's base branch carried two
+//! In a recorded run, the implementation run's base branch carried two
 //! failing tests in a module no task in the set owned. Nothing ran a task's
 //! declared filter on the base commit, so every coder whose filter covered
 //! them re-discovered them and spent its read budget deciding they were old;

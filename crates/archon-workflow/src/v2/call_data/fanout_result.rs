@@ -168,7 +168,7 @@ pub(super) fn normalize_fanout_outcomes(
             if validate_implementation_contract {
                 normalize_implementation_branch_contract(&mut outcome);
             }
-            normalize_focused_verification_outcome(&call.id, &mut outcome);
+            normalize_focused_verification_outcome(call, &mut outcome);
             attach_completion_evidence_for_call(call, &mut outcome);
             outcome
         })
