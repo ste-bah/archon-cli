@@ -21,9 +21,15 @@ const ENVELOPE_POINTER: &str = "entries/0";
 /// Issue 366: with the live `roots`, a check whose executed text names one
 /// by its absolute path is also refused, in the freeze probe's own words
 /// (`live_root`), so the author repairs it in the same call.
-pub(crate) fn entry_defects(
+#[cfg(test)]
+fn entry_defects(entry: &str, roots: &[PathBuf]) -> Result<Vec<ValidationDefect>, String> {
+    entry_defects_with_bindings(entry, roots, &[])
+}
+
+pub(crate) fn entry_defects_with_bindings(
     entry: &str,
     roots: &[PathBuf],
+    bound: &[&str],
 ) -> Result<Vec<ValidationDefect>, String> {
     let candidate = format!("{{\"entries\":[{entry}]}}");
     let defects = element_shape_defects(candidate.as_bytes(), &ENTRY_SHAPE);
@@ -47,7 +53,7 @@ pub(crate) fn entry_defects(
         let value: Value = serde_json::from_str(entry).map_err(|error| error.to_string())?;
         if let Some(text) = value.get("check").and_then(live_root::executed_check_text) {
             defects.extend(
-                archon_workflow::acceptance_check_shell_unset::unset_reads(text)
+                archon_workflow::acceptance_check_shell_unset::unset_reads_with_bound(text, bound)
                     .into_iter()
                     .map(|read| {
                         ValidationDefect::new(
@@ -178,6 +184,25 @@ pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs
              entry: rquickjs::String<'js>,
              roots: rquickjs::function::Opt<String>|
              -> rquickjs::Result<String> {
+                let policy = roots
+                    .0
+                    .as_deref()
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                    .and_then(|value| {
+                        let project = Path::new(value.get("project")?.as_str()?);
+                        let tasks = Path::new(value.get("tasks")?.as_str()?);
+                        crate::command::acceptance_scratch_policy::capture(project, tasks)
+                            .ok()
+                            .flatten()
+                    })
+                    .map(|binding| {
+                        archon_workflow::acceptance_check_environment::CheckPolicy::configured(
+                            &binding.policy,
+                        )
+                    })
+                    .unwrap_or_default();
+                let bound =
+                    archon_workflow::acceptance_check_environment::policy_bound_names(&policy);
                 let roots: Vec<PathBuf> = match roots.0 {
                     Some(text) => {
                         live_roots(&text).map_err(|message| binding_error("roots", message))?
@@ -185,7 +210,7 @@ pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs
                     None => Vec::new(),
                 };
                 let defects = match entry.to_string() {
-                    Ok(text) => entry_defects(&text, &roots)
+                    Ok(text) => entry_defects_with_bindings(&text, &roots, &bound)
                         .map_err(|message| binding_error("entry", message))?,
                     // A JS string holding a raw unpaired surrogate is not
                     // UTF-8: the reply is unreadable, as freeze refuses it.

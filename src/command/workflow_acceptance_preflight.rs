@@ -123,12 +123,16 @@ pub(super) fn rooted_policy_findings(
     // Configured freeze sites select their cache after capture, just as the
     // re-author's site scope does. The captured field is still unset here.
     let build_cache = binding.is_some();
+    let policy = binding
+        .as_ref()
+        .map(|b| archon_workflow::acceptance_check_environment::CheckPolicy::configured(&b.policy))
+        .unwrap_or_default();
+    let bound = archon_workflow::acceptance_check_environment::policy_bound_names(&policy);
     Ok(
-        archon_workflow::task_set_contract::acceptance_policy_findings_with_roots(
+        archon_workflow::task_set_contract::acceptance_policy_findings_with_bindings(
             contract,
-            project,
-            &repository,
-            build_cache,
+            Some((project, &repository, build_cache)),
+            &bound,
         ),
     )
 }

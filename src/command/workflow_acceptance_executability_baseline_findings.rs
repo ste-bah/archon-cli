@@ -4,11 +4,7 @@ use super::*;
 
 /// A pass the acceptance stage would count: exit 0 with real work.
 pub fn passed(result: &CheckResult) -> bool {
-    if let Some(classification) = &result.classification {
-        return result.operational_error.is_none() && classification.passed;
-    }
-    // Issue 544: the capture's classification of the raw streams.
-    result.operational_error.is_none() && result.exit_code == Some(0) && !result.reports_zero_work()
+    result.passed()
 }
 
 /// Author findings, keyed by id, for every check of `refs` that cannot be

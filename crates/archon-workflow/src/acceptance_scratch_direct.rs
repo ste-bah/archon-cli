@@ -211,7 +211,7 @@ pub async fn run_check_direct_with_plan(
 
 /// Preserve the failed result and persist a separate withheld-name note.
 fn with_withheld_note(mut result: CheckResult, withheld: &BTreeSet<String>) -> CheckResult {
-    if result.exit_code != Some(0) && result.operational_error.is_none() {
+    if !result.passed() && result.operational_error.is_none() {
         result.environment_note = withheld_note(&[&result.stdout, &result.stderr], withheld);
     }
     result

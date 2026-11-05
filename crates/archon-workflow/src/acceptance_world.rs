@@ -1,7 +1,7 @@
 //! Frozen command selection. A caller carries identities, never substitute text.
 use crate::task_set_contract::{
-    AcceptanceCheck, AcceptanceContract, JudgeDecision, TrustedCwd, acceptance_policy_findings,
-    content_digest, validate_acceptance_structure,
+    AcceptanceCheck, AcceptanceContract, JudgeDecision, TrustedCwd,
+    acceptance_entry_policy_findings, content_digest, validate_acceptance_structure,
 };
 use crate::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
@@ -90,10 +90,17 @@ pub fn resolve_command(
     if entry.judgment.verdict != JudgeDecision::Accepted {
         return Err(reject("acceptance command was not accepted by the judge"));
     }
-    let prefix = format!("{}.", entry.id);
-    if acceptance_policy_findings(contract)
+    // Expansion findings are handled by in-round author repair. Runtime
+    // execution still classifies any fatal diagnostic before counting a pass.
+    if acceptance_entry_policy_findings(entry)
         .iter()
-        .any(|finding| finding.field.starts_with(&prefix))
+        .any(|finding| {
+            finding.field.ends_with(".check")
+                && finding
+                    .identity
+                    .as_ref()
+                    .is_none_or(|identity| identity.code != "unset_shell_variable")
+        })
     {
         return Err(reject("acceptance command carries a host policy defect"));
     }

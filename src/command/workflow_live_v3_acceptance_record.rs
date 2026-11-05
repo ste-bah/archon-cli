@@ -23,7 +23,7 @@ pub(super) fn check_record(
         && result.reports_zero_work();
     let status = if result.operational_error.is_some() {
         AcceptanceCheckStatus::Error
-    } else if result.exit_code == Some(0) && !zero_work {
+    } else if result.passed() {
         AcceptanceCheckStatus::Passed
     } else {
         AcceptanceCheckStatus::Failed

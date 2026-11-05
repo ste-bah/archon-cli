@@ -13,7 +13,8 @@ use crate::verifier_strength::verifier_strength_defect;
 #[path = "task_set_contract_policy.rs"]
 mod policy;
 pub use policy::{
-    AcceptancePolicyFinding, CHECK_SHAPE_VOCABULARY, acceptance_policy_findings,
+    AcceptancePolicyFinding, CHECK_SHAPE_VOCABULARY, acceptance_entry_policy_findings,
+    acceptance_policy_findings, acceptance_policy_findings_with_bindings,
     acceptance_policy_findings_with_roots, acceptance_site_path_defect,
     criterion_prescribes_check_shape, refuted_check_message,
 };

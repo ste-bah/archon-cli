@@ -46,10 +46,9 @@
 //!   argument count taken from data may be the product's), and any class in
 //!   its qualified name is a class the program defines.
 //!
-//! POSIX shell nounset — the last stderr line names a never-bound variable
-//! read at that line of the check under `set -u`, with the shell's unset
-//! parameter status. The shared conservative text rule excludes environment
-//! names, bindings and default forms.
+//! Fatal shell expansion — a captured shell diagnostic names a parameter
+//! read on the check's own line. An EXIT trap can mask an expansion abort's
+//! exit status, so this evidence takes precedence over a zero status.
 //!
 //! POSIX shell — the error line comes from a shell reading a script from
 //! stdin (`sh: line N:`, dash's `sh: N:`; never a named script, `-c`,
@@ -113,7 +112,7 @@ fn classify_with_environment(command: &str, result: &CheckResult, bound: &[&str]
         return classification.crash.clone();
     }
     match result.exit_code {
-        Some(0) => return CheckRunClass::Passed,
+        Some(0) => {}
         None => return CheckRunClass::Failed,
         Some(_) => {}
     }
@@ -121,8 +120,21 @@ fn classify_with_environment(command: &str, result: &CheckResult, bound: &[&str]
     let stderr = String::from_utf8_lossy(result.verdict_stderr());
     let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
     let code = result.exit_code.unwrap_or_default();
+    if let Some(signal) = lines
+        .iter()
+        .find(|line| crate::acceptance_check_shell_unset::runtime_unset(command, code, line, bound))
+    {
+        return CheckRunClass::ScriptDefect(ScriptDefect {
+            interpreter: "shell".into(),
+            rule: "fatal expansion in the check shell".into(),
+            signal: signal.trim().to_string(),
+        });
+    }
+    if code == 0 {
+        return CheckRunClass::Passed;
+    }
     python_defect(command, code, &lines)
-        .or_else(|| shell_defect(command, code, &lines, bound))
+        .or_else(|| shell_defect(command, code, &lines))
         .map_or(CheckRunClass::Failed, CheckRunClass::ScriptDefect)
 }
 
@@ -140,6 +152,15 @@ pub struct CheckClassification {
 }
 
 impl CheckResult {
+    /// The capture's verdict, shared by observation, probes and live rounds.
+    pub fn passed(&self) -> bool {
+        self.operational_error.is_none()
+            && self.classification.as_ref().map_or_else(
+                || self.exit_code == Some(0) && !self.reports_zero_work(),
+                |classification| classification.passed,
+            )
+    }
+
     /// Call before changing any captured stream. The command is host-authorized.
     pub fn classify_raw(&mut self, command: &str) {
         self.classify_raw_with_environment(command, &[]);
@@ -159,7 +180,7 @@ impl CheckResult {
             defect.signal = "see the fenced stderr below".into();
         }
         self.classification = Some(CheckClassification {
-            passed: self.operational_error.is_none() && self.exit_code == Some(0) && !zero_work,
+            passed: matches!(crash, CheckRunClass::Passed) && !zero_work,
             zero_work,
             crash,
             failure_signature: None,
@@ -419,15 +440,8 @@ fn shell_rejects(command: &str) -> bool {
     crate::acceptance_check_shell::shell_parse_error(command).is_some()
 }
 
-fn shell_defect(command: &str, code: i32, lines: &[&str], bound: &[&str]) -> Option<ScriptDefect> {
+fn shell_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefect> {
     let (&last, _) = lines.split_last()?;
-    if crate::acceptance_check_shell_unset::runtime_unset(command, code, last, bound) {
-        return Some(ScriptDefect {
-            interpreter: "shell".into(),
-            rule: "read of a shell variable the check never sets under set -u".into(),
-            signal: last.trim().to_string(),
-        });
-    }
     match code {
         2 => {
             let start = lines.len().saturating_sub(2);

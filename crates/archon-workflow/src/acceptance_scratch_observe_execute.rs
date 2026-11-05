@@ -59,7 +59,7 @@ pub async fn execute_check_at(
                         cancel.clone(),
                     )
                     .await?;
-                    if checked.exit_code != Some(0) || checked.operational_error.is_some() {
+                    if !checked.passed() {
                         return Ok(checked);
                     }
                 }

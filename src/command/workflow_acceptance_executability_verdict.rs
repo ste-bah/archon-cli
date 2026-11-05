@@ -246,8 +246,17 @@ pub(crate) fn no_verdict_cause(
     at: &Context,
 ) -> Option<(String, UnprovenCause)> {
     let host = |why: String| Some((why, UnprovenCause::PermanentHost));
-    if result.operational_error.is_some() || super::baseline::passed(result) {
+    let classification = classify_check_run(command, result);
+    if result.operational_error.is_some()
+        || (matches!(classification, CheckRunClass::Passed) && !result.reports_zero_work())
+    {
         return None;
+    }
+    if let CheckRunClass::ScriptDefect(defect) = classification {
+        return host(format!(
+            "it crashed in its own {} code ({}) before it asserted anything",
+            defect.interpreter, defect.rule
+        ));
     }
     let Some(code) = result.exit_code else {
         return host(
@@ -279,12 +288,6 @@ pub(crate) fn no_verdict_cause(
     {
         return Some(why);
     }
-    if let CheckRunClass::ScriptDefect(defect) = classify_check_run(command, result) {
-        return host(format!(
-            "it crashed in its own {} code ({}) before it asserted anything",
-            defect.interpreter, defect.rule
-        ));
-    }
     if matches!(code, 0 | 126 | 127) {
         return None;
     }
@@ -304,7 +307,10 @@ pub(crate) fn no_verdict_cause(
 /// rejected subcommand, without the check's text): such a run is never remembered as a verdict, so a retry
 /// runs it again.
 pub(crate) fn may_be_host_failure(result: &CheckResult) -> bool {
-    if result.operational_error.is_some() || super::baseline::passed(result) {
+    let classification = classify_check_run(command, result);
+    if result.operational_error.is_some()
+        || (matches!(classification, CheckRunClass::Passed) && !result.reports_zero_work())
+    {
         return false;
     }
     match result.exit_code {

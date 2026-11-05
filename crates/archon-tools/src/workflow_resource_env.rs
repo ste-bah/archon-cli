@@ -72,10 +72,10 @@ pub fn apply_workflow_resource_defaults(
     }
     ensure_env_default(
         env,
-        "CARGO_INCREMENTAL",
+        CARGO_INCREMENTAL_ENV,
         if limits.incremental { "1" } else { "0" },
     );
-    ensure_env_default(env, "CARGO_BUILD_JOBS", &limits.build_jobs.to_string());
+    ensure_env_default(env, CARGO_BUILD_JOBS_ENV, &limits.build_jobs.to_string());
 }
 
 /// Whether cargo is in play for this command.
@@ -96,6 +96,14 @@ use crate::bash::bash_env::ensure_env_default;
 
 /// Resource class passed to commands running workflow checks.
 pub const WORKFLOW_RESOURCE_CLASS_ENV: &str = "ARCHON_WORKFLOW_RESOURCE_CLASS";
+pub const CARGO_INCREMENTAL_ENV: &str = "CARGO_INCREMENTAL";
+pub const CARGO_BUILD_JOBS_ENV: &str = "CARGO_BUILD_JOBS";
+/// Resource bindings supplied by the host, also used by check authoring.
+pub const WORKFLOW_RESOURCE_ENV_KEYS: &[&str] = &[
+    WORKFLOW_RESOURCE_CLASS_ENV,
+    CARGO_INCREMENTAL_ENV,
+    CARGO_BUILD_JOBS_ENV,
+];
 
 fn contains_shell_word(command: &str, needle: &str) -> bool {
     command.match_indices(needle).any(|(idx, _)| {

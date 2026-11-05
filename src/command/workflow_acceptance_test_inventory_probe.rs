@@ -117,7 +117,7 @@ pub(crate) async fn findings(
                 let names = run
                     .results
                     .get(&entry.id)
-                    .filter(|item| item.exit_code == Some(0) && item.operational_error.is_none())
+                    .filter(|item| item.passed())
                     .and_then(|item| {
                         inventory(&invocation.runner, &String::from_utf8_lossy(&item.stdout))
                     });

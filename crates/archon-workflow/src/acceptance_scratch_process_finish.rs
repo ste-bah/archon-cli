@@ -42,7 +42,7 @@ pub(super) fn finish(
     result.classify_raw_with_environment(&String::from_utf8_lossy(command.bytes()), &bound);
     // Issue 544: every text-dependent fact a later reader needs is computed
     // here from the raw capture; then every stream is masked whole.
-    if result.exit_code != Some(0)
+    if !result.passed()
         && let Some(classification) = &mut result.classification
         && classification.failure_signature.is_none()
     {

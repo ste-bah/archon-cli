@@ -43,7 +43,11 @@ pub struct AcceptancePolicyFinding {
 }
 
 pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<AcceptancePolicyFinding> {
-    policy_findings(contract, None)
+    policy_findings(
+        contract.acceptance.iter().chain(&contract.supplementary),
+        None,
+        &[],
+    )
 }
 
 /// Policy for authoring and publication against the roots of the actual site.
@@ -53,20 +57,38 @@ pub fn acceptance_policy_findings_with_roots(
     repository: &Path,
     build_cache: bool,
 ) -> Vec<AcceptancePolicyFinding> {
-    policy_findings(contract, Some((project, repository, build_cache)))
+    policy_findings(
+        contract.acceptance.iter().chain(&contract.supplementary),
+        Some((project, repository, build_cache)),
+        &[],
+    )
 }
 
-fn policy_findings(
+pub fn acceptance_policy_findings_with_bindings(
     contract: &AcceptanceContract,
     roots: Option<(&Path, &Path, bool)>,
+    bound: &[&str],
+) -> Vec<AcceptancePolicyFinding> {
+    policy_findings(
+        contract.acceptance.iter().chain(&contract.supplementary),
+        roots,
+        bound,
+    )
+}
+
+pub fn acceptance_entry_policy_findings(
+    entry: &super::AcceptanceCriterion,
+) -> Vec<AcceptancePolicyFinding> {
+    policy_findings(std::iter::once(entry), None, &[])
+}
+
+fn policy_findings<'a>(
+    entries: impl Iterator<Item = &'a super::AcceptanceCriterion>,
+    roots: Option<(&Path, &Path, bool)>,
+    bound: &[&str],
 ) -> Vec<AcceptancePolicyFinding> {
     let mut findings = Vec::new();
-    for (index, criterion) in contract
-        .acceptance
-        .iter()
-        .chain(&contract.supplementary)
-        .enumerate()
-    {
+    for (index, criterion) in entries.enumerate() {
         let slot = format!("checks/{index}");
         let before_check = findings.len();
         let mut check_defects = Vec::new();
@@ -129,7 +151,8 @@ fn policy_findings(
             AcceptanceCheck::Floor { contract } => contract.typed_verifier_command.as_deref(),
         };
         if let Some(command) = command {
-            for read in crate::acceptance_check_shell_unset::unset_reads(command) {
+            for read in crate::acceptance_check_shell_unset::unset_reads_with_bound(command, bound)
+            {
                 check_defects.push(crate::defect::ValidationDefect::new(
                     "unset_shell_variable",
                     &slot,

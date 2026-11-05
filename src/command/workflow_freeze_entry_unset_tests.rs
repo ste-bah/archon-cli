@@ -31,3 +31,23 @@ fn native_author_gate_allows_bound_reads() {
             .all(|d| d.identity.code != "unset_shell_variable")
     );
 }
+
+#[test]
+fn native_author_gate_uses_the_supplied_check_policy_names() {
+    let entry = json!({"id":"A", "criterion":"output is valid", "check":{
+        "kind":"command", "command":"set -eu\ntest -s \"$INPUT_DATA\"", "cwd":"project_root"
+    }});
+    let text = entry.to_string();
+    assert!(
+        entry_defects(&text, &[])
+            .unwrap()
+            .iter()
+            .any(|d| d.identity.code == "unset_shell_variable")
+    );
+    assert!(
+        entry_defects_with_bindings(&text, &[], &["INPUT_DATA"])
+            .unwrap()
+            .iter()
+            .all(|d| d.identity.code != "unset_shell_variable")
+    );
+}

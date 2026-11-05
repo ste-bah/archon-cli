@@ -47,3 +47,20 @@ fn a_zero_work_check_output_is_an_author_finding() {
     assert!(finding["AC-F-001"].contains("zero work"));
     assert!(finding["AC-F-001"].contains("running 0 tests"));
 }
+
+#[test]
+fn a_masked_expansion_abort_is_an_author_finding_at_every_probe_verdict() {
+    let command = "set -eu\nd=$(mktemp -d)\ntrap 'rm -rf \"$d\"' EXIT\necho \"$UNSET-p\"\nfalse";
+    let set = frozen_set(&[("AC-F-001", command, true)]);
+    let contract = set.contract();
+    let mut ran = result("AC-F-001", b"running 0 tests", None);
+    ran.stderr = b"/bin/sh: line 4: UNSET: unbound variable\n".to_vec();
+    let at = super::super::CheckSite::on_host_path(&contract);
+    assert!(super::super::verdict::no_verdict(command, &ran, &at).is_some());
+    ran.classify_raw(command);
+    ran.stderr.clear();
+    assert!(!super::super::baseline::passed(&ran));
+    assert!(super::super::verdict::no_verdict(command, &ran, &at).is_some());
+    let findings = super::super::crash_findings(&contract, [&ran]);
+    assert!(findings["AC-F-001"].contains("crashed in its own shell code"));
+}
