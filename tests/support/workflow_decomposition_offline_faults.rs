@@ -14,15 +14,15 @@ use std::path::Path;
 use std::process::Child;
 use std::time::{Duration, Instant};
 
-use crate::deadline::{
-    NO_PROGRESS_LIMIT, await_provider_boundary, progress, run, tail, wait_for_child,
-};
+use crate::deadline::{await_provider_boundary, progress, run, tail, wait_for_child};
 use crate::project::{
     FinalSnapshot, accepted_call_counts, assert_no_unknown_prompts,
     assert_only_call_accepted_again, assert_same_json, final_snapshot, project_with,
     read_golden_requests, resume, run_id, spawn_decompose,
 };
 use crate::server::{Plan, Variant};
+
+const HELD_CALL_LIMIT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
@@ -426,9 +426,11 @@ fn await_hold(root: &Path, hold: &Path, child: &mut Child, name: &str) -> String
                 tail(&crate::deadline::harness_root(root).join("decompose.stderr"))
             );
         }
-        if started.elapsed() > NO_PROGRESS_LIMIT * 4 {
+        // 120s: the named panic must fire before nextest's 240s kill
+        // (.config/nextest.toml), so it is not tied to the no-progress limit.
+        if started.elapsed() > HELD_CALL_LIMIT {
             let _ = child.kill();
-            panic!("{name}: no held call within {:?}", NO_PROGRESS_LIMIT * 4);
+            panic!("{name}: no held call within {HELD_CALL_LIMIT:?}");
         }
         std::thread::sleep(Duration::from_millis(50));
     }

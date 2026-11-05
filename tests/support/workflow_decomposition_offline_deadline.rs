@@ -9,7 +9,10 @@ use super::server::FakeProvider;
 // Scripted local replies are immediate. A child pointed at any other provider
 // must fail within this bound instead of waiting through the production
 // provider transport timeout.
-pub const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(30);
+// 90s, not 30s: on a loaded Windows runner one silent acceptance host command
+// outlasted 30s (PR #592 run 41919790038, frozen_repair cell); the cell takes
+// 55s in total there. The production transport backstop is far longer.
+pub const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(90);
 
 pub fn progress(test: &str, step: &str) {
     let stamp = SystemTime::now()

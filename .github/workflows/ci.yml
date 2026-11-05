@@ -218,6 +218,12 @@ jobs:
           # without changing the Cargo environment inherited by tests.
           env-mapping: |
             ARCHON_TARGET_DIR,{{ DEV_DRIVE }}/target
+          # PR #592/run 41919790038: archiving 746 test binaries took 16m on
+          # Windows against 1m on macOS. Hypothesis: AV filters on the untrusted
+          # Dev Drive. Trusted mode runs fsutil devdrv trust plus /disallowAv,
+          # so no AV filter attaches. The action ignores fsutil exit codes:
+          # read "fsutil devdrv query" in the step log to confirm trust.
+          trusted-dev-drive: true
 
       - &posix-rust-toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88

@@ -66,8 +66,10 @@ async fn stall_collects_and_heals(mode: u32) {
     if mode == 2 {
         std::fs::create_dir(guard.path().with_extension("json.tmp")).unwrap();
     }
-    let outcome =
-        kill_job_off_thread(job.clone(), guard.evidence(), Duration::from_millis(200)).await;
+    // 2s, not 200ms: begin_observed syncs the marker twice before the first
+    // identity read. On a loaded CI runner those syncs outlasted 200ms, the
+    // preparation read never ran, and `reads` was 1 (PR #591 run 41928950312).
+    let outcome = kill_job_off_thread(job.clone(), guard.evidence(), Duration::from_secs(2)).await;
     let Teardown::Stalled { survivors, .. } = outcome else {
         panic!("accounting did not confirm empty")
     };
