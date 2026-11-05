@@ -89,7 +89,11 @@ async fn timeout_ends_a_detached_descendant() {
     // Teardown confirms the job empty before supervision returns.
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("pid");
-    let request = command(&pid_file, "Start-Sleep -Seconds 120", 10);
+    // 30s, not 10s: the timeout must outlast PowerShell's start and the
+    // detached ping's pid write. On a loaded Windows runner that took over
+    // 10s, the command timed out first and no pid was ever written
+    // (PR #592 run 41955468502, 40.17s = 10s timeout + 30s pid wait).
+    let request = command(&pid_file, "Start-Sleep -Seconds 120", 30);
     let (control, _handle) = HostCommandControl::new();
     let output = supervise_process_group(request, control, None)
         .await
