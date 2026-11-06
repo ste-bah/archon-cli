@@ -163,13 +163,24 @@ fn generated_v2_verification_fanout_gets_bash_without_write_tools() {
             {"command": "cargo test -p archon-trading data_store -- --nocapture"}
         ]
     });
+    let ungranted = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
+    assert!(!allowed_tools(&ungranted).contains(&"Bash".to_string()));
+
+    // The lifecycle host marks generated calls before stage projection;
+    // a verification id and command text alone cannot grant shell access.
+    req.call.options.host_planned = true;
     let stage = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
+    assert_eq!(
+        stage.input["v2_call"]["runs_commands"],
+        serde_json::json!(true)
+    );
 
     let tools = allowed_tools(&stage);
 
     assert!(tools.contains(&"Bash".to_string()));
     assert!(tools.contains(&"Read".to_string()));
     assert!(!tools.contains(&"Write".to_string()));
+    assert!(!tools.contains(&"Edit".to_string()));
 }
 
 #[test]

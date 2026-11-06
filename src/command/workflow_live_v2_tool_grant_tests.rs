@@ -88,7 +88,8 @@ fn review_shell_requires_host_client_grant_after_projection() {
 async fn dispatch_uses_host_review_state_instead_of_script_grants() {
     for granted in [false, true] {
         let recorder = Arc::new(RecordingClient::default());
-        let (sink, _) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+        // Dispatch requires a live UI receiver for its activity events.
+        let (sink, _tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
         let client = LiveV2AgentClient::new(
             recorder.clone(),
             sink,
