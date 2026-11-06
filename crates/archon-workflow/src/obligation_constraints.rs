@@ -26,74 +26,48 @@ pub fn constraint_ids(prd: &str) -> BTreeSet<String> {
 /// The first statement wins. Exclusions include all deeper subsections.
 pub fn constraint_texts(prd: &str) -> BTreeMap<String, String> {
     let obligations = obligation_ids(prd);
-    let lines: Vec<_> = prd.lines().collect();
-    let mut exclusion = HeadingExclusion::default();
-    let mut excluded_table = None;
-    let mut texts = BTreeMap::new();
-    for (index, line) in lines.iter().enumerate() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            exclusion.update(trimmed);
-            excluded_table = None;
-            continue;
-        }
-        if !trimmed.starts_with('|') {
-            excluded_table = None;
-        } else {
-            // A non-goal header under a neutral heading excludes the table too.
-            let excluded_table =
-                *excluded_table.get_or_insert_with(|| heading_excludes_obligations(trimmed));
-            if !exclusion.active()
-                && !excluded_table
-                && let Some(id) = table_candidate_id(trimmed)
-                && generic_table_obligation_pattern().is_match(id)
-                && !is_req_or_ac_id(id)
-                && !obligations.contains(id)
-            {
-                let text = trimmed
-                    .trim()
-                    .trim_matches('|')
-                    .split('|')
-                    .skip(1)
-                    .map(str::trim)
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                texts.entry(id.to_string()).or_insert(text);
-            }
-            continue;
-        }
-        if exclusion.active() || !is_list_item(trimmed) {
-            continue;
-        }
-        let body = continuations::list_item_body(trimmed);
-        let Some(id) = leading_id(body) else {
-            continue;
-        };
-        if is_req_or_ac_id(id) || obligations.contains(id) {
-            continue;
-        }
-        let first = body[id.len()..]
-            .trim_start()
-            .trim_start_matches([':', '—', '–', '-'])
-            .trim();
-        let mut text = vec![first.to_string()];
-        continuations::append(&lines, index + 1, line.len() - trimmed.len(), &mut text);
-        texts
-            .entry(id.to_string())
-            .or_insert_with(|| continuations::join(&text));
-    }
-    texts
+    declarations::list_rows(prd)
+        .into_iter()
+        .chain(declarations::table_rows(prd))
+        .filter(|row| row.role == declarations::Role::Constraint && !obligations.contains(&row.id))
+        .fold(BTreeMap::new(), |mut map, row| {
+            map.entry(row.id).or_insert(row.text);
+            map
+        })
 }
 
-/// A definition-form leading token using the shared generic shape.
-/// Bold ids are not read; fenced code is not skipped, as with obligations.
+/// Definition boundaries distinguish declarations from references in prose.
+pub(super) fn definition(body: &str) -> Option<(&str, &str)> {
+    parse_definition(body, false)
+}
+
+pub(super) fn explicit_definition(body: &str) -> Option<(&str, &str)> {
+    parse_definition(body, true)
+}
+
+fn parse_definition(body: &str, require_separator: bool) -> Option<(&str, &str)> {
+    let end = body.find(char::is_whitespace).unwrap_or(body.len());
+    let raw = &body[..end];
+    let unwrapped = raw.trim_matches(['*', '_', '`']);
+    let token = unwrapped.trim_end_matches([':', '—', '–']);
+    let token = token.trim_matches(['*', '_', '`']);
+    let id = shaped_id(token)?;
+    let rest = body[end..].trim_start();
+    let attached = unwrapped.trim_end_matches(['*', '_', '`']) != token;
+    let text = if attached {
+        rest
+    } else {
+        match rest.strip_prefix([':', '—', '–', '-']) {
+            Some(text) => text.trim_start(),
+            None if !require_separator => rest,
+            None => return None,
+        }
+    };
+    (!text.is_empty()).then_some((id, text))
+}
+
 pub(super) fn leading_id(body: &str) -> Option<&str> {
-    let end = body
-        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-'))
-        .unwrap_or(body.len());
-    let id = &body[..end];
-    let definition = body[end..].trim_start().strip_prefix([':', '—', '–'])?;
-    (generic_table_obligation_pattern().is_match(id) && !definition.trim().is_empty()).then_some(id)
+    explicit_definition(body).and_then(|(id, _)| authored_id(id))
 }
 
 #[cfg(test)]

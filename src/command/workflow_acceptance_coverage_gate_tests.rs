@@ -75,30 +75,35 @@ fn every_uncovered_requirement_names_the_supplementary_check_it_is_owed() {
 }
 
 #[test]
-fn a_defined_non_requirement_obligation_gets_the_prefix_rule() {
-    use archon_workflow::v2::acceptance_stage::coverage::REQUIREMENT_PREFIX;
-
-    let prd = "# PRD\n\n| ID | Requirement |\n|---|---|\n| NFR-001 | Persist review evidence. |\n";
-    assert!(archon_workflow::obligation_ids::obligation_texts(prd).contains_key("NFR-001"));
-    let contract = contract(vec![entry("AC-AB-001", &["NFR-001"])]);
-    let findings =
-        acceptance_coverage_findings(prd, Path::new("acceptance-contract.json"), &contract);
-    assert_eq!(findings.len(), 1);
-    let text = &findings[0].text;
-    assert!(text.contains("covers names NFR-001"), "{text}");
-    assert!(
-        text.contains(&format!("PRD's {REQUIREMENT_PREFIX} requirement ids")),
-        "{text}"
-    );
-    assert!(
-        text.contains(&format!(
-            "requirement bullets or obligation-table rows that start with {REQUIREMENT_PREFIX}"
-        )),
-        "{text}"
-    );
-    assert!(text.contains(&format!("remove it or replace it with a {REQUIREMENT_PREFIX} id whose violation makes this check fail")), "{text}");
-    assert!(!text.contains("does not define"), "{text}");
-    assert_eq!(findings[0].subject, "AC-AB-001");
+fn every_defined_requirement_style_gets_the_same_coverage_findings() {
+    for id in [
+        "REQ-X-001",
+        "NFR-001",
+        "FR-001",
+        "R1",
+        "REQ-1",
+        "US-12",
+        "item_1",
+    ] {
+        let prd = format!(
+            "Different title\n---\n| Key | Requirement |\n|---|---|\n| {id} | Persist evidence. |\n"
+        );
+        let covered = contract(vec![entry("AC-ALT-1", &[id])]);
+        assert!(
+            acceptance_coverage_findings(&prd, Path::new("contract.json"), &covered).is_empty()
+        );
+        let missing = contract(vec![]);
+        let findings = acceptance_coverage_findings(&prd, Path::new("contract.json"), &missing);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].subject, format!("SUP-{id}"));
+        let unknown = contract(vec![entry("AC-ALT-1", &["unknown"])]);
+        let findings = acceptance_coverage_findings(&prd, Path::new("contract.json"), &unknown);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.text.contains("host-derived source inventory"))
+        );
+    }
 }
 
 #[test]

@@ -11,7 +11,9 @@ fn generic_bullets_keep_continuations_and_exclude_obligations_and_nested_exclusi
     assert_eq!(texts["ZZ-002"], "independent");
     assert_eq!(
         texts.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["QX-001", "QX-003", "QX-004", "QX-008", "ZZ-002"]
+        [
+            "QX-001", "QX-003", "QX-004", "QX-008", "QX-0090", "QX-010", "ZZ-002"
+        ]
     );
     assert_eq!(constraint_ids(prd), texts.into_keys().collect());
     assert_eq!(
@@ -53,7 +55,7 @@ fn offline_golden_prd_has_no_constraint_bullets() {
 }
 
 #[test]
-fn only_definition_form_bullets_become_constraints() {
+fn constraints_need_definitions_and_empty_declarations_are_findings() {
     let prd = "- SHA-256 digests pinned\n- HTTP-404 responses handled\n- AES-256 encryption used\n- TASK-X-001 owns work\n- AC-X-001 checks work\n- AC-X-001: acceptance owned elsewhere\n- REQ-001: malformed requirement\n- REQ-X-001: requirement\n- QX-001: text\n- QX-002 — dash text\n- QX-003 – other dash\n- QX-004:   \n- QX-005 - ordinary hyphen\n";
     assert_eq!(
         constraint_texts(prd),
@@ -61,9 +63,11 @@ fn only_definition_form_bullets_become_constraints() {
             ("QX-001".into(), "text".into()),
             ("QX-002".into(), "dash text".into()),
             ("QX-003".into(), "other dash".into()),
+            ("QX-005".into(), "ordinary hyphen".into()),
+            ("AC-X-001".into(), "acceptance owned elsewhere".into()),
         ])
     );
-    assert_eq!(malformed_obligation_ids(prd), vec!["REQ-001"]);
+    assert_eq!(malformed_obligation_ids(prd), ["QX-004"]);
 }
 
 #[test]
@@ -83,7 +87,10 @@ fn table_constraints_join_cells_and_leave_obligations_byte_identical() {
     let prd = format!("{existing}{added}");
     assert_eq!(
         constraint_texts(&prd),
-        BTreeMap::from([("QX-001".into(), "small | Use native widgets.".into())])
+        BTreeMap::from([
+            ("QX-001".into(), "small | Use native widgets.".into()),
+            ("AC-X-001".into(), "ignored | acceptance elsewhere".into())
+        ])
     );
     assert_eq!(
         serde_json::to_vec(&obligation_texts(existing)).unwrap(),

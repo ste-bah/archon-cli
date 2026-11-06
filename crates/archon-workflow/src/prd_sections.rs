@@ -38,14 +38,14 @@ fn horizontal_rule(line: &str) -> bool {
 /// preamble content is section "0", titled by the document's level-1 heading;
 /// the title line itself does not count as content. Duplicate keys combine
 /// titles and texts so a citation carries every occurrence.
-/// Fenced code is body text. Only ATX headings (the template form) are supported;
-/// Setext headings are not recognized.
+/// Fenced code is body text. ATX and Setext headings share section identities.
 pub fn numbered_sections(prd: &str) -> BTreeMap<String, PrdSection> {
     extract_sections(prd).0
 }
 
 fn extract_sections(prd: &str) -> (BTreeMap<String, PrdSection>, BTreeSet<String>) {
-    let lines: Vec<_> = prd.lines().collect();
+    let prepared = markdown::prepare(prd, false);
+    let lines: Vec<_> = prepared.lines().collect();
     let mut headings = Vec::new();
     let mut exclusion = HeadingExclusion::default();
     let mut fence: Option<(char, usize)> = None;

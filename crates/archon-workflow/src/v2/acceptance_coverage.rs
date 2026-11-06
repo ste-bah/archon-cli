@@ -1,6 +1,6 @@
 //! Which PRD requirements the frozen acceptance checks exercise (H4, A12).
 //!
-//! A contract keyed only by the PRD's `AC-*` ids said nothing about the
+//! A contract keyed only by the source's acceptance ids said nothing about the
 //! PRD's requirement ids: a set could freeze eleven checks against ninety
 //! requirements, pass every one of them, and finish accepted with most
 //! requirements exercised by no check. So every entry declares `covers`:
@@ -24,15 +24,10 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 
 /// Id prefix of every supplementary check.
 pub const SUPPLEMENTARY_PREFIX: &str = "SUP-";
-/// Prefix of a PRD requirement id.
-pub const REQUIREMENT_PREFIX: &str = "REQ-";
 
 /// Every requirement id the PRD states, with its exact text.
 pub fn prd_requirement_texts(prd: &str) -> BTreeMap<String, String> {
-    crate::obligation_ids::obligation_texts(prd)
-        .into_iter()
-        .filter(|(id, _)| id.starts_with(REQUIREMENT_PREFIX))
-        .collect()
+    crate::obligation_ids::requirement_texts(prd)
 }
 
 /// Every requirement id the PRD states.
@@ -74,11 +69,11 @@ pub fn supplementary_id(requirement: &str) -> String {
 /// The requirement a supplementary id was minted for, if it was.
 pub fn supplementary_requirement(id: &str) -> Option<&str> {
     id.strip_prefix(SUPPLEMENTARY_PREFIX)
-        .filter(|requirement| requirement.starts_with(REQUIREMENT_PREFIX))
+        .filter(|requirement| !requirement.is_empty())
 }
 
 /// `(check id, covered id)` for every covered id outside the PRD requirement
-/// inventory: only obligation ids starting with `REQUIREMENT_PREFIX` qualify.
+/// inventory: membership is the only authority.
 pub fn unknown_covers(
     prd_requirement_ids: &BTreeSet<String>,
     contract: &AcceptanceContract,

@@ -71,6 +71,24 @@ pub struct Requirement {
 }
 
 impl Requirement {
+    /// Construct evidence metadata for a statement already identified by its
+    /// caller's document inventory. No identifier grammar is imposed here.
+    pub fn from_statement(id: String, text: String, line: usize) -> Self {
+        let stem = id
+            .trim_end_matches(char::is_numeric)
+            .trim_end_matches(|ch: char| !ch.is_alphanumeric());
+        let prefix = stem.to_string();
+        let (severity, severity_evidence) = classify(&text);
+        Self {
+            id,
+            prefix,
+            text,
+            line,
+            severity,
+            severity_evidence,
+        }
+    }
+
     /// Whether this requirement is in falsification scope (PRD §21 `error`).
     pub fn is_error_severity(&self) -> bool {
         self.severity == Severity::Error

@@ -1,15 +1,13 @@
-//! Source-section lookup for extracted PRD obligations.
+//! Source-section lookup uses the inventory's declaration locations.
 
 use std::collections::BTreeSet;
 
-use super::obligation_texts;
-
-/// The complete Markdown section containing each requested extracted
-/// obligation, including synthetic numbered done items.
+/// The smallest complete section containing each requested declaration.
+/// References and repeated prose cannot displace the declaration's context.
 pub fn obligation_source_sections(prd: &str, ids: &[String]) -> Vec<String> {
-    let texts = obligation_texts(prd);
-    let mut sections = BTreeSet::new();
-    let lines: Vec<&str> = prd.lines().collect();
+    let locations = super::obligation_source_lines(prd);
+    let prepared = super::markdown::prepare(prd, false);
+    let lines: Vec<&str> = prepared.lines().collect();
     let headings: Vec<(usize, usize)> = lines
         .iter()
         .enumerate()
@@ -20,34 +18,29 @@ pub fn obligation_source_sections(prd: &str, ids: &[String]) -> Vec<String> {
                 .then(|| (index, trimmed.chars().take_while(|ch| *ch == '#').count()))
         })
         .collect();
-    let mut candidates = Vec::new();
-    match headings.first() {
-        Some((first, _)) if *first > 0 => candidates.push(lines[..*first].join("\n")),
-        None => candidates.push(lines.join("\n")),
-        _ => {}
+    let mut ranges = Vec::new();
+    let first = headings.first().map_or(lines.len(), |(index, _)| *index);
+    if first > 0 {
+        ranges.push((0, first));
     }
-    for (start, level) in &headings {
+    for &(start, level) in &headings {
         let end = headings
             .iter()
-            .find(|(index, next_level)| index > start && next_level <= level)
+            .find(|(index, next)| *index > start && *next <= level)
             .map_or(lines.len(), |(index, _)| *index);
-        candidates.push(lines[*start..end].join("\n"));
+        ranges.push((start, end));
     }
+    let mut sections = BTreeSet::new();
     for id in ids {
-        let Some(text) = texts.get(id) else { continue };
-        let normalized_text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        if let Some(section) = candidates
+        let Some(line) = locations.get(id).map(|line| line - 1) else {
+            continue;
+        };
+        if let Some(&(start, end)) = ranges
             .iter()
-            .filter(|section| {
-                section
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .contains(&normalized_text)
-            })
-            .min_by_key(|section| section.len())
+            .filter(|(start, end)| *start <= line && line < *end)
+            .min_by_key(|(start, end)| end - start)
         {
-            sections.insert(section.clone());
+            sections.insert(lines[start..end].join("\n"));
         }
     }
     sections.into_iter().collect()

@@ -21,7 +21,10 @@ fn owners(s: &TaskSkeleton, prd: &str) -> Vec<TaskSetFinding> {
 }
 #[test]
 fn P5_1_unowned_constraint() {
-    let findings = owners(&skeleton(), "- QX-001: bounded work\n");
+    let findings = owners(
+        &skeleton(),
+        "| Key | Rule |\n|---|---|\n| QX-001 | bounded work |\n",
+    );
     assert_eq!(findings.len(), 1);
     assert_eq!(
         findings[0].identity,
@@ -36,7 +39,7 @@ fn P5_1_unowned_constraint() {
 fn P5_2_owned_constraint() {
     let mut s = skeleton();
     s.tasks[0].implements.push("QX-001".into());
-    assert!(owners(&s, "- QX-001: bounded work\n").is_empty());
+    assert!(owners(&s, "| Key | Rule |\n|---|---|\n| QX-001 | bounded work |\n").is_empty());
 }
 #[test]
 fn P5_6_obligation_rule_unchanged() {
@@ -194,7 +197,7 @@ fn offline_V1_skeleton_repairs_all_three_defects() {
         findings(&s),
         [
             ("duplicate_entry".into(), "TASK-X-001".into()),
-            ("unowned_constraint".into(), "QX-002".into()),
+            ("unowned_obligation".into(), "QX-002".into()),
             ("uncited_section".into(), "2".into())
         ]
         .into()

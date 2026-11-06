@@ -48,7 +48,7 @@ fn table_obligations_share_coverage_without_inventing_anchor_rows() {
     assert_eq!(
         report.rows.len(),
         1,
-        "only REQ bullets produce rich proof rows"
+        "requirement declarations produce rich proof rows"
     );
     assert_eq!(report.rows[0].requirement_id, "REQ-X-001");
 }
@@ -234,7 +234,7 @@ fn empty_prd_and_task_populations_are_not_a_synthetic_pass() {
     assert!(
         verdict.blocking_findings.iter().any(|finding| {
             finding.contains("defines zero obligations")
-                && finding.contains("add a line-leading REQ-<AREA>-<NNN> bullet")
+                && finding.contains("the harness could not derive an inventory")
         }),
         "{:?}",
         verdict.blocking_findings
@@ -436,7 +436,7 @@ fn a_malformed_task_file_is_the_authors_finding_not_a_host_failure() {
 }
 
 #[test]
-fn constraint_ids_are_defined_without_creating_requirement_proof_rows() {
+fn named_definitions_are_requirements_independently_of_their_prefix() {
     let dir = tempfile::tempdir().unwrap();
     let prd = write_prd(
         dir.path(),
@@ -452,9 +452,9 @@ fn constraint_ids_are_defined_without_creating_requirement_proof_rows() {
     );
     let report = build_report(dir.path(), &TraceOptions::new(prd, tasks)).unwrap();
     assert!(report.coverage.phantom.is_empty());
-    assert!(report.coverage.unclaimed.is_empty());
+    assert_eq!(report.coverage.unclaimed.len(), 1);
     assert_eq!(report.coverage.requirements_total, 3);
-    assert_eq!(report.rows.len(), 1);
+    assert_eq!(report.rows.len(), 3);
 }
 
 #[path = "p6_verdict_tests.rs"]

@@ -30,30 +30,27 @@ async function author(ctx, state, reply, round = 1) {
 }
 const state = () => ({entries:new Map(), retryIds:null});
 
-test('entry shapes name the requirement prefix and match Rust apart from the P4 cwd handoff', () => {
+test('entry shapes preserve authored identities and match Rust apart from the cwd handoff', () => {
   const ctx = context();
-  const prefix = vm.runInContext('REQUIREMENT_PREFIX', ctx);
-  const rustCoverage = fs.readFileSync(`${root}/../../crates/archon-workflow/src/v2/acceptance_coverage.rs`, 'utf8');
-  assert.equal(prefix, rustCoverage.match(/pub const REQUIREMENT_PREFIX: &str = "([^"]+)";/)[1]);
   const shapes = vm.runInContext('ENTRY_SHAPES', ctx);
-  const expected = `<${prefix} requirement id from the PRD whose violation makes this check fail>`;
+  const expected = '<exact requirement id from the PRD whose violation makes this check fail>';
   for (const shape of JSON.parse(shapes)) assert.deepEqual(shape.covers, [expected]);
   const rust = fs.readFileSync(`${root}/workflow_acceptance_reauthor.rs`, 'utf8');
   const template = rust.match(/static ENTRY_SHAPES:[\s\S]*?r#"([\s\S]*?)"#/)[1];
   // P4 updates the Rust prompt in its branch; P6 removes the single-root example here.
-  const rustShapes = JSON.parse(template.replaceAll('{REQUIREMENT_PREFIX}', prefix));
+  const rustShapes = JSON.parse(template);
   const command = JSON.parse(shapes).find(entry => entry.check.kind === 'command');
   assert.equal(command.check.cwd, '<repo_root or project_root>');
   rustShapes.find(entry => entry.check.kind === 'command').check.cwd = command.check.cwd;
   assert.deepEqual(JSON.parse(shapes), rustShapes);
-  assert.ok(ctx.acceptanceAuthorPrompt().includes(`covers lists every one of the PRD's ${prefix} requirement ids (requirement bullets or obligation-table rows that start with ${prefix})`));
+  assert.ok(ctx.acceptanceAuthorPrompt().includes("covers lists every one of the PRD's requirement ids in the host inventory"));
 });
 
 test('reply format includes covers between gap_permitted and judgment', () => {
   const format = context().acceptanceReplyFormat();
   const example = JSON.parse(format.split('\n').find(line => line.startsWith('{')));
-  assert.deepEqual(example.covers, ['<REQ-ID>']);
-  assert.match(format, /"gap_permitted":false,"covers":\["<REQ-ID>"\],"judgment"/);
+  assert.deepEqual(example.covers, ['<authored requirement id>']);
+  assert.match(format, /"gap_permitted":false,"covers":\["<authored requirement id>"\],"judgment"/);
 });
 
 test('re-author prompt shows current covers; a new entry has no coverage line', async () => {

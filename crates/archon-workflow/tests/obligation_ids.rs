@@ -29,7 +29,7 @@ fn obligations_union_req_bullets_and_obligation_tables() {
     );
     assert_eq!(
         acceptance_ids(prd).into_iter().collect::<Vec<_>>(),
-        vec!["AC-X-001"]
+        vec!["AC-X-001", "OBL-X-002"]
     );
 }
 
@@ -83,40 +83,21 @@ fn acceptance_criteria_preserve_exact_prd_table_text() {
 }
 
 #[test]
-fn exact_obligation_grammar_rejects_numeric_areas_and_missing_areas() {
-    let prd = r#"
-## Requirements
-- REQ-DL-040: valid
-- REQ-DL2-041: numeric area is invalid
-- REQ-042: missing area is invalid
-- REQ-DL-043-extra: trailing slug is invalid
-
-## Acceptance Criteria
-| ID | Criterion |
-|---|---|
-| AC-DL-001 | valid |
-| AC-DL2-002 | numeric area is invalid |
-| AC-003 | missing area is invalid |
-| AC-DL-006-extra | trailing slug is invalid |
-| OBL-X-004 | valid generic obligation family |
-| NFR-005 | valid legacy generic family without an area segment |
-"#;
-
-    assert_eq!(
-        obligation_ids(prd).into_iter().collect::<Vec<_>>(),
-        vec!["AC-DL-001", "NFR-005", "OBL-X-004", "REQ-DL-040"]
-    );
-    assert_eq!(
-        archon_workflow::obligation_ids::malformed_obligation_ids(prd),
-        vec![
-            "AC-003",
-            "AC-DL-006-extra",
-            "AC-DL2-002",
-            "REQ-042",
-            "REQ-DL-043-extra",
-            "REQ-DL2-041",
-        ]
-    );
+fn authored_identifier_shapes_are_preserved_without_renaming() {
+    for id in [
+        "REQ-DL-040",
+        "REQ-DL2-041",
+        "REQ-042",
+        "REQ-DL-043-extra",
+        "FR-001",
+        "R1",
+        "US-12",
+        "ITEM-1",
+    ] {
+        let source = format!("## Requirements\n- **{id}**: required work\n");
+        assert_eq!(obligation_ids(&source), [id.to_string()].into());
+        assert!(archon_workflow::obligation_ids::malformed_obligation_ids(&source).is_empty());
+    }
 }
 
 #[test]

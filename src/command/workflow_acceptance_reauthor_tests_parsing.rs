@@ -489,3 +489,6 @@ fn nested_missing_field_in_an_early_closed_entry_does_not_hang() {
     let floor_error = candidate_entry(floor_reply, frozen).expect_err("early close is diagnosed");
     assert!(floor_error.contains("check.contract"), "{floor_error}");
 }
+
+#[path = "workflow_acceptance_reauthor_format_tests.rs"]
+mod format_tests;

@@ -11,6 +11,18 @@ pub(super) fn append(
     item_indentation: usize,
     text: &mut Vec<String>,
 ) {
+    append_with_ids(lines, start, item_indentation, text, |body| {
+        super::constraints::leading_id(body).is_some()
+    });
+}
+
+pub(super) fn append_with_ids(
+    lines: &[&str],
+    start: usize,
+    item_indentation: usize,
+    text: &mut Vec<String>,
+    is_id: impl Fn(&str) -> bool,
+) {
     for (index, line) in lines.iter().enumerate().skip(start) {
         if line.trim().is_empty() {
             break;
@@ -24,7 +36,7 @@ pub(super) fn append(
         }
         let indentation = line.len() - trimmed.len();
         if is_list_item(trimmed) {
-            if indentation <= item_indentation || starts_with_obligation_id(trimmed) {
+            if indentation <= item_indentation || is_id(list_item_body(trimmed)) {
                 break;
             }
             let bullet_text = list_item_body(trimmed);
@@ -67,14 +79,6 @@ fn is_block_start(line: &str) -> bool {
         || line.starts_with('<')
         || line.starts_with('>')
         || matches!(line, "---" | "***")
-}
-
-fn starts_with_obligation_id(line: &str) -> bool {
-    let body = list_item_body(line);
-    super::constraints::leading_id(body).is_some()
-        || ["REQ-", "AC-", "G-", "DONE-"]
-            .iter()
-            .any(|prefix| body.starts_with(prefix))
 }
 
 pub(super) fn list_item_body(line: &str) -> &str {

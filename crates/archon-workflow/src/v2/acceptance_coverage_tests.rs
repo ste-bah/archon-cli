@@ -87,7 +87,8 @@ fn uncovered_requirements_are_the_prd_ids_no_check_covers() {
         supplementary_requirement("SUP-REQ-AB-003"),
         Some("REQ-AB-003")
     );
-    assert_eq!(supplementary_requirement("SUP-OTHER"), None);
+    assert_eq!(supplementary_requirement("SUP-OTHER"), Some("OTHER"));
+    assert_eq!(supplementary_requirement("SUP-"), None);
     let full = contract(
         partial.acceptance.clone(),
         vec![entry("SUP-REQ-AB-003", &["REQ-AB-003"])],
@@ -157,4 +158,44 @@ fn a_task_is_answered_for_through_a_check_id_or_a_covered_requirement() {
         implementing_tasks(Some(&universe), "AC-AB-001", &[]),
         vec!["TASK-A"]
     );
+}
+
+#[test]
+fn every_authored_style_has_equal_coverage_and_supplementary_lifecycle() {
+    for (first, second) in [
+        ("REQ-X-001", "REQ-X-002"),
+        ("FR-001", "FR-002"),
+        ("R1", "R2"),
+        ("REQ-1", "REQ-2"),
+        ("US-12", "US-13"),
+        ("item_1", "item_2"),
+        ("FEATURE-login-1", "FEATURE-register-2"),
+    ] {
+        for source in [
+            format!("Requirements\n---\n- **{first}**: first\n- {second}: second\n"),
+            format!(
+                "## Other\n| Key | Requirement |\n|---|---|\n| {first} | first |\n| {second} | second |\n"
+            ),
+        ] {
+            let ids = prd_requirement_ids(&source);
+            assert_eq!(ids, [first.into(), second.into()].into());
+            assert_eq!(
+                prd_requirement_texts(&source)
+                    .into_values()
+                    .collect::<Vec<_>>(),
+                ["first", "second"]
+            );
+            let partial = contract(vec![entry("AC-ALT-1", &[first])], vec![]);
+            assert_eq!(uncovered_requirements(&ids, &partial), [second]);
+            assert!(unknown_covers(&ids, &partial).is_empty());
+            let sup = supplementary_id(second);
+            assert_eq!(supplementary_requirement(&sup), Some(second));
+            let full = contract(partial.acceptance, vec![entry(&sup, &[second])]);
+            assert!(uncovered_requirements(&ids, &full).is_empty());
+            assert!(
+                tasks_without_checks([("TASK-X-001", [second.into()].as_slice())], &full)
+                    .is_empty()
+            );
+        }
+    }
 }

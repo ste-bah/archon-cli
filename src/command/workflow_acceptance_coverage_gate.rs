@@ -14,8 +14,8 @@
 
 use super::*;
 use archon_workflow::v2::acceptance_stage::coverage::{
-    REQUIREMENT_PREFIX, prd_requirement_texts, supplementary_id, tasks_without_checks,
-    uncovered_requirements, unknown_covers,
+    prd_requirement_texts, supplementary_id, tasks_without_checks, uncovered_requirements,
+    unknown_covers,
 };
 
 /// Findings for every PRD requirement no check of `contract` covers and
@@ -58,7 +58,7 @@ pub(super) fn acceptance_coverage_findings(
             .map(|(check, covered)| {
                 finding(
                     format!(
-                        "check '{check}': covers names {covered}; covers takes only the PRD's {REQUIREMENT_PREFIX} requirement ids (requirement bullets or obligation-table rows that start with {REQUIREMENT_PREFIX}); remove it or replace it with a {REQUIREMENT_PREFIX} id whose violation makes this check fail"
+                        "check '{check}': covers names {covered}; covers takes only requirement ids in the host-derived source inventory; remove it or replace it with an authored id whose violation makes this check fail"
                     ),
                     check.clone(),
                     "unknown_covered_requirement", format!("covers/{}", contract.acceptance.iter().chain(&contract.supplementary)

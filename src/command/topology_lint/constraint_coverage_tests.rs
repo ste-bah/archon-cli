@@ -5,7 +5,7 @@ fn each_unowned_constraint_is_a_skeleton_repair_and_owned_constraints_are_known(
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("PRD-X");
     fs::create_dir(&root).unwrap();
-    fs::write(dir.path().join("PRD-X.md"), "- REQ-X-001: work\n- QX-001: restrict work\n- QX-002: restrict other work\n- QX-002: duplicate\n").unwrap();
+    fs::write(dir.path().join("PRD-X.md"), "- REQ-X-001: work\n\n| Key | Rule |\n|---|---|\n| QX-001 | restrict work |\n| QX-002 | restrict other work |\n| QX-002 | duplicate |\n").unwrap();
     let task = root.join("TASK-X-001.md");
     let write_task = |ids: &str| {
         fs::write(
@@ -78,7 +78,7 @@ fn p5_fixture() -> (tempfile::TempDir, PathBuf) {
     fs::create_dir(&root).unwrap();
     fs::write(
         dir.path().join("PRD-X.md"),
-        "- REQ-X-001: work\n- QX-001: bound work\n",
+        "- REQ-X-001: work\n\n| Key | Rule |\n|---|---|\n| QX-001 | bound work |\n",
     )
     .unwrap();
     (dir, root)

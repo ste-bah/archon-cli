@@ -118,5 +118,5 @@ async fn duplicate_prd_acceptance_id_is_rejected_by_shared_phase_zero() {
         error.contains("more than one obligation-table row"),
         "{error}"
     );
-    assert!(error.contains("keep exactly one row"), "{error}");
+    assert!(error.contains("retain the authored id"), "{error}");
 }

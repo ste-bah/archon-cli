@@ -297,7 +297,12 @@ fn old_obligation_ids(prd: &str) -> BTreeSet<String> {
             let level = trimmed.chars().take_while(|ch| *ch == '#').count();
             let inside = section_level.is_some_and(|open| level > open);
             if !inside {
-                section_level = heading_states_done(trimmed).then_some(level);
+                section_level = (trimmed.to_ascii_lowercase().contains("done")
+                    && ["definition", "when", "criteria"]
+                        .iter()
+                        .any(|word| trimmed.to_ascii_lowercase().contains(word))
+                    && !heading_excludes_obligations(trimmed))
+                .then_some(level);
             }
             continue;
         }

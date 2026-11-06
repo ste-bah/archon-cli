@@ -1,20 +1,8 @@
 //! PRD obligation identifiers shared by decomposition, lint, and trace.
 //!
-//! Three shapes of obligation are read, and every consumer sees the same union:
-//!
-//! - line-leading `REQ-` bullets;
-//! - rows of any table whose header names an obligation — a criterion, a
-//!   requirement, an acceptance, a goal;
-//! - the numbered items under a "done" heading, as synthetic `DONE-<n>` ids.
-//!
-//! # Why goals and done-items are obligations
-//!
-//! Observed live: a PRD stated its goals in a `| ID | Goal |` table and its
-//! completion contract as fourteen numbered "Done Definition" items. Neither
-//! was extracted, so no task claimed them, no gate asked who owned them, and
-//! every task passed its own acceptance while the registry the goal named
-//! held zero entries. A goal nobody claims is work nobody does, exactly like a
-//! requirement nobody claims; the extractor treats them alike so coverage can.
+//! Identifiers are taken from declarations in the source, never a prefix list.
+//! Tables and list definitions share the same token reader. Coverage resolves
+//! exact membership in this inventory rather than reimplementing its grammar.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -27,6 +15,12 @@ use regex::Regex;
 
 #[path = "obligation_continuations.rs"]
 mod continuations;
+
+#[path = "prd_markdown.rs"]
+mod markdown;
+pub(crate) fn prepare_markdown(prd: &str) -> String {
+    markdown::prepare(prd, true)
+}
 
 #[path = "obligation_constraints.rs"]
 mod constraints;
@@ -44,17 +38,6 @@ const EXCLUDED_HEADINGS: [&str; 5] = [
     "deviation",
     "anti-goal",
 ];
-const OBLIGATION_HEADER_WORDS: [&str; 7] = [
-    "criterion",
-    "criteria",
-    "requirement",
-    "obligation",
-    "acceptance",
-    "must",
-    "goal",
-];
-/// A heading containing "done" and one of these names the completion contract.
-const DONE_HEADING_QUALIFIERS: [&str; 3] = ["definition", "when", "criteria"];
 /// Prefix of the synthetic id minted for each numbered done-definition item.
 pub const DONE_ITEM_PREFIX: &str = "DONE-";
 
@@ -88,66 +71,56 @@ pub fn acceptance_ids(prd: &str) -> BTreeSet<String> {
 
 /// Exact acceptance criterion text keyed by its PRD table ID.
 pub fn acceptance_criteria(prd: &str) -> BTreeMap<String, String> {
-    table_obligation_entries(prd)
+    declarations::table_rows(prd)
         .into_iter()
-        .filter(|(id, _)| id.starts_with("AC-"))
-        .collect()
-}
-
-fn exact_req_or_ac_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| {
-        Regex::new(r"^(?:REQ|AC)-[A-Z]+-[0-9]{3}$").expect("exact REQ/AC regex is literal")
-    })
-}
-
-/// One or more family letters: a goals table conventionally keys its rows
-/// `G-<AREA>-<NNN>`, and requiring two letters made every goal id malformed
-/// the moment goal tables began to count.
-fn generic_table_obligation_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| {
-        Regex::new(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)?-[0-9]{3}$")
-            .expect("generic table obligation regex is literal")
-    })
-}
-
-fn is_req_or_ac_id(id: &str) -> bool {
-    id.starts_with("REQ-") || id.starts_with("AC-")
-}
-
-fn valid_table_obligation_id(id: &str) -> bool {
-    if is_req_or_ac_id(id) {
-        exact_req_or_ac_pattern().is_match(id)
-    } else {
-        generic_table_obligation_pattern().is_match(id)
-    }
-}
-
-fn requirement_candidate_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| {
-        Regex::new(r"(?m)^[ \t]*[-*][ \t]+(REQ-[A-Za-z0-9-]+)")
-            .expect("requirement candidate regex is literal")
-    })
-}
-
-fn table_candidate_id(line: &str) -> Option<&str> {
-    line.trim()
-        .strip_prefix('|')?
-        .split('|')
-        .next()
-        .map(str::trim)
-        .filter(|id| {
-            id.starts_with(|ch: char| ch.is_ascii_uppercase())
-                && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-                && id.chars().any(|ch| ch.is_ascii_digit())
+        .filter(|row| row.role == declarations::Role::Acceptance && !row.text.is_empty())
+        .fold(BTreeMap::new(), |mut map, row| {
+            map.entry(row.id).or_insert(row.text);
+            map
         })
+}
+
+#[path = "obligation_declarations.rs"]
+mod declarations;
+
+/// Requirements declared by requirement sections, requirement tables, or the
+/// legacy unsectioned requirement-bullet adapter. Other classes stay separate.
+pub fn requirement_texts(prd: &str) -> BTreeMap<String, String> {
+    bullet_requirement_entries(prd)
+        .into_iter()
+        .chain(
+            declarations::table_rows(prd)
+                .into_iter()
+                .filter(|row| row.role == declarations::Role::Requirement && !row.text.is_empty())
+                .map(|row| (row.id, row.text)),
+        )
+        .fold(BTreeMap::new(), |mut map, (id, text)| {
+            map.entry(id).or_insert(text);
+            map
+        })
+}
+
+/// Read an authored ID, including inline emphasis and code delimiters. The
+/// prefix, separators and numeric width are retained exactly as declared.
+fn authored_id(value: &str) -> Option<&str> {
+    let id = shaped_id(value)?;
+    id.chars().next()?.is_uppercase().then_some(id)
+}
+
+fn shaped_id(value: &str) -> Option<&str> {
+    let id = value.trim().trim_matches(['*', '_', '`']);
+    (id.chars().next()?.is_alphabetic()
+        && id.chars().last()?.is_alphanumeric()
+        && id.chars().any(char::is_numeric)
+        && id
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || "-_.:/~+".contains(ch)))
+    .then_some(id)
 }
 
 pub fn duplicate_obligation_finding(id: &str) -> String {
     format!(
-        "PRD obligation id '{id}' appears in more than one obligation-table row; keep exactly one row for that id or assign distinct canonical IDs to independently testable criteria"
+        "source obligation id '{id}' appears in more than one obligation-table row; retain the authored id while the harness resolves the conflicting statements before claiming coverage"
     )
 }
 
@@ -164,103 +137,67 @@ pub fn duplicate_obligation_ids(prd: &str) -> Vec<String> {
 
 pub fn malformed_obligation_finding(id: &str) -> String {
     format!(
-        "PRD obligation id '{id}' is malformed; rename it to exact REQ-<LETTERS>-<NNN> for a requirement bullet or <FAMILY>-<LETTERS>-<NNN> for an obligation-table row"
+        "source identifier '{id}' could not be resolved against the document's declarations; the harness must retain the authored identifier and adapt its inventory"
     )
 }
 
+/// There is no external canonical prefix or width to impose on authored IDs.
 pub fn malformed_obligation_ids(prd: &str) -> Vec<String> {
-    let mut malformed = BTreeSet::new();
-    for capture in requirement_candidate_pattern().captures_iter(prd) {
-        let id = capture[1].to_string();
-        if !exact_req_or_ac_pattern().is_match(&id) {
-            malformed.insert(id);
-        }
-    }
-
-    let mut excluded = false;
-    let mut states_obligations = None;
-    for line in prd.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            excluded = heading_excludes_obligations(trimmed);
-            states_obligations = None;
-            continue;
-        }
-        if !trimmed.starts_with('|') {
-            states_obligations = None;
-            continue;
-        }
-        let states = *states_obligations.get_or_insert_with(|| header_states_obligations(line));
-        if excluded || !states {
-            continue;
-        }
-        if let Some(id) = table_candidate_id(line)
-            && !valid_table_obligation_id(id)
-        {
-            malformed.insert(id.to_string());
-        }
-    }
-    malformed.into_iter().collect()
+    declarations::malformed_ids(prd)
 }
 
 fn bullet_requirement_ids(prd: &str) -> BTreeSet<String> {
-    requirement_candidate_pattern()
-        .captures_iter(prd)
-        .map(|capture| capture[1].to_string())
-        .filter(|id| exact_req_or_ac_pattern().is_match(id))
+    bullet_requirement_entries(prd)
+        .into_iter()
+        .map(|(id, _)| id)
         .collect()
 }
 
-/// Each well-formed `REQ-` bullet with the text that follows its id on the
-/// same line, separator (`:`, `—`, `-`) stripped.
 fn bullet_requirement_entries(prd: &str) -> Vec<(String, String)> {
-    let lines: Vec<_> = prd.lines().collect();
-    let mut entries = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let Some(capture) = requirement_candidate_pattern().captures(line) else {
-            continue;
-        };
-        let Some(id) = capture.get(1) else {
-            continue;
-        };
-        if !exact_req_or_ac_pattern().is_match(id.as_str()) {
-            continue;
-        }
-        let indentation = line.len() - line.trim_start().len();
-        let first = line[id.end()..]
-            .trim_start()
-            .trim_start_matches([':', '—', '–', '-'])
-            .trim();
-        let mut text = vec![first.to_string()];
-        continuations::append(&lines, index + 1, indentation, &mut text);
-        entries.push((id.as_str().to_string(), continuations::join(&text)));
-    }
-    entries
+    declarations::list_rows(prd)
+        .into_iter()
+        .filter(|row| row.role == declarations::Role::Requirement && !row.text.is_empty())
+        .map(|row| (row.id, row.text))
+        .collect()
 }
 
-/// The numbered items under a done heading, as `(DONE-<n>, text)`.
-///
-/// `<n>` is the item's position, not the digit the author typed: Markdown
-/// renders a list of `1.` lines as `1., 2., 3.`, so position is the number a
-/// reader of the rendered PRD would cite. Only top-level items count — an
-/// indented sub-item elaborates its parent rather than stating a new
-/// obligation. The section runs until a heading of the same or a shallower
-/// level, so a sub-heading inside it does not truncate the list.
+/// Numbered items under a done-definition heading receive positional IDs.
+/// Nested items elaborate their parent. The section ends at a heading of the
+/// same or shallower depth; unrelated numbered lists never mint obligations.
 fn done_items(prd: &str) -> Vec<(String, String)> {
+    done_statements(prd)
+        .into_iter()
+        .map(|(id, text, _)| (id, text))
+        .collect()
+}
+
+fn done_statements(prd: &str) -> Vec<(String, String, usize)> {
     let mut items = Vec::new();
-    let mut section_level: Option<usize> = None;
-    let lines: Vec<_> = prd.lines().collect();
+    let mut section_level = None;
+    let mut exclusion = HeadingExclusion::default();
+    let prepared = prepare_markdown(prd);
+    let lines: Vec<_> = prepared.lines().collect();
     for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
         if trimmed.starts_with('#') {
             let level = trimmed.chars().take_while(|ch| *ch == '#').count();
-            let inside = section_level.is_some_and(|open| level > open);
-            if !inside {
-                section_level = heading_states_done(trimmed).then_some(level);
+            if section_level.is_none_or(|open| level <= open) {
+                let lower = trimmed.to_ascii_lowercase();
+                section_level = (lower.contains("done")
+                    && ["definition", "when", "criteria"]
+                        .iter()
+                        .any(|word| lower.contains(word))
+                    && !heading_excludes_obligations(trimmed))
+                .then_some(level);
             }
+            exclusion.update(trimmed);
             continue;
         }
-        if section_level.is_none() || line.len() - trimmed.len() >= 2 {
+        if section_level.is_none()
+            || exclusion.active()
+            || line.len() - trimmed.len() >= 2
+            || constraints::leading_id(continuations::list_item_body(trimmed)).is_some()
+        {
             continue;
         }
         if let Some(text) = numbered_item_text(trimmed) {
@@ -270,6 +207,7 @@ fn done_items(prd: &str) -> Vec<(String, String)> {
             items.push((
                 format!("{DONE_ITEM_PREFIX}{}", items.len() + 1),
                 continuations::join(&wrapped),
+                index + 1,
             ));
         }
     }
@@ -310,15 +248,6 @@ fn numbered_item_text(line: &str) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
-fn heading_states_done(line: &str) -> bool {
-    let lower = line.trim_start_matches('#').trim().to_ascii_lowercase();
-    lower.contains("done")
-        && DONE_HEADING_QUALIFIERS
-            .iter()
-            .any(|word| lower.contains(word))
-        && !EXCLUDED_HEADINGS.iter().any(|word| lower.contains(word))
-}
-
 fn table_obligation_ids(prd: &str) -> BTreeSet<String> {
     table_obligation_entries(prd).into_keys().collect()
 }
@@ -332,78 +261,19 @@ fn table_obligation_entries(prd: &str) -> BTreeMap<String, String> {
 }
 
 fn table_obligation_row_ids(prd: &str) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut excluded = false;
-    let mut states_obligations = None;
-    for line in prd.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            excluded = heading_excludes_obligations(trimmed);
-            states_obligations = None;
-            continue;
-        }
-        if !trimmed.starts_with('|') {
-            states_obligations = None;
-            continue;
-        }
-        let states = *states_obligations.get_or_insert_with(|| header_states_obligations(line));
-        if excluded || !states {
-            continue;
-        }
-        let cells = line
-            .trim()
-            .trim_matches('|')
-            .split('|')
-            .map(str::trim)
-            .collect::<Vec<_>>();
-        if let Some(id) = cells
-            .first()
-            .copied()
-            .filter(|id| valid_table_obligation_id(id))
-        {
-            ids.push(id.to_string());
-        }
-    }
-    ids
+    declarations::table_rows(prd)
+        .into_iter()
+        .filter(|row| row.role != declarations::Role::Constraint)
+        .map(|row| row.id)
+        .collect()
 }
 
 fn table_obligation_rows(prd: &str) -> Vec<(String, String)> {
-    let mut rows = Vec::new();
-    let mut excluded = false;
-    let mut states_obligations = None;
-    for line in prd.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            excluded = heading_excludes_obligations(trimmed);
-            states_obligations = None;
-            continue;
-        }
-        if !trimmed.starts_with('|') {
-            states_obligations = None;
-            continue;
-        }
-        let states = *states_obligations.get_or_insert_with(|| header_states_obligations(line));
-        if excluded || !states {
-            continue;
-        }
-        let cells: Vec<_> = line
-            .trim()
-            .trim_matches('|')
-            .split('|')
-            .map(str::trim)
-            .collect();
-        let Some(id) = cells
-            .first()
-            .copied()
-            .filter(|id| valid_table_obligation_id(id))
-        else {
-            continue;
-        };
-        if let Some(criterion) = cells.get(1).filter(|value| !value.is_empty()) {
-            rows.push((id.to_string(), (*criterion).to_string()));
-        }
-    }
-    rows
+    declarations::table_rows(prd)
+        .into_iter()
+        .filter(|row| row.role != declarations::Role::Constraint && !row.text.is_empty())
+        .map(|row| (row.id, row.text))
+        .collect()
 }
 
 fn heading_excludes_obligations(line: &str) -> bool {
@@ -415,11 +285,19 @@ fn heading_excludes_obligations(line: &str) -> bool {
 /// contains "goal", and a non-goals table under a neutral heading must not
 /// become a set of goals the moment goal tables count.
 fn header_states_obligations(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    !EXCLUDED_HEADINGS.iter().any(|word| lower.contains(word))
-        && OBLIGATION_HEADER_WORDS
-            .iter()
-            .any(|word| lower.contains(word))
+    let lower = line.to_lowercase();
+    !heading_excludes_obligations(line)
+        && [
+            "criterion",
+            "criteria",
+            "requirement",
+            "obligation",
+            "acceptance",
+            "must",
+            "goal",
+        ]
+        .iter()
+        .any(|word| lower.contains(word))
 }
 
 /// Forbidden residual-gap phrases declared by the PRD itself.
@@ -431,7 +309,8 @@ pub fn residual_gap_forbidden_phrases(prd: &str) -> Vec<String> {
     let mut in_gap_section = false;
     let mut in_list = false;
     let mut phrases = Vec::new();
-    for line in prd.lines() {
+    let prepared = prepare_markdown(prd);
+    for line in prepared.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('#') {
             let heading = trimmed.trim_start_matches('#').trim().to_ascii_lowercase();
@@ -488,3 +367,26 @@ fn quoted_phrase(value: &str) -> Option<&str> {
 #[cfg(test)]
 #[path = "obligation_ids_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "obligation_format_tests.rs"]
+mod format_tests;
+
+/// One-based declaration lines, using the same ID reader and code boundaries.
+pub fn obligation_source_lines(prd: &str) -> BTreeMap<String, usize> {
+    let mut result = BTreeMap::new();
+    for row in declarations::list_rows(prd)
+        .into_iter()
+        .chain(declarations::table_rows(prd))
+    {
+        result.entry(row.id).or_insert(row.line);
+    }
+    for (id, _, line) in done_statements(prd) {
+        result.entry(id).or_insert(line);
+    }
+    result
+}
+
+#[cfg(test)]
+#[path = "obligation_inventory_fixture_tests.rs"]
+mod inventory_fixture_tests;
