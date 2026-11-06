@@ -474,7 +474,7 @@ fn workflow_provider_env_policy(request: &AgentExecutionRequest) -> Option<Provi
 
 #[path = "subagent_adapter_text.rs"]
 mod text;
-use text::{value_to_text, values_to_text};
+use text::values_to_text;
 
 #[cfg(test)]
 #[path = "subagent_adapter_tests.rs"]
