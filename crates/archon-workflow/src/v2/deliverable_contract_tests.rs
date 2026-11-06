@@ -6,98 +6,6 @@
 use super::{ContractRoots, resolve_contract_path, typed_verification_command};
 
 #[test]
-fn shell_template_domain_table() {
-    let roots = ContractRoots::project_only("/project".to_string());
-    // Every outcome is exact, including the validator-owned refusal text.
-    let rows = [
-        ("${X}", true),
-        (" ${X} ", true),
-        ("$X", true),
-        ("\"${X}\"", true),
-        ("${1}", true),
-        ("${X:-}", true),
-        ("${X}${Y}", true),
-        ("$X && $Y", true),
-        ("$X; $Y", true),
-        ("$X | $Y", true),
-        ("VAR=1 $CMD", true),
-        ("VAR=1", true),
-        ("${X:+d}", true),
-        ("${X+d}", true),
-        ("`$X`", true),
-        ("$($X)", true),
-        ("<cmd>", true),
-        ("$X $Y", true),
-        ("${X:-d}", false),
-        ("echo ${X}", false),
-        ("$HOME/bin/run", false),
-        ("$PYTHON -m pytest", false),
-        ("${CARGO:-cargo} test", false),
-        ("\"$BIN\" --check", false),
-        ("$CMD --flag", false),
-        ("VAR=1 $CMD --flag", false),
-        ("$(which jq) .", false),
-        ("${X}/run.sh", false),
-        ("test -f \"$F\"", false),
-        // Recursive defaults, remaining list separators, quotes and assignments.
-        ("${X-d}", false),
-        ("${X-}", true),
-        ("${X:-${Y:-d}}", false),
-        ("${X:-${Y}}", true),
-        ("${X:-\"\"}", true),
-        ("$X || $Y", true),
-        ("$X & $Y", true),
-        ("$X\n$Y", true),
-        ("VAR=1 OTHER=2 $X $Y", true),
-        ("$X; echo ok", false),
-        ("$(echo '$X; $Y')", false),
-        ("'$X'", true),
-        ("${#X}", false),
-        ("${X%pattern}", false),
-        ("${X:=d}", false),
-        ("${X?error}", false),
-        ("<optional: x>", true),
-        ("  <optional: x>  ", true),
-        ("  ${NAME_1}  ", true),
-        ("${X} \"$Y\"", true),
-        ("python3 - <<'PY'\nassert 1 == 1\nPY", false),
-        ("cmd < in 2>/dev/null", false),
-        ("test -s \"$HOME/x\"", false),
-        ("test -s \"${VAR:-d}\"", false),
-        ("test \"${N}\" -gt 0", false),
-        ("test \"$(cmd)\" = expected", false),
-        ("test \"$VAR\" = expected", false),
-    ];
-    for (command, refused) in rows {
-        let contract = serde_json::json!({
-            "artifact_path": "out.json", "typed_verifier_command": command,
-        });
-        let defects = super::contract_defects(&contract);
-        let expected: Vec<_> = if refused {
-            vec![crate::defect::ValidationDefect::new(
-                "unexpanded_contract_field",
-                "contract",
-                "typed_verifier_command",
-                "deliverable contract typed_verifier_command is a whole-value placeholder or a command list containing only leading assignments and empty-able words; supply a concrete command",
-            )]
-        } else {
-            vec![]
-        };
-        assert_eq!(defects, expected, "{command}");
-        assert_eq!(
-            typed_verification_command(&roots, &contract).as_deref(),
-            (!refused).then_some(command.trim()),
-            "{command}"
-        );
-        if refused {
-            let (passed, output) = run_verifier(&super::verification_command(&roots, &contract));
-            assert!(!passed, "{command}: {output}");
-            assert!(output.contains(&expected[0].message), "{command}: {output}");
-        }
-    }
-}
-
-#[test]
 fn blank_field_advice_respects_required_fields_and_execution_obligations() {
     for (field, extra, omit) in [
         ("kind", serde_json::json!({"min_instances": 1}), false),
@@ -226,7 +134,7 @@ impl Roots {
     }
 }
 
-fn run_verifier(script: &str) -> (bool, String) {
+pub(super) fn run_verifier(script: &str) -> (bool, String) {
     let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
