@@ -33,7 +33,7 @@ pub(super) fn require_budget_prices(
                 return Err(super::super::errors::GameTheoryError::SpecialistFailed {
                     agent_key: key.clone(),
                     message: format!(
-                        "Cannot enforce game-theory budget: model '{model}' has no valid price; set llm.model_prices.<model> for '{model}' or set the budget to unbounded"
+                        "Cannot enforce game-theory budget: model '{model}' has no valid price; set llm.model_prices.\"<model>\" (quote the key) for '{model}' or set the budget to unbounded"
                     ),
                 });
             }

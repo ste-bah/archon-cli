@@ -69,6 +69,38 @@ pub(crate) fn bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnviro
     result
 }
 
+pub(crate) fn runtime_config(
+    config: &ArchonConfig,
+    policy: super::ProviderEndpointPolicy,
+) -> archon_core::config::LlmConfig {
+    let mut llm = config.llm.clone();
+    if let Some(mut binding) =
+        crate::command::workflow_provider_route::bindings(config).remove(&llm.provider)
+    {
+        let ambient = binding
+            .base_url_env
+            .as_deref()
+            .and_then(|name| std::env::var(name).ok());
+        binding.base_url = archon_core::config::model_policy::endpoint(
+            binding.base_url.as_deref(),
+            ambient.as_deref(),
+            policy
+                == crate::command::workflow_provider_route::ProviderEndpointPolicy::AmbientAllowed,
+        );
+        if llm.provider == "openai" {
+            llm.openai.base_url = binding.base_url.clone();
+        }
+        if llm.provider == "local" {
+            if let Some(endpoint) = &binding.base_url {
+                llm.local.base_url = endpoint.clone();
+            }
+        }
+        llm.provider_environment
+            .insert(llm.provider.clone(), binding);
+    }
+    llm
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,36 +156,4 @@ mod tests {
         );
         assert_eq!(values["private-service"].credential_env, ["PRIVATE_TOKEN"]);
     }
-}
-
-pub(crate) fn runtime_config(
-    config: &ArchonConfig,
-    policy: super::ProviderEndpointPolicy,
-) -> archon_core::config::LlmConfig {
-    let mut llm = config.llm.clone();
-    if let Some(mut binding) =
-        crate::command::workflow_provider_route::bindings(config).remove(&llm.provider)
-    {
-        let ambient = binding
-            .base_url_env
-            .as_deref()
-            .and_then(|name| std::env::var(name).ok());
-        binding.base_url = archon_core::config::model_policy::endpoint(
-            binding.base_url.as_deref(),
-            ambient.as_deref(),
-            policy
-                == crate::command::workflow_provider_route::ProviderEndpointPolicy::AmbientAllowed,
-        );
-        if llm.provider == "openai" {
-            llm.openai.base_url = binding.base_url.clone();
-        }
-        if llm.provider == "local" {
-            if let Some(endpoint) = &binding.base_url {
-                llm.local.base_url = endpoint.clone();
-            }
-        }
-        llm.provider_environment
-            .insert(llm.provider.clone(), binding);
-    }
-    llm
 }

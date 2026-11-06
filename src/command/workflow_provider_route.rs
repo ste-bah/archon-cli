@@ -1,5 +1,9 @@
 //! Trusted provider-route policy for fixed decomposition.
 
+#[path = "workflow_provider_route_upgrade.rs"]
+mod upgrade;
+pub(crate) use upgrade::{record_upgrade, validate_resume};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProviderEndpointPolicy {
     AmbientAllowed,
@@ -96,6 +100,36 @@ pub(crate) fn resolve_anthropic_route(
         role_models: Default::default(),
         tier_aliases: Default::default(),
     }
+}
+
+#[cfg(test)]
+#[test]
+fn snapshots_all_configured_routes_without_credentials() {
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.llm.provider = "groq".into();
+    config.llm.provider_environment.insert(
+        "private-service".into(),
+        archon_core::config::ProviderEnvironmentConfig {
+            base_url: Some("https://private.invalid/v1".into()),
+            base_url_env: Some("PRIVATE_ROUTE_URL".into()),
+            api_key_env: Some("PRIVATE_ROUTE_KEY".into()),
+            ..Default::default()
+        },
+    );
+    let before = resolve_provider_routes(&config, ProviderEndpointPolicy::ConfiguredOnly);
+    assert_eq!(before.providers.len(), 2);
+    assert_eq!(before.providers["groq"]["api_key_env"], "GROQ_API_KEY");
+    config
+        .llm
+        .provider_environment
+        .get_mut("private-service")
+        .unwrap()
+        .base_url = Some("https://changed.invalid/v1".into());
+    let after = resolve_provider_routes(&config, ProviderEndpointPolicy::ConfiguredOnly);
+    assert_ne!(before, after);
+    let serialized = serde_json::to_string(&after).unwrap();
+    assert!(!serialized.contains("https://changed.invalid"));
+    assert!(serialized.contains("PRIVATE_ROUTE_KEY"));
 }
 
 #[cfg(test)]
@@ -199,37 +233,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(test)]
-#[test]
-fn snapshots_all_configured_routes_without_credentials() {
-    let mut config = archon_core::config::ArchonConfig::default();
-    config.llm.provider = "groq".into();
-    config.llm.provider_environment.insert(
-        "private-service".into(),
-        archon_core::config::ProviderEnvironmentConfig {
-            base_url: Some("https://private.invalid/v1".into()),
-            base_url_env: Some("PRIVATE_ROUTE_URL".into()),
-            api_key_env: Some("PRIVATE_ROUTE_KEY".into()),
-            ..Default::default()
-        },
-    );
-    let before = resolve_provider_routes(&config, ProviderEndpointPolicy::ConfiguredOnly);
-    assert_eq!(before.providers.len(), 2);
-    assert_eq!(before.providers["groq"]["api_key_env"], "GROQ_API_KEY");
-    config
-        .llm
-        .provider_environment
-        .get_mut("private-service")
-        .unwrap()
-        .base_url = Some("https://changed.invalid/v1".into());
-    let after = resolve_provider_routes(&config, ProviderEndpointPolicy::ConfiguredOnly);
-    assert_ne!(before, after);
-    let serialized = serde_json::to_string(&after).unwrap();
-    assert!(!serialized.contains("https://changed.invalid"));
-    assert!(serialized.contains("PRIVATE_ROUTE_KEY"));
-}
-
-#[path = "workflow_provider_route_upgrade.rs"]
-mod upgrade;
-pub(crate) use upgrade::{record_upgrade, validate_resume};

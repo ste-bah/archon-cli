@@ -2,7 +2,7 @@
 name: type-implementer
 type: implementation
 color: "#9C27B0"
-description: "Implements TypeScript type definitions, interfaces, generics, and type utilities."
+description: "Implements project-native type definitions, interfaces, and type utilities."
 category: coding-pipeline
 version: "1.0.0"
 priority: high
