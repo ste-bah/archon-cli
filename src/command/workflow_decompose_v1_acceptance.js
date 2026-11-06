@@ -130,7 +130,7 @@ function setHostOwnedFields(entry, criteria) {
 // retained work and failure; no inner retry window can hide malformed replies
 // or restart its count when a transport error interrupts them. Keep the call
 // id stride so replay of already-recorded rounds uses the same namespace.
-async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
+async function authorOne(w, prompt, round, id, text, prior, criteria, state, pendingIds) {
   // Each entry reads only its own shape refusal: a sibling's names another
   // entry and is not this entry's repair.
   const refused = state.refusals && state.refusals.get(id);
@@ -151,7 +151,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   for (;;) {
     try {
       const own = ownOf();
-      task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order)}`;
+      task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order, pendingIds)}`;
       task = namedFilesContext(task, state.entries?.get(id) || {id, criterion:text}, [text, own, ...currentAuthorFindings(prompt)], `\n${acceptanceReplyFormat()}`);
       task = await requireDispatchable(w, `acceptance-prompt-${id}`, task);
       break;
@@ -161,7 +161,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       // a complete phase retains its round so healthy-storage replay agrees.
       if (!state.retryPreparation) return {failure:redactFailure({status:"failed",summary:`acceptance entry ${id}: ${error.message}`})};
       // Preparation is unjournaled. Keep this entry in its original round,
-      // with the same settled prefix and prompt, until it can be dispatched.
+      // with the same pre-round inputs and prompt, until it can be dispatched.
       // A recovered write must not change any recorded request on replay.
       const summary = `acceptance entry ${id}: ${error.message}`;
       recordOperational(preparation, round, summary, false, NO_ROUND, "author context");
@@ -266,24 +266,25 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const all = ids.concat(owed);
   state.order = all;
   const pending = all.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));
+  const pendingIds = new Set(pending);
   const cap = authorBatchSize();
-  const earlier = all.filter(id => state.entries.has(id) && !pending.includes(id)).map(id => state.entries.get(id));
-  // Prefix window (Issue-247): entry i starts once entries 0..i-cap of this
-  // round have settled, and sees exactly those (in order) after the entries of
-  // earlier rounds, omitting failed entries. Its prompt depends on its index
-  // alone, so a resume reuses the recorded call, and a slow entry delays only
-  // the entries behind it.
-  const { settled } = await runBounded(pending.length, cap, true, (index, done) => {
-    const prior = earlier.concat(done.slice(0, Math.max(0, index - cap + 1)).map(result => result.value.entry).filter(Boolean));
-    return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria, state);
-  }, (result) => Boolean(result?.failure && result.failure.malformed !== true && !Array.isArray(result.failure.findings)));
-  // Every started call has settled. The window starts an index only while its
-  // fixed prefix holds no operational failure: one at f stops indices i >= f + cap.
-  // A shape refusal or malformed reply does not stop the window; a rejection
-  // stops all new starts. Which entries ran depends on the replies alone, never
-  // on timing (runBounded). Every entry that succeeded is kept,
-  // in input order, the ones after a failure too: re-authoring a passed entry
-  // wastes its call and can bring back a finding it already repaired.
+  // Freeze sibling context before fan-out, including previous best versions
+  // of entries being rewritten. No prompt reads this round's results, so
+  // each depends only on its id and pre-round state and is reusable on resume.
+  const before = state.order.filter(id => state.entries.has(id)).map(id => state.entries.get(id));
+  const failed = (result) => Boolean(result?.failure && result.failure.malformed !== true && !Array.isArray(result.failure.findings));
+  const { settled: outcomes } = await runBounded(pending.length, cap, (index) => {
+    const prior = before.filter(entry => entry.id !== pending[index]);
+    return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria, state, pendingIds);
+  }, failed);
+  // Keep successes only before F, the lowest operational-failure index.
+  // Every index through the first-settled failure was launched, so F depends
+  // only on replies, not timing. Treat all indices after F as unrun, including
+  // their refusals and progress, so replay keeps next-round state and prompts
+  // identical even when freed slots launched extra calls before the outage.
+  // With no operational failure retain every result; rejections still throw.
+  const failureIndex = outcomes.findIndex(result => result?.status === "fulfilled" && failed(result.value));
+  const settled = failureIndex < 0 ? outcomes : outcomes.slice(0, failureIndex + 1);
   const succeeded = (result) => Boolean(result && result.status === "fulfilled" && !result.value.failure);
   const stop = settled.findIndex(result => !succeeded(result));
   for (const result of settled.filter(succeeded)) {
@@ -297,7 +298,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
       state.entries.set(entry.id, entry);
     }
   }
-  // Every refusal of the round is returned and measured, each against its own
+  // Every retained refusal is returned and measured, each against its own
   // entry's best, and each entry is shown only its own refusal next round.
   const refusals = settled.filter(result => result && result.status === "fulfilled" && result.value.failure?.findings)
     .map(result => ({entryId:result.value.failure.entryId, findings:result.value.failure.findings,
@@ -316,16 +317,12 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
     else if (failure && failure.malformed) state.refusals.set(id, [failure.summary]);
     else if (!failure) state.refusals.delete(id);
   });
-  // Provider/context failures are operational outages. A validator refusal
-  // has findings and remains an author attempt instead.
-  state.roundOutage = pending.some((_, index) => {
-    const failure = settled[index]?.status === "fulfilled" ? settled[index].value.failure : null;
-    return Boolean(failure) && failure.malformed !== true && !Array.isArray(failure.findings);
-  });
+  // Validator refusals remain author attempts rather than outages.
+  state.roundOutage = failureIndex >= 0;
   // A thrown call (a pause or cancel the host observed, or a host error)
   // outranks a failed reply at any index: returned as a failed value it would
   // be retried as an operational failure and the stop would be lost.
-  const rejected = settled.find(result => result && result.status === "rejected");
+  const rejected = outcomes.find(result => result && result.status === "rejected");
   if (rejected) throw rejected.reason;
   // Issue 362: a clean round leaves nothing to re-author. Until the gate
   // names entries again, a freeze retried after an operational outage reuses
@@ -338,7 +335,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const first = settled[stop];
   // Unreachable unless the pool stopped without a failure: fail loudly.
   if (!first) throw new Error(`acceptance entry ${pending[stop]} was never authored`);
-  // The failures and the indices never started are retried.
+  // Failures and every index treated as unrun are retried.
   state.retryIds = new Set(pending.filter((_, index) => !succeeded(settled[index])));
   if (refusals.length === 0) return redactFailure(first.value.failure);
   const findings = refusals.flatMap(refusal => refusal.findings);
