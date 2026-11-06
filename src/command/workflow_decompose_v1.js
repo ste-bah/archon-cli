@@ -263,7 +263,7 @@ async function authorCandidate(w, policy) {
         }
       }
     } catch (error) {
-      if (error?.retainedBodyContext === true) {
+      if (error?.retainedBodyContext === true && typeof w.checkpoint === "function") {
         const message = `retained body candidate context failed for ${policy.phase}: ${error.message}`;
         await w.checkpoint(`${policy.phase}-context-failed-${nextCall}`, { task: message });
       }
@@ -318,17 +318,6 @@ async function authorCandidate(w, policy) {
     if (policy.phase === "skeleton" && acceptedSkeletonCandidate(authored.content, outcome)) previousCandidate = authored.content;
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
-    if (policy.capability === "land-task-body" && policy.target) {
-      for (const kind of ["shadow", "inherited"]) {
-        routed[`${kind}Findings`] = routed[`${kind}Findings`].filter((finding, index) => {
-          if (!authoredSourceMatches(finding.source_path, policy.target.fileName)) return true;
-          routed.retry.push(routed[kind][index]);
-          routed.retryFindings.push(finding);
-          return false;
-        });
-        routed[kind] = routed[`${kind}Findings`].map(findingText);
-      }
-    }
     if (policy.capability === "land-task-body" && routed.shadow.length > 0 && routed.fatal.length === 0 && !routed.operational) {
       return { ...outcome, skeletonFindings: routed.shadowFindings, bodyFindings: routed.retryFindings, shadowRung: repairRung };
     }
@@ -390,9 +379,9 @@ async function authorCandidate(w, policy) {
       continue;
     }
     const ownedFound = routed.fatalFindings.filter((finding) => {
+      if (finding.remediation_scope === "operational") return unproven.repeated.has(finding);
       const source = typeof finding.source_path === "string" ? finding.source_path.replace(/\\/g, "/") : "";
       if (policy.target && authoredSourceMatches(source, policy.target.fileName)) return true;
-      if (finding.remediation_scope === "operational") return unproven.repeated.has(finding);
       return policy.phase === "acceptance" && (source === `${String(args.taskRoot || "").replace(/\\/g, "/")}/acceptance-contract.json` || source === "acceptance-contract.json")
         && typeof finding.subject === "string"
         && (Object.prototype.hasOwnProperty.call(args.acceptanceCriteria || {}, finding.subject)

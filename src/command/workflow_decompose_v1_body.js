@@ -78,7 +78,6 @@ function bodyRepairContext(policy, rung, best) {
       : `\nExact gate findings (JSON):\n${details}`;
   } catch (error) {
     error.retainedBodyContext = true;
-    error.authorContext = true;
     throw error;
   }
   return { text: `\n${instruction}\n${reference}`, feedback: best.findings.map(findingText), history: best.history };

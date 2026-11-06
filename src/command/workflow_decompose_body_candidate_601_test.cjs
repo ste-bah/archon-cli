@@ -129,8 +129,8 @@ test('ranking uses progress measures, deduplicates and never retains zero-action
   }
 });
 
-test('owned findings of every scope are promoted before retention with their exact original scope', async () => {
-  for (const scope of ['prd_input', 'operational', 'unknown', 'inherited_predecessor', 'skeleton']) {
+test('owned fatal findings retain their exact original scope', async () => {
+  for (const scope of ['prd_input', 'unknown']) {
   const ctx = context(), prompts = [];
   const found = { text: 'owned fatal defect', remediation_scope: scope,
     source_path: `/tasks/${subject.fileName}` };
@@ -139,6 +139,27 @@ test('owned findings of every scope are promoted before retention with their exa
     hostCommand: async () => outcome(call === 1 ? [found] : []) }, ctx.bodyPolicy(subject, ['initial set feedback']));
   assert.deepEqual(details(prompts[1]), { body: 'body-1', findings: [found], blocking_findings: 1 });
   assert.match(prompts[1], /initial set feedback/);
+  }
+});
+
+test('owned inherited notes publish without retry; shadow findings return to the skeleton', async () => {
+  for (const mode of ['observe', 'enforce']) for (const scope of ['inherited_predecessor', 'skeleton']) {
+    const ctx = context();
+    ctx.args.gateMode = mode;
+    let calls = 0;
+    const found = { text: 'predecessor freeze carries 1 policy finding(s)', remediation_scope: scope,
+      source_path: `/tasks/${subject.fileName}` };
+    const published = outcome([found]);
+    const result = await ctx.authorCandidate({
+      agent: async () => { assert.equal(++calls, 1, 'no body retry'); return reply('body'); },
+      hostCommand: async () => published
+    }, policy(ctx));
+    assert.equal(result.publicationReceipt.call_id, 'published');
+    if (scope === 'skeleton') {
+      assert.equal(result.skeletonFindings.length, 1);
+      assert.equal(result.skeletonFindings[0], found);
+    }
+    else assert.equal(result, published);
   }
 });
 
@@ -174,6 +195,30 @@ test('large retained body uses host context; context failure logs and pauses', a
       assert.equal(ctx.__archonAuthorContext.files.get(path), body);
       assert.deepEqual(details(prompt).findings, found);
     }
+  }
+});
+
+test('retained context host faults throw; write outages work without checkpoint', async () => {
+  for (const fault of ['missing', 'no file', 'write']) {
+    const ctx = context();
+    let calls = 0;
+    const run = ctx.authorCandidate({
+      agent: async () => { assert.equal(++calls, 1); return reply('body'.repeat(5000)); },
+      hostCommand: async () => {
+        if (fault === 'missing') delete ctx.__archonAuthorContext;
+        else ctx.__archonAuthorContext = fault === 'no file' ? () => '{}' : () => { throw new Error('disk unavailable'); };
+        return outcome(findings(1, 'large'));
+      },
+      pause: async () => { throw new Error('paused context outage'); }
+    }, policy(ctx));
+    await assert.rejects(run, error => {
+      assert.match(error.message, fault === 'write' ? /paused context outage/ : fault === 'missing' ? /binding is missing/ : /returned no file/);
+      if (fault !== 'write') {
+        assert.equal(error.retainedBodyContext, true);
+        assert.notEqual(error.authorContext, true);
+      }
+      return true;
+    });
   }
 });
 
