@@ -20,17 +20,17 @@ pub fn command_execution_stage(request: &StageRunRequest) -> bool {
     };
     call.get("method").and_then(serde_json::Value::as_str) == Some("implementation")
         || call
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(verification_wave_id)
+            .get("runs_commands")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
 }
 
-/// Whether a typed read-only V2 call is granted commands: by the host's
-/// stage grant (a review map branch, REM-16) or as a verification wave. The
-/// agent prompt reads this to say which shell the stage has, so what it is
-/// told and what it gets are the same answer.
-pub fn v2_call_runs_commands(call_id: &str, input: &serde_json::Value) -> bool {
-    declared_bash_tool(input) || verification_wave_id(call_id)
+/// Read the admitted typed call, never script input or an author's call id.
+/// Lifecycle ids are host-owned only when `host_planned` was set by the
+/// lifecycle port's task-local scope (script options cannot set that flag).
+pub fn v2_call_runs_commands(call: &crate::WorkflowV2HostCall) -> bool {
+    call.options.item_kind.as_deref() == Some("focused_verification")
+        || (call.options.host_planned && verification_wave_id(&call.id))
 }
 
 /// Whether the host granted this stage a READ-ONLY shell (a review map

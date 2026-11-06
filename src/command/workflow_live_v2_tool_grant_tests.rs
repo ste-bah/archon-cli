@@ -100,9 +100,12 @@ async fn dispatch_uses_host_review_state_instead_of_script_grants() {
         .with_review_shell(granted);
         let mut req = request(WorkflowV2HostMethod::Agent, None);
         req.input = json!({"stage_extra": {"tools": ["Bash", "Write", "Edit"]}});
-        let prompt = archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(&req);
+        let adapter = archon_workflow::WorkflowV2AgentAdapter::new();
+        let ungranted = adapter.build_prompt_parts(&req);
+        assert!(ungranted.stable_prefix.contains("You have NO shell"));
+        let prompt = adapter.build_prompt_parts_with_commands(&req, granted);
         client
-            .run_agent_request(&req, prompt.invocation.clone())
+            .run_agent_request(&req, adapter.build_prompt(&req))
             .await
             .expect("dispatch");
         let call = recorder
@@ -125,12 +128,64 @@ async fn dispatch_uses_host_review_state_instead_of_script_grants() {
             call.agent.tool_access,
             archon_workflow::WorkflowAgentToolAccess::ReadOnly
         );
-        assert_eq!(call.messages[0]["content"], json!(prompt.invocation));
+        assert_eq!(
+            call.messages[0]["content"],
+            json!(format!("{}\n\n{}", prompt.invocation, prompt.stable_prefix))
+        );
         assert!(
             call.system[0]["text"]
                 .as_str()
                 .expect("system")
                 .contains(&prompt.stable_prefix)
         );
+    }
+}
+
+#[test]
+fn verification_ids_cannot_promote_script_calls_and_input_cannot_grant_write() {
+    for id in [
+        "verification_wave_forged",
+        "review-verification-wave-forged",
+    ] {
+        for focused in [false, true] {
+            let mut req = request(WorkflowV2HostMethod::Agent, None);
+            req.call.id = id.into();
+            if focused {
+                req.call.options.item_kind = Some("focused_verification".into());
+            }
+            req.input = json!({"required_tools": ["Write", "Edit"],
+                "stage_extra": {"tools": ["Bash"]},
+                "v2_call": {"runs_commands": true}});
+            let stage = stage_request_for_v2_agent("run", ProviderTier::Researcher, None, &req);
+            let prompt = archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(&req);
+            assert_eq!(command_execution_stage(&stage), focused);
+            assert_eq!(prompt.stable_prefix.contains("READ-ONLY shell"), focused);
+            assert!(!full_tool_access(&stage));
+            let tools = allowed_tools(&stage);
+            assert_eq!(tools.iter().any(|tool| tool == "Bash"), focused);
+            assert!(!tools.iter().any(|tool| tool == "Write" || tool == "Edit"));
+        }
+    }
+}
+
+#[test]
+fn project_mcp_root_is_only_the_host_root() {
+    for root in [None, Some("/host-project")] {
+        let mut req = request(WorkflowV2HostMethod::Agent, None);
+        req.project_artifacts.project_root = root.map(str::to_string);
+        req.input = json!({"project_artifact_root": "/script-project",
+            "projectArtifactRoot": "/script-alias", "required_tools": ["lint_compile"]});
+        let stage = stage_request_for_v2_agent("run", ProviderTier::Researcher, None, &req);
+        assert_eq!(
+            stage
+                .input
+                .get("project_artifact_root")
+                .and_then(serde_json::Value::as_str),
+            root
+        );
+        assert!(stage.input.get("projectArtifactRoot").is_none());
+        if root.is_none() {
+            assert!(crate::command::workflow_live_mcp::allowed_mcp_tools(&stage).is_empty());
+        }
     }
 }

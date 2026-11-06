@@ -25,9 +25,19 @@ use super::agent_adapter::{
 };
 
 pub(super) fn build_prompt_parts(request: &WorkflowV2AgentRequest) -> WorkflowV2PromptParts {
+    build_prompt_parts_with_commands(
+        request,
+        crate::stage_command_policy::v2_call_runs_commands(&request.call),
+    )
+}
+
+pub(super) fn build_prompt_parts_with_commands(
+    request: &WorkflowV2AgentRequest,
+    runs_commands: bool,
+) -> WorkflowV2PromptParts {
     let (stable_input, invocation_input) = split_stable_input(request);
     WorkflowV2PromptParts {
-        stable_prefix: build_stable_prefix(request, &stable_input),
+        stable_prefix: build_stable_prefix(request, &stable_input, runs_commands),
         invocation: build_invocation(request, &invocation_input),
     }
 }
@@ -35,12 +45,13 @@ pub(super) fn build_prompt_parts(request: &WorkflowV2AgentRequest) -> WorkflowV2
 fn build_stable_prefix(
     request: &WorkflowV2AgentRequest,
     stable_input: &serde_json::Value,
+    runs_commands: bool,
 ) -> String {
     let constraints = compact_json(&request.constraints);
     let stable_input = compact_json(stable_input);
     let (write_rules, final_output_rule) = if request.is_write_capable() {
         (IMPLEMENTATION_RULES, FINAL_OUTPUT_RULE)
-    } else if crate::stage_command_policy::v2_call_runs_commands(&request.call.id, &request.input) {
+    } else if runs_commands {
         // REM-16: the rules say what the host granted.
         (READ_ONLY_COMMAND_RULES, "")
     } else {

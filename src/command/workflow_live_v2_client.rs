@@ -144,6 +144,7 @@ impl LiveV2AgentClient {
             fixed_raw_tool_policy: self.fixed_raw_tool_policy.clone(),
             audit: self.audit.clone(),
             owner_store: self.owner_store.clone(),
+            review_shell: self.review_shell,
             cargo_limits: self.cargo_limits.clone(),
         }
     }
@@ -232,6 +233,16 @@ impl LiveV2AgentClient {
             request,
         );
         self.apply_review_shell_grant(&mut stage_request);
+        let prompt_parts = archon_workflow::WorkflowV2AgentAdapter::new()
+            .build_prompt_parts_with_commands(
+                request,
+                archon_workflow::stage_command_policy::command_execution_stage(&stage_request),
+            );
+        // The adapter can carry stable rules in the user/repair message too.
+        // Keep those rules aligned with the host grant and system context.
+        let original_parts =
+            archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(request);
+        let prompt = prompt.replace(&original_parts.stable_prefix, &prompt_parts.stable_prefix);
         let model_alias = tier_model_alias(self.provider_tier).to_string();
         let resolved_model = self.llm.resolve_model_alias(&model_alias);
         let provider_id = self
@@ -261,8 +272,6 @@ impl LiveV2AgentClient {
         let ordinal = workflow_agent_ordinal(&stage_request);
         let mut board =
             StageBoardItem::raise(&stage_request, &session_id, ordinal, &agent_name, &prompt);
-        let prompt_parts =
-            archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(request);
         let agent_request = WorkflowAgentCall {
             session_id,
             task: request.task.clone(),

@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use archon_workflow::StageRunRequest;
 // The key vocabulary and its scrub live in archon-workflow so the collector
@@ -9,7 +9,11 @@ use archon_workflow::tool_declarations::{
 };
 
 pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
-    let project_root = project_root(request);
+    let Some(project_root) = project_root(request) else {
+        tracing::debug!(stage_id = %request.stage_id,
+            "No host-stamped project artifact root; project MCP permissions disabled");
+        return Vec::new();
+    };
     let permitted = crate::command::workflow_mcp::explicitly_permitted_tools(&project_root);
     let requested = requested_tools(request);
     permitted
@@ -115,14 +119,13 @@ fn visit_strings(value: &serde_json::Value, visit: &mut dyn FnMut(&str)) {
     }
 }
 
-fn project_root(request: &StageRunRequest) -> PathBuf {
+fn project_root(request: &StageRunRequest) -> Option<PathBuf> {
     request
         .input
         .get("project_artifact_root")
-        .or_else(|| request.input.get("projectArtifactRoot"))
         .and_then(serde_json::Value::as_str)
+        .filter(|root| !root.trim().is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()))
 }
 
 #[cfg(test)]

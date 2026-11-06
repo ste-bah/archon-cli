@@ -99,18 +99,29 @@ fn only_declared_capabilities_grant_commands() {
 }
 
 #[test]
-fn typed_verification_and_review_grants_are_unchanged() {
-    for id in ["verification-wave-1", "review-verification-wave-2"] {
-        let input = json!({"v2_call": {"id": id, "method": "parallel", "write_mode": null}});
-        assert!(command_execution_stage(&request(input.clone())));
-        assert!(v2_call_runs_commands(id, &input));
+fn typed_verification_grants_require_admitted_kind_or_host_plan() {
+    for id in [
+        "verification-wave-1",
+        "review-verification-wave-2",
+        "inspect",
+    ] {
+        let mut call = crate::WorkflowV2HostCall {
+            id: id.into(),
+            method: crate::WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: Default::default(),
+        };
+        assert!(!v2_call_runs_commands(&call));
+        assert!(!command_execution_stage(&request(json!({
+            "v2_call": {"id": id, "method": "agent"}
+        }))));
+        call.options.item_kind = Some("focused_verification".into());
+        assert!(v2_call_runs_commands(&call));
+        call.options.item_kind = None;
+        call.options.host_planned = true;
+        assert_eq!(v2_call_runs_commands(&call), id != "inspect");
     }
-    let req = request(json!({
-        "v2_call": {"id": "readonly-verification-inventory", "method": "agent"},
-        "stage_task": "Inspect cargo test, npm test and pytest evidence"
-    }));
-    assert!(!command_execution_stage(&req));
-    let mut granted = req;
+    let mut granted = request(json!({"v2_call": {"method": "agent"}}));
     granted.input["stage_extra"] = json!({"tools": ["Bash"], "read_only_shell": true});
     assert!(command_execution_stage(&granted));
     assert!(read_only_shell_grant(&granted.input));
@@ -141,12 +152,5 @@ fn commands_boolean_is_legacy_only_even_for_null_typed_marker() {
     for call in [json!(null), json!({"id": "inspect", "method": "agent"})] {
         let input = json!({"v2_call": call, "stage_extra": {"commands": true}});
         assert!(!command_execution_stage(&request(input.clone())));
-        assert!(!v2_call_runs_commands("inspect", &input));
     }
-    // The typed prompt helper must never interpret the legacy boolean,
-    // even though its input does not itself carry a v2_call marker.
-    assert!(!v2_call_runs_commands(
-        "inspect",
-        &json!({"stage_extra": {"commands": true}})
-    ));
 }

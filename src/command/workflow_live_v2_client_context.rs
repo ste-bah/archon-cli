@@ -107,6 +107,8 @@ pub(super) fn stage_input_for_v2_agent(
             "read_only_shell",
             "v2_call",
             "write_coordination",
+            "project_artifact_root",
+            "projectArtifactRoot",
         ] {
             object.remove(key);
         }
@@ -134,6 +136,7 @@ pub(super) fn stage_input_for_v2_agent(
                 "role": request.role,
                 "write_mode": request.call.write_mode,
                 "target_files": request.target_files,
+                "runs_commands": archon_workflow::stage_command_policy::v2_call_runs_commands(&request.call),
             }),
         );
         if request.call.write_mode.is_some() {

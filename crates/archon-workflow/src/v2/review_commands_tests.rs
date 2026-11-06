@@ -133,29 +133,20 @@ fn a_branch_recorded_without_the_grant_keeps_its_findings_exactly() {
     );
 }
 
-/// REM-16: the prompt's rules read the same grant the tool list does.
+/// Script-shaped review input cannot grant the typed prompt a shell.
 #[test]
-fn the_prompt_rules_follow_the_command_grant() {
+fn the_prompt_rules_ignore_script_command_grants() {
     use crate::stage_command_policy::v2_call_runs_commands;
     let plain = item("adversarial-review-map-0");
-    assert!(!v2_call_runs_commands(
-        "adversarial-review-map-0",
-        &plain.input
-    ));
+    assert!(!v2_call_runs_commands(&plain.call));
     let mut granted = vec![plain];
     grant_review_commands(&mut granted, true);
-    assert!(v2_call_runs_commands(
-        "adversarial-review-map-0",
-        &granted[0].input
-    ));
-    assert!(v2_call_runs_commands(
-        "verification-wave-verify-task-a-2",
-        &json!({})
-    ));
-    assert!(!v2_call_runs_commands(
-        "adversarial-review-reduce",
-        &json!({})
-    ));
+    assert!(!v2_call_runs_commands(&granted[0].call));
+    // The live client passes its admitted review-shell state separately.
+    let mut verifier = item("verification-wave-verify-task-a-2");
+    assert!(!v2_call_runs_commands(&verifier.call));
+    verifier.call.options.item_kind = Some("focused_verification".into());
+    assert!(v2_call_runs_commands(&verifier.call));
 }
 
 /// Major 2: a branch that ran with no shell says so on every finding.
