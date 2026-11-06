@@ -276,11 +276,7 @@ fn claim_findings(
                 ),
             ),
         };
-        let named = if Path::new(&claim.path).is_absolute() {
-            claim.path.clone()
-        } else {
-            relatives.join("` or `")
-        };
+        let named = path_identity(&claim.path, &relatives);
         let finding = format!(
             "{task_id}: the body says `{}` {said} (\"{}\") but {observed}; read the path under the repository root and rewrite the claim to what is there",
             named,
@@ -289,6 +285,15 @@ fn claim_findings(
         findings.push((relatives, finding));
     }
     Ok(findings)
+}
+
+/// One path identity spelling for prose claims and explicit observations.
+pub(super) fn path_identity(named: &str, relatives: &[String]) -> String {
+    if named.starts_with('/') || Path::new(named).is_absolute() {
+        named.to_string()
+    } else {
+        relatives.join("` or `")
+    }
 }
 
 /// The paths a claim may be about. A path with components may already be

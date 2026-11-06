@@ -21,7 +21,7 @@ fn live_heads_declare_only_the_opening_path() {
         ] {
             assert_eq!(
                 declared(&format!("- `{opening}` — {description}")),
-                [opening.clone()]
+                [opening.replace('\\', "/")]
             );
         }
     }
