@@ -94,7 +94,7 @@ fn generated_v2_read_only_verification_branch_stays_read_only() {
 
 #[test]
 fn generated_v2_verification_wave_gets_command_execution() {
-    let req = StageRunRequest {
+    let mut req = StageRunRequest {
         run_id: "wf-test".into(),
         stage_id: "verification-wave-task-verifier-2".into(),
         stage_kind: StageKind::Agent,
@@ -115,8 +115,14 @@ fn generated_v2_verification_wave_gets_command_execution() {
         }),
     };
 
+    assert!(!command_execution_stage(&req));
+    assert!(!allowed_tools(&req).contains(&"Bash".to_string()));
+    // Stage projection stamps this grant from the admitted typed call.
+    req.input["v2_call"]["runs_commands"] = json!(true);
     assert!(command_execution_stage(&req));
     assert!(allowed_tools(&req).contains(&"Bash".to_string()));
+    assert!(!allowed_tools(&req).contains(&"Write".to_string()));
+    assert!(!allowed_tools(&req).contains(&"Edit".to_string()));
 }
 
 // ---------------------------------------------------------------------------
