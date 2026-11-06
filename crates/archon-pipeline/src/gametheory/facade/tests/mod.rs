@@ -242,6 +242,11 @@ impl SlowTier1LlmClient {
 
 #[async_trait]
 impl LlmClient for SlowTier1LlmClient {
+    fn estimate_cost_usd(&self, _model: &str, input: u64, output: u64) -> Option<f64> {
+        // Explicit fixture rates keep finite-budget concurrency tests priced.
+        archon_core::config::model_policy::token_cost(Some([15.0, 75.0]), input, output)
+    }
+
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,

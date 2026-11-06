@@ -39,7 +39,10 @@ fn existing_config_retains_provider_resolved_tier_defaults() {
     let config: LlmConfig = toml::from_str("provider = 'private-service'").unwrap();
     assert!(config.role_models.is_empty());
     assert!(config.tier_aliases.is_empty());
-    assert!(config.model_prices.is_empty());
+    assert_eq!(
+        config.model_prices,
+        archon_core::config::model_policy::default_model_prices()
+    );
     assert!(config.provider_environment.is_empty());
 }
 
