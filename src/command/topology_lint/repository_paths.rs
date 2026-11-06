@@ -62,6 +62,7 @@ pub(super) fn path_form_finding(
     tree: &RepositoryTree,
     relative: &str,
     named: &str,
+    context: &[String],
 ) -> Option<String> {
     let mut matches = tree.paths_ending_with(relative);
     // Parsers normalize a trailing directory slash away. A bare directory
@@ -72,17 +73,17 @@ pub(super) fn path_form_finding(
         return None;
     }
     matches.sort_by_key(|path| {
-        let common = path
-            .rsplit('/')
-            .zip(relative.rsplit('/'))
-            .take_while(|(left, right)| left == right)
-            .count();
-        (
-            std::cmp::Reverse(common),
-            path.split('/').count(),
-            path.len(),
-            *path,
-        )
+        let common = context
+            .iter()
+            .map(|hint| {
+                path.split('/')
+                    .zip(hint.split('/'))
+                    .take_while(|(left, right)| left == right)
+                    .count()
+            })
+            .max()
+            .unwrap_or(0);
+        (std::cmp::Reverse(common), path.split('/').count(), *path)
     });
     let remaining = matches.len().saturating_sub(3);
     let mut matches = matches
@@ -102,6 +103,26 @@ pub(super) fn path_form_finding(
     Some(format!(
         "[{PATH_FORM_CODE}] `{named}` is not repository-root relative: no such path from the repository root; write the full repository-root path (matches: {matches})"
     ))
+}
+
+/// Directory hints from the body's declared files and explicit heading scopes.
+pub(super) fn suggestion_context(tree: &RepositoryTree, raw: &str) -> Vec<String> {
+    let prose = super::fences::prose_lines(raw)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let items = archon_workflow::task_universe::parsing::declared_files_expected_to_change_items_preserving_lines(&prose);
+    let declared = items
+        .iter()
+        .flat_map(|item| archon_write_plan::declared_paths::declared_file_paths(item))
+        .filter_map(|path| {
+            let relative = tree.relative_to_root(&path)?;
+            relative.rsplit_once('/').map(|(dir, _)| dir.to_string())
+        });
+    let scopes = super::repository_claims::scoped_sections(raw)
+        .into_iter()
+        .filter_map(|(_, scope)| scope)
+        .filter_map(|scope| tree.relative_to_root(&scope));
+    declared.chain(scopes).collect()
 }
 
 pub(super) fn finding_code(text: &str) -> &'static str {

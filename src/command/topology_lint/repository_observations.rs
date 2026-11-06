@@ -230,6 +230,7 @@ pub(crate) fn findings_against(
     let mut findings = Vec::new();
     let mut paths = deliverable_paths(task, raw);
     let mut observations = Vec::new();
+    let context = super::repository_paths::suggestion_context(tree, raw);
     for (section, _) in super::repository_claims::scoped_sections(raw) {
         let parsed = super::repository_claims::extract_claims(&section);
         for line in prose_lines(&section) {
@@ -243,6 +244,8 @@ pub(crate) fn findings_against(
                 {
                     let scoped = parsed.iter().find(|claim| {
                         claim.scope.is_some()
+                            && (claim.claim == super::repository_claims::Claim::Absent)
+                                == (observation == Observation::Absent)
                             && archon_workflow::repository_record::normalize_relative(&claim.path)
                                 == archon_workflow::repository_record::normalize_relative(token)
                     });
@@ -347,7 +350,8 @@ pub(crate) fn findings_against(
             && claims
                 .iter()
                 .any(|claim| matches!(claim, Observation::File { .. } | Observation::Directory))
-            && let Some(text) = super::repository_paths::path_form_finding(tree, &relative, named)
+            && let Some(text) =
+                super::repository_paths::path_form_finding(tree, &relative, named, &context)
         {
             findings.push((relative, format!("{task_id}: {text}")));
             continue;

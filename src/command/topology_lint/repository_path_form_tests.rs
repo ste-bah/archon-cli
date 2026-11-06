@@ -167,7 +167,7 @@ fn new_deliverables_and_true_absence_claims_are_not_path_faults() {
 }
 
 #[test]
-fn suggestions_rank_shortest_paths_and_preserve_absolute_spelling() {
+fn suggestions_rank_depth_then_name_and_preserve_absolute_spelling() {
     let (_temp, project, tasks, tree) = recorded("PRD-X", |repo| {
         for prefix in ["a/very/deep", "z", "bb", "ccc"] {
             let dir = repo.join(prefix).join("tests");
@@ -193,7 +193,7 @@ fn suggestions_rank_shortest_paths_and_preserve_absolute_spelling() {
             assert!(found[0].contains(&format!("`{named}`")), "{found:?}");
             assert!(
                 found[0]
-                    .contains("`z/tests/new.rs`, `bb/tests/new.rs`, `ccc/tests/new.rs`, +1 more"),
+                    .contains("`bb/tests/new.rs`, `ccc/tests/new.rs`, `z/tests/new.rs`, +1 more"),
                 "{found:?}"
             );
             if Path::new(&named).is_absolute() {
@@ -205,7 +205,7 @@ fn suggestions_rank_shortest_paths_and_preserve_absolute_spelling() {
 }
 
 #[test]
-fn set_identity_survives_inserting_an_unrelated_earlier_finding() {
+fn both_gate_identities_survive_inserting_an_unrelated_earlier_finding() {
     let (_temp, project, tasks, _tree) = grounded();
     let path = tasks.join("TASK-X-001.md");
     let claim = "`missing/target.rs` exists.";
@@ -218,9 +218,89 @@ fn set_identity_survives_inserting_an_unrelated_earlier_finding() {
             .find(|finding| finding.text.contains("`missing/target.rs`"))
             .unwrap();
         let current = target.deterministic_defect.clone().unwrap();
+        let raw = std::fs::read(&path).unwrap();
+        let candidate = super::super::super::candidate::evaluate_task_file_candidate(
+            &project,
+            &path,
+            &raw,
+            archon_core::config::GateMode::Observe,
+        )
+        .unwrap()
+        .into_envelope()
+        .unwrap();
+        let author = candidate
+            .policy_findings
+            .iter()
+            .find(|finding| finding.text.contains("`missing/target.rs`"))
+            .unwrap();
+        assert_eq!(author.deterministic_defect.as_ref(), Some(&current));
         if let Some(expected) = &identity {
             assert_eq!(&current, expected);
         }
         identity = Some(current);
+    }
+}
+
+#[test]
+fn scoped_absence_is_refuted_by_both_readers() {
+    let (_temp, project, tasks, tree) = recorded("PRD-X", |repo| {
+        std::fs::create_dir_all(repo.join("crates/x/tests")).unwrap();
+        std::fs::write(repo.join("crates/x/tests/new.rs"), "// test\n").unwrap();
+    });
+    let prose = "## In `crates/x/`\n`tests/new.rs` does not exist.";
+    let claims = super::super::super::repository_claims::findings_against(
+        &tree,
+        &project,
+        "TASK-X-001",
+        prose,
+    );
+    assert_eq!(claims.len(), 1, "{claims:?}");
+    assert!(claims[0].contains("`crates/x/tests/new.rs` does not exist"));
+    for lines in [
+        "`tests/new.rs` — absent",
+        "`tests/new.rs` — exists (1 line)\n`tests/new.rs` — absent",
+    ] {
+        let raw = body("[]", "") + "\n## In `crates/x/`\n" + lines;
+        let observed = findings(&tasks, &project, &tree, &raw);
+        assert!(
+            observed
+                .iter()
+                .any(|text| { text.contains("`crates/x/tests/new.rs` is absent but it exists") }),
+            "{observed:?}"
+        );
+    }
+}
+
+#[test]
+fn suggestions_prefer_longest_declared_directory_or_heading_prefix() {
+    let (_temp, project, tasks, tree) = recorded("PRD-X", |repo| {
+        for prefix in ["z/deep/preferred", "z/other", "a", "b"] {
+            let dir = repo.join(prefix).join("tests");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("new.rs"), "// test\n").unwrap();
+        }
+    });
+    for predicate in ["exists.", "— exists (1 line)"] {
+        for (files, heading) in [
+            ("- `z/deep/preferred/src/lib.rs`", "## Notes"),
+            ("", "## In `z/deep/preferred/`"),
+        ] {
+            let raw = body("[]", files) + &format!("\n{heading}\n`tests/new.rs` {predicate}\n");
+            let found = super::super::super::repository_claims::body_findings(
+                &tree,
+                &project,
+                "TASK-X-001",
+                &tasks.join("TASK-X-001.md"),
+                &raw,
+            )
+            .unwrap();
+            let target = found
+                .iter()
+                .find(|text| text.contains("`tests/new.rs`"))
+                .unwrap();
+            assert!(target.contains(
+                "`z/deep/preferred/tests/new.rs`, `z/other/tests/new.rs`, `a/tests/new.rs`, +1 more"
+            ), "{target}");
+        }
     }
 }

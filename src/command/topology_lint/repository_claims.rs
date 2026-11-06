@@ -59,6 +59,21 @@ pub(super) use parser::scoped_sections;
 /// repository recorded under `tasks_root`. Empty when the set has no record.
 /// An error means the record or the repository could not be read:
 /// operational, never a pass.
+pub(crate) fn inspect_with_paths(
+    project_root: &Path,
+    tasks_root: &Path,
+    task_id: &str,
+    path: &Path,
+    text: &str,
+) -> Result<Vec<(Vec<String>, String)>> {
+    let Some(record) = read_repository_record(tasks_root)? else {
+        return Ok(Vec::new());
+    };
+    let tree = RepositoryTree::load(&record).context("loading the recorded repository tree")?;
+    body_findings_with_paths(&tree, project_root, task_id, path, text)
+}
+
+#[cfg(test)]
 pub(crate) fn inspect(
     project_root: &Path,
     tasks_root: &Path,
@@ -66,16 +81,18 @@ pub(crate) fn inspect(
     path: &Path,
     text: &str,
 ) -> Result<Vec<String>> {
-    let Some(record) = read_repository_record(tasks_root)? else {
-        return Ok(Vec::new());
-    };
-    let tree = RepositoryTree::load(&record).context("loading the recorded repository tree")?;
-    body_findings(&tree, project_root, task_id, path, text)
+    Ok(
+        inspect_with_paths(project_root, tasks_root, task_id, path, text)?
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect(),
+    )
 }
 
 /// Both sections for one body: explicit observations, then other prose claims. A path the
 /// observation section already reports is not reported twice — the finding
 /// that names the line count is the one the author needs.
+#[cfg(test)]
 pub(crate) fn body_findings(
     tree: &RepositoryTree,
     project_root: &Path,
@@ -151,6 +168,7 @@ fn claim_findings(
 ) -> Result<Vec<(Vec<String>, String)>> {
     let mut findings = Vec::new();
     let mut faults = std::collections::BTreeSet::new();
+    let context = super::repository_paths::suggestion_context(tree, text);
     for claim in extract_claims(text) {
         let Some(relative) = super::repository_paths::relative_path(tree, &claim.path)? else {
             continue;
@@ -167,8 +185,12 @@ fn claim_findings(
             if claim.claim == Claim::Exists
                 && super::repository_paths::truth(tree, &relative)?.certainly_absent()
             {
-                path_form =
-                    super::repository_paths::path_form_finding(tree, &relative, &claim.path);
+                path_form = super::repository_paths::path_form_finding(
+                    tree,
+                    &relative,
+                    &claim.path,
+                    &context,
+                );
                 if path_form.is_some() {
                     return Ok(vec![relative.clone()]);
                 }
@@ -285,7 +307,8 @@ pub(super) fn resolve_scoped_paths(
     if Path::new(&claim.path).is_absolute() {
         return Ok(vec![claim.path.clone()]);
     }
-    if super::repository_paths::path_form_finding(tree, &claim.path, &claim.path).is_some()
+    if claim.claim == Claim::Exists
+        && super::repository_paths::path_form_finding(tree, &claim.path, &claim.path, &[]).is_some()
         && super::repository_paths::truth(tree, &claim.path)?.certainly_absent()
     {
         return Ok(vec![claim.path.clone()]);
