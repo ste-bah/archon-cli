@@ -26,18 +26,15 @@ impl ResultStore {
     }
 
     /// The verdict saved under `key`; incompatible evidence is a miss and is
-    /// left in place for investigation. Schema 3 is safe only at Scratch,
-    /// whose judging context supplies its fixed tree layout.
-    pub(crate) fn load(&self, key: &str, allow_schema3: bool) -> Option<CheckEvidence> {
+    /// left in place for investigation. Older classifications must be rerun.
+    pub(crate) fn load(&self, key: &str, _allow_schema3: bool) -> Option<CheckEvidence> {
         let path = self.path(key)?;
         let saved = std::fs::read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok());
         match saved {
             Some(saved)
-                if (saved.schema == SCHEMA
-                    || (!allow_schema3 && saved.schema == 4)
-                    || (allow_schema3 && saved.schema == 3))
+                if saved.schema == SCHEMA
                     && saved.key == key
                     && saved.result.operational_error.is_none()
                     && saved.result.classification.is_some()
@@ -80,7 +77,7 @@ impl ResultStore {
         let original = result;
         let mut result = result.clone();
         // Native command results are already classified at capture. Declarative
-        // results have no command and cannot be a script crash.
+        // results have no command; unknown fatal expansion diagnostics conservatively fail.
         result.classify_raw("");
         if let Some(classification) = &mut result.classification
             && let CheckRunClass::ScriptDefect(defect) = &mut classification.crash

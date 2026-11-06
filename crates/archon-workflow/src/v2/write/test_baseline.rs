@@ -118,7 +118,16 @@ pub(crate) struct CommandBaseline {
 impl CommandBaseline {
     /// The command passed on the base commit.
     pub(crate) fn passed(&self) -> bool {
-        self.exit_code == Some(0) && !self.timed_out && self.error.is_none()
+        matches!(
+            crate::acceptance_check_crash::classify_execution(
+                &self.command,
+                self.exit_code,
+                &self.tail.join("\n"),
+                &[]
+            ),
+            crate::acceptance_check_crash::CheckRunClass::Passed
+        ) && !self.timed_out
+            && self.error.is_none()
     }
 
     /// Whether `command` is a lone word the shell found no program for: one
@@ -293,7 +302,7 @@ fn cache_path(
         Some(digest) => format!("{command}\0project-inputs:{digest}"),
         None => command.to_string(),
     };
-    let hash = blake3::hash(key.as_bytes()).to_hex();
+    let hash = blake3::hash(format!("execution-logic-2\0{key}").as_bytes()).to_hex();
     root(store)
         .join(CACHE_DIR)
         .join(format!("{}-{}.json", segment(&sha), &hash[..16]))

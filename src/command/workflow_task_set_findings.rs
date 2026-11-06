@@ -3,6 +3,7 @@
 
 use super::*;
 use archon_workflow::task_set_contract::JudgeDecision;
+use std::collections::BTreeMap;
 
 #[path = "workflow_task_set_acceptance_findings.rs"]
 mod acceptance;
@@ -16,6 +17,41 @@ pub(crate) fn non_accepted_ids(contract: &AcceptanceContract) -> BTreeSet<String
         .chain(&contract.supplementary)
         .filter(|entry| entry.judgment.verdict != JudgeDecision::Accepted)
         .map(|entry| entry.id.clone())
+        .collect()
+}
+
+/// The expansion gate has repairable findings even for a stored accepted verdict.
+/// Keep the exact finding as the re-author's input.
+pub(crate) fn unset_check_findings(
+    contract: &AcceptanceContract,
+    bound: &[&str],
+) -> BTreeMap<String, String> {
+    contract
+        .acceptance
+        .iter()
+        .chain(&contract.supplementary)
+        .filter_map(|entry| {
+            let text = match &entry.check {
+                archon_workflow::task_set_contract::AcceptanceCheck::Command {
+                    command, ..
+                } => Some(command.as_str()),
+                archon_workflow::task_set_contract::AcceptanceCheck::Floor { contract } => {
+                    contract.typed_verifier_command.as_deref()
+                }
+            }?;
+            let findings =
+                archon_workflow::acceptance_check_shell_unset::unset_reads_with_bound(text, bound);
+            (!findings.is_empty()).then(|| {
+                (
+                    entry.id.clone(),
+                    findings
+                        .iter()
+                        .map(|read| read.finding())
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                )
+            })
+        })
         .collect()
 }
 

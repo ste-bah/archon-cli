@@ -393,18 +393,20 @@ pub(crate) fn crash_findings_at<'a>(
                 .chain(&contract.supplementary)
                 .find(|entry| entry.id == result.acceptance_id)?;
             let (_, text) = executed_text(entry)?;
+            let classification = classify_check_run(text, result);
             // Issue 544: the capture's typed fact; the finding text below
             // shows only redacted output.
             if result.operational_error.is_none()
                 && result.exit_code == Some(0)
                 && result.reports_zero_work()
+                && !matches!(classification, CheckRunClass::ScriptDefect(_))
             {
                 let output = program_output(&result.stdout, &redactor, FINDING_TAIL_BYTES);
                 return Some((entry.id.clone(), format!(
                     "check '{}' exited successfully but its output reports zero work, so it did not assert its criterion; correct the command or output convention so the intended test actually runs. If the work adds a test absent at base, the check must fail there when no test runs. Captured stdout:\n{output}", entry.id
                 )));
             }
-            match classify_check_run(text, result) {
+            match classification {
                 CheckRunClass::ScriptDefect(mut defect) => {
                     // The exception line is program output too; show it only
                     // inside the protected stderr, never again in the preamble.

@@ -86,7 +86,7 @@ pub(super) fn memo_key(
         .or_else(|| full_closure_memo_key(probe, tree, data, entry))?;
     let siblings = sibling_input_state(probe, tree, entry)?;
     Some(content_digest(
-        serde_json::json!([key, siblings]).to_string().as_bytes(),
+        serde_json::json!([6, key, siblings]).to_string().as_bytes(),
     ))
 }
 

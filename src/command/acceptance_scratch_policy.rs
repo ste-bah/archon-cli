@@ -217,3 +217,17 @@ pub(crate) fn check_site_path_line(path: &str) -> String {
         "Checks run at the check site with PATH={path}. A program named without a path, or a subcommand that its tool runs as a separate program, is absent there unless it is found on that path."
     )
 }
+
+/// Portable authoring rules share the gate's best-effort binding source.
+pub(crate) fn authoring_policy(
+    project: &Path,
+    tasks: &Path,
+) -> archon_workflow::acceptance_check_environment::CheckPolicy {
+    capture(project, tasks)
+        .ok()
+        .flatten()
+        .map(|binding| {
+            archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy)
+        })
+        .unwrap_or_default()
+}

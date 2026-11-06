@@ -297,3 +297,73 @@ fn acceptance_passes_timeouts_and_operational_errors_are_not_script_defects() {
     errored.operational_error = Some("timed out".into());
     assert_eq!(classify_check_run(HEREDOC, &errored), CheckRunClass::Failed);
 }
+
+#[test]
+fn shell_nounset_read_of_a_never_bound_name_is_a_script_defect() {
+    let command = "set -eu\ngrep -q x \"$UNSETVAR-placeholder\" 2>/dev/null || true";
+    let stderr = "sh: line 2: UNSETVAR: unbound variable\n";
+    assert!(defect(command, 1, stderr));
+    assert!(!defect("set -eu; UNSETVAR=x\necho $UNSETVAR", 1, stderr));
+    assert!(!defect(command, 1, "assertion failed\n"));
+    assert!(defect(command, 1, &format!("{stderr}later output\n")));
+    let mut ran = result(Some(1), stderr);
+    ran.classify_raw_with_environment(command, &["UNSETVAR"]);
+    assert!(matches!(
+        ran.classification.unwrap().crash,
+        CheckRunClass::Failed
+    ));
+}
+
+#[test]
+fn fatal_expansions_override_exit_traps_and_preserve_raw_classification() {
+    let command = "set -eu\nd=\"$(mktemp -d)\"\ntrap 'rm -rf \"$d\"' EXIT\ngrep -q x \"$UNSET-p\" 2>/dev/null || true\necho after\nfalse\n";
+    for (code, stderr) in [
+        (0, "/bin/sh: line 4: UNSET: unbound variable\n"),
+        (2, "/bin/dash: 4: UNSET: parameter not set\n"),
+    ] {
+        let mut ran = result(Some(code), stderr);
+        ran.classify_raw(command);
+        assert!(!ran.passed());
+        assert!(matches!(
+            classify_check_run(command, &ran),
+            CheckRunClass::ScriptDefect(_)
+        ));
+        ran.stderr.clear();
+        assert!(!ran.passed());
+        assert!(matches!(
+            classify_check_run(command, &ran),
+            CheckRunClass::ScriptDefect(_)
+        ));
+    }
+    for expression in ["${UNSET:?need it}", "${UNSET?need it}"] {
+        let command = command.replace("$UNSET-p", expression);
+        assert_eq!(
+            classify_check_run(&command, &result(Some(0), "sh: line 4: UNSET: need it\n")),
+            CheckRunClass::Failed
+        );
+    }
+    assert!(!defect(
+        "set -eu\n./product-script\nfalse\ntrue",
+        0,
+        "sh: line 4: UNSET: unbound variable\n"
+    ));
+    assert!(!defect("set -eu\ntrap 'true' EXIT\nfalse", 1, ""));
+    assert_eq!(
+        classify_check_run("set -eu\ntrap 'true' EXIT\nfalse", &result(Some(1), "")),
+        CheckRunClass::Failed
+    );
+}
+
+#[path = "acceptance_check_crash_expansion_tests.rs"]
+mod expansion_tests;
+
+#[test]
+fn unclassified_results_without_command_reject_masked_custom_expansion() {
+    for stderr in ["/bin/sh: X: msg", "/bin/dash: 1: X: msg"] {
+        let mut ran = result(Some(0), stderr);
+        assert!(!ran.passed());
+        ran.classify_raw("");
+        assert!(!ran.passed());
+        assert_eq!(ran.classification.unwrap().crash, CheckRunClass::Failed);
+    }
+}

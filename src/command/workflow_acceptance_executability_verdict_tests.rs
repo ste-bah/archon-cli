@@ -490,3 +490,6 @@ mod shell_tests;
 
 #[path = "workflow_acceptance_executability_verdict_rows_tests.rs"]
 mod rows;
+
+#[path = "workflow_acceptance_executability_verdict_host_failure_tests.rs"]
+mod host_failure_tests;

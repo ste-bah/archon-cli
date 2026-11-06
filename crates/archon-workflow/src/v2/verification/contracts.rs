@@ -387,7 +387,15 @@ pub(super) async fn run_contract_verifier_for(
     if !failures.is_empty() || cut.is_some() {
         return failed(failures.into_iter().chain(cut).collect());
     }
-    if !output.status.success() {
+    if !matches!(
+        crate::acceptance_check_crash::classify_execution(
+            command,
+            output.status.code(),
+            &String::from_utf8_lossy(&output.stderr),
+            &[]
+        ),
+        crate::acceptance_check_crash::CheckRunClass::Passed
+    ) {
         // Its end and its failure lines (stdout when stderr is silent),
         // well within one finding's 4 KB gap bound (`contracts_demote`).
         let said = if output.stderr.trim_ascii().is_empty() {
@@ -395,8 +403,15 @@ pub(super) async fn run_contract_verifier_for(
         } else {
             &output.stderr
         };
+        // A non-zero exit and a shell expansion abort that exited 0 are
+        // different facts; name the one that happened.
+        let what = if output.status.success() {
+            "aborted on a shell expansion error"
+        } else {
+            "exited non-zero"
+        };
         return failed(vec![format!(
-            "declared contract verifier exited non-zero: {}",
+            "declared contract verifier {what}: {}",
             crate::failure_evidence::failure_evidence(said, 420)
         )]);
     }

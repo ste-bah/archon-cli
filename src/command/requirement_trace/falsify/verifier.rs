@@ -209,7 +209,15 @@ pub(super) fn run_in_environment(
         },
         Some(status) => Ran::Finished {
             code: status.code(),
-            success: status.success(),
+            success: matches!(
+                archon_workflow::acceptance_check_crash::classify_execution(
+                    &argv.join(" "),
+                    status.code(),
+                    &stderr,
+                    &[]
+                ),
+                archon_workflow::acceptance_check_crash::CheckRunClass::Passed
+            ),
             output,
             note,
         },

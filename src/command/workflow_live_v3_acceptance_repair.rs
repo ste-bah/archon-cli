@@ -56,11 +56,11 @@ use super::exec::{self, StageContext};
 use crate::command::workflow_task_set::executability::{
     Baseline, FailedTree, HOST_UNPROVEN, HostProbe, crash_findings_at, originals,
 };
+use crate::command::workflow_task_set::pause_if_unsettled;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{
     ReauthorRequest, ReauthorResult, reauthor_and_republish, reauthor_command,
 };
-use crate::command::workflow_task_set::{non_accepted_ids, pause_if_unsettled};
 
 pub(super) const HOST_PENDING_PREFIX: &str = "host pending:";
 

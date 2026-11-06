@@ -46,6 +46,12 @@
 //!   argument count taken from data may be the product's), and any class in
 //!   its qualified name is a class the program defines.
 //!
+//! Fatal shell expansion — a matching diagnostic prevents a zero-status pass,
+//! since an EXIT trap can mask an abort. It is a script defect only when the
+//! whole-check authoring rule finds the name never bound, including the run's
+//! environment. Required-value expansions remain ordinary failed verdicts.
+//! A correct negative test whose child prints a fatal expansion diagnostic to stderr also fails.
+//!
 //! POSIX shell — the error line comes from a shell reading a script from
 //! stdin (`sh: line N:`, dash's `sh: N:`; never a named script, `-c`,
 //! `eval`, or `source`), and either:
@@ -94,65 +100,9 @@ impl ScriptDefect {
     }
 }
 
-/// Classify one executed check. `command` is the exact check text the host
-/// ran (a command check's command or a floor's verifier command).
-pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass {
-    if result.operational_error.is_some() {
-        return CheckRunClass::Failed;
-    }
-    if let Some(classification) = &result.classification {
-        return classification.crash.clone();
-    }
-    match result.exit_code {
-        Some(0) => return CheckRunClass::Passed,
-        None => return CheckRunClass::Failed,
-        Some(_) => {}
-    }
-    // Issue 544: the raw capture when it is kept, never redacted evidence.
-    let stderr = String::from_utf8_lossy(result.verdict_stderr());
-    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-    let code = result.exit_code.unwrap_or_default();
-    python_defect(command, code, &lines)
-        .or_else(|| shell_defect(command, code, &lines))
-        .map_or(CheckRunClass::Failed, CheckRunClass::ScriptDefect)
-}
-
-/// Host-computed verdict from raw streams, preserved across redaction/reuse.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CheckClassification {
-    pub passed: bool,
-    pub zero_work: bool,
-    pub crash: CheckRunClass,
-    /// Issue 544: the failure's regression fingerprint, computed from the
-    /// raw capture with each secret as an indexed placeholder, so stored
-    /// results compare as the raw ones would without holding a secret.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_signature: Option<String>,
-}
-
-impl CheckResult {
-    /// Call before changing any captured stream. The command is host-authorized.
-    pub fn classify_raw(&mut self, command: &str) {
-        if self.classification.is_some() {
-            return;
-        }
-        let zero_work = crate::acceptance::output_reports_zero_work(
-            &String::from_utf8_lossy(self.verdict_stdout()),
-            &String::from_utf8_lossy(self.verdict_stderr()),
-        );
-        let mut crash = classify_check_run(command, self);
-        if let CheckRunClass::ScriptDefect(defect) = &mut crash {
-            // Raw diagnostic text belongs only in the redacted evidence.
-            defect.signal = "see the fenced stderr below".into();
-        }
-        self.classification = Some(CheckClassification {
-            passed: self.operational_error.is_none() && self.exit_code == Some(0) && !zero_work,
-            zero_work,
-            crash,
-            failure_signature: None,
-        });
-    }
-}
+#[path = "acceptance_check_crash_classification.rs"]
+mod classification;
+pub use classification::{CheckClassification, classify_check_run, classify_execution};
 
 fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("static pattern")

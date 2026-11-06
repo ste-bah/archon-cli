@@ -80,7 +80,7 @@ impl CheckObserver for ScratchObserver<'_> {
                 .map(|check| {
                     // Batch J2: a failure carries its signature, so the
                     // search can tell the tip's failure from another kind.
-                    let verdict = if check.exit_code == Some(0) {
+                    let verdict = if check.passed() {
                         Verdict::Held(true)
                     } else {
                         // Issue 544: the fingerprint the capture computed

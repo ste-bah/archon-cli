@@ -439,3 +439,54 @@ async fn the_real_launch_path_refuses_a_refuted_contract_before_creating_a_run()
     assert!(error.contains("--reauthor AC-F-002"), "{error}");
     assert_eq!(runs(), before, "no run was created");
 }
+
+#[tokio::test]
+async fn an_accepted_frozen_expansion_defect_is_repaired_in_the_round() {
+    let run = run_fixture_with(&[
+        ("AC-F-001", "test -f present", true),
+        (
+            "AC-F-002",
+            "set -eu\nd=$(mktemp -d)\ntrap 'rm -rf \"$d\"' EXIT\necho \"$UNSET-p\"\ntest -s present",
+            true,
+        ),
+    ]);
+    record_baseline(&run);
+    let before = run.set.contract_bytes();
+    let seeds = crate::command::workflow_task_set::unset_check_findings(&run.set.contract(), &[]);
+    assert!(seeds["AC-F-002"].contains("set UNSET or remove that line"));
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "test -f present && test -s present"),
+        |_, _| true,
+    );
+    let (_, record) = stage(&run, &client).await;
+    assert!(client.authored() > 0);
+    assert!(
+        client
+            .prompts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|prompt| prompt.contains("set UNSET or remove that line"))
+    );
+    assert_eq!(record.contract_repairs.len(), 1);
+    assert!(
+        record.contract_repairs[0].repaired,
+        "{:?}",
+        record.contract_repairs
+    );
+    assert!(
+        record.operational_errors.is_empty(),
+        "{:?}",
+        record.operational_errors
+    );
+    assert_eq!(record.passed_check_ids(), vec!["AC-F-001", "AC-F-002"]);
+    assert_only_named_entries_changed(
+        &before,
+        &run.set.contract_bytes(),
+        &["AC-F-002".to_string()].into_iter().collect(),
+    );
+    archon_workflow::task_skeleton::validate_full_chain(&run.set.tasks, &run.set.pin()).unwrap();
+}
+
+#[path = "workflow_live_v3_acceptance_repair_binding_tests.rs"]
+mod binding_tests;

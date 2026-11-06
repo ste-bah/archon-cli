@@ -52,3 +52,53 @@ fn nested_verifier_is_authorized_but_unbound_residual_is_not() {
     r.kind = AcceptanceCommandKind::ResidualFailClosed;
     assert!(resolve_command(&c, "bound-chain", &r).is_err());
 }
+
+#[test]
+fn execution_gate_shares_policy_and_run_bindings() {
+    use archon_workflow::acceptance_world::{
+        execution_policy_defects, resolve_command_with_bindings,
+    };
+    use archon_workflow::task_set_contract::{
+        AcceptanceCheck, TrustedCwd, acceptance_policy_findings,
+    };
+    for bound in [&[][..], &["INPUT_DATA"][..]] {
+        let mut c = contract();
+        let command = "set -u; test -f \"$INPUT_DATA\"";
+        c.acceptance[0].check = AcceptanceCheck::Command {
+            command: command.into(),
+            cwd: TrustedCwd::ProjectRoot,
+        };
+        let mut r = reference();
+        r.command_digest = content_digest(command.as_bytes());
+        // The accepted check induces a judgment contradiction, but the host
+        // still runs it so expansion defects can be repaired in the round.
+        assert!(acceptance_policy_findings(&c).iter().any(|f| {
+            f.identity
+                .as_ref()
+                .is_some_and(|i| i.code == "contradictory_judgment")
+        }));
+        let findings =
+            archon_workflow::task_set_contract::acceptance_entry_policy_findings_with_bindings(
+                &c.acceptance[0],
+                bound,
+            );
+        assert_eq!(
+            findings.iter().any(|f| f
+                .identity
+                .as_ref()
+                .is_some_and(|i| i.code == "unset_shell_variable")),
+            bound.is_empty()
+        );
+        assert!(execution_policy_defects(&c.acceptance[0], bound).is_empty());
+        assert!(resolve_command_with_bindings(&c, "bound-chain", &r, bound).is_ok());
+    }
+    let mut c = contract();
+    c.acceptance[0].check = serde_json::from_value(serde_json::json!({
+        "kind":"floor","contract":{"kind":"artifact","artifact_path":"out.json"}
+    }))
+    .unwrap();
+    assert!(!execution_policy_defects(&c.acceptance[0], &["INPUT_DATA"]).is_empty());
+    let mut r = reference();
+    r.kind = AcceptanceCommandKind::NestedVerifier;
+    assert!(resolve_command_with_bindings(&c, "bound-chain", &r, &["INPUT_DATA"]).is_err());
+}

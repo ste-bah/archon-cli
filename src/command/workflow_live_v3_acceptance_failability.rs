@@ -63,8 +63,7 @@ struct Proof {
 
 /// A pass the round counts: exactly `check_record`'s rule.
 fn passed(result: &CheckResult) -> bool {
-    // Issue 544: the capture's classification of the raw streams.
-    result.operational_error.is_none() && result.exit_code == Some(0) && !result.reports_zero_work()
+    result.passed()
 }
 
 /// The check's id and the exact text the host runs for it.

@@ -22,13 +22,23 @@ async fn repair_unaccepted_detailed(
     contract: &AcceptanceContract,
     base: Option<&Baseline>,
 ) -> WorkflowResult<Option<(Vec<AcceptanceContractRepairV1>, Defects)>> {
-    let ids = non_accepted_ids(contract);
+    let policy = context
+        .binding
+        .as_ref()
+        .map(|binding| {
+            archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy)
+        })
+        .unwrap_or_default();
+    let bound = archon_workflow::acceptance_check_environment::policy_bound_names(&policy);
+    let seeds = crate::command::workflow_task_set::unset_check_findings(contract, &bound);
+    let mut ids = crate::command::workflow_task_set::non_accepted_ids(contract);
+    ids.extend(seeds.keys().cloned());
     if ids.is_empty() {
         return Ok(None);
     }
     // A check the judge never accepted never ran: there is no verdict of
     // its own to hold a repair to, only the baseline.
-    let outcome = republish(llm, context, contract, &ids, &BTreeMap::new(), base, None).await;
+    let outcome = republish(llm, context, contract, &ids, &seeds, base, None).await;
     if let Some(paused) = outcome.as_ref().err().and_then(pause_if_unsettled) {
         return Err(paused);
     }
@@ -101,7 +111,7 @@ async fn repair_unaccepted_detailed(
                         (
                             id.clone(),
                             format!(
-                                "contract defect: frozen check '{id}' was not accepted by the judge, so it can never run and no task can fix it; the in-round re-author did not produce an accepted check ({text}); repair the contract with: {command}"
+                                "contract defect: frozen check '{id}' carries an authored contract defect, so no task can fix it; the in-round re-author did not produce an accepted check ({text}); repair the contract with: {command}"
                             ),
                         )
                     })

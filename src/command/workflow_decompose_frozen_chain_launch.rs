@@ -131,11 +131,14 @@ pub(crate) fn launch_acceptance_decision(
     );
     let roots = crate::command::workflow_task_set::live_root::absolute_roots(&roots)
         .map_err(|why| anyhow!("live roots of {}: {why}", task_root.display()))?;
+    let policy =
+        crate::command::acceptance_scratch_policy::authoring_policy(project_root, task_root);
+    let bound = archon_workflow::acceptance_check_environment::policy_bound_names(&policy);
     let mut reauthor: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let entries = contract.acceptance.iter().chain(&contract.supplementary);
     for entry in entries.clone() {
         let text = serde_json::to_string(entry)?;
-        let defects = crate::command::workflow::entry_defects(&text, &roots)
+        let defects = crate::command::workflow::entry_defects_with_bindings(&text, &roots, &bound)
             .map_err(|why| anyhow!("frozen check '{}' cannot be validated: {why}", entry.id))?;
         for defect in defects {
             let refusal = crate::command::workflow::refusal_text(&entry.id, &defect);

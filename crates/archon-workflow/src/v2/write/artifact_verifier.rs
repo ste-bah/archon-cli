@@ -203,7 +203,19 @@ pub(crate) fn run_supervised(
     }
     match status {
         Err(reason) => Err(VerifierFailure::Environment(reason)),
-        Ok(status) if status.success() => Ok(()),
+        Ok(status)
+            if matches!(
+                crate::acceptance_check_crash::classify_execution(
+                    command,
+                    status.code(),
+                    &err,
+                    &[]
+                ),
+                crate::acceptance_check_crash::CheckRunClass::Passed
+            ) =>
+        {
+            Ok(())
+        }
         Ok(status) => {
             let note = environment.note(&[out.as_bytes(), err.as_bytes()]);
             Err(VerifierFailure::Product(format!(

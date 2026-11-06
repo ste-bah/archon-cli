@@ -121,7 +121,7 @@ pub(crate) fn run_base_commit(store: &WorkflowV2ResultStore) -> Option<String> {
 
 fn verdict_path(store: &WorkflowV2ResultStore, tree: Tree, commit: &str, command: &str) -> PathBuf {
     let sha: String = commit.chars().take(12).collect();
-    let hash = blake3::hash(command.as_bytes()).to_hex();
+    let hash = blake3::hash(format!("execution-logic-2\0{command}").as_bytes()).to_hex();
     store
         .root()
         .join("baseline-tests")
@@ -214,7 +214,15 @@ pub(crate) async fn host_verdicts(
             Some(store.run_root()),
         )
         .await;
-        if run.error.is_some() || run.timed_out || !harness_reported(&run.output) {
+        if run.error.is_some()
+            || run.timed_out
+            || !harness_reported(&run.output)
+            || crate::acceptance_check_shell_unset::never_pass(
+                &command,
+                run.exit_code.unwrap_or(-1),
+                &run.output,
+            )
+        {
             continue;
         }
         let failing = failing_tests(&run.output);

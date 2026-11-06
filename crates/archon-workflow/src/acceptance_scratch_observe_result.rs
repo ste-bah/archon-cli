@@ -41,10 +41,7 @@ impl ObservationResult {
             && self.live_roots_unchanged
             && self.teardown_verified
             && !self.checks.is_empty()
-            && self
-                .checks
-                .iter()
-                .all(|c| c.exit_code == Some(0) && c.operational_error.is_none())
+            && self.checks.iter().all(|c| c.passed())
     }
 }
 

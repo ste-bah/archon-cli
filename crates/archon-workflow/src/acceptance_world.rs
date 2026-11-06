@@ -1,7 +1,7 @@
 //! Frozen command selection. A caller carries identities, never substitute text.
 use crate::task_set_contract::{
-    AcceptanceCheck, AcceptanceContract, JudgeDecision, TrustedCwd, acceptance_policy_findings,
-    content_digest, validate_acceptance_structure,
+    AcceptanceCheck, AcceptanceContract, JudgeDecision, TrustedCwd,
+    acceptance_entry_policy_findings_with_bindings, content_digest, validate_acceptance_structure,
 };
 use crate::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
@@ -63,12 +63,40 @@ impl AuthorizedCommand {
     }
 }
 
+/// Policy defects that prevent the host from running this check. Judgment
+/// contradictions induced by repairable expansion findings do not block execution.
+pub fn execution_policy_defects(
+    entry: &crate::task_set_contract::AcceptanceCriterion,
+    bound: &[&str],
+) -> Vec<crate::task_set_contract::AcceptancePolicyFinding> {
+    acceptance_entry_policy_findings_with_bindings(entry, bound)
+        .into_iter()
+        .filter(|finding| finding.field == format!("{}.check", entry.id))
+        .filter(|finding| {
+            finding
+                .identity
+                .as_ref()
+                .is_none_or(|identity| identity.code != "unset_shell_variable")
+        })
+        .collect()
+}
+
 /// Select from an already integrity-validated bundle. The execution boundary
 /// must revalidate the bundle against the launch pin before calling this function.
 pub fn resolve_command(
     contract: &AcceptanceContract,
     chain_digest: &str,
     reference: &FrozenCommandRef,
+) -> WorkflowResult<AuthorizedCommand> {
+    resolve_command_with_bindings(contract, chain_digest, reference, &[])
+}
+
+/// Resolve using the bound names of the run's environment snapshot.
+pub fn resolve_command_with_bindings(
+    contract: &AcceptanceContract,
+    chain_digest: &str,
+    reference: &FrozenCommandRef,
+    bound: &[&str],
 ) -> WorkflowResult<AuthorizedCommand> {
     let reject = |reason: &str| WorkflowError::ArtifactInvalid(reason.to_string());
     if reference.chain_digest != chain_digest {
@@ -90,11 +118,9 @@ pub fn resolve_command(
     if entry.judgment.verdict != JudgeDecision::Accepted {
         return Err(reject("acceptance command was not accepted by the judge"));
     }
-    let prefix = format!("{}.", entry.id);
-    if acceptance_policy_findings(contract)
-        .iter()
-        .any(|finding| finding.field.starts_with(&prefix))
-    {
+    // Expansion findings are handled by in-round author repair. Runtime
+    // execution still classifies any fatal diagnostic before counting a pass.
+    if !execution_policy_defects(entry, bound).is_empty() {
         return Err(reject("acceptance command carries a host policy defect"));
     }
     let (command, cwd) = match (&entry.check, reference.kind) {

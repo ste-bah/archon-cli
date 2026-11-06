@@ -125,7 +125,16 @@ async fn verdicts_for(
             } else {
                 (Vec::new(), Vec::new())
             };
-            let passed = run.exit_code == Some(0) && !run.timed_out && run.error.is_none();
+            let passed = matches!(
+                crate::acceptance_check_crash::classify_execution(
+                    &command,
+                    run.exit_code,
+                    &run.output,
+                    &[]
+                ),
+                crate::acceptance_check_crash::CheckRunClass::Passed
+            ) && !run.timed_out
+                && run.error.is_none();
             // A failure no test name explains is attributed by the files its
             // error diagnostics point at (Issue-64).
             let diagnostics = if passed || !failing.is_empty() {
@@ -139,10 +148,30 @@ async fn verdicts_for(
                 exit_code: run.exit_code,
                 timed_out: run.timed_out,
                 duration_ms: run.duration_ms,
-                tail: if passed || !failing.is_empty() {
+                tail: if passed
+                    || (!failing.is_empty()
+                        && !crate::acceptance_check_shell_unset::never_pass(
+                            &command,
+                            run.exit_code.unwrap_or(-1),
+                            &run.output,
+                        ))
+                {
                     Vec::new()
                 } else {
-                    tail(&run.output)
+                    let mut evidence = tail(&run.output);
+                    evidence.extend(
+                        run.output
+                            .lines()
+                            .filter(|line| {
+                                crate::acceptance_check_shell_unset::never_pass(
+                                    &command,
+                                    run.exit_code.unwrap_or(-1),
+                                    line,
+                                )
+                            })
+                            .map(str::to_owned),
+                    );
+                    evidence
                 },
                 failing_tests: failing,
                 passed_tests: passed_ids,

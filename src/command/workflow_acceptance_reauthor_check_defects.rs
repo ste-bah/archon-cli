@@ -19,11 +19,18 @@ pub(super) fn check_defects(
     let mut probe = working.clone();
     *super::entry_mut(&mut probe, &candidate.id).expect("named id") = candidate.clone();
     let prefix = format!("{}.check", candidate.id);
-    let defects = super::acceptance_policy_findings(&probe)
-        .into_iter()
-        .filter(|finding| finding.field == prefix)
-        .map(|finding| finding.message)
-        .collect::<Vec<_>>();
+    let policy = crate::command::acceptance_scratch_policy::authoring_policy(
+        &scope.project_root,
+        &scope.task_root,
+    );
+    let bound = archon_workflow::acceptance_check_environment::policy_bound_names(&policy);
+    let defects = archon_workflow::task_set_contract::acceptance_policy_findings_with_bindings(
+        &probe, None, &bound,
+    )
+    .into_iter()
+    .filter(|finding| finding.field == prefix)
+    .map(|finding| finding.message)
+    .collect::<Vec<_>>();
     if defects.is_empty() {
         Ok(candidate)
     } else {

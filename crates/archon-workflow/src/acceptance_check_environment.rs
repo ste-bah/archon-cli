@@ -431,3 +431,7 @@ mod tests;
 #[path = "acceptance_check_environment_command.rs"]
 mod command;
 pub use command::CommandEnvironment;
+
+#[path = "acceptance_check_environment_names.rs"]
+mod names;
+pub use names::{policy_bound_names, shell_bound_name};

@@ -57,42 +57,8 @@ impl AcceptanceOutcome {
     }
 }
 
-impl VerifyCommandReport {
-    pub(crate) fn success(&self) -> bool {
-        self.exit_code == Some(0)
-            && self.parse_error.is_none()
-            && !command_is_discovery_only(&self.command)
-            && !output_reports_zero_work(&self.stdout, &self.stderr)
-    }
-
-    pub(crate) fn failure_reason(&self) -> String {
-        // Issue 554: a command its shell cannot parse never asserted anything.
-        if let Some(error) = &self.parse_error {
-            return format!(
-                "verify_command does not parse in the shell that runs it (`-n`), so it was not run. The rule: {}. The shell reported: {error}",
-                crate::acceptance_check_shell::PARSE_RULE
-            );
-        }
-        if self.exit_code == Some(0) && command_is_discovery_only(&self.command) {
-            return "verify_command is discovery/list-only and cannot prove completion".into();
-        }
-        if self.exit_code == Some(0) && output_reports_zero_work(&self.stdout, &self.stderr) {
-            return "verify_command produced zero-test/no-op output and cannot prove completion"
-                .into();
-        }
-        let code = self
-            .exit_code
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "signal".to_string());
-        format!(
-            "verify_command exited with status {code}{}",
-            self.environment_note
-                .as_ref()
-                .map(|note| format!("\n{note}"))
-                .unwrap_or_default()
-        )
-    }
-}
+#[path = "acceptance_verify_report.rs"]
+mod verify_report;
 
 /// Fingerprint each declared target relative to `root` (or absolute).
 pub fn snapshot_targets(root: &Path, targets: &[String]) -> TargetFingerprints {
