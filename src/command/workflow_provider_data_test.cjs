@@ -27,14 +27,3 @@ test('embedded provider defaults conform to the registry data schema', () => {
     assert.equal(new Set(env.credential_env).size, env.credential_env.length);
   }
 });
-
-test('embedded model prices contain exact model ids and two valid rates', () => {
-  const prices = read('../../crates/archon-core/src/config/model_prices.json');
-  assert.ok(Object.keys(prices).length > 0);
-  for (const [model, rates] of Object.entries(prices)) {
-    assert.ok(model.trim().length > 0);
-    assert.ok(Array.isArray(rates));
-    assert.equal(rates.length, 2);
-    for (const rate of rates) assert.ok(Number.isFinite(rate) && rate >= 0);
-  }
-});

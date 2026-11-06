@@ -138,6 +138,11 @@ const BUILT_IN: &[(&str, Pricing)] = &[
     ("deepseek-reasoner", deepseek(0.14, 0.28, 0.02)),
 ];
 
+/// Canonical model ids and prices used to seed exact-model configuration defaults.
+pub fn built_in_prices() -> impl Iterator<Item = (&'static str, Pricing)> {
+    BUILT_IN.iter().copied()
+}
+
 /// Look a model up in the built-in table.
 ///
 /// Substring rather than exact match, because the same model arrives spelled

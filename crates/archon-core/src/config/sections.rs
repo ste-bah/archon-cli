@@ -98,6 +98,8 @@ pub struct LlmConfig {
     /// Optional tier-to-tier overrides before provider resolution.
     pub tier_aliases: std::collections::BTreeMap<String, String>,
     /// Exact resolved model ids mapped to input/output USD per million tokens.
+    /// User entries override the shared cost table defaults per model.
+    #[serde(deserialize_with = "super::model_policy::deserialize_model_prices")]
     pub model_prices: std::collections::BTreeMap<String, [f64; 2]>,
     /// Environment bindings for configured providers, keyed by registry id.
     pub provider_environment: std::collections::BTreeMap<String, ProviderEnvironmentConfig>,

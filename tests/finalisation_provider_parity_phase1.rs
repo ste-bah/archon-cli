@@ -94,11 +94,33 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
     assert!(
         pipeline_support.contains("build_configured_llm_provider(config, env_vars, origin).await")
     );
-    assert!(pipeline_support.contains("ProviderLlmAdapter::new(provider).with_origin(origin)"));
+    // Configuration builders now sit between construction and origin. Check the
+    // entire chain, ignoring formatting, including the tier and price policy.
+    assert!(
+        pipeline_support
+            .split_whitespace()
+            .collect::<String>()
+            .contains(concat!(
+                "ProviderLlmAdapter::new(provider)",
+                ".with_tier_aliases(config.llm.tier_aliases.clone())",
+                ".with_model_prices(config.llm.model_prices.clone())",
+                ".with_origin(origin)"
+            ))
+    );
     assert!(!pipeline.contains("AnthropicLlmAdapter::new"));
     assert!(!pipeline.contains("AnthropicClient::new"));
 
-    assert!(gametheory.contains("ProviderLlmAdapter::new(provider).with_origin(\"gametheory\")"));
+    assert!(
+        gametheory
+            .split_whitespace()
+            .collect::<String>()
+            .contains(concat!(
+                "ProviderLlmAdapter::new(provider)",
+                ".with_tier_aliases(config.llm.tier_aliases.clone())",
+                ".with_model_prices(config.llm.model_prices.clone())",
+                ".with_origin(\"gametheory\")"
+            ))
+    );
     assert!(!gametheory.contains("AnthropicLlmAdapter"));
     assert!(!gametheory.contains("AnthropicClient::new"));
 

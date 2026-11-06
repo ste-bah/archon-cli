@@ -131,8 +131,27 @@ mod tests {
     }
 }
 
-/// Shipped exact-model prices preserve the base estimates; operators can override them.
+/// Shipped exact-model rates come from the shared cost table.
 pub fn default_model_prices() -> BTreeMap<String, [f64; 2]> {
-    serde_json::from_str(include_str!("model_prices.json"))
-        .expect("invalid shipped model price data")
+    crate::cost_table::built_in_prices()
+        .map(|(model, pricing)| {
+            (
+                model.to_string(),
+                [pricing.input_per_mtok, pricing.output_per_mtok],
+            )
+        })
+        .collect()
+}
+
+/// User entries replace individual models while retaining unlisted defaults.
+pub(super) fn deserialize_model_prices<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, [f64; 2]>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let overrides = <BTreeMap<String, [f64; 2]> as serde::Deserialize>::deserialize(deserializer)?;
+    let mut prices = default_model_prices();
+    prices.extend(overrides);
+    Ok(prices)
 }
