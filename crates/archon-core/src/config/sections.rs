@@ -93,6 +93,14 @@ mod api_token_budget;
 pub struct LlmConfig {
     /// The active provider name (e.g. `"anthropic"`, `"openai-codex"`, `"openai"`, `"bedrock"`, `"vertex"`, `"local"`).
     pub provider: String,
+    /// Per-role abstract model aliases, resolved by the selected provider.
+    pub role_models: std::collections::BTreeMap<String, String>,
+    /// Optional tier-to-tier overrides before provider resolution.
+    pub tier_aliases: std::collections::BTreeMap<String, String>,
+    /// Exact resolved model ids mapped to input/output USD per million tokens.
+    pub model_prices: std::collections::BTreeMap<String, [f64; 2]>,
+    /// Environment bindings for configured providers, keyed by registry id.
+    pub provider_environment: std::collections::BTreeMap<String, ProviderEnvironmentConfig>,
     /// OpenAI provider settings.
     pub openai: LlmOpenAiConfig,
     /// AWS Bedrock provider settings.
@@ -107,12 +115,26 @@ impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             provider: "anthropic".into(),
+            role_models: Default::default(),
+            tier_aliases: Default::default(),
+            model_prices: super::model_policy::default_model_prices(),
+            provider_environment: Default::default(),
             openai: LlmOpenAiConfig::default(),
             bedrock: LlmBedrockConfig::default(),
             vertex: LlmVertexConfig::default(),
             local: LlmLocalConfig::default(),
         }
     }
+}
+
+/// Provider-owned environment bindings; names are configuration, never secrets.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderEnvironmentConfig {
+    pub base_url: Option<String>,
+    pub base_url_env: Option<String>,
+    pub api_key_env: Option<String>,
+    pub credential_env: Vec<String>,
 }
 
 /// OpenAI provider settings.

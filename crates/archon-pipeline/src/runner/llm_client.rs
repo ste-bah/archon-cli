@@ -4,6 +4,11 @@ use super::*;
 /// live in `archon-llm`; the pipeline crate depends only on this trait.
 #[async_trait]
 pub trait LlmClient: Send + Sync {
+    /// Optional provider-owned cost metadata. Unknown pricing stays unknown.
+    fn estimate_cost_usd(&self, _model: &str, tokens_in: u64, tokens_out: u64) -> Option<f64> {
+        archon_core::config::model_policy::token_cost(None, tokens_in, tokens_out)
+    }
+
     /// Digest of the rendered nonsecret request envelope; unknown means no reuse.
     fn message_request_identity(
         &self,

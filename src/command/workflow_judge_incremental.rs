@@ -49,7 +49,7 @@ fn entry_key_with_named_digest(
                 entry.covers,
                 entry.gap_permitted,
                 named_file_digest,
-                client.resolve_model_alias("sonnet"),
+                client.resolve_model_alias(&client.model_for_role("judge", "sonnet")),
                 client.provider_id(),
                 version,
                 digest,
@@ -63,7 +63,10 @@ fn entry_key_with_named_digest(
 
 fn sampling_matches(client: &dyn WorkflowLlmClient, entry: &AcceptanceCriterion) -> bool {
     entry.judgment.sampling.as_ref().is_some_and(|sampling| {
-        sampling["model"] == serde_json::json!(client.resolve_model_alias("sonnet"))
+        sampling["model"]
+            == serde_json::json!(
+                client.resolve_model_alias(&client.model_for_role("judge", "sonnet"))
+            )
             && sampling["provider"] == serde_json::json!(client.provider_id())
     })
 }
@@ -73,7 +76,7 @@ fn current_logic_identity(client: &dyn WorkflowLlmClient) -> Option<serde_json::
         |logic| {
             crate::command::workflow_task_set::reauthor::cache::acceptance_logic_identity(
                 logic,
-                &client.resolve_model_alias("sonnet"),
+                &client.resolve_model_alias(&client.model_for_role("judge", "sonnet")),
                 client.provider_id().as_deref(),
             )
         },

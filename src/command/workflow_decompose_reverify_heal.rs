@@ -89,7 +89,7 @@ pub(super) fn context(
         frozen_task_id: None,
         frozen_task_file: None,
         freeze_provider_environment:
-            crate::command::workflow_decompose::freeze_provider_environment(env_vars),
+            crate::command::workflow_decompose::freeze_provider_environment(config, env_vars),
         acceptance_environment_allowlist: config
             .workflow
             .acceptance_execution

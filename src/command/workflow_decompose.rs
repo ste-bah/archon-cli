@@ -172,8 +172,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         dispositions: Default::default(),
         log_path: path_text(&log_path),
     };
-    let route = super::workflow_provider_route::resolve_anthropic_route(
-        config.api.base_url.as_deref(),
+    let route = super::workflow_provider_route::resolve_provider_routes(
+        config,
         super::workflow_provider_route::ProviderEndpointPolicy::ConfiguredOnly,
     );
     let check_policy = super::acceptance_check_policy::from_config(config)?;
@@ -380,7 +380,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
                     run_staging_root: store.run_dir(&run_id).join("host-command-staging"),
                     frozen_task_id: None,
                     frozen_task_file: None,
-                    freeze_provider_environment: freeze_provider_environment(env_vars),
+                    freeze_provider_environment: freeze_provider_environment(config, env_vars),
                     acceptance_environment_allowlist: config
                         .workflow
                         .acceptance_execution

@@ -317,7 +317,7 @@ async fn provider_adapter_rejects_cwd_bound_agent_requests() {
 }
 
 #[tokio::test]
-async fn provider_adapter_remaps_claude_agent_model_to_provider_default() {
+async fn provider_adapter_preserves_explicit_model_without_silent_substitution() {
     let provider = Arc::new(FakeProvider {
         name: "openai-codex",
         model: "gpt-5.4",
@@ -340,7 +340,7 @@ async fn provider_adapter_remaps_claude_agent_model_to_provider_default() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    assert_eq!(model.as_deref(), Some("gpt-5.4"));
+    assert_eq!(model.as_deref(), Some("claude-sonnet-4-6"));
 }
 
 #[tokio::test]
@@ -430,4 +430,48 @@ fn a_zero_ceiling_is_refused_rather_than_sent() {
     let adapter = ProviderLlmAdapter::new(ceiling_provider()).with_max_tokens(0);
 
     assert_eq!(adapter.max_tokens, 1);
+}
+
+#[test]
+fn configured_tier_is_resolved_by_provider_and_literals_stay_literal() {
+    let provider = Arc::new(FakeProvider {
+        name: "private-service",
+        model: "custom-model",
+        context_window: 123_456,
+        report_usage: true,
+        seen_model: std::sync::Mutex::new(None),
+        seen_messages: std::sync::Mutex::new(Vec::new()),
+        seen_extra: std::sync::Mutex::new(None),
+    });
+    let adapter = ProviderLlmAdapter::new(provider).with_tier_aliases(
+        std::collections::BTreeMap::from([("sonnet".into(), "haiku".into())]),
+    );
+    assert_eq!(adapter.resolve_model_alias("sonnet"), "custom-model");
+    assert_eq!(
+        adapter.resolve_model_alias("explicit-model"),
+        "explicit-model"
+    );
+}
+
+#[test]
+fn pricing_uses_exact_configured_model_without_vendor_fallback() {
+    let provider = Arc::new(FakeProvider {
+        name: "private-service",
+        model: "custom-model",
+        context_window: 123_456,
+        report_usage: true,
+        seen_model: std::sync::Mutex::new(None),
+        seen_messages: std::sync::Mutex::new(Vec::new()),
+        seen_extra: std::sync::Mutex::new(None),
+    });
+    let adapter = ProviderLlmAdapter::new(provider).with_model_prices(
+        std::collections::BTreeMap::from([("custom-model".into(), [2.0, 4.0])]),
+    );
+    assert_eq!(
+        adapter.estimate_cost_usd("custom-model", 1_000_000, 1_000_000),
+        Some(6.0)
+    );
+    assert_eq!(adapter.estimate_cost_usd("sonnet", 1, 1), None);
+    assert_eq!(adapter.estimate_cost_usd("opus", 1, 1), None);
+    assert_eq!(adapter.estimate_cost_usd("unpriced", 0, 0), Some(0.0));
 }

@@ -96,3 +96,46 @@ fn local_tier_requires_local_data_flow() {
         .unwrap_err();
     assert!(err.to_string().contains("local tier requires"));
 }
+
+#[test]
+fn arbitrary_registered_names_use_declared_capabilities_and_flow() {
+    for (name, flow, family) in [
+        (
+            "private-service",
+            DataFlowClassification::Cloud,
+            archon_workflow::ProviderFamily::Cloud,
+        ),
+        (
+            "cloud-looking-name",
+            DataFlowClassification::Local,
+            archon_workflow::ProviderFamily::Local,
+        ),
+        (
+            "local-looking-name",
+            DataFlowClassification::UserOperated,
+            archon_workflow::ProviderFamily::UserOperated,
+        ),
+    ] {
+        let registry = registry(MockProvider {
+            name,
+            model: "custom-model",
+            vision: true,
+            flow,
+        });
+        let resolved = ProviderTierResolver::new(name, "unused")
+            .resolve_with_registry(ProviderTier::Planner, &registry)
+            .unwrap();
+        assert_eq!(resolved.provider_family, family);
+        assert_eq!(resolved.local, flow == DataFlowClassification::Local);
+        assert_eq!(resolved.model, "custom-model");
+    }
+}
+
+#[test]
+fn missing_registry_metadata_never_guesses_features_or_locality() {
+    assert!(
+        ProviderTierResolver::new("unregistered", "model")
+            .resolve_with_registry(ProviderTier::Planner, &ProviderRegistry::new())
+            .is_err()
+    );
+}

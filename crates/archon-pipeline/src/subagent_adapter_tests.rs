@@ -434,3 +434,35 @@ async fn continuing_a_session_the_pipeline_does_not_hold_is_a_typed_refusal() {
         "the refusal is not typed: {error}"
     );
 }
+
+struct AliasSpy(std::sync::atomic::AtomicUsize);
+
+#[async_trait]
+impl LlmClient for AliasSpy {
+    fn resolve_model_alias(&self, model: &str) -> String {
+        assert_eq!(model, "sonnet");
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        "configured-model".into()
+    }
+
+    async fn send_message(
+        &self,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: &str,
+    ) -> Result<LlmResponse> {
+        panic!("missing session must refuse before sending")
+    }
+}
+
+#[tokio::test]
+async fn continuation_applies_the_same_alias_resolution_as_a_new_run() {
+    let fallback = Arc::new(AliasSpy(std::sync::atomic::AtomicUsize::new(0)));
+    let client = SubagentPipelineClient::new(fallback.clone(), ToolContext::default());
+    client
+        .continue_agent(request(ToolAccessLevel::ReadOnly))
+        .await
+        .unwrap_err();
+    assert_eq!(fallback.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

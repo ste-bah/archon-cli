@@ -33,7 +33,10 @@ pub(crate) async fn judge_baseline_failures(
     let redactor = Redactor::for_runs(&runs);
     let candidates = candidates(
         client,
-        crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS,
+        &client.model_for_role(
+            "judge",
+            crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS,
+        ),
         contract,
         &ids,
         &runs,
@@ -123,7 +126,10 @@ pub(crate) async fn judge_baseline_failures(
     if !pending.is_empty() {
         match assess(
             client,
-            crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS,
+            &client.model_for_role(
+                "judge",
+                crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS,
+            ),
             contract,
             &pending,
             &redactor,

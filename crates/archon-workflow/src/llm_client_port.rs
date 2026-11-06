@@ -182,6 +182,11 @@ pub trait WorkflowLlmClient: Send + Sync {
         None
     }
 
+    /// Select a role's tier before provider alias resolution.
+    fn model_for_role(&self, _role: &str, default: &str) -> String {
+        default.to_string()
+    }
+
     /// Resolves a tier alias (`"sonnet"`) to whatever the provider calls it.
     fn resolve_model_alias(&self, model: &str) -> String {
         model.to_string()

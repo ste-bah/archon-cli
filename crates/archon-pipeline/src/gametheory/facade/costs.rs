@@ -7,20 +7,37 @@ pub(super) fn agent_tier(agent_key: &str) -> Option<u8> {
         .map(|agent| agent.tier)
 }
 
-/// Estimate API cost from token usage.
-///
-/// Rates are documented here to keep Group 5 deterministic in tests:
-/// Claude Sonnet family is estimated at $3 / 1M input tokens and $15 / 1M
-/// output tokens. Unknown models fall back to the same conservative rate.
-pub(super) fn estimate_llm_cost_usd(model: &str, tokens_in: u64, tokens_out: u64) -> f64 {
-    let (input_per_million, output_per_million) = if model.contains("sonnet") {
-        (3.0, 15.0)
-    } else if model.contains("opus") {
-        (15.0, 75.0)
-    } else {
-        (3.0, 15.0)
-    };
+/// Pricing comes from the serving client, never from a model-name heuristic.
+pub(super) fn estimate_llm_cost_usd(
+    client: &dyn crate::runner::LlmClient,
+    model: &str,
+    input: Option<u64>,
+    output: Option<u64>,
+) -> Option<f64> {
+    client.estimate_cost_usd(&client.resolve_model_alias(model), input?, output?)
+}
 
-    (tokens_in as f64 / 1_000_000.0 * input_per_million)
-        + (tokens_out as f64 / 1_000_000.0 * output_per_million)
+/// Refuse a budgeted run before dispatch if any selected model lacks valid pricing.
+pub(super) fn require_budget_prices(
+    client: &dyn crate::runner::LlmClient,
+    agents: &[String],
+    budget: f64,
+) -> Result<(), super::super::errors::GameTheoryError> {
+    if !budget.is_finite() {
+        return Ok(());
+    }
+    for key in agents {
+        if let Some(agent) = GAMETHEORY_AGENTS.iter().find(|agent| agent.key == key) {
+            let model = client.resolve_model_alias(agent.model);
+            if client.estimate_cost_usd(&model, 1, 1).is_none() {
+                return Err(super::super::errors::GameTheoryError::SpecialistFailed {
+                    agent_key: key.clone(),
+                    message: format!(
+                        "Cannot enforce game-theory budget: model '{model}' has no valid price; set llm.model_prices.\"<model>\" (quote the key) for '{model}' or set the budget to unbounded"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
 }

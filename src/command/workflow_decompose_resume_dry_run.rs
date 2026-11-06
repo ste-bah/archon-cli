@@ -156,16 +156,17 @@ pub(crate) async fn dry_run_fixed_decomposition(
             "fixed decomposition resume paused: command-catalog digest or starting revision differs from identity"
         ));
     }
-    let current_route = crate::command::workflow_provider_route::resolve_anthropic_route(
-        config.api.base_url.as_deref(),
+    let current_route = crate::command::workflow_provider_route::resolve_provider_routes(
+        config,
         crate::command::workflow_provider_route::ProviderEndpointPolicy::ConfiguredOnly,
     );
     let persisted_route: crate::command::workflow_provider_route::TrustedProviderRouteSnapshot =
         read_run_json(&store, run_id, FIXED_PROVIDER_ROUTE_PATH)?;
-    upgrade::require_equal(
-        &serde_json::to_value(&persisted_route)?,
-        &serde_json::to_value(&current_route)?,
-        "provider route",
+    crate::command::workflow_provider_route::validate_resume(
+        &store,
+        run_id,
+        &persisted_route,
+        &current_route,
     )?;
     let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
     let expected_metadata = policy::canonical_resume_metadata(

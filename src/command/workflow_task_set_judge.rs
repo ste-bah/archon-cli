@@ -323,7 +323,7 @@ pub(super) async fn judge_contract_resumable_with_roots(
     judge_batch(
         client,
         contract,
-        JUDGE_MODEL_ALIAS,
+        &client.model_for_role("judge", JUDGE_MODEL_ALIAS),
         |attempt| {
             if expected.is_empty()
                 && attempt.acceptance.is_empty()
@@ -359,7 +359,7 @@ pub(super) async fn judge_contract_subset_resumable(
     judge_batch(
         client,
         subset,
-        JUDGE_MODEL_ALIAS,
+        &client.model_for_role("judge", JUDGE_MODEL_ALIAS),
         require_judged_prose,
         partial,
         &JudgeRoots::default(),
@@ -376,7 +376,7 @@ pub(super) async fn judge_contract_subset_resumable_with_roots(
     judge_batch(
         client,
         subset,
-        JUDGE_MODEL_ALIAS,
+        &client.model_for_role("judge", JUDGE_MODEL_ALIAS),
         require_judged_prose,
         partial,
         roots,

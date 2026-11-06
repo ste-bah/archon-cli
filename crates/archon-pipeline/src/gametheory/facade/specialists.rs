@@ -12,32 +12,12 @@ use super::super::registry::GAMETHEORY_AGENTS;
 use super::super::routing::RoutingDecision;
 #[cfg(test)]
 use super::MemoryRecallAudit;
-use super::costs::{agent_tier, estimate_llm_cost_usd};
+use super::costs::{agent_tier, estimate_llm_cost_usd, require_budget_prices};
 mod prompt;
 use super::memory_context::recall_prior_context_for_agent;
 use super::types::{SpecialistCallOutput, SpecialistExecutionOutcome};
 use super::{GameTheoryMemoryContext, GameTheoryRunOptions};
 pub(super) use prompt::load_agent_prompt_body;
-
-#[cfg(test)]
-#[test]
-fn unknown_specialist_usage_keeps_estimated_cost_unknown() {
-    // Expected: either missing direction makes the estimate unknown, never $0.0.
-    assert_eq!(estimate_cost_for_usage("sonnet", None, Some(12)), None);
-    assert_eq!(estimate_cost_for_usage("sonnet", Some(12), None), None);
-    assert_eq!(
-        estimate_cost_for_usage("sonnet", Some(0), Some(0)),
-        Some(0.0)
-    );
-}
-
-fn estimate_cost_for_usage(
-    model: &str,
-    tokens_in: Option<u64>,
-    tokens_out: Option<u64>,
-) -> Option<f64> {
-    Some(estimate_llm_cost_usd(model, tokens_in?, tokens_out?))
-}
 
 #[cfg(test)]
 type SpecialistFixtureParts = (
@@ -194,6 +174,7 @@ pub(super) async fn execute_specialists_real_with_options(
     let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
     let mut outcome = SpecialistExecutionOutcome::default();
     let max_concurrent = options.max_concurrent.max(1);
+    require_budget_prices(llm, &routing.enabled_specialists, options.budget_usd)?;
 
     let system = vec![serde_json::json!({
         "type": "text",
@@ -246,6 +227,15 @@ pub(super) async fn execute_specialists_real_with_options(
         });
         let results = join_all(calls).await;
         for result in results {
+            if options.budget_usd.is_finite()
+                && result.output.is_some()
+                && result.cost_usd.is_none()
+            {
+                return Err(GameTheoryError::SpecialistFailed {
+                    agent_key: result.agent_key,
+                    message: "Cannot enforce game-theory budget: model usage or pricing is unavailable; refusing further calls".into(),
+                });
+            }
             if let Some(error) = result.error.as_deref()
                 && error.contains("GameTheory pipeline agent")
                 && error.contains("archon agent sync")
@@ -433,7 +423,7 @@ async fn execute_specialist_call(
             error: None,
             audit: recalled.audit,
             // Missing counts make the estimate unknown instead of assigning them a zero cost.
-            cost_usd: estimate_cost_for_usage(model, response.tokens_in, response.tokens_out),
+            cost_usd: estimate_llm_cost_usd(llm, model, response.tokens_in, response.tokens_out),
         },
         Err(e) => SpecialistCallOutput {
             agent_key: agent_key.to_string(),

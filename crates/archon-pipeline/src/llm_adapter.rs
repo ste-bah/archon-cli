@@ -84,6 +84,8 @@ impl LlmClient for AnthropicLlmAdapter {
 pub struct ProviderLlmAdapter {
     provider: Arc<dyn LlmProvider>,
     max_tokens: u32,
+    tier_aliases: std::collections::BTreeMap<String, String>,
+    model_prices: std::collections::BTreeMap<String, [f64; 2]>,
     request_origin: Option<String>,
     run_id: String,
     session_id: String,
@@ -95,11 +97,30 @@ impl ProviderLlmAdapter {
         Self {
             provider,
             max_tokens: 8192,
+            tier_aliases: Default::default(),
+            model_prices: archon_core::config::model_policy::default_model_prices(),
             request_origin: Some("pipeline".into()),
             run_id: uuid::Uuid::new_v4().to_string(),
             session_id: uuid::Uuid::new_v4().to_string(),
             next_round: AtomicU64::new(0),
         }
+    }
+
+    /// Override abstract tier choices without prescribing a provider model.
+    pub fn with_tier_aliases(
+        mut self,
+        aliases: std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        self.tier_aliases = aliases;
+        self
+    }
+
+    pub fn with_model_prices(
+        mut self,
+        prices: std::collections::BTreeMap<String, [f64; 2]>,
+    ) -> Self {
+        self.model_prices = prices;
+        self
     }
 
     /// Use the caller's configured output ceiling instead of the built-in one.
@@ -178,36 +199,28 @@ impl ProviderLlmAdapter {
 
     fn model_for_provider(&self, requested: &str) -> String {
         let mut request = LlmRequest {
-            model: requested.to_string(),
+            model: archon_core::config::model_policy::role_model(
+                &self.tier_aliases,
+                requested,
+                requested,
+            ),
             ..LlmRequest::default()
         };
         self.provider.resolve_request_model(&mut request);
-        if request.model != requested {
-            return request.model;
-        }
-
-        // Legacy compatibility: an explicit `claude-*` literal coming through
-        // a non-Anthropic provider falls back to the provider's first model.
-        // This matches pre-resolver behavior for agent code that still emits
-        // concrete IDs instead of aliases.
-        if requested.starts_with("claude") {
-            return self
-                .provider
-                .models()
-                .first()
-                .map(|model| model.id.clone())
-                .filter(|model| !model.starts_with("claude"))
-                .unwrap_or_else(|| requested.to_string());
-        }
-
-        // Everything else (concrete IDs the provider recognises directly)
-        // passes through.
-        requested.to_string()
+        request.model
     }
 }
 
 #[async_trait]
 impl LlmClient for ProviderLlmAdapter {
+    fn estimate_cost_usd(&self, model: &str, input: u64, output: u64) -> Option<f64> {
+        archon_core::config::model_policy::token_cost(
+            self.model_prices.get(model).copied(),
+            input,
+            output,
+        )
+    }
+
     fn message_request_identity(&self, request: &LlmRequest) -> Option<String> {
         self.provider
             .request_identity(&identity::message_request(self, request.clone()))

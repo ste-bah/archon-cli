@@ -34,7 +34,7 @@ pub enum GameTheoryError {
     SpecialistFailed { agent_key: String, message: String },
 
     #[error(
-        "LLM provider required for {operation}; configure ANTHROPIC_API_KEY or an Anthropic auth token"
+        "LLM provider required for {operation}; configure credentials for the selected provider"
     )]
     LlmUnavailable { operation: String },
 
@@ -57,4 +57,15 @@ pub enum GameTheoryError {
 
     #[error(transparent)]
     Pipeline(#[from] crate::error::PipelineError),
+}
+
+#[cfg(test)]
+#[test]
+fn unavailable_provider_guidance_uses_selected_provider() {
+    let message = GameTheoryError::LlmUnavailable {
+        operation: "analysis".into(),
+    }
+    .to_string();
+    assert!(message.contains("selected provider"));
+    assert!(!message.contains("ANTHROPIC"));
 }

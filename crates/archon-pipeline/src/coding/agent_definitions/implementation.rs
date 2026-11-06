@@ -43,7 +43,7 @@ pub(in super::super) const TYPE_IMPLEMENTER: CodingAgent = CodingAgent {
     xp_reward: 55,
     parallelizable: true,
     critical: false,
-    description: "Implements TypeScript type definitions, interfaces, generics, and type utilities.",
+    description: "Implements project-native type definitions, interfaces, and type utilities.",
 };
 
 pub(in super::super) const UNIT_IMPLEMENTER: CodingAgent = CodingAgent {
@@ -249,3 +249,10 @@ pub(in super::super) const INTEGRATION_VERIFICATION_AGENT: CodingAgent = CodingA
     critical: true,
     description: "Verifies all wiring obligations from the WiringPlan using tool-based checks (Read). Reports per-obligation pass/fail with evidence.",
 };
+
+#[cfg(test)]
+#[test]
+fn type_implementation_uses_project_native_types() {
+    assert!(TYPE_IMPLEMENTER.description.contains("project-native"));
+    assert!(!TYPE_IMPLEMENTER.description.contains("TypeScript"));
+}

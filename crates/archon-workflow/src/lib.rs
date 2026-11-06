@@ -146,9 +146,7 @@ pub use llm_client_port::{
 pub use lower_workflow::lower_workflow_spec;
 pub use planner::{HeuristicWorkflowPlanner, WorkflowPlanner};
 pub use policy::{PolicyDecision, WorkflowPolicy};
-pub use provider_tiers::{
-    ProviderFamily, ProviderTierResolver, ResolvedProviderTier, classify_provider,
-};
+pub use provider_tiers::{ProviderFamily, ProviderTierResolver, ResolvedProviderTier};
 pub use run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
 pub use runner::{StageRunOutput, StageRunRequest, WorkflowStageRunner};
 pub use spec::{ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec};

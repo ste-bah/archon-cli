@@ -26,6 +26,8 @@ pub(super) fn build_subagent_pipeline_client(
     crate::command::world_model::configure_tool_run_context(config, &mut tool_context);
     let raw: Arc<dyn archon_pipeline::runner::LlmClient> = Arc::new(
         archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
+            .with_tier_aliases(config.llm.tier_aliases.clone())
+            .with_model_prices(config.llm.model_prices.clone())
             .with_origin("tui_pipeline"),
     );
     Arc::new(

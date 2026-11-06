@@ -10,6 +10,8 @@ use crate::spec::ProviderTier;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderFamily {
+    Cloud,
+    UserOperated,
     Anthropic,
     OpenAiCodex,
     OpenAi,
@@ -34,15 +36,13 @@ pub struct ResolvedProviderTier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderTierResolver {
     active_provider: String,
-    active_model: String,
     tier_overrides: BTreeMap<ProviderTier, String>,
 }
 
 impl ProviderTierResolver {
-    pub fn new(active_provider: impl Into<String>, active_model: impl Into<String>) -> Self {
+    pub fn new(active_provider: impl Into<String>, _active_model: impl Into<String>) -> Self {
         Self {
             active_provider: active_provider.into(),
-            active_model: active_model.into(),
             tier_overrides: default_provider_tiers(),
         }
     }
@@ -52,32 +52,6 @@ impl ProviderTierResolver {
             self.tier_overrides.insert(*tier, value.clone());
         }
         self
-    }
-
-    pub fn resolve(&self, tier: ProviderTier) -> WorkflowResult<ResolvedProviderTier> {
-        let target = self
-            .tier_overrides
-            .get(&tier)
-            .map(String::as_str)
-            .unwrap_or("auto");
-        let provider_id = if target == "auto" {
-            self.active_provider.as_str()
-        } else {
-            target
-        };
-        let family = classify_provider(provider_id)?;
-        Ok(ResolvedProviderTier {
-            tier,
-            provider_family: family,
-            provider_id: provider_id.to_string(),
-            model: self.active_model.clone(),
-            local: matches!(
-                family,
-                ProviderFamily::Ollama | ProviderFamily::LmStudio | ProviderFamily::Local
-            ),
-            data_flow: fallback_data_flow(family).to_string(),
-            features: fallback_features(family),
-        })
     }
 
     pub fn resolve_with_registry(
@@ -112,7 +86,11 @@ impl ProviderTierResolver {
         let provider_id = provider.name().to_string();
         Ok(ResolvedProviderTier {
             tier,
-            provider_family: classify_provider(&provider_id)?,
+            provider_family: match flow {
+                DataFlowClassification::Local => ProviderFamily::Local,
+                DataFlowClassification::UserOperated => ProviderFamily::UserOperated,
+                DataFlowClassification::Cloud => ProviderFamily::Cloud,
+            },
             provider_id,
             model: request.model,
             local: flow == DataFlowClassification::Local,
@@ -120,30 +98,6 @@ impl ProviderTierResolver {
             features: supported_features(provider),
         })
     }
-}
-
-pub fn classify_provider(provider: &str) -> WorkflowResult<ProviderFamily> {
-    let lower = provider.to_ascii_lowercase();
-    let family = if lower.contains("openai-codex") || lower == "codex" {
-        ProviderFamily::OpenAiCodex
-    } else if lower.contains("anthropic") || lower.contains("claude") {
-        ProviderFamily::Anthropic
-    } else if lower.contains("deepseek") {
-        ProviderFamily::DeepSeek
-    } else if lower.contains("gemini") || lower.contains("google") {
-        ProviderFamily::Gemini
-    } else if lower.contains("ollama") {
-        ProviderFamily::Ollama
-    } else if lower.contains("lmstudio") || lower.contains("lm-studio") {
-        ProviderFamily::LmStudio
-    } else if lower.contains("openai") {
-        ProviderFamily::OpenAi
-    } else if lower.contains("local") {
-        ProviderFamily::Local
-    } else {
-        return Err(WorkflowError::ProviderTierUnresolved(provider.to_string()));
-    };
-    Ok(family)
 }
 
 fn enforce_tier_requirements(
@@ -195,19 +149,4 @@ fn data_flow_label(flow: DataFlowClassification) -> &'static str {
         DataFlowClassification::UserOperated => "user_operated",
         DataFlowClassification::Cloud => "cloud",
     }
-}
-
-fn fallback_data_flow(family: ProviderFamily) -> &'static str {
-    match family {
-        ProviderFamily::Ollama | ProviderFamily::LmStudio | ProviderFamily::Local => "local",
-        _ => "cloud",
-    }
-}
-
-fn fallback_features(family: ProviderFamily) -> Vec<String> {
-    let mut features = vec!["tool_use".to_string(), "streaming".to_string()];
-    if !matches!(family, ProviderFamily::Ollama | ProviderFamily::LmStudio) {
-        features.push("vision".to_string());
-    }
-    features
 }

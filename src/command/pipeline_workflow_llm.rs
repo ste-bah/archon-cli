@@ -31,6 +31,7 @@ use crate::command::pipeline_support::build_subagent_pipeline_adapter_with_polic
 /// Presents an `archon-pipeline` client through the workflow port.
 pub(crate) struct PipelineWorkflowLlmClient {
     inner: Arc<dyn LlmClient>,
+    role_models: std::collections::BTreeMap<String, String>,
     /// The digest of the request settings `inner` was built with, when known.
     request_identity: Option<String>,
     audit_provenance: Option<serde_json::Value>,
@@ -43,6 +44,7 @@ impl PipelineWorkflowLlmClient {
     pub(crate) fn new(inner: Arc<dyn LlmClient>) -> Self {
         Self {
             inner,
+            role_models: Default::default(),
             request_identity: None,
             audit_policy: None,
             audit_provenance: None,
@@ -86,6 +88,7 @@ impl PipelineWorkflowLlmClient {
         };
         Arc::new(Self {
             inner,
+            role_models: config.llm.role_models.clone(),
             request_identity,
             audit_min_progress_secs: resolved.min_progress_secs.get(),
             audit_provenance: Some(
@@ -122,6 +125,10 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
 
     fn provider_id(&self) -> Option<String> {
         self.inner.provider_id()
+    }
+
+    fn model_for_role(&self, role: &str, default: &str) -> String {
+        archon_core::config::model_policy::role_model(&self.role_models, role, default)
     }
 
     fn resolve_model_alias(&self, model: &str) -> String {

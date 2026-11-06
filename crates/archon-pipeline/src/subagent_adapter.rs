@@ -345,6 +345,9 @@ impl LlmClient for SubagentPipelineClient {
             .extend(archon_tools::read_boundary::current());
         Some(archon_tools::path_guard_probe::probe_read_access(path, &context).map(|_| ()))
     }
+    fn estimate_cost_usd(&self, model: &str, input: u64, output: u64) -> Option<f64> {
+        self.fallback.estimate_cost_usd(model, input, output)
+    }
     fn resolve_model_alias(&self, model: &str) -> String {
         self.fallback.resolve_model_alias(model)
     }
@@ -387,12 +390,12 @@ impl LlmClient for SubagentPipelineClient {
             .send_message_with_progress(messages, system, tools, model, temperature, progress)
             .await
     }
-
-    async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn run_agent(&self, mut request: AgentExecutionRequest) -> Result<LlmResponse> {
+        request.agent.model = self.fallback.resolve_model_alias(&request.agent.model);
         self.execute_session(request, false).await
     }
-
-    async fn continue_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn continue_agent(&self, mut request: AgentExecutionRequest) -> Result<LlmResponse> {
+        request.agent.model = self.fallback.resolve_model_alias(&request.agent.model);
         self.execute_session(request, true).await
     }
 }
@@ -469,29 +472,9 @@ fn workflow_provider_env_policy(request: &AgentExecutionRequest) -> Option<Provi
         .find_map(provider_env_policy_from_marker)
 }
 
-fn values_to_text(values: &[serde_json::Value]) -> String {
-    values
-        .iter()
-        .map(value_to_text)
-        .filter(|text| !text.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-fn value_to_text(value: &serde_json::Value) -> String {
-    if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
-        return text.to_string();
-    }
-    if let Some(content) = value.get("content") {
-        if let Some(text) = content.as_str() {
-            return text.to_string();
-        }
-        if let Some(parts) = content.as_array() {
-            return values_to_text(parts);
-        }
-    }
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
-}
+#[path = "subagent_adapter_text.rs"]
+mod text;
+use text::{value_to_text, values_to_text};
 
 #[cfg(test)]
 #[path = "subagent_adapter_tests.rs"]

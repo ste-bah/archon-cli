@@ -1810,3 +1810,19 @@ exclude = ["TodoWrite"]
 # string, so a looping Write cannot ride its whole payload into the next
 # request and two payloads sharing a prefix are still two different calls.
 arguments_preview_chars = 500
+
+# Optional provider-neutral role and tier choices (aliases resolve at the provider).
+# [llm.role_models]
+# judge = "opus"
+# reauthor = "haiku"
+# [llm.tier_aliases]
+# sonnet = "opus"
+# Environment bindings may be supplied for any configured provider id:
+# [llm.provider_environment.private-service]
+# base_url = "https://service.example/v1"
+# base_url_env = "PRIVATE_SERVICE_URL"
+# api_key_env = "PRIVATE_SERVICE_KEY"
+# credential_env = ["PRIVATE_SERVICE_TOKEN"]
+# Optional exact resolved-model prices in USD per million input/output tokens:
+# [llm.model_prices]
+# "configured-model-id" = [2.0, 4.0]
