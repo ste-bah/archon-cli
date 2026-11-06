@@ -165,6 +165,7 @@ async function authorCandidate(w, policy) {
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
+  let bodyCandidate = null; // Issue 601: retained only within this author/land episode.
   let lastFindings = feedback.slice();
   // Issue 551: the findings open in the latest gate result. Earlier findings
   // stay in `history`, shown as ones not to regress, never as current.
@@ -195,6 +196,7 @@ async function authorCandidate(w, policy) {
         return { pendingAuthor: true, pendingRung: repairRung, findings: lastFindings.slice() };
       }
       // A host fault is not an authored finding and cannot be repaired here.
+      bodyCandidate = null;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
       continue;
     }
@@ -227,10 +229,11 @@ async function authorCandidate(w, policy) {
       : repairRung === 3 ? "\nReturn a complete replacement. Work through the findings in smaller groups while preserving every finding from this and earlier attempts."
       : policy.author ? "\nReturn a complete replacement of this entry that repairs only the findings listed below for this entry."
       : "\nThis subject is deferred while independent subjects settle. Return a complete replacement when re-entered with the latest findings.";
-    const midpoint = Math.ceil(feedback.length / 2);
-    const groupFeedback = repairRung === 3 && feedback.length > 1
-      ? (nextCall % 2 === 1 ? feedback.slice(0, midpoint) : feedback.slice(midpoint))
-      : feedback;
+    const grouping = bodyCandidate ? bodyCandidate.findings.map(findingText) : feedback;
+    const midpoint = Math.ceil(grouping.length / 2);
+    const groupFeedback = repairRung === 3 && grouping.length > 1
+      ? (nextCall % 2 === 1 ? grouping.slice(0, midpoint) : grouping.slice(midpoint))
+      : grouping;
     // #555: the part of an entry prompt every entry shares names no finding:
     // each entry reads only its own, and the phase-level ones, in its own
     // section (authorOne). The round's findings, its history and its groups
@@ -242,7 +245,9 @@ async function authorCandidate(w, policy) {
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
         const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${rungInstruction}${operation}${group}`, attempt + 1, promptFeedback, policy.author ? [] : history);
+        const bodyRepair = bodyRepairContext(policy, repairRung, bodyCandidate);
+        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${bodyRepair ? bodyRepair.text : rungInstruction}${operation}${group}`, attempt + 1,
+          bodyRepair ? [...new Set([...bodyRepair.feedback, ...(policy.initialFeedback || [])])] : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history);
         // Context writes are not journaled. Reserve no ordinal until the
         // complete prompt is ready, so recovery and replay dispatch identically.
         const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
@@ -263,6 +268,10 @@ async function authorCandidate(w, policy) {
         }
       }
     } catch (error) {
+      if (error?.retainedBodyContext === true && typeof w.checkpoint === "function") {
+        const message = `retained body candidate context failed for ${policy.phase}: ${error.message}`;
+        await w.checkpoint(`${policy.phase}-context-failed-${nextCall}`, { task: message });
+      }
       if (!error || error.authorContext !== true) throw error;
       authorState.roundCalls = 0;
       authorState.roundAnswered = 0;
@@ -394,6 +403,10 @@ async function authorCandidate(w, policy) {
       routed.fatalFindings = routed.fatalFindings.filter((finding) => !owned.has(finding));
       routed.retry.push(...ownedText);
       routed.retryFindings.push(...ownedFatal);
+    }
+    if (policy.capability === "land-task-body") {
+      bodyCandidate = retainBodyCandidate(bodyCandidate, policy, authored.content, routed.retryFindings,
+        [...history, { attempt: attempt + 1, findings: routed.retry.slice() }]);
     }
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));

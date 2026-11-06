@@ -47,3 +47,38 @@ function bodyPolicy(subject, initialFeedback) {
   };
 }
 
+// Issue 601: the caller owns this candidate for exactly one author/land loop.
+function retainBodyCandidate(prior, policy, body, findings, history = []) {
+  findings = [...new Map(findings.filter(f => ["body", "candidate_artifact"].includes(f.remediation_scope)
+    || authoredSourceMatches(f.source_path, policy.target.fileName)).map(f => [findingKey(f), f])).values()];
+  if (findings.length === 0) return prior;
+  const measure = { ...attemptMeasure(findings), count: findings.length };
+  if (prior && isBetter(prior.measure, measure)) return prior;
+  return { body, findings, score: findings.length, measure, history: history.slice() };
+}
+
+function bodyRepairContext(policy, rung, best) {
+  if (policy.capability !== "land-task-body") return null;
+  if (!best || best.findings.length === 0) return null;
+  if (rung === 4) return {
+    text: `\nRe-author a complete replacement from fresh context. Keep the subject contract. Previously seen defects:\n- ${best.findings.map(findingText).join("\n- ")}`,
+    feedback: [], history: best.history
+  };
+  const instruction = "Correct the retained candidate below. Change only what its findings require and keep every other line exactly. Return the complete corrected file, never a patch.";
+  const details = JSON.stringify({ findings: best.findings, blocking_findings: best.score });
+  let reference;
+  try {
+    const body = best.body;
+    const path = utf8Bytes(body) > 16384 ? contextFile("txt", body).path : null;
+    reference = path
+      ? `Read the retained candidate as raw text at ${path} (host-written body context for this call: read it by its exact path, even under an excluded directory).`
+      : `Retained candidate (raw text):\n${body}\nEnd retained candidate.`;
+    reference += utf8Bytes(details) > 16384
+      ? `\nRead exact gate findings (JSON) at ${contextFile("json", details).path} (host-written context: read this exact path).`
+      : `\nExact gate findings (JSON):\n${details}`;
+  } catch (error) {
+    error.retainedBodyContext = true;
+    throw error;
+  }
+  return { text: `\n${instruction}\n${reference}`, feedback: best.findings.map(findingText), history: best.history };
+}
