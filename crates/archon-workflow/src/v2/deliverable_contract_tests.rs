@@ -6,64 +6,178 @@
 use super::{ContractRoots, resolve_contract_path, typed_verification_command};
 
 #[test]
-fn shell_verifiers_are_concrete_commands_unless_the_whole_value_is_a_template() {
+fn shell_template_domain_table() {
     let roots = ContractRoots::project_only("/project".to_string());
-    for command in [
-        "echo ${X}",
-        "$HOME/bin/run",
-        "${X:-d}",
-        "${X:-${Y:-d}}",
-        "python3 - <<'PY'\nassert 1 == 1\nPY",
-        "cmd < in 2>/dev/null",
-        "test -s \"$HOME/x\"",
-        "test -s \"${VAR:-d}\"",
-        "test \"${N}\" -gt 0",
-        "test \"$(cmd)\" = expected",
-        "test \"$VAR\" = expected",
-    ] {
-        let contract = serde_json::json!({
-            "artifact_path": "out.json", "typed_verifier_command": command,
-        });
-        assert!(super::contract_defects(&contract).is_empty(), "{command}");
-        assert_eq!(
-            typed_verification_command(&roots, &contract).as_deref(),
-            Some(command)
-        );
-    }
-    for command in [
-        "<optional: x>",
-        "  <optional: x>  ",
-        "${UNREPLACED}",
-        "${X}${Y}",
-        "$X",
-        "\"${X}\"",
-        "${1}",
-        "${X:-}",
-        "${X:-${Y}}",
-        "${X:-\"\"}",
-        "${#X}",
-        "${X%pattern}",
-        "'$X'",
-        "${X} \"$Y\"",
-        "  ${NAME_1}  ",
-        "  ",
-    ] {
+    // Every outcome is exact, including the validator-owned refusal text.
+    let rows = [
+        ("${X}", true),
+        (" ${X} ", true),
+        ("$X", true),
+        ("\"${X}\"", true),
+        ("${1}", true),
+        ("${X:-}", true),
+        ("${X}${Y}", true),
+        ("$X && $Y", true),
+        ("$X; $Y", true),
+        ("$X | $Y", true),
+        ("VAR=1 $CMD", true),
+        ("VAR=1", true),
+        ("${X:+d}", true),
+        ("${X+d}", true),
+        ("`$X`", true),
+        ("$($X)", true),
+        ("<cmd>", true),
+        ("$X $Y", true),
+        ("${X:-d}", false),
+        ("echo ${X}", false),
+        ("$HOME/bin/run", false),
+        ("$PYTHON -m pytest", false),
+        ("${CARGO:-cargo} test", false),
+        ("\"$BIN\" --check", false),
+        ("$CMD --flag", false),
+        ("VAR=1 $CMD --flag", false),
+        ("$(which jq) .", false),
+        ("${X}/run.sh", false),
+        ("test -f \"$F\"", false),
+        // Recursive defaults, remaining list separators, quotes and assignments.
+        ("${X-d}", false),
+        ("${X-}", true),
+        ("${X:-${Y:-d}}", false),
+        ("${X:-${Y}}", true),
+        ("${X:-\"\"}", true),
+        ("$X || $Y", true),
+        ("$X & $Y", true),
+        ("$X\n$Y", true),
+        ("VAR=1 OTHER=2 $X $Y", true),
+        ("$X; echo ok", false),
+        ("$(echo '$X; $Y')", false),
+        ("'$X'", true),
+        ("${#X}", false),
+        ("${X%pattern}", false),
+        ("${X:=d}", false),
+        ("${X?error}", false),
+        ("<optional: x>", true),
+        ("  <optional: x>  ", true),
+        ("  ${NAME_1}  ", true),
+        ("${X} \"$Y\"", true),
+        ("python3 - <<'PY'\nassert 1 == 1\nPY", false),
+        ("cmd < in 2>/dev/null", false),
+        ("test -s \"$HOME/x\"", false),
+        ("test -s \"${VAR:-d}\"", false),
+        ("test \"${N}\" -gt 0", false),
+        ("test \"$(cmd)\" = expected", false),
+        ("test \"$VAR\" = expected", false),
+    ];
+    for (command, refused) in rows {
         let contract = serde_json::json!({
             "artifact_path": "out.json", "typed_verifier_command": command,
         });
         let defects = super::contract_defects(&contract);
-        assert!(!defects.is_empty(), "{command}");
-        assert!(
-            defects
-                .iter()
-                .all(|defect| !defect.message.contains("omit")),
+        let expected: Vec<_> = if refused {
+            vec![crate::defect::ValidationDefect::new(
+                "unexpanded_contract_field",
+                "contract",
+                "typed_verifier_command",
+                "deliverable contract typed_verifier_command is a whole-value placeholder or a command list containing only leading assignments and empty-able words; supply a concrete command",
+            )]
+        } else {
+            vec![]
+        };
+        assert_eq!(defects, expected, "{command}");
+        assert_eq!(
+            typed_verification_command(&roots, &contract).as_deref(),
+            (!refused).then_some(command.trim()),
             "{command}"
         );
-        assert!(typed_verification_command(&roots, &contract).is_none());
-        let (passed, output) = run_verifier(&super::verification_command(&roots, &contract));
-        assert!(!passed, "{command}: {output}");
-        assert!(output.contains(&defects[0].message), "{command}: {output}");
+        if refused {
+            let (passed, output) = run_verifier(&super::verification_command(&roots, &contract));
+            assert!(!passed, "{command}: {output}");
+            assert!(output.contains(&expected[0].message), "{command}: {output}");
+        }
     }
+}
+
+#[test]
+fn blank_field_advice_respects_required_fields_and_execution_obligations() {
+    for (field, extra, omit) in [
+        ("kind", serde_json::json!({"min_instances": 1}), false),
+        (
+            "artifact_path",
+            serde_json::json!({"min_instances": 1}),
+            false,
+        ),
+        ("data_kind", serde_json::json!({}), true),
+        ("registry_status_field", serde_json::json!({}), true),
+        ("typed_verifier_command", serde_json::json!({}), false),
+        (
+            "typed_verifier_command",
+            serde_json::json!({"min_instances": 1}),
+            true,
+        ),
+        (
+            "instance_artifact_field",
+            serde_json::json!({"instance_source_path": "records.json", "instance_source_records_field": "records"}),
+            false,
+        ),
+        (
+            "instance_artifact_field",
+            serde_json::json!({"min_instances": 1}),
+            true,
+        ),
+        (
+            "instance_source_path",
+            serde_json::json!({"instance_artifact_field": "path", "instance_source_records_field": "records"}),
+            false,
+        ),
+        (
+            "instance_source_path",
+            serde_json::json!({"instance_artifact_field": "path", "instance_source_records_field": "records", "registry_path": "records.json"}),
+            true,
+        ),
+        (
+            "registry_path",
+            serde_json::json!({"instance_artifact_field": "path", "registry_records_field": "records"}),
+            false,
+        ),
+        (
+            "instance_source_records_field",
+            serde_json::json!({"instance_artifact_field": "path", "instance_source_path": "records.json"}),
+            false,
+        ),
+        (
+            "registry_records_field",
+            serde_json::json!({"instance_artifact_field": "path", "registry_path": "records.json"}),
+            false,
+        ),
+    ] {
+        let mut contract = serde_json::json!({"kind": "result", "artifact_path": "out.json"});
+        contract
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        contract[field] = serde_json::json!(" ");
+        let defects = super::contract_defects(&contract);
+        let defect = defects
+            .iter()
+            .find(|d| d.identity.location == field)
+            .unwrap();
+        assert_eq!(
+            defect.message,
+            format!(
+                "deliverable contract {field} is blank; supply a concrete value{}",
+                if omit {
+                    " or omit the optional field"
+                } else {
+                    ""
+                }
+            ),
+            "{field}: {contract}"
+        );
+    }
+}
+
+#[test]
+fn non_command_fields_still_refuse_shell_templates() {
     for field in [
         "instance_artifact_field",
         "instance_source_records_field",
