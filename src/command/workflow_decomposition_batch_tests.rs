@@ -212,8 +212,7 @@ impl WorkflowLlmClient for PoolLlm {
             ("AC-X-002", Some((store, run_id))) => {
                 self.wait_for("end", &["AC-X-001", "AC-X-003", "AC-X-004"])
                     .await;
-                self.wait_for("start", &["AC-X-005", "AC-X-006"])
-                    .await;
+                self.wait_for("start", &["AC-X-005", "AC-X-006"]).await;
                 archon_workflow::LifecycleController::new(store.clone())
                     .apply(run_id, archon_workflow::LifecycleAction::Pause)
                     .expect("pause the run mid-pool");
