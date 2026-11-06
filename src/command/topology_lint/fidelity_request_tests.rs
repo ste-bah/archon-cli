@@ -152,11 +152,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // #587: named Skeleton findings also reach their body author after re-freeze.
     // #593: a shape refusal no longer stops the acceptance author window.
     // #599: deliverable contract rule in the skeleton prompt.
-    // Issue 601: body repair retains the best actionable candidate within one author episode.
+    // Issue 601: body repair retains the best actionable candidate within one author episode; authors no longer write observations.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "b2a26a4e2bffcfbecd2212e61866514bbef74671156a6422ae9f2733809f6a66"
+        "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711"
     );
 }
