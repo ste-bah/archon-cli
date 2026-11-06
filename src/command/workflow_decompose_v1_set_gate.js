@@ -312,12 +312,16 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
   chain.outcome = outcome;
   chain.subjects = outcome.subjects;
   const next = SKELETON_TASKS.get(outcome);
-  const grouped = new Map(groupFindingsBySubject([...bodyFindings, ...findings], chain.subjects));
+  // Inferred body omissions may still help a body author after skeleton repair.
+  // Deterministic skeleton defects describe frozen fields only their owner can fix.
+  const bodyContext = [...bodyFindings, ...findings.filter(finding => !finding.deterministic_defect)];
+  const grouped = new Map(groupFindingsBySubject(bodyContext, chain.subjects));
+  const skeletonSubjects = new Set(groupFindingsBySubject(findings, chain.subjects).map(([file]) => file));
   const onDisk = frozenChain().bodies;
   const dependencies = changedDependencySubjects(prior, next);
   const reached = (subject) => dependencies.has(subject.taskId) || !prior || !next
     || !(bodies.has(subject.fileName) || onDisk.has(subject.fileName))
-    || grouped.has(subject.fileName) || !prior.has(subject.taskId)
+    || grouped.has(subject.fileName) || skeletonSubjects.has(subject.fileName) || !prior.has(subject.taskId)
     || prior.get(subject.taskId) !== next.get(subject.taskId);
   const note = BODY_FROZEN_RULE;
   await authorBodies(w, chain.subjects.filter(reached).map((subject) => [

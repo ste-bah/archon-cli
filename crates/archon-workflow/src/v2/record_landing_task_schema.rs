@@ -20,11 +20,7 @@ pub fn task_schema() -> Value {
         blocks: vec![String::new()],
         implements: vec![String::new()],
         source_sections: vec![String::new()],
-        deliverable_contracts: vec![WorkflowV2DeliverableContract {
-            instance_source_records_field: Some(String::new()),
-            registry_records_field: Some(String::new()),
-            ..Default::default()
-        }],
+        deliverable_contracts: vec![contract_sample()],
     };
     let mut schema = shape(&serde_json::to_value(sample).expect("FrozenTask serializes"));
     schema["required"] = json!(["task_id", "file_name"]);
@@ -52,6 +48,16 @@ pub fn task_schema() -> Value {
     for field in ["kind", "artifact_path"] {
         contract["properties"][field]["minLength"] = json!(1);
     }
+    // Map samples carry one value so their accepted value type survives shaping.
+    for field in [
+        "minimum_count_fields",
+        "registry_identity_fields",
+        "response_identity_fields",
+    ] {
+        let map = &mut contract["properties"][field];
+        let value = map["properties"][""].take();
+        *map = json!({"type":"object", "additionalProperties":value});
+    }
     schema
 }
 
@@ -73,4 +79,58 @@ pub(super) fn task_clause() -> String {
         "task (skeleton records only): {}; implements and/or deliverable_contracts must be non-empty, ",
         task_schema()
     )
+}
+
+// Exhaustive construction makes new accepted fields a compile-time hint update.
+fn contract_sample() -> WorkflowV2DeliverableContract {
+    WorkflowV2DeliverableContract {
+        kind: String::new(),
+        artifact_path: String::new(),
+        typed_verifier_command: Some(String::new()),
+        registry_path: Some(String::new()),
+        instance_source_path: Some(String::new()),
+        instance_source_records_field: Some(String::new()),
+        instance_artifact_field: Some(String::new()),
+        min_instances: 0,
+        required_universe: false,
+        data_kind: Some(String::new()),
+        universe_fields: vec![String::new()],
+        cells_field: Some(String::new()),
+        cell_identity_fields: vec![String::new()],
+        required_true_fields: vec![String::new()],
+        required_nonempty_fields: vec![String::new()],
+        positive_count_fields: vec![String::new()],
+        minimum_count_fields: [(String::new(), 0)].into(),
+        gaps_field: Some(String::new()),
+        registry_records_field: Some(String::new()),
+        registry_key_fields: vec![String::new()],
+        registry_required_true_fields: vec![String::new()],
+        registry_status_field: Some(String::new()),
+        registry_allowed_statuses: vec![String::new()],
+        registry_count_field: Some(String::new()),
+        registry_minimum_count: 0,
+        registry_identity_fields: [(String::new(), String::new())].into(),
+        payload_path_field: Some(String::new()),
+        payload_format: Some(String::new()),
+        required_fields: vec![String::new()],
+        non_constant_fields: vec![String::new()],
+        artifact_format: Some(String::new()),
+        observed_time_field: Some(String::new()),
+        closed_weekdays: Some(vec![0]),
+        closed_dates: vec![String::new()],
+        step_variety_min_rows: Some(0),
+        step_variety_min_percent: Some(0),
+        series_value_fields: vec![String::new()],
+        series_overlap_min_rows: 0,
+        request_path_field: Some(String::new()),
+        requested_count_field: Some(String::new()),
+        response_path_field: Some(String::new()),
+        response_identity_fields: [(String::new(), String::new())].into(),
+        validation_path_field: Some(String::new()),
+        validation_status_field: Some(String::new()),
+        validation_checks_field: Some(String::new()),
+        validation_check_status_field: Some(String::new()),
+        validation_failed_values: vec![String::new()],
+        validation_passed_values: vec![String::new()],
+    }
 }

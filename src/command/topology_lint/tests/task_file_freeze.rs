@@ -399,7 +399,7 @@ fn task_file_lint_blocks_the_same_weak_verifier_as_the_runtime_gate() {
     let findings = blocking_findings(temp.path(), &LintSource::TaskFile(task));
     assert!(
         findings.iter().any(|finding| {
-            finding.contains("only tests whether its own artifact_path")
+            finding.contains("only tests whether its own artifact")
                 && finding.contains("replace")
                 && finding.contains("deleting the verifier does not satisfy this contract")
         }),

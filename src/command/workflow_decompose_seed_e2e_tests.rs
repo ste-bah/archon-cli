@@ -272,7 +272,7 @@ impl Run {
     }
     fn args(&self) -> serde_json::Value {
         let root = self.temp.path();
-        serde_json::json!({"projectRoot": root, "repositoryRoot": root, "prdPath": root.join("PRD.md"), "prdDigest": "a".repeat(64),
+        serde_json::json!({"deliverableContractRule": archon_workflow::task_universe_contract_audit::DELIVERABLE_CONTRACT_RULE, "projectRoot": root, "repositoryRoot": root, "prdPath": root.join("PRD.md"), "prdDigest": "a".repeat(64),
             "acceptanceCriteria": {"AC-1": "one", "AC-2": "two", "AC-3": "three"}, "taskRoot": root.join("tasks"), "gateMode": "enforce"})
     }
     async fn run(

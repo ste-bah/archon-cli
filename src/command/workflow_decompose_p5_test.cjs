@@ -126,3 +126,11 @@ test('M2_P5_28_stale_resume_seed_does_not_drop_later_reopen_candidate', async ()
     assert.ok(reopened.task.includes('Keep every frozen task_id and file_name.'));
   }
 });
+
+test('contract rule comes from the host and missing policy is explicit', () => {
+  const ctx = context();
+  ctx.args.deliverableContractRule = 'host contract policy';
+  assert.ok(ctx.skeletonPolicy([]).prompt().includes('host contract policy'));
+  delete ctx.args.deliverableContractRule;
+  assert.throws(() => ctx.skeletonPolicy([]).prompt(), /host did not supply deliverableContractRule/);
+});

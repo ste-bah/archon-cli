@@ -127,8 +127,17 @@ pub(super) fn gate_findings(
         .into_iter()
         .map(|defect| {
             let named = finding_subject(&defect.message, subject);
-            GateFinding::new(gate_id, defect.message, named, path.clone(), scope)
-                .with_defect(defect.identity)
+            let mut finding = GateFinding::new(gate_id, defect.message, named, path.clone(), scope)
+                .with_defect(defect.identity);
+            let root = path.as_deref().and_then(|path| {
+                if scope == archon_workflow::RemediationScope::Body {
+                    path.parent()
+                } else {
+                    Some(path)
+                }
+            });
+            super::finding_scope::route(&mut finding, root);
+            finding
         })
         .collect()
 }

@@ -52,7 +52,11 @@ pub(crate) fn canonical_resume_metadata(
     if comparable["script_args"].get("prdObligationIds").is_none() {
         enriched.as_object_mut().unwrap().remove("prdObligationIds");
     }
-    for key in ["prdConstraintTexts", "prdSections"] {
+    for key in [
+        "prdConstraintTexts",
+        "prdSections",
+        "deliverableContractRule",
+    ] {
         if comparable["script_args"].get(key).is_none() {
             enriched.as_object_mut().unwrap().remove(key);
         }

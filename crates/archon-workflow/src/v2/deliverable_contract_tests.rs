@@ -5,6 +5,48 @@
 
 use super::{ContractRoots, resolve_contract_path, typed_verification_command};
 
+#[test]
+fn shell_verifiers_are_concrete_commands_unless_the_whole_value_is_a_template() {
+    let roots = ContractRoots::project_only("/project".to_string());
+    for command in [
+        "python3 - <<'PY'\nassert 1 == 1\nPY",
+        "cmd < in 2>/dev/null",
+        "test \"${N}\" -gt 0",
+        "test \"$(cmd)\" = expected",
+        "test \"$VAR\" = expected",
+    ] {
+        let contract = serde_json::json!({
+            "artifact_path": "out.json", "typed_verifier_command": command,
+        });
+        assert!(super::contract_defects(&contract).is_empty(), "{command}");
+        assert_eq!(
+            typed_verification_command(&roots, &contract).as_deref(),
+            Some(command)
+        );
+    }
+    for command in ["<optional: x>", "  <optional: x>  ", "  "] {
+        let contract = serde_json::json!({
+            "artifact_path": "out.json", "typed_verifier_command": command,
+        });
+        assert!(!super::contract_defects(&contract).is_empty(), "{command}");
+        assert!(typed_verification_command(&roots, &contract).is_none());
+    }
+    for field in [
+        "instance_artifact_field",
+        "instance_source_records_field",
+        "registry_records_field",
+        "kind",
+    ] {
+        let mut contract = serde_json::json!({"artifact_path": "out.json"});
+        contract[field] = serde_json::json!("${X}");
+        assert!(
+            super::contract_defects(&contract)
+                .iter()
+                .any(|defect| defect.identity.location == field)
+        );
+    }
+}
+
 struct Roots {
     project: tempfile::TempDir,
     repository: tempfile::TempDir,

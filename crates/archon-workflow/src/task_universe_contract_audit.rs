@@ -97,39 +97,18 @@ pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding
             });
         }
         for (index, contract) in task.deliverable_contracts.iter().enumerate() {
-            let value = match serde_json::to_value(contract) {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
             let before = findings.len();
-            for mut defect in crate::v2::deliverable_contract::contract_defects(&value) {
-                defect.identity.subject =
-                    crate::task_skeleton::skeleton_subject(&task.canonical_task_id, task_slot);
-                defect.identity.location =
-                    format!("deliverable_contracts/{index}/{}", defect.identity.location);
+            for defect in contract_defects(
+                &crate::task_skeleton::skeleton_subject(&task.canonical_task_id, task_slot),
+                index,
+                contract,
+            ) {
                 findings.push(ContractFinding {
                     identity: Some(defect.identity),
                     kind: ContractFindingKind::Unsatisfiable,
                     task_id: task.canonical_task_id.clone(),
                     artifact_path: contract.artifact_path.clone(),
                     message: defect.message,
-                });
-            }
-            if let Some(defect) = crate::verifier_strength::verifier_strength_defect(
-                contract.typed_verifier_command.as_deref(),
-                Some(&contract.artifact_path),
-                Some(contract),
-            ) {
-                findings.push(ContractFinding {
-                    identity: Some(crate::defect::DeterministicDefect::new(
-                        "invalid_verifier",
-                        crate::task_skeleton::skeleton_subject(&task.canonical_task_id, task_slot),
-                        format!("deliverable_contracts/{index}/typed_verifier_command"),
-                    )),
-                    kind: ContractFindingKind::Unsatisfiable,
-                    task_id: task.canonical_task_id.clone(),
-                    artifact_path: contract.artifact_path.clone(),
-                    message: defect.to_string(),
                 });
             }
             // Every certain defect is reported; the heuristic is not added to
@@ -155,6 +134,69 @@ pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding
         }
     }
     findings
+}
+
+/// The same per-contract refusal at skeleton freeze and body gates.
+pub fn contract_defects(
+    subject: &str,
+    index: usize,
+    contract: &crate::task_universe::WorkflowV2DeliverableContract,
+) -> Vec<crate::defect::ValidationDefect> {
+    let value = serde_json::to_value(contract).expect("serializing a typed deliverable contract");
+    let mut defects = crate::v2::deliverable_contract::contract_defects(&value);
+    for defect in &mut defects {
+        defect.message = format!(
+            "{}; at deliverable_contracts/{index}/{} for subject {subject}",
+            defect.message, defect.identity.location
+        );
+        defect.identity.subject = subject.into();
+        defect.identity.location =
+            format!("deliverable_contracts/{index}/{}", defect.identity.location);
+    }
+    if let Some(defect) = crate::verifier_strength::verifier_strength_defect(
+        contract.typed_verifier_command.as_deref(),
+        Some(&contract.artifact_path),
+        Some(contract),
+    ) {
+        defects.push(crate::defect::ValidationDefect::new(
+            "invalid_verifier",
+            subject,
+            &format!("deliverable_contracts/{index}/typed_verifier_command"),
+            format!(
+                "{defect}; {}; at deliverable_contracts/{index} for subject {subject}",
+                contract_remedy(&defect, contract)
+            ),
+        ));
+    }
+    defects
+}
+
+/// Authoring policy supplied by the host alongside the input context.
+pub const DELIVERABLE_CONTRACT_RULE: &str = "Each deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path. Optional string fields must be concrete and nonblank; omit unused fields. A present verifier must be falsifiable even with a floor or binding.";
+
+/// Field grouping shared with the authoring prompt (checked in tests).
+pub const INSTANCE_SOURCE_FIELDS: &str = "instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field";
+
+fn contract_remedy(
+    defect: &crate::verifier_strength::VerifierStrengthDefect,
+    contract: &crate::task_universe::WorkflowV2DeliverableContract,
+) -> String {
+    use crate::verifier_strength::{VerifierStrengthDefect, has_positive_instance_obligation};
+    if matches!(defect, VerifierStrengthDefect::MissingExecutionObligation) {
+        return format!(
+            "set min_instances >= 1 (preferred for one concrete artifact path), add a falsifiable typed_verifier_command, or bind an instance source ({INSTANCE_SOURCE_FIELDS})"
+        );
+    }
+    let replacement = "replace the verifier with a command that can exit non-zero when the declared outcome is false";
+    if has_positive_instance_obligation(contract) {
+        format!(
+            "{replacement}, or remove it when min_instances >= 1 or a complete instance-source binding already gives the execution obligation"
+        )
+    } else {
+        format!(
+            "{replacement}; deleting the verifier does not satisfy this contract without min_instances >= 1 or a complete instance-source binding ({INSTANCE_SOURCE_FIELDS})"
+        )
+    }
 }
 
 /// The fixed prefix of a templated path — everything before the first token.

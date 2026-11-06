@@ -96,6 +96,12 @@ pub async fn scope<T>(
 pub fn current() -> Option<Arc<RecordLanding>> {
     RECORDS.try_with(Clone::clone).ok()
 }
+#[derive(Clone, Copy)]
+pub(super) enum Admission {
+    NewLanding,
+    Persisted,
+}
+
 impl RecordLanding {
     /// `subjects_are_tasks` says whether each subject is a canonical task id (map calls) or an opaque call id (reduce calls); it decides whether the subject may stand in for a finding's task.
     pub fn open(
@@ -136,7 +142,7 @@ impl RecordLanding {
             RecordKind::Skeleton => "land-skeleton-record",
         }
     }
-    fn validate(&self, r: &StageRecord) -> WorkflowResult<()> {
+    fn validate(&self, r: &StageRecord, admission: Admission) -> WorkflowResult<()> {
         if r.subject.trim().is_empty() || r.subject.len() > 4096 {
             return Err(invalid("record subject is missing or too long"));
         }
@@ -144,46 +150,7 @@ impl RecordLanding {
             return Err(invalid("record subject is outside this call"));
         }
         if self.kind == RecordKind::Skeleton {
-            let task = r
-                .task
-                .as_ref()
-                .ok_or_else(|| invalid("skeleton record requires task"))?;
-            if task.task_id != r.subject || task.file_name.is_empty() {
-                return Err(invalid("skeleton task identity mismatch"));
-            }
-            crate::repository_audit::contract::validate_path(&task.file_name).map_err(invalid)?;
-            let skeleton = crate::task_skeleton::TaskSkeleton {
-                schema_version: 1,
-                acceptance_digest: "pending".into(),
-                tasks: vec![task.clone()],
-            };
-            crate::task_skeleton::validate_skeleton(&skeleton, "pending").map_err(invalid)?;
-
-            // Issue-38: a live run landed 15 `{task_id,file_name}` stubs that passed here, so the host froze a skeleton with zero obligations and the judge raised 126 findings; a task naming nothing it implements or delivers is unownable.
-            if task.implements.is_empty() && task.deliverable_contracts.is_empty() {
-                return Err(invalid(
-                    "a skeleton task must name the PRD obligations it implements and/or the artifacts it delivers; a stub with neither cannot be owned or verified",
-                ));
-            }
-            // Issue-39: a blank obligation id or a contract with no kind/path passed here and was silently skipped downstream, so the task looked owned while owing nothing; name the exact hollow entry.
-            if let Some(i) = task.implements.iter().position(|id| id.trim().is_empty()) {
-                return Err(invalid(format!(
-                    "task.implements[{i}] is blank; each entry must be a PRD obligation id"
-                )));
-            }
-            for (i, contract) in task.deliverable_contracts.iter().enumerate() {
-                if contract.kind.trim().is_empty() {
-                    return Err(invalid(format!(
-                        "task.deliverable_contracts[{i}].kind is blank; each contract must name its kind"
-                    )));
-                }
-                if contract.artifact_path.trim().is_empty() {
-                    return Err(invalid(format!(
-                        "task.deliverable_contracts[{i}].artifact_path is blank; each contract must name the artifact it delivers"
-                    )));
-                }
-            }
-            return Ok(());
+            return self.validate_skeleton_record(r, admission);
         }
         if r.evidence.is_empty() || r.evidence.iter().any(|e| e.summary.trim().is_empty()) {
             return Err(invalid("record requires concrete evidence"));
@@ -255,7 +222,7 @@ impl RecordLanding {
         if record.remove {
             return self.remove_task(&record.subject);
         }
-        self.validate(&record)
+        self.validate(&record, Admission::NewLanding)
             .map_err(|e| with_schema(e, self.kind))?;
         if self.kind == RecordKind::Skeleton
             && let Some(task) = &record.task
@@ -278,7 +245,7 @@ impl RecordLanding {
         if path.exists() && self.kind != RecordKind::Skeleton && !replace {
             let previous: StageRecord =
                 serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
-            self.validate(&previous)?;
+            self.validate(&previous, Admission::Persisted)?;
             for finding in previous.findings {
                 if !record.findings.contains(&finding) {
                     record.findings.push(finding);
@@ -303,7 +270,7 @@ impl RecordLanding {
                     record.summary = format!("{}; {}", previous.summary, record.summary);
                 }
             }
-            self.validate(&record)
+            self.validate(&record, Admission::NewLanding)
                 .map_err(|e| with_schema(e, self.kind))?;
         }
         write(&path, &record)
@@ -321,7 +288,7 @@ impl RecordLanding {
             }
             let record: StageRecord =
                 serde_json::from_slice(&std::fs::read(path).map_err(invalid)?)?;
-            self.validate(&record)?;
+            self.validate(&record, Admission::Persisted)?;
             if records.insert(record.subject.clone(), record).is_some() {
                 return Err(invalid("duplicate persisted record subject"));
             }

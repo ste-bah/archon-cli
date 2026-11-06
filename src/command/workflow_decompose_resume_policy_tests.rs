@@ -140,7 +140,19 @@ fn resume_metadata_accepts_each_launch_obligation_context_shape() {
         .remove("prdConstraintTexts");
     let mut older = previous.clone();
     older.as_object_mut().unwrap().remove("prdObligationIds");
-    for launch_arguments in [&arguments, &older, &previous, &pre_sections, &enriched] {
+    let mut pre_rule = enriched.clone();
+    pre_rule
+        .as_object_mut()
+        .unwrap()
+        .remove("deliverableContractRule");
+    for launch_arguments in [
+        &arguments,
+        &older,
+        &previous,
+        &pre_sections,
+        &pre_rule,
+        &enriched,
+    ] {
         let metadata = canonical_metadata(&state.identity, "script".into(), launch_arguments);
         assert_eq!(
             canonical_resume_metadata(&state.identity, "script".into(), &arguments, prd, &metadata),

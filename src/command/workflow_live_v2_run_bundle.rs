@@ -67,6 +67,7 @@ pub(super) async fn live_plan_from_generated_bundle(
             .into());
         }
         script_plan.task_universe = metadata.task_universe;
+        // Fixed decomposition resumes bypass this loader: workflow_decompose_cli.rs:86 (CLI), fixed_decomposition_host.rs:273 (slash).
         script_plan.script_args = metadata.script_args;
         script_plan.governed_learning_context = metadata.governed_learning_context;
         if let Some(generated_config) = metadata.generated_config {

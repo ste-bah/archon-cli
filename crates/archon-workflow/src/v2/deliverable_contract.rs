@@ -102,10 +102,35 @@ pub fn contract_defect(contract: &Value) -> Option<String> {
     template_binding_failure(contract)
 }
 
-/// Every independent template defect, named by a validator-owned field.
+/// Every independent declaration defect, named by a validator-owned field.
 pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect> {
     use crate::defect::ValidationDefect;
     let mut defects = Vec::new();
+    // Optional strings are declarations even when empty; never treat them as absent.
+    if let Some(fields) = contract.as_object() {
+        for (key, value) in fields {
+            let Some(text) = value.as_str() else { continue };
+            if text.trim().is_empty() {
+                defects.push(ValidationDefect::new("blank_contract_field", "contract", key,
+                    format!("deliverable contract {key} is blank; omit unused optional fields or supply a concrete value")));
+            } else if if key == "typed_verifier_command" {
+                // The contract type's only shell command: shell syntax is concrete input.
+                whole_value_template(text)
+            } else {
+                ![
+                    "artifact_path",
+                    "registry_path",
+                    "instance_source_path",
+                    "payload_path",
+                ]
+                .contains(&key.as_str())
+                    && (!template_tokens(text).is_empty() || !shell_tokens(text).is_empty())
+            } {
+                defects.push(ValidationDefect::new("unexpanded_contract_field", "contract", key,
+                    format!("deliverable contract {key} contains an unreplaced template token; supply a concrete value or omit the unused optional field")));
+            }
+        }
+    }
     for key in [
         "artifact_path",
         "registry_path",
@@ -150,6 +175,14 @@ pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect
 fn template_binding_failure(contract: &Value) -> Option<String> {
     let defects = contract_defects(contract);
     (!defects.is_empty()).then(|| crate::defect::defect_message(&defects))
+}
+
+fn whole_value_template(value: &str) -> bool {
+    value
+        .trim()
+        .strip_prefix('<')
+        .and_then(|body| body.strip_suffix('>'))
+        .is_some_and(|body| !body.contains(['<', '>']))
 }
 
 fn source_collection_is_bound(contract: &Value) -> bool {

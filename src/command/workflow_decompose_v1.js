@@ -46,6 +46,13 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
 // the example is what made it return the whole contract (observed live).
 const ENTRY_SHAPES = JSON.stringify(JSON.parse(ACCEPTANCE_SHAPE).acceptance);
 
+function deliverableContractRule() {
+  if (typeof args.deliverableContractRule !== "string" || !args.deliverableContractRule.trim()) {
+    throw new Error("host did not supply deliverableContractRule");
+  }
+  return args.deliverableContractRule;
+}
+
 const SKELETON_SHAPE = JSON.stringify({
   schema_version: 1,
   acceptance_digest: "",
@@ -68,8 +75,6 @@ const SKELETON_SHAPE = JSON.stringify({
       deliverable_contracts: [{
           kind: "<short stable name for what this task produces>",
           artifact_path: "<path this task produces, exactly as its dependents consume it>",
-          instance_source_records_field: "<optional: name of the records field in the instance source>",
-          registry_records_field: "<optional: name of the records field in the registry>",
           min_instances: 1
         }]
     }]

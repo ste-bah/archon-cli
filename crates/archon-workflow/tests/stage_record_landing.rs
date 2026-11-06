@@ -163,7 +163,7 @@ fn issue39_skeleton_rejects_hollow_entries_by_path() {
     assert!(error.contains("task.implements[0]"), "{error}");
     let error=records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md","deliverable_contracts":[{"kind":"","artifact_path":"out/x.json"}]}})).unwrap_err().to_string();
     assert!(
-        error.contains("task.deliverable_contracts[0].kind"),
+        error.contains("task.deliverable_contracts[0].kind is blank"),
         "{error}"
     );
     assert_eq!(records.remaining().unwrap(), Vec::<String>::new());

@@ -464,3 +464,26 @@ fn frozen_source_sections_are_stamped_parsed_and_compared() {
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].field, "source_sections");
 }
+
+#[test]
+fn body_cannot_override_frozen_deliverable_contracts() {
+    let mut frozen = frozen_with_owned_fields();
+    frozen.deliverable_contracts = vec![
+        archon_workflow::task_universe::WorkflowV2DeliverableContract {
+            kind: "report".into(),
+            artifact_path: "output/report.json".into(),
+            typed_verifier_command: Some("grep -q required {artifact_path}".into()),
+            ..Default::default()
+        },
+    ];
+    let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\ndeliverable_contracts: [{kind: report, artifact_path: other.json, typed_verifier_command: 'true'}]\n```\n";
+    let (stamped, notes) =
+        super::workflow_host_command_binding::stamp_frozen_frontmatter(candidate, &frozen).unwrap();
+    assert!(notes.contains(&"deliverable_contracts".to_string()));
+    let task = archon_workflow::task_universe::parsing::parse_task_file(
+        std::path::Path::new("TASK-X-010.md"),
+        &stamped,
+    )
+    .unwrap();
+    assert_eq!(task.deliverable_contracts, frozen.deliverable_contracts);
+}

@@ -304,7 +304,7 @@ fn skeleton_record_with_a_full_task_lands_and_assembles_under_tasks() {
 fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema() {
     let (_temp, landing) = skeleton();
     let error = landing.land(json!({"subject":"TASK-CORE-002","summary":"depends on TASK-CORE-001","task":{"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md","depends_on":[],"blocks":[],"implements":[],"deliverable_contracts":[]}})).unwrap_err().to_string();
-    assert!(error.contains("a skeleton task must name the PRD obligations it implements and/or the artifacts it delivers"), "{error}");
+    assert!(error.contains("a skeleton task must name the obligations it implements and/or the artifacts it delivers"), "{error}");
     assert!(error.contains("implements"), "{error}");
     assert!(error.contains("Expected schema:"), "{error}");
     assert!(landing.hint().unwrap().contains("Host retained 0 records."));
@@ -317,7 +317,7 @@ fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema
         error.contains("cannot be owned or verified"),
         "omitted arrays are the same stub: {error}"
     );
-    landing.land(json!({"subject":"TASK-CORE-002","task":{"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md","deliverable_contracts":[{"kind":"report","artifact_path":"out/report.json"}]}})).unwrap();
+    landing.land(json!({"subject":"TASK-CORE-002","task":{"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md","deliverable_contracts":[{"kind":"report","artifact_path":"out/report.json","min_instances":1}]}})).unwrap();
 }
 
 #[test]

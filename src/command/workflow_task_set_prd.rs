@@ -15,6 +15,8 @@ pub(crate) fn script_arguments_with_prd_requirement_texts(
     prd_text: &str,
 ) -> serde_json::Value {
     let mut script_arguments = arguments.clone();
+    script_arguments["deliverableContractRule"] =
+        serde_json::json!(archon_workflow::task_universe_contract_audit::DELIVERABLE_CONTRACT_RULE);
     script_arguments["prdRequirementTexts"] = serde_json::json!(
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text)
     );
@@ -91,6 +93,10 @@ mod tests {
         assert_eq!(
             enriched["prdConstraintTexts"],
             serde_json::json!({"QX-001": "constraint"})
+        );
+        assert_eq!(
+            enriched["deliverableContractRule"],
+            archon_workflow::task_universe_contract_audit::DELIVERABLE_CONTRACT_RULE
         );
         assert_eq!(arguments, serde_json::json!({"prdPath": "prd.md"}));
     }

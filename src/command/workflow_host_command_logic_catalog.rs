@@ -7,7 +7,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
         // Earlier bump and re-pin notes: workflow_host_command_logic_catalog_history.rs.
-        version: 83, // Fatal check expansion diagnostics override masked exit status.
+        version: 84, // #599: acceptance republish also validates the retained skeleton contracts (83: #597 fatal check expansion diagnostics override masked exit status).
         // #584 P5 bump: republish now refuses legacy skeleton entry and constraint defects; operator re-pins digest.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -71,7 +71,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: review of #491: an attempt with open findings stays open when its logic is stale, and a recorded skeleton without its lock stays acceptance-only. 7: Issue 569 the unknown obligation finding names a non-obligation id and the host-listed id sources; freeze reuses by version only, so a replayed outcome would keep the old text. 8: Issue 572 skeleton freeze accepts host-listed PRD constraint ids in implements and raises no unowned_obligation for them; Issue 573 tab-indented REQ- bullets become obligations a task must claim. 9: Issue 574/575 frozen skeleton tasks carry source_sections, skeleton freeze raises uncited_section/unknown_section, and id-keyed table rows under a header with no obligation word become host-listed PRD constraints.
-        version: 10, // #584 P5 bump: constraint ownership and entry defects change refusal; operator re-pins digest.
+        version: 11, // #599: shared contract refusal and frozen-field repair ownership.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -152,7 +152,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // body gating; bumped so no body verdict is reused across it.
         // 29: batch 26 (#490 landing reconcile, #521 per-agent cutoffs) shares sources with
         // body gating; bumped so no body verdict is reused across it. 30: Issue 572 body lint of a draft or pending skeleton accepts PRD constraint ids and raises no unowned_obligation for them; Issue 573 tab-indented REQ- bullets become obligations. 31: Issue 574/575 body lint of a draft or pending skeleton raises uncited_section/unknown_section, the frozen source_sections are stamped into bodies and compared, and id-keyed table rows become PRD constraints.
-        version: 32, // #584 P5 bump: pending skeleton defects and normalized equality change findings; operator re-pins digest.
+        version: 33, // #599: shared contract refusal and frozen-field repair ownership.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -217,7 +217,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // with set gating; bumped so no set verdict is reused across it.
         // 23: batch 25 (#494) shares sources with set gating; bumped likewise.
         // 24: batch 26 (#520 #521) shares sources with set gating; bumped likewise. 25: Issue 572 set coverage defines PRD constraint ids and raises one unowned_constraint finding per constraint no task names; Issue 573 tab-indented REQ- bullets become obligations. 26: Issue 574/575 set coverage raises one uncited_section per uncited PRD section and one unknown_section per bad citation, and id-keyed table rows become PRD constraints.
-        version: 28, // #587: critic findings without verified body quotes route to the skeleton.
+        version: 29, // #599: shared contract refusal and frozen-field repair ownership.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -300,7 +300,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #518 and #519 change which inputs a frozen-check mutation proof moves
         // and how it restores them.
         // 18: batch 26 #523 host refutation and #520 judge identity can change reverify verdicts.
-        version: 21, // #590 re-pin only: frozen verification runs no probe.
+        version: 22, // #599: acceptance bundle validation reports contract field defects (21: #590 re-pin only, frozen verification runs no probe).
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
@@ -344,7 +344,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: #491 a skeleton bound to the prior acceptance is pending and skipped by the frozen snapshot.
         // 6: review of #491: a recorded skeleton without its lock stays acceptance-only, and open findings keep a stale-logic stage open. 8: Issue 574/575 the frozen skeleton task shape (workflow_freeze_schema.rs, FrozenTask) gains source_sections.
-        version: 9, // #584 P5 bump: normalized sets change frozen equality; operator re-pins digest.
+        version: 10, // #599: shared contract refusal and frozen-field repair ownership.
         sources: &[GATE, CONTRACT, VERIFY],
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.

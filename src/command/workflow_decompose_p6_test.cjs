@@ -349,3 +349,43 @@ test('P6_15_nested_pending_skeleton_repair_rechecks_outer_shadow', async () => {
   assert.equal(outerCalls, 3, 'outer shadow must be checked against the repaired skeleton');
   assert.equal(chain.bodyShadowRepair, null);
 });
+
+test('P6_599_contract_shadow_repairs_skeleton_once_and_only_reauthors_reached_bodies', async () => {
+  const ctx = context();
+  const consumer = {taskId:'TASK-X-020', fileName:'TASK-X-020.md'};
+  const sibling = {taskId:'TASK-X-030', fileName:'TASK-X-030.md'};
+  const subjects = [subject, consumer, sibling];
+  const entries = subjects.map(s => ({task_id:s.taskId, file_name:s.fileName,
+    depends_on:s === consumer ? [{task_id:subject.taskId}] : [],
+    deliverable_contracts:s === subject ? [{kind:'report', artifact_path:'output/report.json'}] : []}));
+  const old = {subjects};
+  ctx.recordSkeletonTasks(old, JSON.stringify({tasks:entries}));
+  const chain = {subjects, outcome:old};
+  const keptSibling = {accepted:'sibling'};
+  const bodies = new Map([[subject.fileName, {old:true}], [consumer.fileName, {old:true}],
+    [sibling.fileName, keptSibling]]);
+  const defect = {...finding('skeleton'), text:'add a falsifiable typed_verifier_command in task-skeleton.json',
+    source_path:'tasks/task-skeleton.json', deterministic_defect:{code:'invalid_verifier',
+      subject:subject.taskId, location:'deliverable_contracts/0/typed_verifier_command'}};
+  let freezes = 0;
+  const authored = [];
+  ctx.authorCandidate = async (_w, policy) => {
+    if (policy.phase === 'skeleton') {
+      freezes++;
+      assert(policy.initialFeedback.includes(defect.text));
+      const next = {subjects};
+      entries[0].deliverable_contracts[0].typed_verifier_command = 'grep -q required {artifact_path}';
+      ctx.recordSkeletonTasks(next, JSON.stringify({tasks:entries}));
+      return next;
+    }
+    authored.push(policy.target.taskId);
+    assert(!policy.initialFeedback.includes(defect.text), 'body author cannot repair frozen fields');
+    if (!freezes) return {skeletonFindings:[defect], bodyFindings:[]};
+    return {accepted:true};
+  };
+  await ctx.authorBodies({checkpoint:async () => {}, pause:async () => { throw Error('unexpected pause'); }},
+    [[subject, []]], bodies, chain);
+  assert.equal(freezes, 1);
+  assert.deepEqual(authored, [subject.taskId, subject.taskId, consumer.taskId]);
+  assert.equal(bodies.get(sibling.fileName), keptSibling);
+});

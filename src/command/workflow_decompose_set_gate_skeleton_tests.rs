@@ -40,6 +40,10 @@ pub(crate) fn driver_on(
 ) -> String {
     let skeletons = serde_json::to_string(skeletons).unwrap();
     let refused = serde_json::to_string(refused).unwrap();
+    let contract_rule = serde_json::to_string(
+        archon_workflow::task_universe_contract_audit::DELIVERABLE_CONTRACT_RULE,
+    )
+    .unwrap();
     format!(
         r##"{FIXED_SCRIPT_SOURCE}
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
@@ -48,7 +52,7 @@ const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.
 globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({{ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) }});
 globalThis.args = {{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "{TASK_ROOT}",
-  gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }}, frozenChain: {frozen},
+  deliverableContractRule: {contract_rule}, gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }}, frozenChain: {frozen},
 }};
 const skeletons = {skeletons};
 const refused = {refused};

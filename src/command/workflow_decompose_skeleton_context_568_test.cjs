@@ -53,9 +53,11 @@ test('skeleton retries reference the latest judged candidate; the first prompt p
   const {ctx, files} = context();
   const replies = [candidate(1), candidate(2), candidate(3)];
   const out = await run(ctx, replies, [refused(), refused(), clean()]);
+  assert(out.prompts[0].includes(ctx.deliverableContractRule()));
+  // #599 adds the deliverable contract rule to the first prompt.
   // SHA-256 of the dispatched first prompt without #568 (main plus #569, the #572 obligation sentence, the #574 table-row constraint wording and the #575 source_sections shape field), with these exact args.
   // P5 replaces the whole-document prompt with one-task landing and exact receipt wording.
-  assert.equal(digest(out.prompts[0]), 'b77df0c75c00a4e2ba35d9b5bced2c5222acc073280b0982324057e3d7c74967');
+  assert.equal(digest(out.prompts[0]), 'e4812e9af5d78988850e6bda5feb43e734fc765e9d5d483aa4c0c90cc3eccecd');
   assert(!out.prompts[0].includes('The previous candidate is in'));
   assert.equal(files.size, 2);
   assertPrevious(out.prompts[1], files, replies[0]);

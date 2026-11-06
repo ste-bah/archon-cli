@@ -214,3 +214,105 @@ async fn a_host_pending_launch_repair_stops_resumably_and_is_never_routed_to_the
         "nothing was published"
     );
 }
+
+#[test]
+fn execution_obligation_has_the_same_verdict_at_freeze_and_frozen_verification() {
+    for (patch, accepted) in [
+        (serde_json::json!({}), false),
+        (
+            serde_json::json!({"typed_verifier_command":"test -f output/report.json"}),
+            false,
+        ),
+        (serde_json::json!({"typed_verifier_command":"true"}), false),
+        (
+            serde_json::json!({"typed_verifier_command":"grep -q required {artifact_path}"}),
+            true,
+        ),
+        (serde_json::json!({"min_instances":1}), true),
+        (
+            serde_json::json!({"artifact_path":"output/<ID>/report.json",
+            "instance_source_path":"input/records.json", "instance_source_records_field":"records",
+            "instance_artifact_field":"report_path"}),
+            true,
+        ),
+    ] {
+        contract_freeze_and_verification(patch, accepted);
+    }
+}
+
+fn contract_freeze_and_verification(patch: serde_json::Value, accepted: bool) {
+    use archon_workflow::task_set_contract::{
+        AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
+    };
+    let fixture = frozen(None);
+    with_skeleton(&fixture);
+    let path = fixture.tasks.join(TASK_SKELETON_FILE);
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    document["tasks"][0]["deliverable_contracts"] = serde_json::json!([
+        {"kind":"report", "artifact_path":"output/report.json", "min_instances":0}
+    ]);
+    document["tasks"][0]["deliverable_contracts"][0]
+        .as_object_mut()
+        .unwrap()
+        .extend(patch.as_object().unwrap().clone());
+    let bytes = serde_json::to_vec_pretty(&document).unwrap();
+    let prepared = crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate(
+        &fixture.project,
+        &fixture.tasks,
+        &fixture.project.join("prds/PRD-X.md"),
+        archon_core::config::GateMode::Observe,
+        bytes.clone(),
+    );
+    assert_eq!(prepared.is_ok(), accepted, "freeze verdict: {prepared:?}");
+    if !accepted {
+        let error = prepared.unwrap_err();
+        let defects = &error
+            .downcast_ref::<crate::command::workflow_task_set_candidate::CandidateDefects>()
+            .unwrap()
+            .0;
+        assert!(defects.iter().any(|d| d.identity.code == "invalid_verifier"
+            && d.identity.subject == "TASK-X-010"
+            && d.identity.location == "deliverable_contracts/0/typed_verifier_command"));
+    }
+    // Simulate an authenticated skeleton frozen by the earlier binary.
+    std::fs::write(&path, &bytes).unwrap();
+    let digest = content_digest(&bytes);
+    let pin_path =
+        crate::command::workflow_task_set::acceptance_pin_path(&fixture.project, &fixture.tasks);
+    for (path, field) in [
+        (fixture.tasks.join(TASK_SKELETON_LOCK_FILE), "digest"),
+        (pin_path.clone(), "skeleton_digest"),
+    ] {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value[field] = digest.clone().into();
+        std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    let pin: AcceptancePin = serde_json::from_slice(&std::fs::read(pin_path).unwrap()).unwrap();
+    let verified = archon_workflow::task_skeleton::validate_full_chain(&fixture.tasks, &pin);
+    assert_eq!(
+        verified.is_ok(),
+        accepted,
+        "verification verdict: {verified:?}"
+    );
+    if accepted {
+        return;
+    }
+    let error = verified.unwrap_err();
+    assert_eq!(error.defects.len(), 1);
+    assert_eq!(error.defects[0].identity.code, "invalid_verifier");
+    assert_eq!(error.defects[0].identity.subject, "TASK-X-010");
+    let error = anyhow::Error::new(error);
+    let evaluation = crate::command::workflow_decompose_frozen_chain::verification::evaluation(
+        &error,
+        &fixture.project,
+        &fixture.tasks,
+        crate::command::workflow_decompose_frozen_chain::FrozenStage::Skeleton,
+    );
+    assert_eq!(
+        evaluation.findings[0].remediation_scope,
+        archon_workflow::RemediationScope::Skeleton
+    );
+    assert_eq!(evaluation.findings[0].source_path.as_ref(), Some(&path));
+}

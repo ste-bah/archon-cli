@@ -84,8 +84,10 @@ fn verifier_or_positive_instance_obligation_is_mandatory() {
     assert!(
         missing
             .to_string()
-            .contains("deleting the verifier does not satisfy")
+            .contains("neither a verifier nor a positive instance obligation")
     );
+    assert!(!missing.to_string().contains("replace"));
+    assert!(!missing.to_string().contains("deleting"));
     assert!(
         verifier_strength_defect(None, Some("out.json"), Some(&positive_floor)).is_none(),
         "a positive floor is a falsifiable execution obligation"
@@ -93,13 +95,13 @@ fn verifier_or_positive_instance_obligation_is_mandatory() {
 }
 
 #[test]
-fn own_artifact_existence_finding_demands_replacement_not_deletion() {
+fn verifier_display_is_defect_only_for_non_contract_callers() {
     let defect = verifier_strength_defect(Some("test -f out.json"), Some("out.json"), None)
         .expect("duplicate existence test must be refused")
         .to_string();
-    assert!(defect.contains("replace"), "{defect}");
+    assert!(!defect.contains("replace"), "{defect}");
     assert!(
-        defect.contains("deleting the verifier does not satisfy"),
+        !defect.contains("deleting the verifier does not satisfy"),
         "{defect}"
     );
 }
@@ -220,5 +222,47 @@ fn earlier_statements_end_the_script_only_through_live_commands() {
         "set -eo pipefail\ncargo test | tail -n 5",
     ] {
         assert_eq!(defect(command), None, "must not be refused: {command:?}");
+    }
+}
+
+#[test]
+fn generic_diagnostics_never_offer_contract_fields_to_other_callers() {
+    for (command, artifact) in [
+        (None, None),
+        (Some("true"), None),
+        (Some("grep -q ready out.json || true"), None),
+        (Some("test -f out.json"), Some("out.json")),
+    ] {
+        let text = verifier_strength_defect(command, artifact, None)
+            .unwrap()
+            .to_string();
+        for field in [
+            "min_instances",
+            "typed_verifier_command",
+            "instance_source_path",
+            "registry_path",
+            "artifact_path",
+        ] {
+            assert!(!text.contains(field), "{text}");
+        }
+    }
+}
+
+#[test]
+fn incomplete_blank_and_placeholder_bindings_do_not_supply_an_obligation() {
+    for field in [
+        "instance_artifact_field",
+        "registry_path",
+        "registry_records_field",
+    ] {
+        for invalid in ["", "  ", "<optional: value>", "${UNREPLACED}"] {
+            let mut value = serde_json::json!({"kind":"output", "artifact_path":"out.json", "instance_artifact_field":"path", "registry_path":"registry.json", "registry_records_field":"rows"});
+            value[field] = serde_json::json!(invalid);
+            let contract = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                verifier_strength_defect(None, Some("out.json"), Some(&contract)),
+                Some(VerifierStrengthDefect::MissingExecutionObligation)
+            );
+        }
     }
 }
