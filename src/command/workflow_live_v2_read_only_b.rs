@@ -216,8 +216,9 @@ pub(super) async fn run_read_only_v2_fanout(
         let control_store = branch_control_store.clone();
         let run_id = branch_run_id.clone();
         let target_repository_root = target_repository_root.clone();
-        let branch_client =
-            client.with_timeout_secs(Some(branch_timeout_secs), branch_timeout_source);
+        let branch_client = client
+            .with_timeout_secs(Some(branch_timeout_secs), branch_timeout_source)
+            .with_review_shell(review_shell);
         let artifact_store = branch_artifact_store.clone();
         let judged_commit = judged_commit.clone();
         let tripwire = tripwire.clone();

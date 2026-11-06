@@ -309,6 +309,9 @@ pub(crate) fn workflow_agent(
 /// so a declared name can never widen a stage the other two treat as
 /// read-only.
 pub(crate) fn full_tool_access(request: &StageRunRequest) -> bool {
+    if request.input.get("v2_call").is_some() {
+        return matches!(request.stage_kind, StageKind::Implementation);
+    }
     matches!(request.stage_kind, StageKind::Implementation)
         || (command_execution_stage(request)
             // REM-16: a review branch's shell is read-only tools plus Bash;

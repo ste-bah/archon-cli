@@ -1,6 +1,21 @@
 use super::*;
 
 impl LiveV2AgentClient {
+    // Set only after the host has admitted a review's OS boundary and scope.
+    pub(in super::super) fn with_review_shell(mut self, granted: bool) -> Self {
+        self.review_shell = granted;
+        self
+    }
+
+    pub(super) fn apply_review_shell_grant(&self, stage: &mut StageRunRequest) {
+        if self.review_shell && stage.input["v2_call"]["write_mode"].is_null() {
+            stage.input["stage_extra"] = serde_json::json!({
+                "read_only_shell": true,
+                "allowed_tools": ["Bash"],
+            });
+        }
+    }
+
     pub(in super::super) fn with_owner_store(
         mut self,
         store: archon_workflow::WorkflowStore,
@@ -85,6 +100,18 @@ pub(super) fn stage_input_for_v2_agent(
         value => serde_json::json!({ "input": value }),
     };
     if let Some(object) = input.as_object_mut() {
+        // Script data cannot carry host grants. Strip before artifact-context
+        // and review dispatch add capabilities from host-owned declarations.
+        for key in [
+            "stage_extra",
+            "read_only_shell",
+            "v2_call",
+            "write_coordination",
+            "project_artifact_root",
+            "projectArtifactRoot",
+        ] {
+            object.remove(key);
+        }
         if let Some(root) = request
             .repository_root
             .clone()
@@ -109,6 +136,7 @@ pub(super) fn stage_input_for_v2_agent(
                 "role": request.role,
                 "write_mode": request.call.write_mode,
                 "target_files": request.target_files,
+                "runs_commands": archon_workflow::stage_command_policy::v2_call_runs_commands(&request.call),
             }),
         );
         if request.call.write_mode.is_some() {

@@ -85,6 +85,10 @@ pub fn grant_review_commands(
         let Some(object) = item.input.as_object_mut() else {
             continue;
         };
+        // Preserve authored reuse identity above, but never merge script grants
+        // into the host's bounded review policy (including when withheld).
+        object.remove("stage_extra");
+        object.remove("read_only_shell");
         let rule = if shell {
             REVIEW_EXECUTION_RULE
         } else {

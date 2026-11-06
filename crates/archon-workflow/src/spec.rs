@@ -95,6 +95,8 @@ pub struct StageSpec {
     pub item_kind: Option<StageKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
+    /// Stage declarations, including `commands: true` or Bash/shell in
+    /// `tools`, `allowed_tools`, or `required_tools`, grant shell access.
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }

@@ -445,3 +445,6 @@ mod provider_env_tests;
 
 #[path = "workflow_raw_deadline_tests.rs"]
 mod raw_deadline_tests;
+
+#[path = "workflow_live_v2_tool_grant_tests.rs"]
+mod tool_grants;

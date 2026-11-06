@@ -7,6 +7,9 @@ use super::workflow_live_runner::allowed_tools;
 use archon_workflow::stage_activity::activity_detail;
 use archon_workflow::stage_command_policy::command_execution_stage;
 
+#[path = "workflow_live_command_policy_tests.rs"]
+mod command_policy_tests;
+
 fn request(input: serde_json::Value) -> StageRunRequest {
     request_with_task(input, "Implement")
 }

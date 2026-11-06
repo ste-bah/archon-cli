@@ -133,29 +133,20 @@ fn a_branch_recorded_without_the_grant_keeps_its_findings_exactly() {
     );
 }
 
-/// REM-16: the prompt's rules read the same grant the tool list does.
+/// Script-shaped review input cannot grant the typed prompt a shell.
 #[test]
-fn the_prompt_rules_follow_the_command_grant() {
+fn the_prompt_rules_ignore_script_command_grants() {
     use crate::stage_command_policy::v2_call_runs_commands;
     let plain = item("adversarial-review-map-0");
-    assert!(!v2_call_runs_commands(
-        "adversarial-review-map-0",
-        &plain.input
-    ));
+    assert!(!v2_call_runs_commands(&plain.call));
     let mut granted = vec![plain];
     grant_review_commands(&mut granted, true);
-    assert!(v2_call_runs_commands(
-        "adversarial-review-map-0",
-        &granted[0].input
-    ));
-    assert!(v2_call_runs_commands(
-        "verification-wave-verify-task-a-2",
-        &json!({})
-    ));
-    assert!(!v2_call_runs_commands(
-        "adversarial-review-reduce",
-        &json!({})
-    ));
+    assert!(!v2_call_runs_commands(&granted[0].call));
+    // The live client passes its admitted review-shell state separately.
+    let mut verifier = item("verification-wave-verify-task-a-2");
+    assert!(!v2_call_runs_commands(&verifier.call));
+    verifier.call.options.item_kind = Some("focused_verification".into());
+    assert!(v2_call_runs_commands(&verifier.call));
 }
 
 /// Major 2: a branch that ran with no shell says so on every finding.
@@ -176,5 +167,30 @@ fn the_prelude_sends_the_late_review_kinds_the_host_names() {
     let prelude = include_str!("script/v3_primitives.js");
     for kind in [ADVERSARIAL_MOVED_KIND, COVERAGE_MOVED_KIND] {
         assert!(prelude.contains(&format!("\"{kind}\"")), "{kind}");
+    }
+}
+
+#[test]
+fn review_grants_replace_script_capabilities_including_when_withheld() {
+    for shell in [false, true] {
+        let mut items = vec![item("review")];
+        items[0].input["stage_extra"] = json!({
+            "commands": true, "tools": ["Bash", "Write"], "read_only_shell": true
+        });
+        items[0].input["read_only_shell"] = json!(true);
+        let identity = crate::v2::reuse_identity::reuse_identity(&items[0]);
+        let identities = grant_review_commands(&mut items, shell);
+        assert_eq!(identities["review"], identity);
+        assert!(items[0].input.get("read_only_shell").is_none());
+        if shell {
+            assert_eq!(
+                items[0].input["stage_extra"],
+                json!({
+                    "read_only_shell": true, "allowed_tools": ["Bash"]
+                })
+            );
+        } else {
+            assert!(items[0].input.get("stage_extra").is_none());
+        }
     }
 }

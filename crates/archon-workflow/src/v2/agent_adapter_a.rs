@@ -68,6 +68,15 @@ impl WorkflowV2AgentAdapter {
     pub fn build_prompt_parts(&self, request: &WorkflowV2AgentRequest) -> WorkflowV2PromptParts {
         super::agent_prompt::build_prompt_parts(request)
     }
+    /// The live host supplies the same admitted command grant used by tools.
+    pub fn build_prompt_parts_with_commands(
+        &self,
+        request: &WorkflowV2AgentRequest,
+        runs_commands: bool,
+    ) -> WorkflowV2PromptParts {
+        super::agent_prompt::build_prompt_parts_with_commands(request, runs_commands)
+    }
+
     pub fn build_repair_prompt(
         &self,
         request: &WorkflowV2AgentRequest,
