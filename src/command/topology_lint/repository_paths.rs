@@ -58,8 +58,12 @@ pub(super) const PATH_FORM_CODE: &str = "repository_path_not_root_relative";
 
 /// A suffix present at the base is an author path-form fault, not an
 /// existence contradiction. Keep the suggestions deterministic and bounded.
-pub(super) fn path_form_finding(tree: &RepositoryTree, relative: &str) -> Option<String> {
-    let matches = tree.paths_ending_with(relative);
+pub(super) fn path_form_finding(
+    tree: &RepositoryTree,
+    relative: &str,
+    named: &str,
+) -> Option<String> {
+    let mut matches = tree.paths_ending_with(relative);
     // Parsers normalize a trailing directory slash away. A bare directory
     // suffix still names a path; bare filenames require an explicit scope.
     if matches.is_empty()
@@ -67,14 +71,36 @@ pub(super) fn path_form_finding(tree: &RepositoryTree, relative: &str) -> Option
     {
         return None;
     }
-    let matches = matches
+    matches.sort_by_key(|path| {
+        let common = path
+            .rsplit('/')
+            .zip(relative.rsplit('/'))
+            .take_while(|(left, right)| left == right)
+            .count();
+        (
+            std::cmp::Reverse(common),
+            path.split('/').count(),
+            path.len(),
+            *path,
+        )
+    });
+    let remaining = matches.len().saturating_sub(3);
+    let mut matches = matches
         .into_iter()
         .take(3)
         .map(|path| format!("`{path}`"))
         .collect::<Vec<_>>()
         .join(", ");
+    if remaining > 0 {
+        matches.push_str(&format!(", +{remaining} more"));
+    }
+    if Path::new(&named.replace('\\', "/")).is_absolute() {
+        return Some(format!(
+            "[{PATH_FORM_CODE}] `{named}`: absolute path does not exist; did you mean {matches}"
+        ));
+    }
     Some(format!(
-        "[{PATH_FORM_CODE}] `{relative}` is not repository-root relative: no such path from the repository root; write the full repository-root path (matches: {matches})"
+        "[{PATH_FORM_CODE}] `{named}` is not repository-root relative: no such path from the repository root; write the full repository-root path (matches: {matches})"
     ))
 }
 
@@ -141,4 +167,20 @@ pub(super) fn truth(tree: &RepositoryTree, named: &str) -> anyhow::Result<PathTr
             .is_some_and(|relative| tree.exists_at_base(&relative)),
         in_checkout,
     })
+}
+
+/// Hash canonical path metadata rather than diagnostic prose or list order.
+/// The opaque slot also keeps submitted paths out of the defect envelope.
+pub(super) fn claim_location(paths: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut paths = paths.to_vec();
+    paths.sort();
+    paths.dedup();
+    let mut hash = Sha256::new();
+    for path in paths {
+        hash.update(path.len().to_string());
+        hash.update(b":");
+        hash.update(path.as_bytes());
+    }
+    format!("claims/{}", hex::encode(hash.finalize()))
 }

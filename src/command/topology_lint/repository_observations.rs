@@ -269,12 +269,26 @@ pub(crate) fn findings_against(
                     } else {
                         Vec::new()
                     };
+                    // No scoped reading exists: report the author spelling once.
+                    let candidates = if token.contains('/')
+                        && candidates.len() > 1
+                        && candidates
+                            .iter()
+                            .map(|path| super::repository_paths::truth(tree, path))
+                            .collect::<anyhow::Result<Vec<_>>>()?
+                            .iter()
+                            .all(|truth| truth.certainly_absent())
+                    {
+                        vec![token.to_string()]
+                    } else {
+                        candidates
+                    };
                     for candidate in candidates {
                         if let Some(relative) =
                             super::repository_paths::relative_path(tree, &candidate)?
                         {
                             paths.push(candidate);
-                            observations.push((relative, observation));
+                            observations.push((relative, observation, token.to_string()));
                         }
                     }
                 }
@@ -297,8 +311,8 @@ pub(crate) fn findings_against(
         }
         let claims: Vec<_> = observations
             .iter()
-            .filter(|(path, _)| path == &relative)
-            .map(|(_, observation)| *observation)
+            .filter(|(path, _, _)| path == &relative)
+            .map(|(_, observation, _)| *observation)
             .collect();
         let count = claims
             .iter()
@@ -325,12 +339,24 @@ pub(crate) fn findings_against(
         if !path.starts_with('/') && !truth.in_checkout && project_root.join(&relative).exists() {
             continue;
         }
+        let named = observations
+            .iter()
+            .find(|(path, _, _)| path == &relative)
+            .map_or(path.as_str(), |(_, _, named)| named.as_str());
         if truth.certainly_absent()
-            && let Some(text) = super::repository_paths::path_form_finding(tree, &relative)
+            && claims
+                .iter()
+                .any(|claim| matches!(claim, Observation::File { .. } | Observation::Directory))
+            && let Some(text) = super::repository_paths::path_form_finding(tree, &relative, named)
         {
             findings.push((relative, format!("{task_id}: {text}")));
             continue;
         }
+        let named = if std::path::Path::new(named).is_absolute() {
+            named
+        } else {
+            &relative
+        };
         let root = tree.root().display();
         let base = tree.base_commit();
         let checkout_dir = actual == Observation::Directory;
@@ -340,29 +366,29 @@ pub(crate) fn findings_against(
             let text = match claimed {
                 Observation::Absent if truth.certainly_exists() => match actual {
                     Observation::File { lines } => format!(
-                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout ({lines} lines); correct it to exists ({lines} lines) or delete it"
+                        "{task_id}: the body says `{named}` is absent but it exists in repository {root} at base commit {base} and in the checkout ({lines} lines); correct it to exists ({lines} lines) or delete it"
                     ),
                     Observation::UncountedFile => format!(
-                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a file; correct the claim or delete it"
+                        "{task_id}: the body says `{named}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a file; correct the claim or delete it"
                     ),
                     _ => format!(
-                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a directory; correct it to exists (directory) or delete it"
+                        "{task_id}: the body says `{named}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a directory; correct it to exists (directory) or delete it"
                     ),
                 },
                 Observation::File { .. } | Observation::Directory if truth.certainly_absent() => {
                     format!(
-                        "{task_id}: the body says `{relative}` exists but it is absent from repository {root} at base commit {base} and from the checkout; correct it to absent or delete it"
+                        "{task_id}: the body says `{named}` exists but it is absent from repository {root} at base commit {base} and from the checkout; correct it to absent or delete it"
                     )
                 }
                 Observation::File { lines } if truth.in_checkout => {
                     if checkout_dir {
                         format!(
-                            "{task_id}: the body says `{relative}` exists ({lines} lines) but it is a directory in repository {root}; correct it to exists (directory) or delete it"
+                            "{task_id}: the body says `{named}` exists ({lines} lines) but it is a directory in repository {root}; correct it to exists (directory) or delete it"
                         )
                     } else {
                         match actual {
                             Observation::File { lines: actual } if actual != lines => format!(
-                                "{task_id}: the body says `{relative}` exists ({lines} lines) but the checkout at {root} has {actual} lines; correct it to exists ({actual} lines) or delete it"
+                                "{task_id}: the body says `{named}` exists ({lines} lines) but the checkout at {root} has {actual} lines; correct it to exists ({actual} lines) or delete it"
                             ),
                             _ => continue,
                         }
@@ -370,7 +396,7 @@ pub(crate) fn findings_against(
                 }
                 Observation::Directory if truth.in_checkout && !checkout_dir => {
                     format!(
-                        "{task_id}: the body says `{relative}` exists (directory) but it is a file in repository {root}; correct the claim or delete it"
+                        "{task_id}: the body says `{named}` exists (directory) but it is a file in repository {root}; correct the claim or delete it"
                     )
                 }
                 _ => continue,

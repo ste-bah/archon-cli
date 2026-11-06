@@ -83,6 +83,21 @@ pub(crate) fn body_findings(
     path: &Path,
     text: &str,
 ) -> Result<Vec<String>> {
+    Ok(
+        body_findings_with_paths(tree, project_root, task_id, path, text)?
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect(),
+    )
+}
+
+fn body_findings_with_paths(
+    tree: &RepositoryTree,
+    project_root: &Path,
+    task_id: &str,
+    path: &Path,
+    text: &str,
+) -> Result<Vec<(Vec<String>, String)>> {
     // An unparsable body has no deliverable lists; the preflight reports it.
     let observed = match parse_task_file(path, text) {
         Ok(task) => super::repository_observations::findings_against(
@@ -99,11 +114,10 @@ pub(crate) fn body_findings(
     let claims = claim_findings(tree, project_root, task_id, text)?
         .into_iter()
         .filter(|(paths, _)| !paths.iter().any(|p| reported.contains(p.as_str())))
-        .map(|(_, text)| text)
         .collect::<Vec<_>>();
     Ok(observed
         .into_iter()
-        .map(|(_, text)| text)
+        .map(|(path, text)| (vec![path], text))
         .chain(claims)
         .collect())
 }
@@ -144,8 +158,17 @@ fn claim_findings(
         let mut path_form = None;
         let resolved = (|| -> Result<Vec<String>> {
             super::repository_paths::checked_path(tree, &claim.path)?;
-            if super::repository_paths::truth(tree, &relative)?.certainly_absent() {
-                path_form = super::repository_paths::path_form_finding(tree, &relative);
+            if claim.claim == Claim::Exists
+                && !Path::new(&claim.path).is_absolute()
+                && project_root.join(&relative).exists()
+            {
+                return Ok(Vec::new());
+            }
+            if claim.claim == Claim::Exists
+                && super::repository_paths::truth(tree, &relative)?.certainly_absent()
+            {
+                path_form =
+                    super::repository_paths::path_form_finding(tree, &relative, &claim.path);
                 if path_form.is_some() {
                     return Ok(vec![relative.clone()]);
                 }
@@ -231,9 +254,14 @@ fn claim_findings(
                 ),
             ),
         };
+        let named = if Path::new(&claim.path).is_absolute() {
+            claim.path.clone()
+        } else {
+            relatives.join("` or `")
+        };
         let finding = format!(
             "{task_id}: the body says `{}` {said} (\"{}\") but {observed}; read the path under the repository root and rewrite the claim to what is there",
-            relatives.join("` or `"),
+            named,
             excerpt(&claim.sentence)
         );
         findings.push((relatives, finding));
@@ -257,7 +285,7 @@ pub(super) fn resolve_scoped_paths(
     if Path::new(&claim.path).is_absolute() {
         return Ok(vec![claim.path.clone()]);
     }
-    if super::repository_paths::path_form_finding(tree, &claim.path).is_some()
+    if super::repository_paths::path_form_finding(tree, &claim.path, &claim.path).is_some()
         && super::repository_paths::truth(tree, &claim.path)?.certainly_absent()
     {
         return Ok(vec![claim.path.clone()]);
@@ -382,10 +410,10 @@ pub(crate) fn set_findings(project_root: &Path, root: &Path) -> Result<Vec<GateF
             continue;
         };
         findings.extend(
-            body_findings(&tree, project_root, &task.canonical_task_id, &path, &raw)?
+            body_findings_with_paths(&tree, project_root, &task.canonical_task_id, &path, &raw)?
                 .into_iter()
-                .enumerate()
-                .map(|(index, text)| {
+                .map(|(paths, text)| {
+                    let location = super::repository_paths::claim_location(&paths);
                     let code = super::repository_paths::finding_code(&text);
                     GateFinding::new(
                         GateId::WorkflowLintTaskSet,
@@ -398,7 +426,7 @@ pub(crate) fn set_findings(project_root: &Path, root: &Path) -> Result<Vec<GateF
                         archon_workflow::defect::DeterministicDefect::new(
                             code,
                             &task.canonical_task_id,
-                            format!("claims/{index}"),
+                            location,
                         ),
                     )
                 }),

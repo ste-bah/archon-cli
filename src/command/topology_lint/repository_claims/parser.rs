@@ -428,7 +428,7 @@ pub(crate) fn repository_relative_token(token: &str) -> Option<String> {
         return None;
     }
     let kept = if absolute {
-        format!("/{normalized}")
+        token.to_string()
     } else {
         normalized.clone()
     };
