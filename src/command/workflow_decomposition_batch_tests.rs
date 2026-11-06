@@ -65,7 +65,7 @@ async fn fixed_author_pool_overlaps_through_real_quickjs_host_and_keeps_read_pol
         .map(|n| (format!("AC-X-{n:03}"), format!("criterion {n}")))
         .collect::<std::collections::BTreeMap<_, _>>();
     let summary = WorkflowV2ScriptRunner::new("batch proof".into(),test_runtime(&spec),WorkflowV2AgentAdapter::new(),client,v2,store,run.id,true,None,
-        Some(serde_json::json!({"projectRoot":temp.path(),"repositoryRoot":temp.path(),"prdPath":temp.path().join("prd.md"),"prdDigest":"a".repeat(64),"taskRoot":temp.path().join("tasks"),"gateMode":"observe","acceptanceCriteria":criteria,"authorMaxParallelism":3})))
+        Some(crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(&serde_json::json!({"projectRoot":temp.path(),"repositoryRoot":temp.path(),"prdPath":temp.path().join("prd.md"),"prdDigest":"a".repeat(64),"taskRoot":temp.path().join("tasks"),"gateMode":"observe","acceptanceCriteria":criteria,"authorMaxParallelism":3}), "")))
         .with_raw_outcomes(true).with_host_command_executor(Arc::new(PhaseHost {calls:Mutex::new(vec![])}))
         .run(crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE).await.unwrap();
     assert_eq!(summary.status, WorkflowV2Status::Accepted);
@@ -245,7 +245,7 @@ async fn run_window(
         .map(|n| (format!("AC-X-{n:03}"), format!("criterion {n}")))
         .collect::<std::collections::BTreeMap<_, _>>();
     let result = WorkflowV2ScriptRunner::new("window proof".into(),test_runtime(&spec),WorkflowV2AgentAdapter::new(),client,v2,store,run.id,true,None,
-        Some(serde_json::json!({"projectRoot":temp.path(),"repositoryRoot":temp.path(),"prdPath":temp.path().join("prd.md"),"prdDigest":"a".repeat(64),"taskRoot":temp.path().join("tasks"),"gateMode":"observe","acceptanceCriteria":criteria,"authorMaxParallelism":3})))
+        Some(crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(&serde_json::json!({"projectRoot":temp.path(),"repositoryRoot":temp.path(),"prdPath":temp.path().join("prd.md"),"prdDigest":"a".repeat(64),"taskRoot":temp.path().join("tasks"),"gateMode":"observe","acceptanceCriteria":criteria,"authorMaxParallelism":3}), "")))
         .with_raw_outcomes(true).with_host_command_executor(Arc::new(PhaseHost {calls:Mutex::new(vec![])}))
         .run(crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE).await;
     (llm, result)

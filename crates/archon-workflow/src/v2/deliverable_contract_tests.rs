@@ -6,31 +6,86 @@
 use super::{ContractRoots, resolve_contract_path, typed_verification_command};
 
 #[test]
-fn shell_verifiers_are_concrete_commands_unless_the_whole_value_is_a_template() {
-    let roots = ContractRoots::project_only("/project".to_string());
-    for command in [
-        "python3 - <<'PY'\nassert 1 == 1\nPY",
-        "cmd < in 2>/dev/null",
-        "test \"${N}\" -gt 0",
-        "test \"$(cmd)\" = expected",
-        "test \"$VAR\" = expected",
+fn blank_field_advice_respects_required_fields_and_execution_obligations() {
+    for (field, extra, omit) in [
+        ("kind", serde_json::json!({"min_instances": 1}), false),
+        (
+            "artifact_path",
+            serde_json::json!({"min_instances": 1}),
+            false,
+        ),
+        ("data_kind", serde_json::json!({}), true),
+        ("registry_status_field", serde_json::json!({}), true),
+        ("typed_verifier_command", serde_json::json!({}), false),
+        (
+            "typed_verifier_command",
+            serde_json::json!({"min_instances": 1}),
+            true,
+        ),
+        (
+            "instance_artifact_field",
+            serde_json::json!({"instance_source_path": "records.json", "instance_source_records_field": "records"}),
+            false,
+        ),
+        (
+            "instance_artifact_field",
+            serde_json::json!({"min_instances": 1}),
+            true,
+        ),
+        (
+            "instance_source_path",
+            serde_json::json!({"instance_artifact_field": "path", "instance_source_records_field": "records"}),
+            false,
+        ),
+        (
+            "instance_source_path",
+            serde_json::json!({"instance_artifact_field": "path", "instance_source_records_field": "records", "registry_path": "records.json"}),
+            true,
+        ),
+        (
+            "registry_path",
+            serde_json::json!({"instance_artifact_field": "path", "registry_records_field": "records"}),
+            false,
+        ),
+        (
+            "instance_source_records_field",
+            serde_json::json!({"instance_artifact_field": "path", "instance_source_path": "records.json"}),
+            false,
+        ),
+        (
+            "registry_records_field",
+            serde_json::json!({"instance_artifact_field": "path", "registry_path": "records.json"}),
+            false,
+        ),
     ] {
-        let contract = serde_json::json!({
-            "artifact_path": "out.json", "typed_verifier_command": command,
-        });
-        assert!(super::contract_defects(&contract).is_empty(), "{command}");
+        let mut contract = serde_json::json!({"kind": "result", "artifact_path": "out.json"});
+        contract
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        contract[field] = serde_json::json!(" ");
+        let defects = super::contract_defects(&contract);
+        let defect = defects
+            .iter()
+            .find(|d| d.identity.location == field)
+            .unwrap();
         assert_eq!(
-            typed_verification_command(&roots, &contract).as_deref(),
-            Some(command)
+            defect.message,
+            format!(
+                "deliverable contract {field} is blank; supply a concrete value{}",
+                if omit {
+                    " or omit the optional field"
+                } else {
+                    ""
+                }
+            ),
+            "{field}: {contract}"
         );
     }
-    for command in ["<optional: x>", "  <optional: x>  ", "  "] {
-        let contract = serde_json::json!({
-            "artifact_path": "out.json", "typed_verifier_command": command,
-        });
-        assert!(!super::contract_defects(&contract).is_empty(), "{command}");
-        assert!(typed_verification_command(&roots, &contract).is_none());
-    }
+}
+
+#[test]
+fn non_command_fields_still_refuse_shell_templates() {
     for field in [
         "instance_artifact_field",
         "instance_source_records_field",
@@ -79,7 +134,7 @@ impl Roots {
     }
 }
 
-fn run_verifier(script: &str) -> (bool, String) {
+pub(super) fn run_verifier(script: &str) -> (bool, String) {
     let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

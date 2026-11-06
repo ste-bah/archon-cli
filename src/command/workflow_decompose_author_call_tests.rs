@@ -52,9 +52,15 @@ fn mcp_obligation_body_prompt_requires_project_specific_declarations() {
 #[test]
 fn acceptance_entries_are_separate_calls_and_truncation_retries_only_one() {
     let dir = tempfile::tempdir().unwrap();
+    let host_arguments =
+        crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
+            &serde_json::json!({}),
+            "",
+        );
     let script = format!(
-        "{}\n{}",
+        "{}\nglobalThis.hostArguments = {};\n{}",
         FIXED_SCRIPT_SOURCE,
+        host_arguments,
         r#"
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => '[]';
@@ -64,6 +70,7 @@ globalThis.__archonRedactPublicText = text => String(text).replace(/held-[^\s]+/
 const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0, 2166136261).toString(16).padStart(8, "0").repeat(8);
 globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) });
 globalThis.args = { projectRoot:'/p', repositoryRoot:'/r', prdPath:'/p/prd', prdDigest:'x', taskRoot:'/p/tasks', gateMode:'observe', acceptanceCriteria:{'AC-X-001':'first','AC-X-002':'second'} };
+Object.assign(globalThis.args, globalThis.hostArguments);
 let calls = [], freezes = [], failed = false;
 const w = {
  finalReport: async ()=>({}),

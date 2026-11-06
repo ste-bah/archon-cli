@@ -1,5 +1,9 @@
 use serde_json::Value;
 
+#[path = "deliverable_command_template.rs"]
+mod command_template;
+use command_template::expansion_only;
+
 pub use super::contract_roots::ContractRoots;
 
 pub fn verification_command(roots: &ContractRoots, contract: &Value) -> String {
@@ -111,8 +115,19 @@ pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect
         for (key, value) in fields {
             let Some(text) = value.as_str() else { continue };
             if text.trim().is_empty() {
-                defects.push(ValidationDefect::new("blank_contract_field", "contract", key,
-                    format!("deliverable contract {key} is blank; omit unused optional fields or supply a concrete value")));
+                defects.push(ValidationDefect::new(
+                    "blank_contract_field",
+                    "contract",
+                    key,
+                    format!(
+                        "deliverable contract {key} is blank; supply a concrete value{}",
+                        if field_can_be_omitted(contract, key) {
+                            " or omit the optional field"
+                        } else {
+                            ""
+                        }
+                    ),
+                ));
             } else if if key == "typed_verifier_command" {
                 // The contract type's only shell command: shell syntax is concrete input.
                 whole_value_template(text)
@@ -127,7 +142,9 @@ pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect
                     && (!template_tokens(text).is_empty() || !shell_tokens(text).is_empty())
             } {
                 defects.push(ValidationDefect::new("unexpanded_contract_field", "contract", key,
-                    format!("deliverable contract {key} contains an unreplaced template token; supply a concrete value or omit the unused optional field")));
+                    if key == "typed_verifier_command" {
+                        "deliverable contract typed_verifier_command has no literal program word once assignments, redirections and placeholder expansions are removed, so it cannot exercise the deliverable; replace it with the real command".to_string()
+                    } else { format!("deliverable contract {key} contains an unreplaced template token; supply a concrete value") }));
             }
         }
     }
@@ -178,11 +195,51 @@ fn template_binding_failure(contract: &Value) -> Option<String> {
 }
 
 fn whole_value_template(value: &str) -> bool {
-    value
-        .trim()
+    let value = value.trim();
+    let angle = value
         .strip_prefix('<')
         .and_then(|body| body.strip_suffix('>'))
-        .is_some_and(|body| !body.contains(['<', '>']))
+        .is_some_and(|body| !body.contains(['<', '>']));
+    angle || expansion_only(value)
+}
+
+fn field_can_be_omitted(contract: &Value, key: &str) -> bool {
+    if matches!(key, "kind" | "artifact_path") {
+        return false;
+    }
+    if !matches!(
+        key,
+        "typed_verifier_command"
+            | "instance_artifact_field"
+            | "instance_source_path"
+            | "registry_path"
+            | "instance_source_records_field"
+            | "registry_records_field"
+    ) {
+        return true;
+    }
+    let mut omitted = contract.clone();
+    omitted.as_object_mut().unwrap().remove(key);
+    // Use the obligation validator itself so advice follows its exact pairing rules.
+    // Runtime callers can supply untyped JSON without the serde-required kind.
+    omitted
+        .as_object_mut()
+        .unwrap()
+        .entry("kind")
+        .or_insert(Value::String(String::new()));
+    let Ok(typed) =
+        serde_json::from_value::<crate::task_universe::WorkflowV2DeliverableContract>(omitted)
+    else {
+        return false;
+    };
+    !matches!(
+        crate::verifier_strength::verifier_strength_defect(
+            typed.typed_verifier_command.as_deref(),
+            Some(&typed.artifact_path),
+            Some(&typed)
+        ),
+        Some(crate::verifier_strength::VerifierStrengthDefect::MissingExecutionObligation)
+    )
 }
 
 fn source_collection_is_bound(contract: &Value) -> bool {
@@ -313,3 +370,7 @@ const VERIFIER: &str = include_str!("deliverable_verifier.sh");
 #[cfg(test)]
 #[path = "deliverable_contract_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "deliverable_command_template_tests.rs"]
+mod command_template_tests;

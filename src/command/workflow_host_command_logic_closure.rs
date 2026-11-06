@@ -69,6 +69,9 @@ pub(crate) struct Workspace {
 mod deny;
 pub(crate) use deny::LOGIC_DENYLIST_EXCEPTIONS;
 
+#[path = "workflow_host_command_logic_macro_invocations.rs"]
+mod macro_invocations;
+
 /// The binary crate the host-command subcommands are built into.
 const BINARY: &str = "archon";
 
@@ -486,6 +489,7 @@ impl Workspace {
                 }
             }
         }
+        self.check_macro_invocations(&items, &closure);
         closure
     }
 }

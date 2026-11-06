@@ -140,11 +140,17 @@ fn the_decomposition_script_re_authors_the_body_whose_claim_the_trace_refuted() 
 /// are clean.
 fn run_script(findings: &str) -> serde_json::Value {
     let source = crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE;
+    let contract_rule =
+        crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
+            &serde_json::json!({}),
+            "",
+        )["deliverableContractRule"]
+            .clone();
     let script = format!(
         r##"{source}
 globalThis.args = {{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "/p/tasks",
-  gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
+  deliverableContractRule: {contract_rule}, gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
 }};
 // Node has no native entry validator; stub it as the other node-driven script tests do.
 globalThis.__archonValidateAcceptanceEntry = () => "[]";

@@ -160,15 +160,20 @@ async fn run_with(
         run.id.clone(),
         true,
         None,
-        Some(serde_json::json!({
-            "projectRoot": temp.path(),
-            "repositoryRoot": temp.path(),
-            "prdPath": temp.path().join("PRD.md"),
-            "prdDigest": "a".repeat(64),
-            "acceptanceCriteria": {"AC-X-001":"example criterion"},
-            "taskRoot": temp.path().join("tasks"),
-            "gateMode": "observe"
-        })),
+        Some(
+            crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
+                &serde_json::json!({
+                    "projectRoot": temp.path(),
+                    "repositoryRoot": temp.path(),
+                    "prdPath": temp.path().join("PRD.md"),
+                    "prdDigest": "a".repeat(64),
+                    "acceptanceCriteria": {"AC-X-001":"example criterion"},
+                    "taskRoot": temp.path().join("tasks"),
+                    "gateMode": "observe"
+                }),
+                "",
+            ),
+        ),
     )
     .with_raw_outcomes(true)
     .with_host_command_executor(Arc::new(AcceptingHost));

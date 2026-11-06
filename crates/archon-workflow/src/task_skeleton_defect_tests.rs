@@ -140,6 +140,7 @@ fn contract_audit_reports_all_path_and_verifier_defects_together() {
         WorkflowV2DeliverableContract, WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
     };
     let contract = WorkflowV2DeliverableContract {
+        kind: "report".into(),
         artifact_path: "${AUTHOR_A}/x".into(),
         registry_path: Some("${AUTHOR_B}/y".into()),
         instance_source_path: Some("${AUTHOR_C}/z".into()),

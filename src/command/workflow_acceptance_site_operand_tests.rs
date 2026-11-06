@@ -59,7 +59,15 @@ fn reader_path_decisions(
     let strength =
         archon_workflow::verifier_strength::verifier_strength_defect(Some(command), None, None)
             .unwrap();
-    let expected_message = format!("check 'AC-X-001': {strength}");
+    let policy = archon_workflow::task_set_contract::acceptance_policy_findings(&contract);
+    let strength_findings = policy
+        .iter()
+        .filter(|finding| finding.field == "AC-X-001.check")
+        .collect::<Vec<_>>();
+    assert_eq!(strength_findings.len(), 1, "{policy:?}");
+    let expected_message = strength_findings[0].message.clone();
+    assert!(expected_message.starts_with(&format!("check 'AC-X-001': {strength};")));
+    assert!(expected_message.contains("can exit non-zero when the declared outcome is false"));
     let scope = AuthorScope::for_task_set(root, &set.tasks, &set.prd, false).unwrap();
     let reauthor = check_defects::check_defects(&contract, contract.acceptance[0].clone(), &scope);
     let text = std::fs::read_to_string(&set.prd).unwrap();
