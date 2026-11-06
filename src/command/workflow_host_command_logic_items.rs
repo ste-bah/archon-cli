@@ -28,8 +28,8 @@ pub(crate) struct Item {
     pub(crate) names: BTreeSet<String>,
     /// The type an `impl` block is for.
     pub(crate) impl_for: Option<String>,
-    /// An item-level macro call (`thread_local! { … }`): the names it
-    /// defines are read from inside it.
+    /// An item-level macro call or definition: literal item names it emits
+    /// are read from inside it, so references reach their defining macro.
     pub(crate) macro_call: bool,
     pub(crate) paths: BTreeSet<Vec<String>>,
     pub(crate) idents: BTreeSet<String>,
@@ -169,9 +169,10 @@ pub(crate) fn facts(text: &str) -> Facts {
         }
         if item_level
             && is(toks.get(i + 1), '!')
-            && let (Some(cur), Some(name)) = (cur, w)
+            && w.is_some()
+            && let Some(cur) = cur
         {
-            facts.items[cur].macro_call = name != "macro_rules";
+            facts.items[cur].macro_call = true;
         }
         if item_level {
             match w {

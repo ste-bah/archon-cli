@@ -180,15 +180,18 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
 }
 
 fn fixed_args(root: &std::path::Path) -> serde_json::Value {
-    serde_json::json!({
-        "projectRoot": root,
-        "repositoryRoot": root,
-        "prdPath": root.join("PRD.md"),
-        "prdDigest": "a".repeat(64),
-        "acceptanceCriteria": {"AC-X-001": "example criterion"},
-        "taskRoot": root.join("tasks"),
-        "gateMode": "enforce"
-    })
+    crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
+        &serde_json::json!({
+            "projectRoot": root,
+            "repositoryRoot": root,
+            "prdPath": root.join("PRD.md"),
+            "prdDigest": "a".repeat(64),
+            "acceptanceCriteria": {"AC-X-001": "example criterion"},
+            "taskRoot": root.join("tasks"),
+            "gateMode": "enforce"
+        }),
+        "",
+    )
 }
 
 async fn run_fixed(

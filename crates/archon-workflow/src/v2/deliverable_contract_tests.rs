@@ -11,6 +11,8 @@ fn shell_verifiers_are_concrete_commands_unless_the_whole_value_is_a_template() 
     for command in [
         "python3 - <<'PY'\nassert 1 == 1\nPY",
         "cmd < in 2>/dev/null",
+        "test -s \"$HOME/x\"",
+        "test -s \"${VAR:-d}\"",
         "test \"${N}\" -gt 0",
         "test \"$(cmd)\" = expected",
         "test \"$VAR\" = expected",
@@ -24,7 +26,13 @@ fn shell_verifiers_are_concrete_commands_unless_the_whole_value_is_a_template() 
             Some(command)
         );
     }
-    for command in ["<optional: x>", "  <optional: x>  ", "  "] {
+    for command in [
+        "<optional: x>",
+        "  <optional: x>  ",
+        "${UNREPLACED}",
+        "  ${NAME_1}  ",
+        "  ",
+    ] {
         let contract = serde_json::json!({
             "artifact_path": "out.json", "typed_verifier_command": command,
         });

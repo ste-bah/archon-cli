@@ -476,7 +476,7 @@ fn body_cannot_override_frozen_deliverable_contracts() {
             ..Default::default()
         },
     ];
-    let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\ndeliverable_contracts: [{kind: report, artifact_path: other.json, typed_verifier_command: 'true'}]\n```\n";
+    let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: [{kind: report, artifact_path: other.json, typed_verifier_command: 'true'}]\n```\n";
     let (stamped, notes) =
         super::workflow_host_command_binding::stamp_frozen_frontmatter(candidate, &frozen).unwrap();
     assert!(notes.contains(&"deliverable_contracts".to_string()));

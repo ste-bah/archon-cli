@@ -110,3 +110,37 @@ fn logic_361_code_on_the_closing_line_of_a_test_block_is_hashed() {
     };
     assert_eq!(hashed_text(&plain("")), hashed_text(&plain("1;")));
 }
+
+/// Literal names emitted by a declarative macro resolve to its definition;
+/// changing either the definition or its invocation must invalidate the digest.
+#[test]
+fn logic_361_references_to_macro_generated_items_reach_the_definition_and_invocation() {
+    let tree = Tree::new();
+    tree.write("src/command/mod.rs", "mod root;\nmod policy;\n");
+    tree.write(
+        "src/command/root.rs",
+        "pub fn verdict() -> bool { super::policy::FIELDS.len() > 0 }\n",
+    );
+    let policy = "macro_rules! fields { ($($field:ident),+) => { pub const FIELDS: &[&str] = &[$(stringify!($field)),+]; }; }\nfields! { first, second }\n";
+    tree.write("src/command/policy.rs", policy);
+    let hashed = tree.hash(&[]);
+    assert!(
+        walk_problems(&hashed).is_empty(),
+        "{:?}",
+        walk_problems(&hashed)
+    );
+    assert!(tree.files().contains("src/command/policy.rs"));
+    tree.write(
+        "src/command/policy.rs",
+        &policy.replace("first, second", "first, third"),
+    );
+    assert_ne!(tree.digest(), hashed.digest);
+    let invocation_changed = tree.digest();
+    tree.write(
+        "src/command/policy.rs",
+        &policy
+            .replace("first, second", "first, third")
+            .replace("stringify!($field)", "stringify!(other)"),
+    );
+    assert_ne!(tree.digest(), invocation_changed);
+}

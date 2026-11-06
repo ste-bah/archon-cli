@@ -64,9 +64,17 @@ fn skeleton_validation_defects(
         }
         if audit_contracts {
             for (index, contract) in task.deliverable_contracts.iter().enumerate() {
-                defects.extend(crate::task_universe_contract_audit::contract_defects(
-                    &subject, index, contract,
-                ));
+                defects.extend(
+                    crate::task_universe_contract_audit::contract_defects(
+                        &subject, index, contract,
+                    )
+                    .into_iter()
+                    .map(|mut defect| {
+                        defect.message =
+                            format!("task-skeleton.json task {subject}: {}", defect.message);
+                        defect
+                    }),
+                );
             }
         }
         let file = Path::new(&task.file_name);

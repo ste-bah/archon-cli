@@ -178,11 +178,24 @@ fn template_binding_failure(contract: &Value) -> Option<String> {
 }
 
 fn whole_value_template(value: &str) -> bool {
-    value
-        .trim()
+    let value = value.trim();
+    let angle = value
         .strip_prefix('<')
         .and_then(|body| body.strip_suffix('>'))
-        .is_some_and(|body| !body.contains(['<', '>']))
+        .is_some_and(|body| !body.contains(['<', '>']));
+    // A bare variable is an authoring placeholder, not an executable verifier.
+    // Keep shell parameter operators and expansions within real commands valid.
+    let shell_name = value
+        .strip_prefix("${")
+        .and_then(|body| body.strip_suffix('}'))
+        .is_some_and(|body| {
+            let mut chars = body.chars();
+            chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        });
+    angle || shell_name
 }
 
 fn source_collection_is_bound(contract: &Value) -> bool {
