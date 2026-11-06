@@ -477,19 +477,9 @@ function groundingRules() {
   ].join("\n");
 }
 
-// The observation every deliverable path must carry (Issue-56). The host lint
-// (`topology_lint/repository_observations.rs`) parses exactly this grammar and
-// checks it against the checkout, line count included: a path with no
-// observation, an inexact count, or "not observed" wording is a blocking
-// finding, so the words here and the parser there must agree.
+// Repository facts are checked by the host.
 function observationRule() {
-  return [
-    `Every path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (\`${args.repositoryRoot}/<relative path>\` or the repository-relative path), exactly one of these three observations and nothing in their place:`,
-    "  \`<path>\` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);",
-    "  \`<path>\` — exists (directory)   for a directory;",
-    "  \`<path>\` — absent   for a path that is not in the repository.",
-    "The host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root."
-  ].join("\n");
+  return "Do not write existence or line-count observations for paths; the host refutes explicit existence/type/line-count claims that contradict the repository; it does not write observations. Any existence or count you do state must be exact. Never claim a path exists or is absent unless you read it.";
 }
 
 // Directory names the host says are not worth reading, joined for a prompt.

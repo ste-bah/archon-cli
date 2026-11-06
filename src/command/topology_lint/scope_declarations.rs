@@ -43,7 +43,7 @@ pub(super) fn inspect(
         && task.deliverable_contracts.is_empty()
     {
         findings.push(format!(
-            "task {id}: declares no file it changes -- the `## Files Expected to Change` heading is missing or lists nothing, and it has no shared-append target or deliverable contract -- so its write set would be empty and no branch could land its work; add the heading and list every file this task changes, each with its observation"
+            "task {id}: declares no file it changes -- the `## Files Expected to Change` heading is missing or lists nothing, and it has no shared-append target or deliverable contract -- so its write set would be empty and no branch could land its work; add the heading and list every file this task changes, as a leading path declaration"
         ));
     }
     for entry in &task.files_forbidden_to_change {

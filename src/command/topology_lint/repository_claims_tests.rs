@@ -241,7 +241,7 @@ fn dotted_symbols_do_not_block_but_a_real_missing_path_still_does() {
 }
 
 #[test]
-fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
+fn scoped_slash_suffix_is_a_path_form_finding() {
     let (_temp, project, _tasks, tree) = grounded();
     let findings = findings_against(
         &tree,
@@ -249,7 +249,8 @@ fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
         "TASK-X-425",
         "`tests/x.rs` exists under `crate/tests/`.",
     );
-    assert!(findings.is_empty(), "{findings:?}");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].contains("is not repository-root relative"));
 }
 
 #[path = "repository_claims_scoped_tests.rs"]

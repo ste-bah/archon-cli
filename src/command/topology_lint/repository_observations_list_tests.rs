@@ -1,39 +1,74 @@
 use super::*;
 
-#[test]
-fn paths_after_an_observation_on_the_same_line_are_still_checked() {
-    let (_temp, project, tasks, tree) = grounded();
-    let raw = body(
-        "[]",
-        "- `src/lib.rs` — exists (1 line), `src/existing.rs` — exists (3 lines)",
-    );
-    assert!(findings(&tasks, &project, &tree, &raw).is_empty());
+fn declared(head: &str) -> Vec<String> {
+    let raw = body("[]", head);
+    let task =
+        archon_workflow::task_universe::parsing::parse_task_file(Path::new("TASK-X-001.md"), &raw)
+            .unwrap();
+    deliverable_paths(&task, &raw)
+}
 
-    let raw = body("[]", "- `src/lib.rs` — exists (1 line); `src/missing_n.rs`");
-    let found = findings(&tasks, &project, &tree, &raw);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0].contains("deliverable path `src/missing_n.rs` has no verifiable observation"),
-        "{}",
-        found[0]
+#[test]
+fn live_heads_declare_only_the_opening_path() {
+    let (_temp, _project, _tasks, tree) = grounded();
+    for opening in [
+        "source/report.rs".to_string(),
+        tree.root().join("source/report.rs").display().to_string(),
+    ] {
+        for description in [
+            "exists (directory `capability/` exists; `report.rs` observed elsewhere)",
+            "exists (about 12 lines); update `validation_tests.rs`",
+        ] {
+            assert_eq!(
+                declared(&format!("- `{opening}` — {description}")),
+                [opening.clone()]
+            );
+        }
+    }
+}
+
+#[test]
+fn declarations_match_the_ownership_reader() {
+    for head in [
+        "- `src/a.rs` and `src/b.rs`",
+        "- Likely anchors: `src/a.rs`, `src/b.rs`",
+        "- `src/widgets/` — update `mod.rs`",
+        "- src/a.rs.",
+        "- `Widget` with `src/widget.rs`",
+    ] {
+        assert_eq!(
+            declared(head),
+            archon_write_plan::declared_paths::declared_file_paths(head),
+            "{head}"
+        );
+    }
+}
+
+#[test]
+fn declaration_sources_include_contracts_and_shared_targets() {
+    let raw = body(
+        "[{kind: source, artifact_path: src/existing.rs}]",
+        "- `src/lib.rs`",
+    )
+    .replace(
+        "required_tools: []",
+        "required_tools: []\nshared_append_target_files: [src/shared.rs]",
+    );
+    let task =
+        archon_workflow::task_universe::parsing::parse_task_file(Path::new("TASK-X-001.md"), &raw)
+            .unwrap();
+    assert_eq!(
+        deliverable_paths(&task, &raw),
+        ["src/existing.rs", "src/lib.rs", "src/shared.rs"]
     );
 }
 
 #[test]
-fn wrapped_heads_continue_after_and_or_and_plus() {
-    let (_temp, project, tasks, tree) = grounded();
-    for ending in ["and/or", "+"] {
-        let raw = body(
-            "[]",
-            &format!("- `src/lib.rs` {ending}\n  `src/missing.rs` (create)"),
-        );
-        let found = findings(&tasks, &project, &tree, &raw);
-        assert_eq!(found.len(), 2, "ending={ending:?}: {found:?}");
-        assert!(
-            found
-                .iter()
-                .any(|finding| finding.contains("src/missing.rs")),
-            "ending={ending:?}: {found:?}"
-        );
-    }
+fn observation_lint_uses_prose_fences_without_changing_shared_sections() {
+    assert_eq!(
+        declared(
+            "- `src/lib.rs`\n\n```markdown\n## Files Expected to Change\n- `fake.rs`\n```\n\n- `src/new.rs`"
+        ),
+        ["src/lib.rs", "src/new.rs"]
+    );
 }

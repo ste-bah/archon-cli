@@ -72,19 +72,19 @@ pub(crate) fn evaluate_task_file_candidate(
         let task_id = archon_workflow::task_universe::parsing::parse_task_file(&path, raw)
             .map(|task| task.canonical_task_id)
             .unwrap_or_else(|_| subject.clone());
-        match super::repository_claims::inspect(cwd, tasks_root, &task_id, &path, raw) {
+        match super::repository_claims::inspect_with_paths(cwd, tasks_root, &task_id, &path, raw) {
             Ok(claims) => {
                 report.push_str("\n## repository claims\n");
                 if claims.is_empty() {
                     report.push_str("  no backticked repository path is said to exist or not exist against the recorded repository\n");
                 }
-                for (index, text) in claims.into_iter().enumerate() {
+                for (paths, text) in claims {
                     report.push_str(&format!("  BLOCKING {text}\n"));
                     // Deterministic: checked against the recorded repository.
                     let identity = archon_workflow::defect::DeterministicDefect::new(
-                        "repository_claim",
+                        super::repository_paths::finding_code(&text),
                         &task_id,
-                        format!("claims/{index}"),
+                        super::repository_paths::claim_location(&paths),
                     );
                     findings.push(
                         crate::command::workflow_gate::GateFinding::new(

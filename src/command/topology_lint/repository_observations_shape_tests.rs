@@ -29,7 +29,8 @@ fn a_landed_chat_and_wrapper_file_is_one_finding_not_one_per_deliverable() {
         "TASK-X-001",
         &path,
         &landed,
-    );
+    )
+    .unwrap();
     assert_eq!(set, found);
     // A pure wrapper is read as the document inside it: no finding at all.
     let wrapped = format!("```markdown\n{inner}```\n");
