@@ -209,7 +209,7 @@ mod compatibility_tests {
             for (index, id) in ids.iter().enumerate() {
                 let call = super::WorkflowV2HostCall {
                     id: (*id).into(),
-                    method: super::WorkflowV2HostMethod::Agent,
+                    method: crate::v2::WorkflowV2HostMethod::Agent,
                     write_mode: None,
                     options: Default::default(),
                 };
