@@ -153,6 +153,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 29: batch 26 (#490 landing reconcile, #521 per-agent cutoffs) shares sources with
         // body gating; bumped so no body verdict is reused across it. 30: Issue 572 body lint of a draft or pending skeleton accepts PRD constraint ids and raises no unowned_obligation for them; Issue 573 tab-indented REQ- bullets become obligations. 31: Issue 574/575 body lint of a draft or pending skeleton raises uncited_section/unknown_section, the frozen source_sections are stamped into bodies and compared, and id-keyed table rows become PRD constraints.
         version: 33, // #599: shared contract refusal and frozen-field repair ownership.
+        // #601, same unreleased version: declared paths come from the ownership reader; missing observations are no finding; explicit contradictions and path-form errors stay findings.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
@@ -218,6 +219,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 23: batch 25 (#494) shares sources with set gating; bumped likewise.
         // 24: batch 26 (#520 #521) shares sources with set gating; bumped likewise. 25: Issue 572 set coverage defines PRD constraint ids and raises one unowned_constraint finding per constraint no task names; Issue 573 tab-indented REQ- bullets become obligations. 26: Issue 574/575 set coverage raises one uncited_section per uncited PRD section and one unknown_section per bad citation, and id-keyed table rows become PRD constraints.
         version: 29, // #599: shared contract refusal and frozen-field repair ownership.
+        // #601, same unreleased version: declared paths come from the ownership reader; missing observations are no finding; explicit contradictions and path-form errors stay findings.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
