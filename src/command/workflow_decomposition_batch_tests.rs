@@ -93,7 +93,8 @@ fn bounded_author_pool_schedule_prompts_and_failures() {
 
 /// Acceptance authors driven through the real QuickJS host. The first entry
 /// waits for the fourth to start in a freed slot; prompts use pre-round state,
-/// and a pause written mid-pool must stop new dispatch.
+/// and, in pause mode, the second, fifth and sixth hold all slots until a
+/// pause is written so the next dispatch must encounter it at the host.
 struct PoolLlm {
     events: Mutex<Vec<(&'static str, String, String)>>,
     active: AtomicUsize,
@@ -131,6 +132,17 @@ impl PoolLlm {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         panic!("calls {ids:?} never had a {kind} event");
+    }
+
+    /// Keep the other slots occupied until the pause has been written.
+    async fn wait_for_pause(&self) {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !self.paused.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("pause was never written while AC-X-005 and AC-X-006 held their slots");
     }
 
     fn position(&self, kind: &str, id: &str) -> usize {
@@ -200,10 +212,15 @@ impl WorkflowLlmClient for PoolLlm {
             ("AC-X-002", Some((store, run_id))) => {
                 self.wait_for("end", &["AC-X-001", "AC-X-003", "AC-X-004"])
                     .await;
+                self.wait_for("start", &["AC-X-005", "AC-X-006"])
+                    .await;
                 archon_workflow::LifecycleController::new(store.clone())
                     .apply(run_id, archon_workflow::LifecycleAction::Pause)
                     .expect("pause the run mid-pool");
                 self.paused.store(true, Ordering::SeqCst);
+            }
+            ("AC-X-005" | "AC-X-006", Some(_)) => {
+                self.wait_for_pause().await;
             }
             _ => tokio::time::sleep(std::time::Duration::from_millis(5)).await,
         }
@@ -277,9 +294,10 @@ async fn fixed_acceptance_pool_fills_freed_slots_with_pre_round_prompts() {
     }
 }
 
-/// End-to-end guarantee: once a pause is written mid-pool, no model call
-/// starts and the caller sees the pause. Scope: this cannot catch a script
-/// that dispatches after a stop, because the host polls run control before
+/// End-to-end guarantee: all three slots stay occupied until the pause is
+/// written, so entry 7 reaches host run control after the pause and never
+/// starts a model call; the caller sees the pause. Scope: this cannot catch
+/// a script that dispatches after a stop, because the host polls run control before
 /// every dispatch (`workflow_live_v2_script_host_exec.rs`) and refuses such a
 /// call before anything observable happens. The script's own stop rules (no
 /// launch after a failure or a thrown stop, queued launches skipped, started
