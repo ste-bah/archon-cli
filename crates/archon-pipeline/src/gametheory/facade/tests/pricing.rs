@@ -46,7 +46,8 @@ fn budget_requires_the_resolved_model_price_before_any_calls() {
     let agents = vec!["nash-equilibrium-finder".into()];
     let error = costs::require_budget_prices(&PriceClient(None), &agents, 10.0).unwrap_err();
     assert!(error.to_string().contains("configured-model"));
-    assert!(error.to_string().contains("llm.model_prices"));
+    assert!(error.to_string().contains("llm.model_prices.<model>"));
+    assert!(error.to_string().contains("set the budget to unbounded"));
     assert!(costs::require_budget_prices(&PriceClient(Some([3.0, 15.0])), &agents, 10.0).is_ok());
     assert!(costs::require_budget_prices(&PriceClient(None), &agents, f64::INFINITY).is_ok());
 }

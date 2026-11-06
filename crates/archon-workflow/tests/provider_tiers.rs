@@ -134,12 +134,6 @@ fn arbitrary_registered_names_use_declared_capabilities_and_flow() {
 #[test]
 fn missing_registry_metadata_never_guesses_features_or_locality() {
     assert!(
-        ProviderTierResolver::new("local-vision", "model")
-            .resolve(ProviderTier::Vision)
-            .is_err()
-    );
-    assert!(archon_workflow::classify_provider("local-vision").is_err());
-    assert!(
         ProviderTierResolver::new("unregistered", "model")
             .resolve_with_registry(ProviderTier::Planner, &ProviderRegistry::new())
             .is_err()

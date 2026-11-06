@@ -21,8 +21,22 @@ fn compare(
     let mut expected = current.clone();
     if saved.providers.is_empty() {
         expected.providers.clear();
-        expected.role_models.clear();
-        expected.tier_aliases.clear();
+        for (field, unchanged) in [
+            (
+                "role_models",
+                saved.role_models.is_empty() && current.role_models.is_empty(),
+            ),
+            (
+                "tier_aliases",
+                saved.tier_aliases.is_empty() && current.tier_aliases.is_empty(),
+            ),
+        ] {
+            if !unchanged {
+                bail!(
+                    "fixed decomposition resume paused: legacy snapshot requires {field} to be empty; restore the launch-bound configuration"
+                );
+            }
+        }
     }
     if saved != &expected {
         bail!(
@@ -41,8 +55,13 @@ fn read_upgrade(store: &WorkflowStore, run_id: &str) -> Result<Option<RouteUpgra
     }
     let bytes = archon_workflow::v2::store_file::read_store_file(&path)?;
     let record: RouteUpgrade = serde_json::from_slice(&bytes)?;
-    if record.note != NOTE || record.route.providers.is_empty() {
+    if record.note != NOTE {
         bail!("invalid provider route upgrade record: {}", path.display());
+    }
+    if record.route.providers.is_empty() {
+        tracing::warn!(path = %path.display(),
+            "invalid provider route upgrade record: providers is empty; ignoring this record and rewriting it on the next admitted resume");
+        return Ok(None);
     }
     Ok(Some(record))
 }
@@ -120,5 +139,62 @@ mod tests {
         let mut wrong_endpoint = current.clone();
         wrong_endpoint.endpoint = Some("http://127.0.0.1:9999".into());
         assert!(validate_resume(&store, "fresh", &legacy, &wrong_endpoint).is_err());
+    }
+    #[test]
+    fn legacy_model_changes_are_refused_before_first_upgrade() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::project(temp.path());
+        let config = archon_core::config::ArchonConfig::default();
+        let current = resolve_provider_routes(&config, ProviderEndpointPolicy::ConfiguredOnly);
+        let mut legacy = current.clone();
+        legacy.providers.clear();
+        for field in ["role_models", "tier_aliases"] {
+            for change_saved in [false, true] {
+                let mut saved = legacy.clone();
+                let mut changed = current.clone();
+                let target = if change_saved {
+                    &mut saved
+                } else {
+                    &mut changed
+                };
+                if field == "role_models" {
+                    target.role_models.insert("judge".into(), "custom".into());
+                } else {
+                    target.tier_aliases.insert("opus".into(), "sonnet".into());
+                }
+                let error = record_upgrade(&store, "legacy", &saved, &changed).unwrap_err();
+                assert!(error.to_string().contains(field));
+                assert!(!store.run_dir("legacy").join(UPGRADE_PATH).exists());
+            }
+        }
+    }
+
+    #[test]
+    fn empty_provider_record_is_repaired_only_after_admission() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::project(temp.path());
+        let current = resolve_provider_routes(
+            &archon_core::config::ArchonConfig::default(),
+            ProviderEndpointPolicy::ConfiguredOnly,
+        );
+        let mut legacy = current.clone();
+        legacy.providers.clear();
+        store
+            .write_run_json(
+                "legacy",
+                UPGRADE_PATH,
+                &RouteUpgrade {
+                    note: NOTE.into(),
+                    route: legacy.clone(),
+                },
+            )
+            .unwrap();
+        validate_resume(&store, "legacy", &legacy, &current).unwrap();
+        assert!(read_upgrade(&store, "legacy").unwrap().is_none());
+        record_upgrade(&store, "legacy", &legacy, &current).unwrap();
+        assert_eq!(
+            read_upgrade(&store, "legacy").unwrap().unwrap().route,
+            current
+        );
     }
 }

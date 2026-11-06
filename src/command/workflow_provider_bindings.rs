@@ -2,7 +2,15 @@
 use archon_core::config::{ArchonConfig, ProviderEnvironmentConfig};
 use std::collections::BTreeMap;
 
-pub(crate) fn bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnvironmentConfig> {
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderDefault {
+    id: String,
+    base_url_config: Option<String>,
+    environment: ProviderEnvironmentConfig,
+}
+
+pub(crate) fn all_bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnvironmentConfig> {
     let mut result = BTreeMap::new();
     // Registry descriptors own standard key names. Explicit bindings override them.
     for descriptor in archon_llm::providers::registry::list_compat() {
@@ -15,8 +23,23 @@ pub(crate) fn bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnviro
             },
         );
     }
-    for (id, binding) in include!("workflow_provider_defaults.inc.rs") {
-        result.insert(id.into(), binding);
+    let defaults: Vec<ProviderDefault> =
+        serde_json::from_str(include_str!("workflow_provider_defaults.json"))
+            .expect("invalid shipped provider environment data");
+    let config_value = serde_json::to_value(config).expect("configuration must serialize");
+    for entry in defaults {
+        let mut binding = entry.environment;
+        if let Some(path) = entry.base_url_config {
+            let value = config_value
+                .pointer(&path)
+                .expect("shipped provider endpoint path must exist in configuration");
+            assert!(
+                value.is_null() || value.is_string(),
+                "invalid provider endpoint value at {path}"
+            );
+            binding.base_url = value.as_str().map(str::to_string);
+        }
+        result.insert(entry.id, binding);
     }
     for (id, configured) in &config.llm.provider_environment {
         let binding = result.entry(id.clone()).or_default();
@@ -35,6 +58,11 @@ pub(crate) fn bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnviro
         binding.credential_env.sort();
         binding.credential_env.dedup();
     }
+    result
+}
+
+pub(crate) fn bindings(config: &ArchonConfig) -> BTreeMap<String, ProviderEnvironmentConfig> {
+    let mut result = all_bindings(config);
     result.retain(|id, _| {
         id == &config.llm.provider || config.llm.provider_environment.contains_key(id)
     });
@@ -54,6 +82,21 @@ mod tests {
             super::super::ProviderEndpointPolicy::ConfiguredOnly,
         );
         assert_eq!(runtime.openai.api_key, config.llm.openai.api_key);
+    }
+
+    #[test]
+    fn fallback_keeps_the_same_endpoint_registry_as_direct_selection() {
+        let mut config = ArchonConfig::default();
+        let direct = all_bindings(&config)["anthropic"].clone();
+        config.llm.provider = "openai".into();
+        let fallback = all_bindings(&config)["anthropic"].clone();
+        assert_eq!(direct.base_url_env, fallback.base_url_env);
+        assert_eq!(fallback.base_url_env.as_deref(), Some("ANTHROPIC_BASE_URL"));
+        config.api.base_url = Some("https://proxy.invalid/messages".into());
+        assert_eq!(
+            all_bindings(&config)["anthropic"].base_url,
+            config.api.base_url
+        );
     }
 
     #[test]

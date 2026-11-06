@@ -133,8 +133,6 @@ mod tests {
 
 /// Shipped exact-model prices preserve the base estimates; operators can override them.
 pub fn default_model_prices() -> BTreeMap<String, [f64; 2]> {
-    include!("model_prices.inc.rs")
-        .into_iter()
-        .map(|(model, rates)| (model.to_string(), rates))
-        .collect()
+    serde_json::from_str(include_str!("model_prices.json"))
+        .expect("invalid shipped model price data")
 }

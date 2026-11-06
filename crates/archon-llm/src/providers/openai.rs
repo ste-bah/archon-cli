@@ -9,12 +9,7 @@ use crate::providers::openai_cache::{supports_explicit_prompt_cache, system_cont
 use crate::providers::openai_protocol::map_http_error;
 use crate::streaming::StreamEvent;
 
-// ---------------------------------------------------------------------------
-// OpenAiProvider
-// ---------------------------------------------------------------------------
-
 pub struct OpenAiProvider {
-    /// Resolved API key (env var takes priority over config).
     api_key: String,
     /// Base URL override (defaults to https://api.openai.com/v1).
     base_url: String,
@@ -23,13 +18,19 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     /// Create a new OpenAI provider.
-    ///
-    /// `api_key` is the fallback if `OPENAI_API_KEY` env var is not set.
-    pub fn new(api_key: String, base_url: Option<String>, _default_model: String) -> Self {
-        let resolved_key = Self::resolve_api_key(&api_key);
+    pub fn new(api_key: String, base_url: Option<String>, default_model: String) -> Self {
+        Self::with_resolved_api_key(Self::resolve_api_key(&api_key), base_url, default_model)
+    }
+
+    /// Construct with credentials already resolved by the caller's provider registry.
+    pub fn with_resolved_api_key(
+        api_key: String,
+        base_url: Option<String>,
+        _model: String,
+    ) -> Self {
         let resolved_url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
         Self {
-            api_key: resolved_key,
+            api_key,
             base_url: resolved_url,
             http: crate::transport_http::client_builder()
                 .build()

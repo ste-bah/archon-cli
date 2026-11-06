@@ -54,13 +54,6 @@ impl ProviderTierResolver {
         self
     }
 
-    /// Metadata-free legacy resolution cannot establish locality or capabilities.
-    pub fn resolve(&self, tier: ProviderTier) -> WorkflowResult<ResolvedProviderTier> {
-        Err(WorkflowError::ProviderTierUnresolved(format!(
-            "tier {tier:?} requires a provider registry to establish capabilities and data flow"
-        )))
-    }
-
     pub fn resolve_with_registry(
         &self,
         tier: ProviderTier,
@@ -105,13 +98,6 @@ impl ProviderTierResolver {
             features: supported_features(provider),
         })
     }
-}
-
-/// Provider names alone do not establish a family; use registry-backed resolution.
-pub fn classify_provider(provider: &str) -> WorkflowResult<ProviderFamily> {
-    Err(WorkflowError::ProviderTierUnresolved(format!(
-        "provider {provider} requires registry metadata for classification"
-    )))
 }
 
 fn enforce_tier_requirements(

@@ -21,7 +21,7 @@ pub(crate) struct TrustedProviderRouteSnapshot {
 
 #[path = "workflow_provider_bindings.rs"]
 mod provider_bindings;
-pub(crate) use provider_bindings::{bindings, runtime_config};
+pub(crate) use provider_bindings::{all_bindings, bindings, runtime_config};
 
 /// Snapshot every configured provider's endpoint and environment binding names.
 pub(crate) fn resolve_provider_routes(

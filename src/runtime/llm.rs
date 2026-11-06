@@ -185,7 +185,7 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
         get_or_create_device_id(),
         account_uuid,
     );
-    let binding = crate::command::workflow_provider_route::bindings(config)
+    let binding = crate::command::workflow_provider_route::all_bindings(config)
         .remove("anthropic")
         .unwrap_or_default();
     let ambient = binding
@@ -329,8 +329,7 @@ pub(crate) fn build_llm_provider_selection(
         ),
 
         "openai" => {
-            let inline_key = llm_cfg.openai.api_key.clone().unwrap_or_default();
-            let resolved = OpenAiProvider::resolve_api_key(&inline_key);
+            let resolved = crate::runtime::llm_non_anthropic::openai_api_key(llm_cfg);
             if resolved.is_empty() {
                 tracing::warn!("OpenAI selected but no API key found; falling back to Anthropic");
                 return selected_anthropic(
@@ -340,7 +339,7 @@ pub(crate) fn build_llm_provider_selection(
                 );
             }
             selected(
-                OpenAiProvider::new(
+                OpenAiProvider::with_resolved_api_key(
                     resolved,
                     llm_cfg.openai.base_url.clone(),
                     llm_cfg.openai.model.clone(),
@@ -404,12 +403,6 @@ pub(crate) fn build_llm_provider_selection(
         ),
 
         other => {
-            // Flat-config descriptor path: groq, deepseek, mistral, xai,
-            // gemini, together, perplexity, etc. Route through
-            // `archon_llm::ActiveProvider`
-            // with a minimal flat LlmConfig; credentials come from the
-            // descriptor's default env var (api_key_env override not
-            // supported via nested archon_core::config::LlmConfig yet).
             let flat = FlatLlmConfig {
                 provider: other.to_string(),
                 model: None,
