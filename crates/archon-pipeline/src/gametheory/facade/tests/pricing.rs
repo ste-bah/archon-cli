@@ -53,6 +53,17 @@ fn budget_requires_the_resolved_model_price_before_any_calls() {
 }
 
 #[test]
+fn shipped_defaults_refuse_unknown_models_with_the_configuration_hint() {
+    let config = archon_core::config::LlmConfig::default();
+    let client = PriceClient(config.model_prices.get("configured-model").copied());
+    let agents = vec!["nash-equilibrium-finder".into()];
+    let error = costs::require_budget_prices(&client, &agents, 10.0).unwrap_err();
+    assert!(error.to_string().contains(
+        "Cannot enforce game-theory budget: model 'configured-model' has no valid price; set llm.model_prices.\"<model>\" (quote the key) for 'configured-model' or set the budget to unbounded"
+    ));
+}
+
+#[test]
 fn budgeted_execution_refuses_unpriced_model_before_dispatch() {
     let routing = RoutingDecision {
         run_id: "unpriced".into(),

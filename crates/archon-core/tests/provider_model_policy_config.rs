@@ -39,22 +39,56 @@ fn existing_config_retains_provider_resolved_tier_defaults() {
     let config: LlmConfig = toml::from_str("provider = 'private-service'").unwrap();
     assert!(config.role_models.is_empty());
     assert!(config.tier_aliases.is_empty());
-    assert_eq!(
-        config.model_prices,
-        archon_core::config::model_policy::default_model_prices()
-    );
+    for (model, pricing) in archon_core::cost_table::built_in_prices() {
+        assert_eq!(
+            config.model_prices[model],
+            [pricing.input_per_mtok, pricing.output_per_mtok],
+            "{model}"
+        );
+    }
     assert!(config.provider_environment.is_empty());
 }
 
 #[test]
-fn shipped_default_models_retain_base_estimates() {
+fn shipped_default_models_use_the_shared_cost_table() {
     let models = archon_core::config::ModelsConfig::default();
-    let prices = archon_core::config::model_policy::default_model_prices();
-    for (model, rates) in [
-        (models.anthropic.opus, [15.0, 75.0]),
-        (models.anthropic.sonnet, [3.0, 15.0]),
-        (models.anthropic.haiku, [3.0, 15.0]),
+    let prices = LlmConfig::default().model_prices;
+    for model in [
+        models.anthropic.opus,
+        models.anthropic.sonnet,
+        models.anthropic.haiku,
     ] {
-        assert_eq!(prices.get(&model), Some(&rates), "{model}");
+        let pricing = archon_core::cost_table::lookup(&model).unwrap();
+        assert_eq!(
+            prices[&model],
+            [pricing.input_per_mtok, pricing.output_per_mtok],
+            "{model}"
+        );
     }
+    for (model, pricing) in archon_core::cost_table::built_in_prices() {
+        assert_eq!(
+            prices[model],
+            [pricing.input_per_mtok, pricing.output_per_mtok],
+            "{model}"
+        );
+    }
+}
+
+#[test]
+fn partial_model_price_overrides_keep_unlisted_defaults() {
+    let config: LlmConfig = toml::from_str(
+        r#"
+[model_prices]
+"claude-opus-5" = [7.0, 35.0]
+"private-model" = [0.0, 0.0]
+"#,
+    )
+    .unwrap();
+    let mut expected = archon_core::config::model_policy::default_model_prices();
+    expected.insert("claude-opus-5".into(), [7.0, 35.0]);
+    expected.insert("private-model".into(), [0.0, 0.0]);
+    assert_eq!(config.model_prices, expected);
+    assert!(!config.model_prices.contains_key("unknown-model"));
+    let empty: LlmConfig = toml::from_str("[model_prices]").unwrap();
+    assert_eq!(empty.model_prices, LlmConfig::default().model_prices);
 }
