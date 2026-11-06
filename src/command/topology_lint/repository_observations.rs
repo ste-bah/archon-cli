@@ -256,10 +256,9 @@ pub(crate) fn findings_against(
                             {
                                 if let Some(relative) =
                                     super::repository_paths::relative_path(tree, &claim.path)?
+                                    && !findings.iter().any(|(path, _)| path == &relative)
                                 {
-                                    if !findings.iter().any(|(path, _)| path == &relative) {
-                                        findings.push((relative, format!("{task_id}: {error}")));
-                                    }
+                                    findings.push((relative, format!("{task_id}: {error}")));
                                 }
                                 Vec::new()
                             }
@@ -324,6 +323,12 @@ pub(crate) fn findings_against(
         // A relative path present in the project but not in the checkout is
         // a project artifact (a registry, a report), not repository source.
         if !path.starts_with('/') && !truth.in_checkout && project_root.join(&relative).exists() {
+            continue;
+        }
+        if truth.certainly_absent()
+            && let Some(text) = super::repository_paths::path_form_finding(tree, &relative)
+        {
+            findings.push((relative, format!("{task_id}: {text}")));
             continue;
         }
         let root = tree.root().display();

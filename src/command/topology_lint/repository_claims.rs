@@ -141,8 +141,15 @@ fn claim_findings(
         let Some(relative) = super::repository_paths::relative_path(tree, &claim.path)? else {
             continue;
         };
+        let mut path_form = None;
         let resolved = (|| -> Result<Vec<String>> {
             super::repository_paths::checked_path(tree, &claim.path)?;
+            if super::repository_paths::truth(tree, &relative)?.certainly_absent() {
+                path_form = super::repository_paths::path_form_finding(tree, &relative);
+                if path_form.is_some() {
+                    return Ok(vec![relative.clone()]);
+                }
+            }
             if let Some(scope) = &claim.scope {
                 super::repository_paths::checked_path(tree, scope)?;
             }
@@ -163,6 +170,12 @@ fn claim_findings(
                 return Err(error);
             }
         };
+        if let Some(text) = path_form {
+            if faults.insert(relative.clone()) {
+                findings.push((vec![relative], format!("{task_id}: {text}")));
+            }
+            continue;
+        }
         let Some(relatives) = paths
             .iter()
             .map(|path| super::repository_paths::relative_path(tree, path))
@@ -230,9 +243,10 @@ fn claim_findings(
 
 /// The paths a claim may be about. A path with components may already be
 /// repository-relative, or it may be relative to the explicitly named
-/// directory: keep an existing root path, otherwise use the only scoped
-/// interpretation present in the tree. A bare name is joined to every
-/// directory the scope may name. Empty when the claim names no path.
+/// directory: keep an existing root path or diagnose a base-tree suffix.
+/// When no scoped interpretation exists, retain the root and joined paths.
+/// A bare name is joined to every directory the scope may name.
+/// Empty when the claim names no path.
 pub(super) fn resolve_scoped_paths(
     tree: &RepositoryTree,
     claim: &PathClaim,
@@ -240,6 +254,14 @@ pub(super) fn resolve_scoped_paths(
     let Some(cited) = &claim.scope else {
         return Ok(vec![claim.path.clone()]);
     };
+    if Path::new(&claim.path).is_absolute() {
+        return Ok(vec![claim.path.clone()]);
+    }
+    if super::repository_paths::path_form_finding(tree, &claim.path).is_some()
+        && super::repository_paths::truth(tree, &claim.path)?.certainly_absent()
+    {
+        return Ok(vec![claim.path.clone()]);
+    }
     let scopes = scope_directories(tree, cited)?;
     if claim.scoped_join || !claim.path.contains('/') {
         return Ok(scopes
@@ -248,7 +270,7 @@ pub(super) fn resolve_scoped_paths(
             .collect());
     }
     if scopes.is_empty() {
-        return Ok(Vec::new());
+        return Ok(vec![claim.path.clone()]);
     }
     let Some(root_path) = tree.relative_to_root(&claim.path) else {
         return Ok(Vec::new());
@@ -275,7 +297,9 @@ pub(super) fn resolve_scoped_paths(
         }
         let mut present = existing.into_iter();
         let (Some(only), None) = (present.next(), present.next()) else {
-            return Ok(Vec::new());
+            readings.insert(root_path.clone());
+            readings.insert(format!("{scope}/{}", claim.path));
+            continue;
         };
         readings.insert(only);
     }
@@ -360,13 +384,22 @@ pub(crate) fn set_findings(project_root: &Path, root: &Path) -> Result<Vec<GateF
         findings.extend(
             body_findings(&tree, project_root, &task.canonical_task_id, &path, &raw)?
                 .into_iter()
-                .map(|text| {
+                .enumerate()
+                .map(|(index, text)| {
+                    let code = super::repository_paths::finding_code(&text);
                     GateFinding::new(
                         GateId::WorkflowLintTaskSet,
                         text,
                         &task.canonical_task_id,
                         Some(path.clone()),
                         archon_workflow::RemediationScope::Body,
+                    )
+                    .with_defect(
+                        archon_workflow::defect::DeterministicDefect::new(
+                            code,
+                            &task.canonical_task_id,
+                            format!("claims/{index}"),
+                        ),
                     )
                 }),
         );

@@ -82,7 +82,7 @@ pub(crate) fn evaluate_task_file_candidate(
                     report.push_str(&format!("  BLOCKING {text}\n"));
                     // Deterministic: checked against the recorded repository.
                     let identity = archon_workflow::defect::DeterministicDefect::new(
-                        "repository_claim",
+                        super::repository_paths::finding_code(&text),
                         &task_id,
                         format!("claims/{index}"),
                     );

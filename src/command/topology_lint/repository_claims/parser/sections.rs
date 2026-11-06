@@ -8,10 +8,10 @@ pub(crate) fn scoped_sections(text: &str) -> Vec<(String, Option<String>)> {
         if kind == LineKind::Prose && line.trim_start().starts_with('#') {
             sections.push((std::mem::take(&mut body), scope.take()));
             let tokens: Vec<_> = line.split('`').skip(1).step_by(2).collect();
-            if let [token] = tokens.as_slice() {
-                if token.ends_with('/') {
-                    scope = super::repository_directory_token(token);
-                }
+            if let [token] = tokens.as_slice()
+                && token.ends_with('/')
+            {
+                scope = super::repository_directory_token(token);
             }
         }
         body.push_str(line);

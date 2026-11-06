@@ -37,8 +37,9 @@ pub(super) fn metadata_error(path: &str, error: std::io::Error) -> anyhow::Error
     }
 }
 
-/// Keep lexical members for escape checks; resolve alternate absolute root
-/// spellings through their deepest existing ancestor (including missing tails).
+/// Compare absolute spellings only against the lexical and canonical root.
+/// Never probe an outside candidate (or any of its ancestors): even ENOTDIR
+/// or EACCES there is unrelated to the recorded repository.
 pub(super) fn relative_path(tree: &RepositoryTree, named: &str) -> anyhow::Result<Option<String>> {
     let spelling = named.replace('\\', "/");
     let candidate = Path::new(&spelling);
@@ -48,57 +49,41 @@ pub(super) fn relative_path(tree: &RepositoryTree, named: &str) -> anyhow::Resul
     let root = tree.root().canonicalize().map_err(|error| {
         anyhow::Error::new(error).context(format!("repository root {}", tree.root().display()))
     })?;
-    // Preserve an aliased root's lexical tail, so a symlink below that root
-    // is still checked for escape rather than mistaken for an outside path.
-    for prefix in candidate.ancestors().collect::<Vec<_>>().into_iter().rev() {
-        match std::fs::symlink_metadata(prefix) {
-            Ok(_) => {
-                if prefix
-                    .canonicalize()
-                    .map_err(|error| metadata_error(named, error))?
-                    == root
-                {
-                    let relative = candidate.strip_prefix(prefix)?;
-                    return Ok(Some(
-                        archon_workflow::repository_record::normalize_relative(
-                            &relative.to_string_lossy(),
-                        ),
-                    ));
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-            Err(error) => return Err(metadata_error(named, error)),
-        }
+    Ok(candidate.strip_prefix(root).ok().map(|relative| {
+        archon_workflow::repository_record::normalize_relative(&relative.to_string_lossy())
+    }))
+}
+
+pub(super) const PATH_FORM_CODE: &str = "repository_path_not_root_relative";
+
+/// A suffix present at the base is an author path-form fault, not an
+/// existence contradiction. Keep the suggestions deterministic and bounded.
+pub(super) fn path_form_finding(tree: &RepositoryTree, relative: &str) -> Option<String> {
+    let matches = tree.paths_ending_with(relative);
+    // Parsers normalize a trailing directory slash away. A bare directory
+    // suffix still names a path; bare filenames require an explicit scope.
+    if matches.is_empty()
+        || (!relative.contains('/') && !matches.iter().all(|path| tree.is_dir_at_base(path)))
+    {
+        return None;
     }
-    let mut ancestor = candidate;
-    let mut tail = Vec::new();
-    loop {
-        match std::fs::symlink_metadata(ancestor) {
-            Ok(_) => break,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let Some(name) = ancestor.file_name() else {
-                    return Ok(None);
-                };
-                tail.push(name.to_os_string());
-                let Some(parent) = ancestor.parent() else {
-                    return Ok(None);
-                };
-                ancestor = parent;
-            }
-            Err(error) => return Err(metadata_error(named, error)),
-        }
-    }
-    let resolved = ancestor
-        .canonicalize()
-        .map_err(|error| metadata_error(named, error))?;
-    let Ok(relative) = resolved.strip_prefix(&root) else {
-        return Ok(None);
-    };
-    let mut relative = relative.to_path_buf();
-    relative.extend(tail.into_iter().rev());
-    Ok(Some(
-        archon_workflow::repository_record::normalize_relative(&relative.to_string_lossy()),
+    let matches = matches
+        .into_iter()
+        .take(3)
+        .map(|path| format!("`{path}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "[{PATH_FORM_CODE}] `{relative}` is not repository-root relative: no such path from the repository root; write the full repository-root path (matches: {matches})"
     ))
+}
+
+pub(super) fn finding_code(text: &str) -> &'static str {
+    if text.contains(&format!("[{PATH_FORM_CODE}]")) {
+        PATH_FORM_CODE
+    } else {
+        "repository_claim"
+    }
 }
 
 /// Reject lexical escapes before reading the filesystem, then resolve the

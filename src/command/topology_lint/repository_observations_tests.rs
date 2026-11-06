@@ -426,3 +426,6 @@ mod shape_tests;
 
 #[path = "repository_observations_security_tests.rs"]
 mod security_tests;
+
+#[path = "repository_path_form_tests.rs"]
+mod path_form_tests;

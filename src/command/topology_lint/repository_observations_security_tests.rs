@@ -191,14 +191,15 @@ fn directory_heading_scopes_component_observations() {
     });
     let raw = body("[]", "")
         + "\n## Tests in `src/providers/`\n`capability_tests/engine_tests.rs` — exists (4 lines)\n";
-    assert!(inspect_result(&tasks, &project, &raw).unwrap().is_empty());
-    let found = inspect_result(&tasks, &project, &raw.replace("(4 lines)", "(3 lines)")).unwrap();
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0].contains("src/providers/capability_tests/engine_tests.rs"),
-        "{found:?}"
-    );
-    assert!(found[0].contains("has 4 lines"), "{found:?}");
+    for raw in [&raw, &raw.replace("(4 lines)", "(3 lines)")] {
+        let found = inspect_result(&tasks, &project, raw).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].contains("is not repository-root relative"),
+            "{found:?}"
+        );
+        assert!(found[0].contains("src/providers/capability_tests/engine_tests.rs"));
+    }
     assert!(tree.root().is_dir());
 }
 
@@ -220,7 +221,7 @@ fn path_faults_dedupe_normalized_spellings() {
 
 #[cfg(unix)]
 #[test]
-fn alternate_absolute_root_spelling_checks_existing_and_missing_paths() {
+fn outside_absolute_aliases_are_skipped_without_resolving_candidates() {
     let (_temp, project, tasks, tree) = grounded();
     let alias = project.join("repository-alias");
     std::os::unix::fs::symlink(tree.root(), &alias).unwrap();
@@ -228,14 +229,12 @@ fn alternate_absolute_root_spelling_checks_existing_and_missing_paths() {
         let named = alias.join(path).display().to_string();
         let raw = body("[]", &format!("- `{named}` — exists ({count} lines)"));
         let found = inspect_result(&tasks, &project, &raw).unwrap();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert!(!found[0].contains("path leaves"), "{found:?}");
-        assert!(found[0].contains(path), "{found:?}");
+        assert!(found.is_empty(), "{found:?}");
     }
 }
 
 #[test]
-fn case_aliases_are_checked_when_the_filesystem_supports_them() {
+fn outside_case_aliases_are_skipped() {
     let (_temp, project, tasks, tree) = grounded();
     let alias = tree.root().with_file_name("REPO");
     // A case-sensitive filesystem has no alternate spelling for this root.
@@ -249,13 +248,12 @@ fn case_aliases_are_checked_when_the_filesystem_supports_them() {
     let named = alias.join("missing/deep/file.rs").display().to_string();
     let raw = body("[]", &format!("- `{named}` — exists (1 line)"));
     let found = inspect_result(&tasks, &project, &raw).unwrap();
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].contains("absent from repository"), "{found:?}");
+    assert!(found.is_empty(), "{found:?}");
 }
 
 #[test]
-fn absolute_temp_root_spelling_matches_the_canonical_record() {
-    let (temp, project, tasks, _tree) = grounded();
+fn absolute_temp_paths_require_a_recognized_root_spelling() {
+    let (temp, project, tasks, tree) = grounded();
     let named = temp
         .path()
         .join("repo/src/existing.rs")
@@ -263,13 +261,17 @@ fn absolute_temp_root_spelling_matches_the_canonical_record() {
         .to_string();
     let raw = body("[]", &format!("- `{named}` — exists (2 lines)"));
     let found = inspect_result(&tasks, &project, &raw).unwrap();
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].contains("has 3 lines"), "{found:?}");
+    if Path::new(&named).starts_with(tree.root()) {
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("has 3 lines"), "{found:?}");
+    } else {
+        assert!(found.is_empty(), "{found:?}");
+    }
 }
 
 #[cfg(unix)]
 #[test]
-fn absolute_symlink_escape_is_a_body_fault_through_root_aliases() {
+fn absolute_symlink_escape_is_a_body_fault_only_under_a_recognized_root() {
     let (_temp, project, tasks, tree) = grounded();
     let alias = project.join("repository-alias");
     std::os::unix::fs::symlink(tree.root(), &alias).unwrap();
@@ -278,7 +280,11 @@ fn absolute_symlink_escape_is_a_body_fault_through_root_aliases() {
         let named = root.join("escape/missing.rs").display().to_string();
         let raw = body("[]", &format!("- `{named}` — exists (2 lines)"));
         let found = inspect_result(&tasks, &project, &raw).unwrap();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].contains("path leaves the repository"), "{found:?}");
+        if root == tree.root() {
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert!(found[0].contains("path leaves the repository"), "{found:?}");
+        } else {
+            assert!(found.is_empty(), "{found:?}");
+        }
     }
 }
