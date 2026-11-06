@@ -84,7 +84,7 @@ fn headings_keep_missing_slashed_and_absolute_claims() {
                 "{found:?}"
             );
             assert!(found[0].contains(&format!("`{named}`")), "{found:?}");
-            if named == "unknown/ghost.rs" && predicate == "exists." {
+            if named == "unknown/ghost.rs" {
                 assert!(
                     found[0].contains("`src/unknown/ghost.rs` or `unknown/ghost.rs` exists"),
                     "{found:?}"

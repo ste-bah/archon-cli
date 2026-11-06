@@ -422,7 +422,8 @@ pub(crate) fn repository_relative_token(token: &str) -> Option<String> {
     {
         return None;
     }
-    let absolute = std::path::Path::new(&token.replace('\\', "/")).is_absolute();
+    let absolute =
+        token.starts_with('/') || std::path::Path::new(&token.replace('\\', "/")).is_absolute();
     let normalized = archon_workflow::repository_record::normalize_relative(token);
     if normalized.is_empty() {
         return None;

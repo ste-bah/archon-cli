@@ -282,7 +282,8 @@ pub(crate) fn findings_against(
                     } else {
                         Vec::new()
                     };
-                    // No scoped reading exists: report the author spelling once.
+                    let mut identity = None;
+                    // Check a wholly missing scoped claim once, keeping every candidate in its name.
                     let candidates = if (token.contains('/') || Path::new(token).is_absolute())
                         && candidates.len() > 1
                         && candidates
@@ -292,6 +293,14 @@ pub(crate) fn findings_against(
                             .iter()
                             .all(|truth| truth.certainly_absent())
                     {
+                        let relatives = candidates
+                            .iter()
+                            .map(|path| super::repository_paths::relative_path(tree, path))
+                            .collect::<anyhow::Result<Vec<_>>>()?
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>();
+                        identity = Some(super::repository_claims::path_identity(token, &relatives));
                         vec![token.to_string()]
                     } else {
                         candidates
@@ -300,8 +309,14 @@ pub(crate) fn findings_against(
                         if let Some(relative) =
                             super::repository_paths::relative_path(tree, &candidate)?
                         {
+                            let identity = identity.clone().unwrap_or_else(|| {
+                                super::repository_claims::path_identity(
+                                    token,
+                                    std::slice::from_ref(&relative),
+                                )
+                            });
                             paths.push(candidate);
-                            observations.push((relative, observation, token.to_string()));
+                            observations.push((relative, observation, token.to_string(), identity));
                         }
                     }
                 }
@@ -324,8 +339,8 @@ pub(crate) fn findings_against(
         }
         let claims: Vec<_> = observations
             .iter()
-            .filter(|(path, _, _)| path == &relative)
-            .map(|(_, observation, _)| *observation)
+            .filter(|(path, _, _, _)| path == &relative)
+            .map(|(_, observation, _, _)| *observation)
             .collect();
         let count = claims
             .iter()
@@ -354,8 +369,8 @@ pub(crate) fn findings_against(
         }
         let named = observations
             .iter()
-            .find(|(path, _, _)| path == &relative)
-            .map_or(path.as_str(), |(_, _, named)| named.as_str());
+            .find(|(path, _, _, _)| path == &relative)
+            .map_or(path.as_str(), |(_, _, named, _)| named.as_str());
         if truth.certainly_absent()
             && claims
                 .iter()
@@ -366,11 +381,12 @@ pub(crate) fn findings_against(
             findings.push((relative, format!("{task_id}: {text}")));
             continue;
         }
-        let named = if std::path::Path::new(named).is_absolute() {
-            named
-        } else {
-            &relative
-        };
+        let identity =
+            super::repository_claims::path_identity(named, std::slice::from_ref(&relative));
+        let named = observations
+            .iter()
+            .find(|(path, _, _, _)| path == &relative)
+            .map_or(identity.as_str(), |(_, _, _, identity)| identity.as_str());
         let root = tree.root().display();
         let base = tree.base_commit();
         let checkout_dir = actual == Observation::Directory;

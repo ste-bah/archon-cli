@@ -257,3 +257,23 @@ fn a_module_path_is_not_a_directory_scope() {
     let found = findings(text);
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn absolute_tokens_preserve_their_spelling_on_every_host() {
+    for (token, expected) in [
+        ("/etc/x.rs", Some("/etc/x.rs")),
+        (r"C:\x\y.rs", cfg!(windows).then_some(r"C:\x\y.rs")),
+    ] {
+        assert_eq!(
+            parser::repository_relative_token(token).as_deref(),
+            expected
+        );
+        assert_eq!(
+            claims(&format!("`{token}` exists.")),
+            expected
+                .map(|path| vec![(path.to_string(), Claim::Exists)])
+                .unwrap_or_default(),
+            "{token}"
+        );
+    }
+}
