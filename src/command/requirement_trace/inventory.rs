@@ -20,7 +20,7 @@ mod tests {
     use super::*;
     #[test]
     fn trace_uses_the_host_inventory_for_every_authored_style() {
-        for id in ["REQ-X-001", "FR-001", "R1", "REQ-1", "US-12", "item_name"] {
+        for id in ["REQ-X-001", "FR-001", "R1", "REQ-1", "US-12", "ITEM-1"] {
             let source = format!("Requirements\n---\n- **{id}**: fail closed\n");
             let rows = extract_requirements(&source).unwrap();
             assert_eq!(rows.len(), 1);

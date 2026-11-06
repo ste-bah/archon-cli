@@ -7,7 +7,7 @@ const STYLES: &[(&str, &str)] = &[
     ("REQ-1", "REQ-2"),
     ("US-12", "US-13"),
     ("feature_1", "feature_2"),
-    ("feature-login", "feature-register"),
+    ("FEATURE-login-1", "FEATURE-register-2"),
     ("Änderung.1", "Änderung.2"),
 ];
 
@@ -121,7 +121,7 @@ fn source_context_follows_declarations_instead_of_matching_prose() {
 
 #[test]
 fn acceptance_table_ids_are_authored_identities_too() {
-    for id in ["AC-X-001", "FR-001", "R1", "US-12", "item_name"] {
+    for id in ["AC-X-001", "FR-001", "R1", "US-12", "ITEM-1"] {
         let source = format!(
             "Autre titre\n---\n| Key | Criterion |\n|---|---|\n| **{id}** | Checked behavior. |\n"
         );
@@ -130,4 +130,92 @@ fn acceptance_table_ids_are_authored_identities_too() {
             BTreeMap::from([(id.into(), "Checked behavior.".into())])
         );
     }
+}
+
+#[test]
+fn no_separator_and_unparseable_declarations_are_visible() {
+    let source = "## Requirements\n- REQ-X-001 Store gadgets\n- FR-2\n";
+    assert_eq!(requirement_texts(source)["REQ-X-001"], "Store gadgets");
+    assert_eq!(malformed_obligation_ids(source), ["FR-2"]);
+}
+
+#[test]
+fn requirement_section_words_classify_every_id_family() {
+    for title in [
+        "Functional Spec",
+        "FEATURES",
+        "User Stories",
+        "Requirements",
+        "Functional Requirements",
+    ] {
+        let source = format!(
+            "## 3 {title}\n- FR-1: first\n- R-2 second\n- NAMED-3: third\n\n| Identifier | Description |\n|---|---|\n| FR-4 | fourth |\n"
+        );
+        assert_eq!(requirement_texts(&source).len(), 4, "{title}");
+        assert!(constraint_ids(&source).is_empty());
+    }
+}
+
+#[test]
+fn common_headers_and_first_column_adapter_keep_requirement_rows() {
+    for header in [
+        "ID",
+        "Req ID",
+        "requirement id",
+        "#",
+        "Identifier",
+        "KEY",
+        "Reference",
+    ] {
+        let source = format!(
+            "## Requirements\n| {header} | Description |\n|---|---|\n| FR-1 | first |\n| no identity | cannot silently vanish |\n"
+        );
+        assert_eq!(requirement_texts(&source)["FR-1"], "first");
+        assert_eq!(malformed_obligation_ids(&source).len(), 1);
+    }
+    let misplaced = "## Requirements\n| Reference | ID | Description |\n|---|---|---|\n| FR-2 | legacy label | second |\n";
+    assert!(requirement_texts(misplaced).contains_key("FR-2"));
+    let no_ids = "## Requirements\n| Label | Description |\n|---|---|\n| ordinary | missing id |\n";
+    assert_eq!(malformed_obligation_ids(no_ids).len(), 1);
+}
+
+#[test]
+fn titles_fields_and_nested_versions_never_inflate_inventory() {
+    let source = "# Requirement planning\n## Data\n- dataset_id: field\n- max_retries: field\n- FR-2: constraint\n| Key | Value |\n|---|---|\n| dataset_id | field |\n| max_retries | field |\n## Requirements\n- FR-1: parent\n  - v2: nested version\n";
+    assert_eq!(
+        requirement_texts(source),
+        BTreeMap::from([("FR-1".into(), "parent; v2: nested version".into())])
+    );
+    assert_eq!(constraint_ids(source), ["FR-2".into()].into());
+    assert!(malformed_obligation_ids(source).is_empty());
+    assert!(obligation_ids("## Requirements\n- feature-login: prose\n").is_empty());
+}
+
+#[test]
+fn mixed_requirement_acceptance_tables_use_section_role_and_matching_text() {
+    for (section, requirement) in [("Requirements", true), ("Acceptance Criteria", false)] {
+        let source = format!(
+            "## {section}\n| # | Requirement | Acceptance |\n|---|---|---|\n| FR-1 | required behavior | verified behavior |\n"
+        );
+        if requirement {
+            assert_eq!(requirement_texts(&source)["FR-1"], "required behavior");
+            assert!(acceptance_ids(&source).is_empty());
+        } else {
+            assert_eq!(acceptance_criteria(&source)["FR-1"], "verified behavior");
+            assert!(requirement_texts(&source).is_empty());
+        }
+    }
+}
+
+#[test]
+fn repeated_nested_version_labels_do_not_establish_an_id_family() {
+    let source = "## Requirements\n- FR-1: parent\n  - v2: version two\n  - v3: version three\n";
+    assert_eq!(
+        requirement_texts(source),
+        BTreeMap::from([(
+            "FR-1".into(),
+            "parent; v2: version two; v3: version three".into()
+        )])
+    );
+    assert!(malformed_obligation_ids(source).is_empty());
 }

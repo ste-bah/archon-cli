@@ -330,7 +330,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   if (stop < 0) state.retryIds = new Set();
   if (stop < 0) return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({
     entries: ids.map(id => state.entries.get(id)),
-    supplementary: owed.map(id => state.entries.get(id)).filter(Boolean)
+    supplementary: carriedSupplementary(state, owed)
   })};
   const first = settled[stop];
   // Unreachable unless the pool stopped without a failure: fail loudly.

@@ -98,7 +98,7 @@ mod requirement_inventory;
 mod task_universe {
     #[derive(Default)] pub struct WorkflowV2TaskUniverseTask {
         pub canonical_task_id: String, pub source_path: String,
-        pub implements: Vec<String>,
+        pub implements: Vec<String>, pub title: String,
     }
     #[derive(Default)] pub struct WorkflowV2TaskUniverse {
         pub schema_version: String, pub source_roots: Vec<String>,
@@ -127,13 +127,20 @@ fn current_read_only_prd_matches_base_inventory() {
     assert_eq!(obligation_ids::obligation_ids(&source), baseline::obligation_ids(&source));
     assert_eq!(obligation_ids::acceptance_ids(&source), baseline::acceptance_ids(&source));
     assert_eq!(obligation_ids::constraint_ids(&source), baseline::constraint_ids(&source));
+    assert_eq!(obligation_ids::obligation_texts(&source), baseline::obligation_texts(&source));
+    assert_eq!(obligation_ids::acceptance_criteria(&source), baseline::acceptance_criteria(&source));
+    assert_eq!(obligation_ids::constraint_texts(&source), baseline::constraint_texts(&source));
+    assert_eq!(obligation_ids::acceptance_ids(&source).len(), 11);
+    assert_eq!(obligation_ids::constraint_ids(&source).len(), 19);
+    assert_eq!(obligation_ids::obligation_ids(&source).iter().filter(|id| id.starts_with("G-")).count(), 8);
+    assert!(obligation_ids::malformed_obligation_ids(&source).is_empty(), "{:?}", obligation_ids::malformed_obligation_ids(&source));
     let done = |rows: std::collections::BTreeMap<String, String>| rows.into_iter()
         .filter(|(id, _)| id.starts_with("DONE-")).collect::<std::collections::BTreeMap<_, _>>();
     assert_eq!(done(obligation_ids::obligation_texts(&source)).len(), 14);
     assert_eq!(done(obligation_ids::obligation_texts(&source)), done(baseline::obligation_texts(&source)));
 }
 ''')
-    command = ["rustc", "--edition=2024", "-A", "dead_code", "-A", "unused_imports", "--test", str(target / "harness.rs"),
+    command = [os.environ.get("RUSTC", "rustc"), "--edition=2024", "-A", "dead_code", "-A", "unused_imports", "--test", str(target / "harness.rs"),
                "-L", f"dependency={DEPS}", "-o", str(target / "tests")]
     command += shlex.split(os.environ.get("PRD_TEST_RUSTFLAGS", ""))
     for name in ["regex", "serde", "serde_json", "thiserror", "anyhow", "tempfile"]:

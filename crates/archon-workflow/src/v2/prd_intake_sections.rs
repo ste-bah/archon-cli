@@ -1,6 +1,5 @@
 pub(super) fn extract_sections(body: &str, headings: &[&str]) -> Vec<String> {
-    let prepared = crate::obligation_ids::prepare_markdown(body);
-    extract_raw_sections(&prepared, headings)
+    extract_raw_sections(body, headings)
         .into_iter()
         .flat_map(markdown_list_items)
         .collect()

@@ -92,7 +92,7 @@ fn authored_identifier_shapes_are_preserved_without_renaming() {
         "FR-001",
         "R1",
         "US-12",
-        "item_name",
+        "ITEM-1",
     ] {
         let source = format!("## Requirements\n- **{id}**: required work\n");
         assert_eq!(obligation_ids(&source), [id.to_string()].into());

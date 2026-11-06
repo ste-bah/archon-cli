@@ -38,24 +38,36 @@ pub fn constraint_texts(prd: &str) -> BTreeMap<String, String> {
 
 /// Definition boundaries distinguish declarations from references in prose.
 pub(super) fn definition(body: &str) -> Option<(&str, &str)> {
+    parse_definition(body, false)
+}
+
+pub(super) fn explicit_definition(body: &str) -> Option<(&str, &str)> {
+    parse_definition(body, true)
+}
+
+fn parse_definition(body: &str, require_separator: bool) -> Option<(&str, &str)> {
     let end = body.find(char::is_whitespace).unwrap_or(body.len());
     let raw = &body[..end];
     let unwrapped = raw.trim_matches(['*', '_', '`']);
     let token = unwrapped.trim_end_matches([':', '—', '–']);
     let token = token.trim_matches(['*', '_', '`']);
-    let id = authored_id(token)?;
+    let id = shaped_id(token)?;
     let rest = body[end..].trim_start();
     let attached = unwrapped.trim_end_matches(['*', '_', '`']) != token;
     let text = if attached {
         rest
     } else {
-        rest.strip_prefix([':', '—', '–', '-'])?.trim_start()
+        match rest.strip_prefix([':', '—', '–', '-']) {
+            Some(text) => text.trim_start(),
+            None if !require_separator => rest,
+            None => return None,
+        }
     };
     (!text.is_empty()).then_some((id, text))
 }
 
 pub(super) fn leading_id(body: &str) -> Option<&str> {
-    definition(body).map(|(id, _)| id)
+    explicit_definition(body).and_then(|(id, _)| authored_id(id))
 }
 
 #[cfg(test)]

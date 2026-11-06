@@ -437,3 +437,16 @@ function skeletonPreviousCandidate(policy, previous, seeded) {
   if (seeded && seed?.candidate === previous && (!seed?.gate || (seed.gate.findings || []).some(f => f.remediation_scope === "candidate_artifact"))) return undefined;
   return parsedSkeletonCandidate(previous) ? previous : undefined;
 }
+
+async function repairUnknownSupplementary(w, findings, candidate, state) {
+  for (const finding of findings) {
+    const defect = finding?.deterministic_defect;
+    if (defect?.code !== "unknown_supplementary_requirement") continue;
+    const slot = /^supplementary\/(0|[1-9]\d*)$/.exec(defect.location || "");
+    const entry = slot && candidate?.supplementary?.[Number(slot[1])];
+    if (!entry || typeof entry.id !== "string") throw new Error("unknown supplementary defect has no candidate entry");
+    await w.checkpoint(`remove-unknown-${entry.id}`, {task: `Rust preflight unknown_supplementary_requirement: removing ${entry.id}`});
+    state.entries.delete(entry.id);
+    owedSupplementary().delete(entry.id);
+  }
+}

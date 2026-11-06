@@ -103,19 +103,19 @@ pub fn requirement_texts(prd: &str) -> BTreeMap<String, String> {
 /// Read an authored ID, including inline emphasis and code delimiters. The
 /// prefix, separators and numeric width are retained exactly as declared.
 fn authored_id(value: &str) -> Option<&str> {
+    let id = shaped_id(value)?;
+    id.chars().next()?.is_uppercase().then_some(id)
+}
+
+fn shaped_id(value: &str) -> Option<&str> {
     let id = value.trim().trim_matches(['*', '_', '`']);
-    let first = id.chars().next()?;
-    (first.is_alphabetic()
+    (id.chars().next()?.is_alphabetic()
         && id.chars().last()?.is_alphanumeric()
-        && (id.chars().any(char::is_numeric) || id.contains(['-', '_', '.', ':', '/', '~', '+']))
+        && id.chars().any(char::is_numeric)
         && id
             .chars()
             .all(|ch| ch.is_alphanumeric() || "-_.:/~+".contains(ch)))
     .then_some(id)
-}
-
-fn table_candidate_id(line: &str) -> Option<&str> {
-    authored_id(line.trim().strip_prefix('|')?.split('|').next()?)
 }
 
 pub fn duplicate_obligation_finding(id: &str) -> String {
@@ -142,8 +142,8 @@ pub fn malformed_obligation_finding(id: &str) -> String {
 }
 
 /// There is no external canonical prefix or width to impose on authored IDs.
-pub fn malformed_obligation_ids(_prd: &str) -> Vec<String> {
-    Vec::new()
+pub fn malformed_obligation_ids(prd: &str) -> Vec<String> {
+    declarations::malformed_ids(prd)
 }
 
 fn bullet_requirement_ids(prd: &str) -> BTreeSet<String> {

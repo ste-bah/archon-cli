@@ -15,3 +15,23 @@ fn identifier_spelling_does_not_promote_notes_to_rules_or_criteria() {
         assert!(acceptance_criteria(&source).is_empty());
     }
 }
+
+#[test]
+fn hard_rules_keep_base_fences_and_horizontal_rules() {
+    let source = "## Hard Rules\n```text\n- retain fenced rule\n```\nplain rule\n---\n- retain following rule\n## Other\n- outside\n";
+    assert_eq!(
+        source_rules(source),
+        [
+            "```text",
+            "retain fenced rule",
+            "```",
+            "plain rule",
+            "",
+            "retain following rule"
+        ]
+        .into_iter()
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+    );
+}

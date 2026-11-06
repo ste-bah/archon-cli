@@ -1,11 +1,27 @@
+const UNKNOWN_SUPPLEMENTARY = new Set();
+
 // The host-derived inventory is the sole authority for authored identities.
 function supplementaryRequirement(id) {
   if (typeof id !== "string" || !id.startsWith("SUP-")) return null;
   const requirement = id.slice(4);
   if (!Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, requirement)) {
-    throw new Error(`supplementary check ${id} names missing source requirement ${requirement}`);
+    UNKNOWN_SUPPLEMENTARY.add(id);
+    return null;
   }
   return requirement;
+}
+
+async function logUnknownSupplementary(w) {
+  for (const id of UNKNOWN_SUPPLEMENTARY) {
+    await w.checkpoint(`unknown-supplementary-${id}`, {task: `Retained ${id} for Rust preflight unknown_supplementary_requirement repair`});
+    UNKNOWN_SUPPLEMENTARY.delete(id);
+  }
+}
+
+// Carry stale host/seed checks through submission so Rust preflight sees them.
+function carriedSupplementary(state, owed) {
+  const ids = new Set([...owed, ...state.entries.keys()].filter(id => typeof id === "string" && id.startsWith("SUP-")));
+  return [...ids].sort().map(id => state.entries.get(id)).filter(Boolean);
 }
 
 const COMMAND_EXAMPLES = 'Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.';
@@ -189,6 +205,7 @@ async function authorCandidate(w, policy) {
   let carried = seeded ? seeded.carried : null;
   let previousCandidate = skeletonPreviousCandidate(policy, seeded ? seeded.previousCandidate : policy.previousCandidate, seeded);
   for (;;) {
+    await logUnknownSupplementary(w);
     const stall = stallReason(progress);
     if (stall) {
       if (stall === "no_progress" && policy.deferAuthoredPending) {
@@ -400,6 +417,7 @@ async function authorCandidate(w, policy) {
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = routed.retryFindings;
+      await repairUnknownSupplementary(w, repair, JSON.parse(authored.content), authorState);
       const latest = attributeEntryFindings(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
       settleGateFindings(authorState, latest.own);
       settlePhaseFindings(authorState, latest.phase);

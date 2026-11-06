@@ -169,7 +169,7 @@ fn every_authored_style_has_equal_coverage_and_supplementary_lifecycle() {
         ("REQ-1", "REQ-2"),
         ("US-12", "US-13"),
         ("item_1", "item_2"),
-        ("feature-login", "feature-register"),
+        ("FEATURE-login-1", "FEATURE-register-2"),
     ] {
         for source in [
             format!("Requirements\n---\n- **{first}**: first\n- {second}: second\n"),

@@ -55,7 +55,7 @@ fn offline_golden_prd_has_no_constraint_bullets() {
 }
 
 #[test]
-fn only_definition_form_bullets_become_constraints() {
+fn constraints_need_definitions_and_empty_declarations_are_findings() {
     let prd = "- SHA-256 digests pinned\n- HTTP-404 responses handled\n- AES-256 encryption used\n- TASK-X-001 owns work\n- AC-X-001 checks work\n- AC-X-001: acceptance owned elsewhere\n- REQ-001: malformed requirement\n- REQ-X-001: requirement\n- QX-001: text\n- QX-002 — dash text\n- QX-003 – other dash\n- QX-004:   \n- QX-005 - ordinary hyphen\n";
     assert_eq!(
         constraint_texts(prd),
@@ -67,7 +67,7 @@ fn only_definition_form_bullets_become_constraints() {
             ("AC-X-001".into(), "acceptance owned elsewhere".into()),
         ])
     );
-    assert!(malformed_obligation_ids(prd).is_empty());
+    assert_eq!(malformed_obligation_ids(prd), ["QX-004"]);
 }
 
 #[test]
