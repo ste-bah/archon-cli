@@ -150,10 +150,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 574/575: constraint wording names table rows; the skeleton shape gains source_sections, the skeleton author gets the qualifying PRD section keys and texts, and the body author its frozen source_sections and their texts.
     // #584 P1-P6 integration: acceptance, skeleton and body author scripts changed.
     // #587: named Skeleton findings also reach their body author after re-freeze.
+    // #593: a shape refusal no longer stops the acceptance author window.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "a9ad815e4cf78d021024a3577d32594d6382d963e7a45ec10883d85bd4f703f8"
+        "8a6dc61d9c9b9fd6d79cc985fcc9537b2854e8cc9c025c5ad67b6a858cd79e18"
     );
 }

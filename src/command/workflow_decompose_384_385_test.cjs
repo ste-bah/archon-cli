@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const context = () => {
   const ctx = {args:{prdPath:'PRD.md', taskRoot:'tasks', repositoryRoot:'repo', projectRoot:'project',
@@ -196,6 +196,50 @@ async function missingContentIsSpecific() {
   assert.match(out.summary, /stop reason was end_turn but content was missing or empty/);
 }
 
+// Both resume paths carry D while repairing A/B/C. A malformed A must not
+// defer B/C to another round, and only A is called again before freeze.
+async function seededAndFrozenRepairsContinueAfterMalformedReply() {
+  for (const mode of ['seeded', 'frozen']) {
+    const ctx = context();
+    ctx.args.acceptanceCriteria = {A:'a', B:'b', C:'c', D:'d'};
+    const entries = ['A','B','C','D'].map(id => ({id, criterion:id.toLowerCase(), version:0, covers:[]}));
+    const findings = ['A','B','C'].map(id => ({subject:id, text:`check '${id}' was refuted: repair`,
+      source_path:'tasks/acceptance-contract.json', remediation_scope:'candidate_artifact'}));
+    const policy = {phase:'acceptance', prompt:()=> 'author', author:ctx.authorAcceptanceEntries,
+      capability:'freeze-acceptance', retryScopes:new Set(['candidate_artifact'])};
+    if (mode === 'seeded') {
+      ctx.args.phaseSeed = {transition_index:0, author_ordinals:{}, pause_ordinals:{}, subjects:{acceptance:{
+        kind:'entries', candidate:JSON.stringify({entries, supplementary:[]}), replies:[], invalid:{}, carried:4,
+        gates:[{call_id:'g', published:false, findings}]}}};
+      ctx.applySeedOrdinals();
+    }
+    const calls = [], prompts = [];
+    let freezes = 0;
+    const w = {
+      agent:async (_, options) => {
+        const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
+        calls.push(id); prompts.push(options.task);
+        if (calls.length > 4) throw new Error('unexpected author retry');
+        return {status:'accepted', stopReason:'end_turn', content:calls.length === 1 ? '{"id":' : JSON.stringify({id, version:1, covers:[]})};
+      },
+      hostCommand:async (_, request) => {
+        freezes++;
+        const submitted = JSON.parse(request.stdin);
+        assert.deepEqual(submitted.entries.map(e => [e.id, e.version]), [['A',1],['B',1],['C',1],['D',0]]);
+        return {publicationReceipt:{call_id:'freeze'}, postcondition:{satisfied:true}, gateEnvelope:{policy_findings:[]}};
+      },
+      pause:async () => { throw new Error('unexpected pause'); },
+    };
+    if (mode === 'seeded') await ctx.authorCandidate(w, policy);
+    else await ctx.repairFrozenStage(w, {gateEnvelope:{report:JSON.stringify({acceptance:entries, supplementary:[]})}}, findings);
+    assert.deepEqual(calls, ['A','B','C','A'], mode);
+    const prior = task => task.split('Previously completed entries')[1].split('\n').filter(line => line.startsWith('- ')).map(line => line.split(' ')[1]);
+    assert.deepEqual(prior(prompts[1]), ['D'], `${mode}: refused A omitted, carried D retained`);
+    assert.deepEqual(prior(prompts[2]), ['D','B'], `${mode}: later success in the same round`);
+    assert.equal(freezes, 1);
+  }
+}
+
 (async () => {
   for (const [name, test] of [['prompt rules',promptRules],['reply format last on first and repair attempts',replyFormatIsTheLastTaskSection],['gate outage candidate reuse',gateOutageReusesCandidate],
     ['wrong id measured refusal',wrongIdRefusalHasSpecificMeasuredProgress],['specific stop reason',wrongStopReasonIsSpecific],
@@ -204,7 +248,8 @@ async function missingContentIsSpecific() {
     ['generated fixture reply format',replyFormatGuidesGeneratedFixtures],
     ['skeleton and body reply formats guide generated fixtures',skeletonAndBodyReplyFormatsGuideGeneratedFixtures],
     ['candidate loop measured feedback',candidateLoopUsesMeasuredMaxTokenFeedback],
-    ['specific missing content',missingContentIsSpecific]]) {
+    ['specific missing content',missingContentIsSpecific],
+    ['seeded and frozen repair continuation',seededAndFrozenRepairsContinueAfterMalformedReply]]) {
     await test(); console.log(`PASS ${name}`);
   }
 })().catch(error => { console.error(`FAIL ${error.stack}`); process.exitCode = 1; });

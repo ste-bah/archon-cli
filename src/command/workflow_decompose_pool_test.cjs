@@ -3,7 +3,8 @@
 // clock units, and the clock jumps to the next timer once every microtask has
 // drained. Proves: makespan follows the pool / prefix-window schedule, the
 // in-flight count never exceeds the cap, an acceptance prompt depends on its
-// index alone, and a failure stops new starts but lets started calls settle.
+// index alone, and an operational failure stops new starts but lets started
+// calls settle.
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -74,6 +75,7 @@ function acceptanceRun(seed, cap, criteria, state, options={}) {
   await c.sleep(options.durations?.[id] ?? 1+Math.floor(random()*50)); active--; ends.push({id,at:c.now(),active});
   if(options.throws===id) throw new Error(options.throwMessage||`stopped at ${id}`);
   if(options.fails===id&&(options.round||1)===1) return {status:'failed',summary:'transport'};
+  if(options.malformed?.includes(id)) return {status:'accepted',stopReason:'end_turn',content:'{"id":'};
   return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,seed,covers:[]})};
  }};
  const run=c.drive(ctx.authorAcceptanceEntries(w,'author',options.round||1,state||{entries:new Map(),retryIds:null}));
@@ -139,15 +141,16 @@ async function failureStopsNewStartsAndSettlesSiblings() {
 }
 
 // Issue 357 round 4 (F3): a shape refusal of one entry keeps the sibling that
-// passed beside it, whichever finished first. Several failures in one round
-// return the lowest index's failure and retry each of them.
+// passed beside it, whichever finished first. Refusals do not stop later
+// entries; every refusal is returned and only refused entries are retried.
 async function refusalKeepsPassedSiblings() {
  const criteria={A:'a',B:'b',C:'c',D:'d'};
  const refusal=id=>[{text:`acceptance entry '${id}' was refused: criterion is missing`,
   deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',subject:'entries/0/criterion',location:'shape',stage:'shape'}}];
  for(const [cap,refused,starts,kept,retry] of [
-  [2,['A'],['A','B'],['B'],['A','C','D']],
-  [3,['A','C'],['A','B','C'],['B'],['A','C','D']],
+  [1,['A'],['A','B','C','D'],['B','C','D'],['A']],
+  [2,['A'],['A','B','C','D'],['B','C','D'],['A']],
+  [3,['A','C'],['A','B','C','D'],['B','D'],['A','C']],
   [3,['B'],['A','B','C','D'],['A','C','D'],['B']],
  ]) {
   const prompts=[];
@@ -168,6 +171,53 @@ async function refusalKeepsPassedSiblings() {
   }
   assert.deepEqual(prompts[0],prompts[1],'retained siblings do not depend on timing');
  }
+}
+
+// Refusals leave holes in the fixed prefix: slice by original index before
+// dropping them, and retain earlier-round drafts in every later prompt.
+async function repairableRepliesContinueWithFixedPrompts() {
+ const criteria={A:'a',B:'b',C:'c',D:'d',E:'e',F:'f',G:'g'};
+ for(const cap of [1,3]) for(const kind of ['refusal','malformed']) {
+  const runs=[];
+  for(const reverse of [false,true]) {
+   const state={entries:new Map([['A',{id:'A',old:true}]]),retryIds:new Set(['B','C','D','E','F','G'])};
+   const refused=['B','D'];
+   const validator=serialized=>JSON.stringify(refused.includes(JSON.parse(serialized).id)?[{text:'invalid check'}]:[]);
+   const durations=reverse?{B:40,C:5,D:20,E:5,F:5,G:5}:{B:5,C:40,D:20,E:5,F:5,G:5};
+   const r=acceptanceRun(1,cap,criteria,state,{durations,...(kind==='refusal'?{validator}:{malformed:refused})});
+   assert.equal((await r.run).status,'failed');
+   const pending=['B','C','D','E','F','G'];
+   assert.deepEqual(r.starts.map(s=>s.id),pending);
+   assert.deepEqual([...state.entries.keys()],['A','C','E','F','G']);
+   assert.deepEqual([...state.retryIds],refused);
+   pending.forEach((id,i)=>assert.deepEqual(priorIds(r.prompts[id]),
+    ['A',...pending.slice(0,Math.max(0,i-cap+1)).filter(prior=>!refused.includes(prior))],`${kind} cap ${cap} prior of ${id}`));
+   assert.equal(r.active(),0);
+   assert(r.peak()<=cap);
+   runs.push(r);
+  }
+  if(cap>1) assert.notDeepEqual(runs[0].ends.map(e=>e.id),runs[1].ends.map(e=>e.id));
+  assert.deepEqual(runs[0].prompts,runs[1].prompts,`${kind} cap ${cap}: prompts identical across opposite completion orders`);
+ }
+}
+
+// A repairable refusal before an outage must not move the outage boundary.
+async function refusalBeforeOperationalFailureKeepsBoundary() {
+ const criteria={A:'a',B:'b',C:'c',D:'d',E:'e',F:'f',G:'g',H:'h'};
+ const prompts=[];
+ for(const aTakes of [5,40]) {
+  const state={entries:new Map(),retryIds:null};
+  const validator=serialized=>JSON.stringify(JSON.parse(serialized).id==='A'?[{text:'invalid check'}]:[]);
+  const r=acceptanceRun(1,3,criteria,state,{validator,fails:'C',durations:{A:aTakes,B:10,C:20,D:5,E:5,F:5}});
+  assert.equal((await r.run).status,'failed');
+  assert.deepEqual(r.starts.map(s=>s.id),['A','B','C','D','E'],'outage at f=2 stops i >= 5');
+  assert.deepEqual([...state.entries.keys()],['B','D','E']);
+  assert.deepEqual([...state.retryIds],['A','C','F','G','H']);
+  assert.equal(state.roundOutage,true);
+  assert.equal(r.active(),0);
+  prompts.push(r.prompts);
+ }
+ assert.deepEqual(prompts[0],prompts[1]);
 }
 
 // A stop raised inside one call (a pause or cancel the host observed) is
@@ -193,5 +243,5 @@ async function rejectionOutranksAFailedReply() {
 }
 
 makespanFollowsTheSchedule().then(slowFirstCallBlocksOnlyCallsBehindIt).then(promptsDependOnIndexAlone)
- .then(failureStopsNewStartsAndSettlesSiblings).then(refusalKeepsPassedSiblings).then(rejectionSettlesSiblingsBeforeRaising).then(rejectionOutranksAFailedReply)
+ .then(failureStopsNewStartsAndSettlesSiblings).then(refusalKeepsPassedSiblings).then(repairableRepliesContinueWithFixedPrompts).then(refusalBeforeOperationalFailureKeepsBoundary).then(rejectionSettlesSiblingsBeforeRaising).then(rejectionOutranksAFailedReply)
  .then(()=>console.log('bounded author pool passed')).catch(e=>{console.error(e);process.exitCode=1});
