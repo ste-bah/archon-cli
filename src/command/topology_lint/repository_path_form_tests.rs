@@ -84,7 +84,14 @@ fn headings_keep_missing_slashed_and_absolute_claims() {
                 "{found:?}"
             );
             assert!(found[0].contains(&format!("`{named}`")), "{found:?}");
-            assert!(!found[0].contains("`src/unknown/ghost.rs`"), "{found:?}");
+            if named == "unknown/ghost.rs" && predicate == "exists." {
+                assert!(
+                    found[0].contains("`src/unknown/ghost.rs` or `unknown/ghost.rs` exists"),
+                    "{found:?}"
+                );
+            } else {
+                assert!(!found[0].contains("`src/unknown/ghost.rs`"), "{found:?}");
+            }
             assert!(!found[0].contains("not repository-root relative"));
         }
     }

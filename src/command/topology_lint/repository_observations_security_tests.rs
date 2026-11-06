@@ -89,8 +89,15 @@ fn oversized_files_only_count_under_explicit_claims() {
 
 #[test]
 fn malformed_paths_do_not_abort_the_set_gate() {
-    let (_temp, project, tasks, _tree) = grounded();
+    let (_temp, project, tasks, tree) = grounded();
     let bad = "src/lib.rs/x.rs";
+    let error = observe(&tree, bad).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<super::super::super::repository_paths::PathFault>()
+            .is_some(),
+        "{error:#}"
+    );
     let raw = body(
         "[]",
         &format!("- `{bad}`\n- `src/existing.rs` — exists (2 lines)"),
@@ -217,6 +224,7 @@ fn path_faults_dedupe_normalized_spellings() {
     ) + "\n## Notes\n`src/lib.rs/child.rs` exists.\n`./src/lib.rs/child.rs` exists.\n";
     let found = inspect_result(&tasks, &project, &raw).unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("invalid repository path"), "{found:?}");
 }
 
 #[cfg(unix)]

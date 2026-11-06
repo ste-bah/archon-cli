@@ -157,7 +157,8 @@ pub(super) fn checked_path(tree: &RepositoryTree, named: &str) -> anyhow::Result
     })?;
     let joined = tree.root().join(relative);
     let mut ancestor = tree.root().to_path_buf();
-    for part in relative.components() {
+    let mut parts = relative.components().peekable();
+    while let Some(part) = parts.next() {
         ancestor.push(part.as_os_str());
         match std::fs::symlink_metadata(&ancestor) {
             Ok(_) => {
@@ -166,6 +167,18 @@ pub(super) fn checked_path(tree: &RepositoryTree, named: &str) -> anyhow::Result
                     .map_err(|error| metadata_error(named, error))?;
                 if !resolved.starts_with(&root) {
                     return Err(fault(named, "path leaves the repository"));
+                }
+                // Windows may report NotFound for a child of a regular file.
+                // Validate each ancestor's type before probing its descendants.
+                if parts.peek().is_some()
+                    && !std::fs::metadata(&resolved)
+                        .map_err(|error| metadata_error(named, error))?
+                        .is_dir()
+                {
+                    return Err(fault(
+                        named,
+                        "invalid repository path: ancestor is not a directory",
+                    ));
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(joined),

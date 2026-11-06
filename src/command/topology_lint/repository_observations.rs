@@ -41,6 +41,16 @@ pub(crate) fn deliverable_paths(task: &WorkflowV2TaskUniverseTask, raw: &str) ->
 }
 
 fn is_path_shaped(token: &str) -> bool {
+    let spelling = token.replace('\\', "/");
+    // A Windows drive prefix contains a colon, but is valid path syntax.
+    let token = if spelling.as_bytes().get(1) == Some(&b':')
+        && spelling.as_bytes()[0].is_ascii_alphabetic()
+        && Path::new(&spelling).is_absolute()
+    {
+        &spelling[2..]
+    } else {
+        &spelling
+    };
     if token.is_empty() || token.contains(char::is_whitespace) || token.contains("://") {
         return false;
     }
@@ -267,13 +277,13 @@ pub(crate) fn findings_against(
                             }
                             Err(error) => return Err(error),
                         }
-                    } else if token.contains('/') {
+                    } else if token.contains('/') || Path::new(token).is_absolute() {
                         vec![token.to_string()]
                     } else {
                         Vec::new()
                     };
                     // No scoped reading exists: report the author spelling once.
-                    let candidates = if token.contains('/')
+                    let candidates = if (token.contains('/') || Path::new(token).is_absolute())
                         && candidates.len() > 1
                         && candidates
                             .iter()
