@@ -33,8 +33,17 @@ fn shell_template_domain_table() {
         ("$!", true),
         ("${@}", true),
         ("${1:-}", true),
-        ("A+=1 $X", true),
-        ("$(true)", true),
+        ("A+=1 $X", false),
+        ("$(true)", false),
+        ("a=$(echo x) $X", false),
+        ("${X:-$(true)}", false),
+        ("R=$(false)", false),
+        ("OUT=$(make -q nosuch)", false),
+        ("R=$($X)", true),
+        ("${X:- }", true),
+        (">out", true),
+        ("$X <<EOF\nhello\nEOF", true),
+        ("cat <<EOF\n$X\nEOF", false),
         ("$X 2>/dev/null", true),
         ("$X >/dev/null", true),
         ("$X 2>&1", true),
@@ -107,7 +116,7 @@ fn shell_template_domain_table() {
                 "unexpanded_contract_field",
                 "contract",
                 "typed_verifier_command",
-                "deliverable contract typed_verifier_command is only unreplaced placeholder text (variable expansions or <...> with no literal program word), so it cannot exercise the deliverable; replace it with the real command",
+                "deliverable contract typed_verifier_command has no literal program word once assignments, redirections and placeholder expansions are removed, so it cannot exercise the deliverable; replace it with the real command",
             )]
         } else {
             vec![]

@@ -143,7 +143,7 @@ pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect
             } {
                 defects.push(ValidationDefect::new("unexpanded_contract_field", "contract", key,
                     if key == "typed_verifier_command" {
-                        "deliverable contract typed_verifier_command is only unreplaced placeholder text (variable expansions or <...> with no literal program word), so it cannot exercise the deliverable; replace it with the real command".to_string()
+                        "deliverable contract typed_verifier_command has no literal program word once assignments, redirections and placeholder expansions are removed, so it cannot exercise the deliverable; replace it with the real command".to_string()
                     } else { format!("deliverable contract {key} contains an unreplaced template token; supply a concrete value") }));
             }
         }

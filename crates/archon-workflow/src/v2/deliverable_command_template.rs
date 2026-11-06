@@ -3,6 +3,9 @@
 //! Each byte is consumed once. Frames carry their result to their parent;
 //! substitutions and default operands never rescan a suffix or recurse.
 
+#[path = "deliverable_command_template_heredoc.rs"]
+mod heredoc;
+
 const MAX_BYTES: usize = 4096;
 const MAX_DEPTH: usize = 32;
 
@@ -11,7 +14,6 @@ enum Assignment {
     #[default]
     Start,
     Name,
-    Plus,
     Value,
     No,
 }
@@ -20,6 +22,8 @@ enum Assignment {
 struct Word {
     present: bool,
     literal: bool,
+    // A concrete substitution in an assignment value still exercises a command.
+    command: bool,
     assignment: Assignment,
     digits: bool,
     start: usize,
@@ -37,8 +41,7 @@ impl Word {
         self.assignment = match (self.assignment, byte) {
             (Assignment::Start, Some(c)) if name_start(c) => Assignment::Name,
             (Assignment::Name, Some(c)) if name_byte(c) => Assignment::Name,
-            (Assignment::Name, Some(b'+')) => Assignment::Plus,
-            (Assignment::Name | Assignment::Plus, Some(b'=')) => Assignment::Value,
+            (Assignment::Name, Some(b'=')) => Assignment::Value,
             (Assignment::Value, _) => Assignment::Value,
             _ => Assignment::No,
         };
@@ -50,6 +53,7 @@ struct List {
     leading: bool,
     target: bool,
     word: Word,
+    heredocs: heredoc::HereDocs,
 }
 
 impl Default for List {
@@ -59,6 +63,7 @@ impl Default for List {
             leading: true,
             target: false,
             word: Word::default(),
+            heredocs: heredoc::HereDocs::default(),
         }
     }
 }
@@ -73,7 +78,7 @@ impl List {
             self.target = false;
         } else if !(redirection && word.digits)
             && !matches!(&input[word.start..end], b"{" | b"}" | b"(" | b")")
-            && !(self.leading && matches!(word.assignment, Assignment::Value))
+            && !(self.leading && matches!(word.assignment, Assignment::Value) && !word.command)
         {
             // A bare `!` is a negation token, not ignorable grouping:
             // even a negated empty command fails and is never a template.
@@ -110,6 +115,7 @@ struct Frame {
     kind: Kind,
     list: List,
     empty: bool,
+    command: bool,
     start: usize,
     // Grouping has list semantics, but contributes no word to its parent.
     group: bool,
@@ -121,6 +127,7 @@ impl Frame {
             kind,
             list: List::default(),
             empty: true,
+            command: false,
             start,
             group,
         }
@@ -225,6 +232,12 @@ pub(super) fn expansion_only(value: &str) -> bool {
                 parent.list.leading = true;
             } else {
                 parent.add(done.start, None, empty);
+                let command = done.command || (matches!(done.kind, Kind::List(_)) && !empty);
+                if matches!(parent.kind, Kind::List(_)) {
+                    parent.list.word.command |= command;
+                } else {
+                    parent.command |= command;
+                }
             }
             at += close;
             continue;
@@ -241,6 +254,14 @@ pub(super) fn expansion_only(value: &str) -> bool {
             if c == b'<' || c == b'>' || (c == b'&' && input.get(at + 1) == Some(&b'>')) {
                 frame.list.finish_word(input, at, true);
                 frame.list.target = true;
+                if input[at..].starts_with(b"<<") && input.get(at + 2) != Some(&b'<') {
+                    at += 2;
+                    if !frame.list.heredocs.read(input, &mut at) {
+                        return false;
+                    }
+                    frame.list.target = false;
+                    continue;
+                }
                 let first = c;
                 at += 1;
                 if first == b'&' {
@@ -261,6 +282,9 @@ pub(super) fn expansion_only(value: &str) -> bool {
             if matches!(c, b';' | b'&' | b'|' | b'\n') {
                 frame.list.separator(input, at);
                 at += 1;
+                if c == b'\n' && !frame.list.heredocs.skip(input, &mut at) {
+                    return false;
+                }
                 continue;
             }
             if c.is_ascii_whitespace() {
@@ -339,7 +363,9 @@ pub(super) fn expansion_only(value: &str) -> bool {
             // Unmatched grouping is malformed, and belongs to the syntax gate.
             return false;
         } else {
-            frame.add(at, Some(c), false);
+            let empty = matches!(frame.kind, Kind::Parameter(Parameter::Default))
+                && c.is_ascii_whitespace();
+            frame.add(at, Some(c), empty);
             at += 1;
         }
     }
@@ -408,14 +434,28 @@ mod tests {
             "$X <<EOF",
             "$X <<- EOF",
             "$X # ignored literal\n$Y",
-            "A+=1 $X",
-            "a=$(echo x) $X",
-            "${X:-$(true)}",
             "${X:-`$Y`}",
+            "${X:- }",
+            "R=$($X)",
+            "$X <<EOF\nhello\nEOF",
+            "$X <<-EOF\n\thello\n\tEOF",
+            "$X <<'EOF' <<\"END\"\nliteral\nEOF\nmore literal\nEND",
+            "R=\"$($X)\"",
         ] {
             assert!(expansion_only(input), "{input}");
         }
         for input in [
+            "A+=1 $X",
+            "a=$(echo x) $X",
+            "${X:-$(true)}",
+            "$(true)",
+            "R=$(false)",
+            "OUT=$(make -q nosuch)",
+            "cat <<EOF\n$X\nEOF",
+            "R=\"$(false)\"",
+            "R=${X:-$(false)}",
+            "R=`false`",
+            "$X <<EOF\nignored\nEOF\necho ok",
             "! $X",
             "! ${X}",
             "'$X'",
