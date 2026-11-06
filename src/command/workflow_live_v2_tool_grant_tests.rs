@@ -1,5 +1,5 @@
 use super::*;
-use crate::command::workflow_live_runner::{allowed_tools, full_tool_access};
+use crate::command::workflow_live::workflow_live_runner::{allowed_tools, full_tool_access};
 use archon_workflow::stage_command_policy::{command_execution_stage, read_only_shell_grant};
 use serde_json::json;
 
@@ -185,7 +185,10 @@ fn project_mcp_root_is_only_the_host_root() {
         );
         assert!(stage.input.get("projectArtifactRoot").is_none());
         if root.is_none() {
-            assert!(crate::command::workflow_live_mcp::allowed_mcp_tools(&stage).is_empty());
+            assert!(
+                crate::command::workflow_live::workflow_live_mcp::allowed_mcp_tools(&stage)
+                    .is_empty()
+            );
         }
     }
 }
