@@ -92,8 +92,8 @@ console.log(JSON.stringify([...acceptanceRepairIds(findings, ids, false)]));
 /// Issue-551: a repair prompt lists only the findings open in the latest gate
 /// result as the ones to repair. Findings earlier attempts raised and the
 /// latest result no longer reports are shown once, after them, as findings
-/// not to regress, at every rung: the rung-4 fresh-context step keeps the
-/// history, so the open finding still carries its repeat marker.
+/// not to regress on bounded-edit rungs. Issue 601: the rung-4 fresh-context
+/// step shows previously seen defects without retaining the body text.
 #[test]
 fn issue551_repair_prompt_names_only_open_findings_as_current_and_keeps_resolved_ones_as_do_not_regress()
  {
@@ -159,7 +159,7 @@ authorCandidate(w, policy).then(
         "{fresh}"
     );
     assert!(
-        fresh.contains("finding OPEN-GAMMA (a repeat: seen in 2 earlier attempts"),
-        "the open finding keeps its repeat marker at rung 4: {fresh}"
+        fresh.contains("Previously seen defects:\n- finding OPEN-GAMMA"),
+        "the fresh rung keeps previously seen defects: {fresh}"
     );
 }

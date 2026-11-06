@@ -133,10 +133,7 @@ pub(crate) struct FrozenChainSnapshot {
     pub(crate) subjects: Vec<HostCommandSubject>,
     /// Frozen file names whose body file exists under the task root.
     pub(crate) bodies: Vec<String>,
-    /// Legacy body cache for recorded snapshots; script context uses file paths.
-    #[serde(default)]
-    pub(crate) body_contents: std::collections::BTreeMap<String, String>,
-    /// Content digests prove launch repair left bodies intact.
+    /// Content digests let launch repair prove that it left frozen bodies intact.
     #[serde(default)]
     pub(crate) body_digests: Vec<(String, String)>,
     /// Frozen artifacts the acceptance repair is not allowed to republish.
@@ -149,8 +146,8 @@ pub(crate) struct FrozenChainSnapshot {
 }
 
 impl FrozenChainSnapshot {
-    /// The script argument: camelCase subjects and frozen skeleton entries.
-    /// Body text stays on disk, outside arguments and gate evaluation reports.
+    /// The script argument: camelCase subjects, exactly as `HostCommandSubject`
+    /// serialises for a host outcome, and a frozen skeleton's task entries.
     pub(crate) fn to_argument(&self) -> serde_json::Value {
         let mut argument = serde_json::json!({
             "acceptance": self.acceptance,
@@ -350,9 +347,6 @@ fn snapshot_inner(
             snapshot.bodies.push(task.file_name.clone());
             let bytes = verification::read(&path, false)
                 .with_context(|| format!("reading frozen task body {}", path.display()))?;
-            let body = String::from_utf8(bytes.clone())
-                .with_context(|| format!("decoding frozen task body {}", path.display()))?;
-            snapshot.body_contents.insert(task.file_name.clone(), body);
             snapshot
                 .body_digests
                 .push((task.file_name.clone(), content_digest(&bytes)));

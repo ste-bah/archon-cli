@@ -114,11 +114,7 @@ async function workflow(w) {
   const forceBodySubjects = new Set(Array.isArray(args.forceBodySubjects) ? args.forceBodySubjects : []);
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
-    if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) {
-      const body = { path: `${args.taskRoot}/${subject.fileName}` };
-      publishBodyCandidate(`body-${subject.taskId}`, body);
-      continue;
-    }
+    if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) continue;
     unauthored.push([subject, []]);
   }
   const chain = { outcome: skeleton, subjects: skeleton.subjects };
@@ -164,6 +160,7 @@ async function authorCandidate(w, policy) {
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
+  let bodyCandidate = null; // Issue 601: retained only within this author/land episode.
   let lastFindings = feedback.slice();
   // Issue 551: the findings open in the latest gate result. Earlier findings
   // stay in `history`, shown as ones not to regress, never as current.
@@ -194,6 +191,7 @@ async function authorCandidate(w, policy) {
         return { pendingAuthor: true, pendingRung: repairRung, findings: lastFindings.slice() };
       }
       // A host fault is not an authored finding and cannot be repaired here.
+      bodyCandidate = null;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
       continue;
     }
@@ -226,10 +224,11 @@ async function authorCandidate(w, policy) {
       : repairRung === 3 ? "\nReturn a complete replacement. Work through the findings in smaller groups while preserving every finding from this and earlier attempts."
       : policy.author ? "\nReturn a complete replacement of this entry that repairs only the findings listed below for this entry."
       : "\nThis subject is deferred while independent subjects settle. Return a complete replacement when re-entered with the latest findings.";
-    const midpoint = Math.ceil(feedback.length / 2);
-    const groupFeedback = repairRung === 3 && feedback.length > 1
-      ? (nextCall % 2 === 1 ? feedback.slice(0, midpoint) : feedback.slice(midpoint))
-      : feedback;
+    const grouping = bodyCandidate ? bodyCandidate.findings.map(findingText) : feedback;
+    const midpoint = Math.ceil(grouping.length / 2);
+    const groupFeedback = repairRung === 3 && grouping.length > 1
+      ? (nextCall % 2 === 1 ? grouping.slice(0, midpoint) : grouping.slice(midpoint))
+      : grouping;
     // #555: the part of an entry prompt every entry shares names no finding:
     // each entry reads only its own, and the phase-level ones, in its own
     // section (authorOne). The round's findings, its history and its groups
@@ -241,9 +240,9 @@ async function authorCandidate(w, policy) {
       if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
       else {
         const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
-        const bodyRepair = bodyRepairContext(policy, repairRung);
+        const bodyRepair = bodyRepairContext(policy, repairRung, bodyCandidate);
         const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${bodyRepair ? bodyRepair.text : rungInstruction}${operation}${group}`, attempt + 1,
-          bodyRepair ? [...new Set([...bodyRepair.feedback, ...promptFeedback])] : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history);
+          bodyRepair ? [...new Set([...bodyRepair.feedback, ...(policy.initialFeedback || [])])] : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history);
         // Context writes are not journaled. Reserve no ordinal until the
         // complete prompt is ready, so recovery and replay dispatch identically.
         const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
@@ -319,8 +318,16 @@ async function authorCandidate(w, policy) {
     if (policy.phase === "skeleton" && acceptedSkeletonCandidate(authored.content, outcome)) previousCandidate = authored.content;
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
-    if (policy.capability === "land-task-body" && !routed.operational && routed.all.length > 0) {
-      retainBodyCandidate(policy.phase, authored.content, routed.retryFindings, [...history, { attempt: attempt + 1, findings: routed.retry.slice() }]);
+    if (policy.capability === "land-task-body" && policy.target) {
+      for (const kind of ["shadow", "inherited"]) {
+        routed[`${kind}Findings`] = routed[`${kind}Findings`].filter((finding, index) => {
+          if (!authoredSourceMatches(finding.source_path, policy.target.fileName)) return true;
+          routed.retry.push(routed[kind][index]);
+          routed.retryFindings.push(finding);
+          return false;
+        });
+        routed[kind] = routed[`${kind}Findings`].map(findingText);
+      }
     }
     if (policy.capability === "land-task-body" && routed.shadow.length > 0 && routed.fatal.length === 0 && !routed.operational) {
       return { ...outcome, skeletonFindings: routed.shadowFindings, bodyFindings: routed.retryFindings, shadowRung: repairRung };
@@ -383,9 +390,9 @@ async function authorCandidate(w, policy) {
       continue;
     }
     const ownedFound = routed.fatalFindings.filter((finding) => {
-      if (finding.remediation_scope === "operational") return unproven.repeated.has(finding);
       const source = typeof finding.source_path === "string" ? finding.source_path.replace(/\\/g, "/") : "";
       if (policy.target && authoredSourceMatches(source, policy.target.fileName)) return true;
+      if (finding.remediation_scope === "operational") return unproven.repeated.has(finding);
       return policy.phase === "acceptance" && (source === `${String(args.taskRoot || "").replace(/\\/g, "/")}/acceptance-contract.json` || source === "acceptance-contract.json")
         && typeof finding.subject === "string"
         && (Object.prototype.hasOwnProperty.call(args.acceptanceCriteria || {}, finding.subject)
@@ -402,6 +409,10 @@ async function authorCandidate(w, policy) {
       routed.fatalFindings = routed.fatalFindings.filter((finding) => !owned.has(finding));
       routed.retry.push(...ownedText);
       routed.retryFindings.push(...ownedFatal);
+    }
+    if (policy.capability === "land-task-body") {
+      bodyCandidate = retainBodyCandidate(bodyCandidate, policy, authored.content, routed.retryFindings,
+        [...history, { attempt: attempt + 1, findings: routed.retry.slice() }]);
     }
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
@@ -457,7 +468,6 @@ async function authorCandidate(w, policy) {
     if (routed.retry.length === 0) {
       requireCommitted(outcome, policy.phase);
       if (policy.phase === "skeleton") recordSkeletonTasks(outcome, authored.content);
-      if (policy.capability === "land-task-body") publishBodyCandidate(policy.phase, authored.content);
       return outcome;
     }
     attempt += 1;

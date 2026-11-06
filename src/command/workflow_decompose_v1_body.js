@@ -47,53 +47,18 @@ function bodyPolicy(subject, initialFeedback) {
   };
 }
 
-// The durable author replies and gate outcomes already live in the run journal.
-// Like progress, this index is rebuilt by replay, including across pool pauses
-// and set-gate retries. No score can stand in for a committed gate outcome.
-const BODY_CANDIDATES = new Map();
-const BODY_PUBLISHED = new Map();
-
-function retainBodyCandidate(phase, body, findings, history = []) {
-  findings = bodyRetryFindings(findings);
-  if (findings.length === 0) return;
+// Issue 601: the caller owns this candidate for exactly one author/land loop.
+function retainBodyCandidate(prior, policy, body, findings, history = []) {
+  findings = [...new Map(findings.filter(f => ["body", "candidate_artifact"].includes(f.remediation_scope)
+    || authoredSourceMatches(f.source_path, policy.target.fileName)).map(f => [findingKey(f), f])).values()];
+  if (findings.length === 0) return prior;
   const measure = { ...attemptMeasure(findings), count: findings.length };
-  const score = findings.length;
-  const prior = BODY_CANDIDATES.get(phase);
-  if (!prior || prior.body === body || !isBetter(prior.measure, measure)) {
-    BODY_CANDIDATES.set(phase, { body, findings: findings.slice(), score, measure, history: history.slice() });
-  }
+  if (prior && isBetter(prior.measure, measure)) return prior;
+  return { body, findings, score: findings.length, measure, history: history.slice() };
 }
 
-function publishBodyCandidate(phase, body) {
-  BODY_PUBLISHED.set(phase, body);
-  BODY_CANDIDATES.delete(phase);
-}
-
-// A set gate judges the published body, not an unlanded repair draft.
-// Routing assigns these findings to this body whatever their original scope.
-function retainSetBodyCandidate(subject, findings) {
-  const phase = `body-${subject.taskId}`;
-  const body = BODY_PUBLISHED.get(phase);
-  BODY_CANDIDATES.delete(phase);
-  if (body !== undefined) {
-    retainBodyCandidate(phase, body, findings.map(f => ({ ...f, remediation_scope: "body" })));
-  }
-}
-
-function dropBodyCandidate(subject) {
-  const phase = `body-${subject.taskId}`;
-  BODY_CANDIDATES.delete(phase);
-  BODY_PUBLISHED.delete(phase);
-}
-
-function bodyRetryFindings(findings) {
-  return [...new Map(findings.filter(f => ["body", "candidate_artifact"].includes(f.remediation_scope))
-    .map(f => [findingKey(f), f])).values()];
-}
-
-function bodyRepairContext(policy, rung) {
+function bodyRepairContext(policy, rung, best) {
   if (policy.capability !== "land-task-body") return null;
-  const best = BODY_CANDIDATES.get(policy.phase);
   if (!best || best.findings.length === 0) return null;
   if (rung === 4) return {
     text: `\nRe-author a complete replacement from fresh context. Keep the subject contract. Previously seen defects:\n- ${best.findings.map(findingText).join("\n- ")}`,
@@ -103,10 +68,10 @@ function bodyRepairContext(policy, rung) {
   const details = JSON.stringify({ findings: best.findings, blocking_findings: best.score });
   let reference;
   try {
-    const body = typeof best.body === "string" ? best.body : null;
-    const path = body === null ? best.body.path : utf8Bytes(body) > 16384 ? contextFile("txt", body).path : null;
+    const body = best.body;
+    const path = utf8Bytes(body) > 16384 ? contextFile("txt", body).path : null;
     reference = path
-      ? `Read the retained candidate as raw text at ${path} (host-written or frozen body context for this call: read it by its exact path, even under an excluded directory).`
+      ? `Read the retained candidate as raw text at ${path} (host-written body context for this call: read it by its exact path, even under an excluded directory).`
       : `Retained candidate (raw text):\n${body}\nEnd retained candidate.`;
     reference += utf8Bytes(details) > 16384
       ? `\nRead exact gate findings (JSON) at ${contextFile("json", details).path} (host-written context: read this exact path).`

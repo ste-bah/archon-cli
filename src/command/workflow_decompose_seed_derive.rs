@@ -86,8 +86,6 @@ pub(crate) enum SubjectSeed {
         candidate_call: String,
         /// The last gate that judged exactly this candidate.
         gate: Option<GateSeed>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        journal_results: Vec<Value>,
     },
 }
 
@@ -247,7 +245,6 @@ pub(crate) fn derive_with_reply_markers(
         })
         .collect();
     for (subject, (_, record)) in artifacts {
-        let journal_results = body_results::collect(&subject, &records, &gates);
         let candidate = reply_content(record).unwrap_or_default();
         // The last judgment of exactly these bytes, whichever reply held them.
         let gate = gates
@@ -257,7 +254,6 @@ pub(crate) fn derive_with_reply_markers(
         derived.subjects.insert(
             subject,
             SubjectSeed::Artifact {
-                journal_results,
                 candidate: candidate.to_string(),
                 candidate_call: record.call.id.clone(),
                 gate,
@@ -284,9 +280,18 @@ pub(crate) fn derive_with_reply_markers(
     Ok(derived)
 }
 
-#[path = "workflow_decompose_seed_types.rs"]
-mod seed_types;
-use seed_types::{Gate, Reply};
+/// A judged gate: its record, command, stdin and what the script saw.
+type Gate<'a> = (&'a WorkflowV2CallRecord, &'a str, &'a str, GateSeed);
+
+/// An acceptance author reply the script can read: its entry, with the
+/// host-owned fields of an owed check set, and its call ordinal.
+struct Reply<'a> {
+    record: &'a WorkflowV2CallRecord,
+    id: String,
+    ordinal: u64,
+    text: String,
+    entry: Value,
+}
 
 /// The reply round a gate's candidate holds: the latest round after which
 /// the loop's entries (each entry's latest reply up to that round) are the
@@ -486,8 +491,6 @@ fn acceptance(
     }))
 }
 
-#[path = "workflow_decompose_seed_body_results.rs"]
-mod body_results;
 #[cfg(test)]
 #[path = "workflow_decompose_seed_derive_tests.rs"]
 pub(crate) mod tests;

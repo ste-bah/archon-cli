@@ -312,7 +312,6 @@ pub(crate) async fn after_claim(
                     launched.skeleton = false;
                     launched.subjects.clear();
                     launched.bodies.clear();
-                    launched.body_contents.clear();
                     launched.body_digests.clear();
                     return Ok(());
                 }
@@ -412,7 +411,6 @@ pub(crate) async fn after_claim(
             launched.skeleton = false;
             launched.subjects.clear();
             launched.bodies.clear();
-            launched.body_contents.clear();
             launched.body_digests.clear();
             for line in &lines {
                 ui.emit(archon_workflow::WorkflowUiEvent::Text(format!("{line}\n")))

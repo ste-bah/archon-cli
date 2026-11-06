@@ -150,11 +150,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 574/575: constraint wording names table rows; the skeleton shape gains source_sections, the skeleton author gets the qualifying PRD section keys and texts, and the body author its frozen source_sections and their texts.
     // #584 P1-P6 integration: acceptance, skeleton and body author scripts changed.
     // #587: named Skeleton findings also reach their body author after re-freeze.
-    // Issue 601: body repair ranking, scoped context, fresh rungs and durable resume seeds.
+    // Issue 601: body repair retains the best actionable candidate within one author episode.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "d4ba66ff9ae614eabe3edae4d35bbba226f1d51d7d1bc5c1b77b2b8f0c73aad5"
+        "99114d0f9594886fdb22ac0e6daa1de40ec31dfbfcd3194821a6df9c08f2cd1c"
     );
 }

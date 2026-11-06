@@ -209,31 +209,6 @@ fn decide_locked(
     effective.acceptance = acceptance.verify;
     effective.skeleton = skeleton.verify;
     effective.bodies = bodies;
-    effective.body_contents.retain(|name, _| effective.bodies.contains(name));
-    // Older generation records predate body_contents. Recover only the bytes
-    // their recorded digest authenticates; never substitute a changed body.
-    for file_name in &effective.bodies {
-        if effective.body_contents.contains_key(file_name) {
-            continue;
-        }
-        let bytes = std::fs::read(task_root.join(file_name))?;
-        let digest = archon_workflow::task_set_contract::content_digest(&bytes);
-        if !effective
-            .body_digests
-            .iter()
-            .any(|(name, held)| name == file_name && held == &digest)
-        {
-            return Err(anyhow!(
-                "recorded frozen body digest differs for {file_name}"
-            ));
-        }
-        effective
-            .body_contents
-            .insert(file_name.clone(), String::from_utf8(bytes)?);
-        lines.push(format!(
-            "frozen_body_context_recovered file={file_name} source=verified_disk"
-        ));
-    }
     if !effective.skeleton {
         effective.subjects.clear();
     }

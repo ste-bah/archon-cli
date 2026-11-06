@@ -190,7 +190,6 @@ fn a_frozen_acceptance_contract_alone_is_reported_without_subjects() {
             skeleton: false,
             subjects: Vec::new(),
             bodies: Vec::new(),
-            body_contents: Default::default(),
             body_digests: Vec::new(),
             preserved_digests: Vec::new(),
             tasks: Vec::new(),

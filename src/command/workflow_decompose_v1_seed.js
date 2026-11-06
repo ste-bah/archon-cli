@@ -232,15 +232,6 @@ function seedArtifact(seed, policy) {
   if (typeof seed.candidate !== "string" || seed.candidate.length === 0) {
     throw new Error(`phase seed for ${policy.phase} carries no candidate`);
   }
-  if (policy.capability === "land-task-body" && (!seed.gate || seedRepairFindings(seed.gate, policy).length > 0)) {
-    // Journaled judgments recover the best body with this runtime's ranking;
-    // older seeds without those results recover only the latest candidate.
-    const results = Array.isArray(seed.journal_results) ? seed.journal_results : [];
-    for (const result of results) retainBodyCandidate(policy.phase, result.body, result.findings);
-    if (results.length === 0 && seed.gate) retainBodyCandidate(policy.phase, seed.candidate, seed.gate.findings);
-    const best = BODY_CANDIDATES.get(policy.phase);
-    if (best && seed.gate) return { feedback: best.findings.map(findingText), carried: null, previousCandidate: best.body };
-  }
   const repair = seed.gate ? seedRepairFindings(seed.gate, policy).map((finding) => String(finding.text)) : [];
   return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: seed.candidate };
 }

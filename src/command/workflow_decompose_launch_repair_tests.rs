@@ -11,7 +11,6 @@ fn snapshot(body: &str) -> FrozenChainSnapshot {
             file_name: "TASK-1.md".into(),
         }],
         bodies: vec!["TASK-1.md".into()],
-        body_contents: Default::default(),
         body_digests: vec![("TASK-1.md".into(), content_digest(body.as_bytes()))],
         preserved_digests: vec![],
         tasks: vec![],
