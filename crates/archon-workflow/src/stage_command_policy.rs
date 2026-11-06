@@ -30,7 +30,7 @@ pub fn command_execution_stage(request: &StageRunRequest) -> bool {
 /// agent prompt reads this to say which shell the stage has, so what it is
 /// told and what it gets are the same answer.
 pub fn v2_call_runs_commands(call_id: &str, input: &serde_json::Value) -> bool {
-    stage_extra_requests_bash(input) || verification_wave_id(call_id)
+    declared_bash_tool(input) || verification_wave_id(call_id)
 }
 
 /// Whether the host granted this stage a READ-ONLY shell (a review map
@@ -49,15 +49,24 @@ fn verification_wave_id(stage_id: &str) -> bool {
 }
 
 fn stage_extra_requests_bash(input: &serde_json::Value) -> bool {
+    (input.get("v2_call").is_none()
+        && input
+            .get("stage_extra")
+            .and_then(|extra| extra.get("commands"))
+            .and_then(serde_json::Value::as_bool)
+            == Some(true))
+        || declared_bash_tool(input)
+}
+
+fn declared_bash_tool(input: &serde_json::Value) -> bool {
     let Some(extra) = input.get("stage_extra") else {
         return false;
     };
-    extra.get("commands").and_then(serde_json::Value::as_bool) == Some(true)
-        || ["allowed_tools", "tools", "required_tools"]
-            .iter()
-            .filter_map(|key| extra.get(*key))
-            .flat_map(text_values)
-            .any(|tool| tool.eq_ignore_ascii_case("bash") || tool.eq_ignore_ascii_case("shell"))
+    ["allowed_tools", "tools", "required_tools"]
+        .iter()
+        .filter_map(|key| extra.get(*key))
+        .flat_map(text_values)
+        .any(|tool| tool.eq_ignore_ascii_case("bash") || tool.eq_ignore_ascii_case("shell"))
 }
 
 fn text_values(value: &serde_json::Value) -> Vec<&str> {

@@ -135,3 +135,18 @@ fn yaml_stage_declarations_survive_stage_and_fanout_context() {
         assert_eq!(command_execution_stage(&req), expected, "{declaration}");
     }
 }
+
+#[test]
+fn commands_boolean_is_legacy_only_even_for_null_typed_marker() {
+    for call in [json!(null), json!({"id": "inspect", "method": "agent"})] {
+        let input = json!({"v2_call": call, "stage_extra": {"commands": true}});
+        assert!(!command_execution_stage(&request(input.clone())));
+        assert!(!v2_call_runs_commands("inspect", &input));
+    }
+    // The typed prompt helper must never interpret the legacy boolean,
+    // even though its input does not itself carry a v2_call marker.
+    assert!(!v2_call_runs_commands(
+        "inspect",
+        &json!({"stage_extra": {"commands": true}})
+    ));
+}

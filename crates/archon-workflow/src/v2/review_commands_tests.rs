@@ -178,3 +178,28 @@ fn the_prelude_sends_the_late_review_kinds_the_host_names() {
         assert!(prelude.contains(&format!("\"{kind}\"")), "{kind}");
     }
 }
+
+#[test]
+fn review_grants_replace_script_capabilities_including_when_withheld() {
+    for shell in [false, true] {
+        let mut items = vec![item("review")];
+        items[0].input["stage_extra"] = json!({
+            "commands": true, "tools": ["Bash", "Write"], "read_only_shell": true
+        });
+        items[0].input["read_only_shell"] = json!(true);
+        let identity = crate::v2::reuse_identity::reuse_identity(&items[0]);
+        let identities = grant_review_commands(&mut items, shell);
+        assert_eq!(identities["review"], identity);
+        assert!(items[0].input.get("read_only_shell").is_none());
+        if shell {
+            assert_eq!(
+                items[0].input["stage_extra"],
+                json!({
+                    "read_only_shell": true, "allowed_tools": ["Bash"]
+                })
+            );
+        } else {
+            assert!(items[0].input.get("stage_extra").is_none());
+        }
+    }
+}
