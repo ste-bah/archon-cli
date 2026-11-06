@@ -144,3 +144,97 @@ fn logic_361_references_to_macro_generated_items_reach_the_definition_and_invoca
     );
     assert_ne!(tree.digest(), invocation_changed);
 }
+
+/// A macro's generated constant resolves at its definition, but the field
+/// list lives in a different module which the forward walk need not visit.
+#[test]
+fn logic_361_cross_file_macro_arguments_cannot_escape_the_closure() {
+    let tree = Tree::new();
+    tree.write(
+        "src/command/mod.rs",
+        "mod root; mod policy; mod declaration;\n",
+    );
+    tree.write(
+        "src/command/root.rs",
+        "pub fn verdict() -> bool { super::policy::FIELDS.len() > 0 }\n",
+    );
+    tree.write("src/command/policy.rs", "macro_rules! fields { ($($field:ident),+) => { pub const FIELDS: &[&str] = &[$(stringify!($field)),+]; }; }\n");
+    tree.write("src/command/declaration.rs", "fields! { first, second }\n");
+    let hashed = tree.hash(&[]);
+    assert!(
+        !hashed
+            .closure
+            .files
+            .contains(Path::new("src/command/declaration.rs"))
+    );
+    let problems = walk_problems(&hashed);
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("declaration.rs") && p.contains("macro invocation fields!")),
+        "{problems:?}"
+    );
+    tree.write(
+        "src/command/declaration.rs",
+        "use super::policy::fields as selected; selected! { first, second }\n",
+    );
+    let aliased = walk_problems(&tree.hash(&[]));
+    assert!(
+        aliased
+            .iter()
+            .any(|p| p.contains("macro invocation selected!")),
+        "{aliased:?}"
+    );
+    tree.write("src/command/declaration.rs", "fields! { first, second }\n");
+    // Explicitly reaching the invocation closes the hole and hashes its fields.
+    tree.write("src/command/mod.rs", "mod root; mod policy;\n");
+    tree.write("src/command/root.rs", "pub fn verdict() -> bool { super::policy::FIELDS.len() > 0 }\n#[path = \"declaration.rs\"] mod declaration;\n");
+    let reached = tree.hash(&[]);
+    assert!(
+        walk_problems(&reached).is_empty(),
+        "{:?}",
+        walk_problems(&reached)
+    );
+    assert!(
+        reached
+            .closure
+            .files
+            .contains(Path::new("src/command/declaration.rs"))
+    );
+    tree.write("src/command/declaration.rs", "fields! { first, third }\n");
+    assert_ne!(tree.digest(), reached.digest);
+}
+
+/// A same-named macro with its own resolved definition is independent.
+#[test]
+fn logic_361_an_unrelated_local_macro_does_not_expand_the_closure() {
+    let tree = Tree::new();
+    tree.write(
+        "src/command/mod.rs",
+        "mod root; mod policy; mod separate;\n",
+    );
+    tree.write(
+        "src/command/root.rs",
+        "pub fn verdict() -> bool { super::policy::FIELDS.len() > 0 }\n",
+    );
+    tree.write(
+        "src/command/policy.rs",
+        "macro_rules! fields { () => { pub const FIELDS: &[&str] = &[]; }; } fields!();\n",
+    );
+    tree.write(
+        "src/command/separate.rs",
+        "macro_rules! fields { () => { pub const OTHER: bool = true; }; } fields!();\n",
+    );
+    let hashed = tree.hash(&[]);
+    assert!(
+        !hashed
+            .closure
+            .files
+            .contains(Path::new("src/command/separate.rs"))
+    );
+    assert!(
+        walk_problems(&hashed).is_empty(),
+        "{:?}",
+        walk_problems(&hashed)
+    );
+}

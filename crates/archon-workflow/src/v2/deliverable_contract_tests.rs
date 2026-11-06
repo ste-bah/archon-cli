@@ -9,6 +9,10 @@ use super::{ContractRoots, resolve_contract_path, typed_verification_command};
 fn shell_verifiers_are_concrete_commands_unless_the_whole_value_is_a_template() {
     let roots = ContractRoots::project_only("/project".to_string());
     for command in [
+        "echo ${X}",
+        "$HOME/bin/run",
+        "${X:-d}",
+        "${X:-${Y:-d}}",
         "python3 - <<'PY'\nassert 1 == 1\nPY",
         "cmd < in 2>/dev/null",
         "test -s \"$HOME/x\"",
@@ -30,14 +34,35 @@ fn shell_verifiers_are_concrete_commands_unless_the_whole_value_is_a_template() 
         "<optional: x>",
         "  <optional: x>  ",
         "${UNREPLACED}",
+        "${X}${Y}",
+        "$X",
+        "\"${X}\"",
+        "${1}",
+        "${X:-}",
+        "${X:-${Y}}",
+        "${X:-\"\"}",
+        "${#X}",
+        "${X%pattern}",
+        "'$X'",
+        "${X} \"$Y\"",
         "  ${NAME_1}  ",
         "  ",
     ] {
         let contract = serde_json::json!({
             "artifact_path": "out.json", "typed_verifier_command": command,
         });
-        assert!(!super::contract_defects(&contract).is_empty(), "{command}");
+        let defects = super::contract_defects(&contract);
+        assert!(!defects.is_empty(), "{command}");
+        assert!(
+            defects
+                .iter()
+                .all(|defect| !defect.message.contains("omit")),
+            "{command}"
+        );
         assert!(typed_verification_command(&roots, &contract).is_none());
+        let (passed, output) = run_verifier(&super::verification_command(&roots, &contract));
+        assert!(!passed, "{command}: {output}");
+        assert!(output.contains(&defects[0].message), "{command}: {output}");
     }
     for field in [
         "instance_artifact_field",

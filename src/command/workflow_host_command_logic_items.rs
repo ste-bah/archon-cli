@@ -31,6 +31,8 @@ pub(crate) struct Item {
     /// An item-level macro call or definition: literal item names it emits
     /// are read from inside it, so references reach their defining macro.
     pub(crate) macro_call: bool,
+    pub(crate) macro_definition: Option<String>,
+    pub(crate) macro_invocations: BTreeSet<Vec<String>>,
     pub(crate) paths: BTreeSet<Vec<String>>,
     pub(crate) idents: BTreeSet<String>,
     pub(crate) invoked: BTreeSet<String>,
@@ -214,6 +216,7 @@ pub(crate) fn facts(text: &str) -> Facts {
                 Some("macro_rules") if is(toks.get(i + 1), '!') => {
                     if let (Some(name), Some(cur)) = (word(toks.get(i + 2)), cur) {
                         facts.items[cur].names.insert(name.into());
+                        facts.items[cur].macro_definition = Some(name.into());
                     }
                 }
                 Some("impl") => {
@@ -282,6 +285,9 @@ pub(crate) fn facts(text: &str) -> Facts {
                     }
                 } else if let Some(cur) = cur {
                     let item = &mut facts.items[cur];
+                    if bang {
+                        item.macro_invocations.insert(segs.clone());
+                    }
                     if segs.len() > 1 {
                         item.paths.insert(segs);
                     } else if bang {

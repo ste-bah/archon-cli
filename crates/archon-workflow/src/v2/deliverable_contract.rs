@@ -111,8 +111,12 @@ pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect
         for (key, value) in fields {
             let Some(text) = value.as_str() else { continue };
             if text.trim().is_empty() {
-                defects.push(ValidationDefect::new("blank_contract_field", "contract", key,
-                    format!("deliverable contract {key} is blank; omit unused optional fields or supply a concrete value")));
+                defects.push(ValidationDefect::new(
+                    "blank_contract_field",
+                    "contract",
+                    key,
+                    format!("deliverable contract {key} is blank; supply a concrete value"),
+                ));
             } else if if key == "typed_verifier_command" {
                 // The contract type's only shell command: shell syntax is concrete input.
                 whole_value_template(text)
@@ -127,7 +131,7 @@ pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect
                     && (!template_tokens(text).is_empty() || !shell_tokens(text).is_empty())
             } {
                 defects.push(ValidationDefect::new("unexpanded_contract_field", "contract", key,
-                    format!("deliverable contract {key} contains an unreplaced template token; supply a concrete value or omit the unused optional field")));
+                    format!("deliverable contract {key} contains an unreplaced template token; supply a concrete value")));
             }
         }
     }
@@ -183,19 +187,69 @@ fn whole_value_template(value: &str) -> bool {
         .strip_prefix('<')
         .and_then(|body| body.strip_suffix('>'))
         .is_some_and(|body| !body.contains(['<', '>']));
-    // A bare variable is an authoring placeholder, not an executable verifier.
-    // Keep shell parameter operators and expansions within real commands valid.
-    let shell_name = value
-        .strip_prefix("${")
-        .and_then(|body| body.strip_suffix('}'))
-        .is_some_and(|body| {
-            let mut chars = body.chars();
-            chars
-                .next()
-                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-        });
-    angle || shell_name
+    // Expansion-only words do not declare a program. Quotes and whitespace
+    // add no program text. A nonempty literal default (e.g. `${X:-d}`) does:
+    // it names `d` when X is unset, just as `$HOME/bin/run` names a program.
+    angle || expansion_only(value)
+}
+
+fn expansion_only(value: &str) -> bool {
+    let mut rest = value;
+    while let Some(c) = rest.chars().next() {
+        if c.is_whitespace() || matches!(c, '\'' | '"') {
+            rest = &rest[c.len_utf8()..];
+            continue;
+        }
+        let Some(after) = rest.strip_prefix('$') else {
+            return false;
+        };
+        if let Some(body) = after.strip_prefix('{') {
+            let mut depth = 1;
+            let Some(close) = body.char_indices().find_map(|(at, c)| {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                (depth == 0).then_some(at)
+            }) else {
+                return false;
+            };
+            let parameter = &body[..close];
+            // Only default/alternative/assignment operands can supply literal
+            // program text. Error messages and removal patterns cannot.
+            let parameter = parameter.strip_prefix('#').unwrap_or(parameter);
+            let name_end = parameter
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(parameter.len());
+            let operator = &parameter[name_end..];
+            for prefix in [":-", "-", ":+", "+", ":=", "="] {
+                if let Some(operand) = operator.strip_prefix(prefix) {
+                    if !expansion_only(operand) {
+                        return false;
+                    }
+                    break;
+                }
+            }
+            rest = &body[close + 1..];
+        } else {
+            let length = if after.starts_with(|c: char| c.is_ascii_digit() || "@*#?$!-".contains(c))
+            {
+                1
+            } else {
+                after
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .map(char::len_utf8)
+                    .sum()
+            };
+            if length == 0 {
+                return false;
+            }
+            rest = &after[length..];
+        }
+    }
+    true
 }
 
 fn source_collection_is_bound(contract: &Value) -> bool {
