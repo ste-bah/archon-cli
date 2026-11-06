@@ -1,4 +1,4 @@
-//! TASK-WC-003 — Per-item Git worktree isolation (PRD-012 §7.2, §7.3, §9, §14).
+//! TASK-WC-003 — Per-item Git worktree isolation.
 //!
 //! Owns the filesystem side of write coordination: reproduce the canonical
 //! dirty state inside a private worktree, seal a detached baseline commit, and
@@ -112,7 +112,7 @@ pub enum IsolationError {
     Io(#[from] std::io::Error),
 }
 
-/// Capture the canonical dirty state (PRD-012 §9).
+/// Capture the canonical dirty state.
 ///
 /// Declared targets and verify inputs are copied when untracked. Safe
 /// compile-relevant support files are copied too, because tracked dirty edits

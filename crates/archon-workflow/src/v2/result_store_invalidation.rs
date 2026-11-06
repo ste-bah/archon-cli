@@ -187,3 +187,72 @@ fn dynamic_call_index(call_id: &str, prefix: &str) -> Option<u32> {
     }
     digits.parse().ok()
 }
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn mixed_record_formats_restart_invalidates_later_verdicts_without_task_overlap() {
+        // Records from the withdrawn metadata implementation remain readable, but
+        // metadata without sequence must not suppress the established wave order.
+        for restart_has_metadata in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let store = WorkflowV2ResultStore::new(temp.path());
+            let ids = [
+                "implementation-wave-1",
+                "implementation-wave-2",
+                "verification-wave-2",
+                "final-acceptance-gate",
+                "final-acceptance-report",
+            ];
+            for (index, id) in ids.iter().enumerate() {
+                let call = super::WorkflowV2HostCall {
+                    id: (*id).into(),
+                    method: super::WorkflowV2HostMethod::Agent,
+                    write_mode: None,
+                    options: Default::default(),
+                };
+                let record = WorkflowV2CallRecord::new(
+                    "compatibility-test",
+                    call,
+                    1,
+                    "unchanged-input".into(),
+                    super::WorkflowV2Result::accepted("done"),
+                    vec![],
+                );
+                let mut raw = serde_json::to_value(&record).unwrap();
+                if (index % 2 == 1) == restart_has_metadata {
+                    raw["call"]["options"]["metadata"] = serde_json::json!({
+                        "kind": "other", "task_scoped": false
+                    });
+                }
+                let path = store.result_path(id);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, serde_json::to_vec(&raw).unwrap()).unwrap();
+            }
+            let invalidated = store
+                .invalidate_dynamic_wave_dependents("implementation-wave-2")
+                .unwrap();
+            assert_eq!(
+                invalidated.into_iter().collect::<BTreeSet<_>>(),
+                ids[1..].iter().map(|id| (*id).to_string()).collect()
+            );
+            for id in &ids[1..] {
+                let record = store.load_call_record(id).unwrap().unwrap();
+                assert_eq!(
+                    record.invalidated_by.as_deref(),
+                    Some("implementation-wave-2")
+                );
+            }
+            assert!(
+                store
+                    .load_call_record(ids[0])
+                    .unwrap()
+                    .unwrap()
+                    .invalidated_by
+                    .is_none()
+            );
+        }
+    }
+}

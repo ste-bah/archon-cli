@@ -43,6 +43,10 @@ use super::compile::{CONCEPT_SOURCE_PREFIX, SUMMARY_SOURCE_PREFIX};
 mod query_types;
 pub use query_types::*;
 
+#[path = "query_helpers.rs"]
+mod query_helpers;
+use query_helpers::{format_context, truncate_chars};
+
 /// `source_path` prefix for an answer filed back into the knowledge base.
 pub const ANSWER_SOURCE_PREFIX: &str = "archon-kb://answer/";
 
@@ -480,33 +484,6 @@ fn synthesis_prompt(question: &str, formatted_context: &str) -> String {
          Cite your sources by chunk ID. If the context is insufficient, say so.\n\n\
          Question: {question}\n\nContext:\n{formatted_context}"
     )
-}
-
-fn format_context(context: &AnswerContext) -> String {
-    let mut parts = Vec::new();
-    for chunk in &context.primary {
-        parts.push(format!(
-            "### [{}] {} (relevance: {:.2})\n{}",
-            chunk.chunk_id, chunk.source_path, chunk.score, chunk.content
-        ));
-    }
-    if !context.summaries.is_empty() {
-        parts.push("\n### Compiled summaries:".to_string());
-        parts.extend(context.summaries.iter().cloned());
-    }
-    if !context.concepts.is_empty() {
-        parts.push("\n### Related concepts:".to_string());
-        parts.extend(context.concepts.iter().cloned());
-    }
-    parts.join("\n\n")
-}
-
-fn truncate_chars(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let prefix: String = text.chars().take(max).collect();
-    format!("{prefix}...")
 }
 
 #[cfg(test)]

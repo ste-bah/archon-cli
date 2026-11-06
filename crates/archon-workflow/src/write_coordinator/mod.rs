@@ -1,4 +1,4 @@
-//! Write Coordinator — safe parallel implementation fanout (PRD-ARCHON-FINALISATION-012).
+//! Write Coordinator — safe parallel implementation fanout.
 //!
 //! This module owns the config surface, the runtime feature resolver, and the
 //! canonical id aliases shared by every coordinator task. Coordinator behavior
