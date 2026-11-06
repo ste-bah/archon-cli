@@ -23,7 +23,7 @@ fn live_shaped_suffixes_have_distinct_body_findings_in_both_checks() {
             "providers/mod.rs",
         ] {
             for predicate in ["exists.", "— exists (1 line)"] {
-                let raw = body("[]", "") + &format!("\n## Notes\n`{path}` {predicate}\n");
+                let raw = body("[]", "") + format!("\n## Notes\n`{path}` {predicate}\n").as_str();
                 let found = super::super::super::repository_claims::body_findings(
                     &tree,
                     &project,
@@ -67,7 +67,7 @@ fn headings_keep_missing_slashed_and_absolute_claims() {
         tree.root().join("unknown/ghost.rs").display().to_string(),
     ] {
         for predicate in ["exists.", "— exists (1 line)"] {
-            let raw = body("[]", "") + &format!("\n## In `src/`\n`{named}` {predicate}\n");
+            let raw = body("[]", "") + format!("\n## In `src/`\n`{named}` {predicate}\n").as_str();
             let found = super::super::super::repository_claims::body_findings(
                 &tree,
                 &project,
@@ -115,7 +115,7 @@ fn outside_absolute_descendants_of_files_are_skipped_in_all_entry_points() {
     );
     for predicate in ["", "exists.", "— exists (1 line)"] {
         let raw = body("[]", &format!("- `{named}` {predicate}"))
-            + &format!("\n## In `src/`\n`{named}` {predicate}\n");
+            + format!("\n## In `src/`\n`{named}` {predicate}\n").as_str();
         let found = super::super::super::repository_claims::body_findings(
             &tree,
             &project,
@@ -285,7 +285,8 @@ fn suggestions_prefer_longest_declared_directory_or_heading_prefix() {
             ("- `z/deep/preferred/src/lib.rs`", "## Notes"),
             ("", "## In `z/deep/preferred/`"),
         ] {
-            let raw = body("[]", files) + &format!("\n{heading}\n`tests/new.rs` {predicate}\n");
+            let raw =
+                body("[]", files) + format!("\n{heading}\n`tests/new.rs` {predicate}\n").as_str();
             let found = super::super::super::repository_claims::body_findings(
                 &tree,
                 &project,

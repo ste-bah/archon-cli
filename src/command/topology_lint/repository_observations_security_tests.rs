@@ -27,7 +27,7 @@ fn lexical_escapes_are_body_findings() {
     let outside = project.join("outside.rs").display().to_string();
     for suffix in ["", " — exists (4 lines)", " — absent"] {
         let raw = body("[]", &format!("- `{outside}`{suffix}"))
-            + &format!("\n## Notes\n`{outside}` exists.\n");
+            + format!("\n## Notes\n`{outside}` exists.\n").as_str();
         assert!(inspect_result(&tasks, &project, &raw).unwrap().is_empty());
     }
 }
@@ -43,7 +43,7 @@ fn symlink_escapes_are_body_findings_in_both_lints() {
         let found = inspect_result(&tasks, &project, &raw).unwrap();
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].contains("path leaves the repository"), "{found:?}");
-        let raw = body("[]", "- `src/lib.rs`") + &format!("\n## Notes\n`{path}` exists.\n");
+        let raw = body("[]", "- `src/lib.rs`") + format!("\n## Notes\n`{path}` exists.\n").as_str();
         assert!(
             inspect_result(&tasks, &project, &raw)
                 .unwrap()
@@ -109,7 +109,7 @@ fn malformed_paths_do_not_abort_the_set_gate() {
         found.iter().any(|finding| finding.contains(bad)),
         "{found:?}"
     );
-    let raw = body("[]", "- `src/lib.rs`") + &format!("\n## Notes\n`{bad}` exists.\n");
+    let raw = body("[]", "- `src/lib.rs`") + format!("\n## Notes\n`{bad}` exists.\n").as_str();
     assert_eq!(inspect_result(&tasks, &project, &raw).unwrap().len(), 1);
 }
 
