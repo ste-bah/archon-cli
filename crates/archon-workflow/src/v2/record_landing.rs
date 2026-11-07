@@ -76,6 +76,7 @@ fn with_schema(err: WorkflowError, kind: RecordKind) -> WorkflowError {
 }
 pub struct RecordLanding {
     pub(super) root: PathBuf,
+    pub(super) read_snapshot: Option<BTreeMap<String, Value>>,
     pub(super) kind: RecordKind,
     subjects: Vec<String>,
     subjects_are_tasks: bool,
@@ -106,40 +107,6 @@ pub(super) enum Admission {
 }
 
 impl RecordLanding {
-    /// `subjects_are_tasks` says whether each subject is a canonical task id (map calls) or an opaque call id (reduce calls); it decides whether the subject may stand in for a finding's task.
-    pub fn open(
-        root: PathBuf,
-        identity: String,
-        kind: RecordKind,
-        subjects: Vec<String>,
-        subjects_are_tasks: bool,
-    ) -> WorkflowResult<Self> {
-        std::fs::create_dir_all(&root).map_err(invalid)?;
-        let path = root.join("contract.json");
-        let expected = json!({"identity":identity,"kind":kind,"subjects":subjects});
-        if path.exists() {
-            let saved: Value = serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
-            if saved != expected {
-                return Err(invalid("record landing identity changed"));
-            }
-        } else {
-            write(&path, &expected)?;
-        }
-        let store = Self {
-            root,
-            kind,
-            subjects,
-            subjects_are_tasks,
-            lock: Mutex::new(()),
-            frozen_tasks: Mutex::new(None),
-            rejected: Mutex::new(BTreeMap::new()),
-            landed_here: Mutex::new(Default::default()),
-            repair_required: Mutex::new(false),
-            pre_call_tasks: Mutex::new(Default::default()),
-        };
-        store.restore_call()?;
-        Ok(store)
-    }
     pub fn kind(&self) -> RecordKind {
         self.kind
     }
@@ -274,8 +241,15 @@ impl RecordLanding {
                 )
             ) {
                 record.status = previous.status;
-                // The latest summary replaces prose; only the failure verdict sticks.
-                // replace:true above explicitly supersedes both verdict and record.
+                // Keep the failure explanation without duplicating repeated landings.
+                // The normal record size validation bounds the combined summary.
+                if !previous.summary.is_empty() && !record.summary.contains(&previous.summary) {
+                    record.summary = if previous.summary.contains(&record.summary) {
+                        previous.summary
+                    } else {
+                        format!("{}\n{}", record.summary, previous.summary)
+                    };
+                }
             }
             self.validate(&record, Admission::NewLanding)
                 .map_err(|e| with_schema(e, self.kind))?;
@@ -284,17 +258,12 @@ impl RecordLanding {
     }
     pub(super) fn records(&self) -> WorkflowResult<BTreeMap<String, StageRecord>> {
         let mut records = BTreeMap::new();
-        for entry in std::fs::read_dir(&self.root).map_err(invalid)? {
-            let path = entry.map_err(invalid)?.path();
-            if !path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|s| s.starts_with("record-") && s.ends_with(".json"))
-            {
-                continue;
-            }
-            let record: StageRecord =
-                serde_json::from_slice(&std::fs::read(path).map_err(invalid)?)?;
+        let snapshot = match &self.read_snapshot {
+            Some(records) => records.clone(),
+            None => self.saved_records()?,
+        };
+        for value in snapshot.into_values() {
+            let record: StageRecord = serde_json::from_value(value)?;
             self.validate(&record, Admission::Persisted)?;
             if records.insert(record.subject.clone(), record).is_some() {
                 return Err(invalid("duplicate persisted record subject"));
@@ -317,7 +286,7 @@ impl RecordLanding {
             return self.skeleton_hint(&records);
         }
         Ok(format!(
-            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Findings, evidence and commands are unioned; the latest summary replaces the previous summary. A failed, blocked or needs_review verdict persists unless replace:true supersedes it. Schema: {}",
+            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Findings, evidence and commands are unioned; the latest summary retains any inherited failure explanation. A failed, blocked or needs_review verdict persists unless replace:true supersedes it. Schema: {}",
             records.len(),
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
             serde_json::to_string(&self.remaining()?)?,

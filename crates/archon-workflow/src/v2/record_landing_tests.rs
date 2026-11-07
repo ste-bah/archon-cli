@@ -174,8 +174,11 @@ fn replace_on_a_verify_record_drops_the_inherited_failure() {
         record["status"], "failed",
         "without replace the earlier failure is inherited"
     );
-    // B3 (B-store.md:94-96): summaries replace prose; failure status still sticks.
-    assert_eq!(record["summary"], "second attempt passed");
+    // An inherited failure retains both its verdict and its explanation.
+    assert_eq!(
+        record["summary"],
+        "second attempt passed\nfirst attempt failed"
+    );
     landing.land(json!({"subject":"S","status":"accepted","summary":"second attempt passed","evidence":evidence,"commands_run":passed,"replace":true})).unwrap();
     let record =
         &landing.assemble(&json!({"records_landed":1})).unwrap()["verification_records"][0];

@@ -315,7 +315,7 @@ fn record_landing_pending_new_task_hint_matches_draft_and_frozen_modes() {
 }
 
 #[test]
-fn record_landing_unchanged_bytes_and_missing_removals_do_not_count() {
+fn record_landing_reopened_call_keeps_original_change_count_and_missing_removals_do_not_add_work() {
     let (temp, landing) = open(RecordKind::Skeleton, &[]);
     let record = task_record("TASK-X-001");
     landing.land(record.clone()).unwrap();
@@ -435,4 +435,20 @@ fn record_landing_finding_coverage_belongs_to_the_gate() {
         .land(json!({"subject":"TASK-X-002","remove":true}))
         .unwrap();
     assert!(landing.compose_reply(&json!({"records_landed":1})).is_ok());
+}
+
+#[test]
+fn record_landing_fresh_seed_identical_relanding_counts_zero() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let record = task_record("TASK-X-001");
+    landing
+        .seed_skeleton(
+            &json!({"schema_version":1,"acceptance_digest":"","tasks":[record["task"]]}),
+            false,
+        )
+        .unwrap();
+    landing.land(record).unwrap();
+    assert_eq!(landing.new_landing_count().unwrap(), 0);
+    assert!(landing.compose_reply(&json!({"records_landed":0})).is_ok());
+    assert!(landing.retained_reply().unwrap().is_none());
 }

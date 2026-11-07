@@ -155,7 +155,7 @@ fn record_landing_reopen_preserves_removals_when_seed_is_supplied_again() {
 }
 
 #[test]
-fn record_landing_b3_latest_summary_replaces_prose_while_failure_sticks() {
+fn record_landing_b3_inherited_failure_summary_is_retained_and_bounded() {
     for kind in [RecordKind::Review, RecordKind::Verify] {
         let dir = tempfile::tempdir().unwrap();
         let store = open(dir.path(), kind);
@@ -167,7 +167,32 @@ fn record_landing_b3_latest_summary_replaces_prose_while_failure_sticks() {
         store.land(record.clone()).unwrap();
         let rows = store.records().unwrap();
         assert_eq!(rows["TASK-X-001"].status, Some(WorkflowV2Status::Failed));
-        assert_eq!(rows["TASK-X-001"].summary, "latest evidence");
+        assert_eq!(rows["TASK-X-001"].summary, "latest evidence\nold failure");
+        for _ in 0..5 {
+            store.land(record.clone()).unwrap();
+        }
+        assert_eq!(
+            store.records().unwrap()["TASK-X-001"].summary,
+            rows["TASK-X-001"].summary
+        );
+        record["summary"] = json!("latest evidence\nold failure\nnew context");
+        store.land(record.clone()).unwrap();
+        assert_eq!(
+            store.records().unwrap()["TASK-X-001"].summary,
+            "latest evidence\nold failure\nnew context"
+        );
+        let before = serde_json::to_value(store.records().unwrap()).unwrap();
+        let mut boundary: StageRecord = serde_json::from_value(record.clone()).unwrap();
+        boundary.summary.clear();
+        boundary.summary = "x".repeat(32768 - serde_json::to_vec(&boundary).unwrap().len());
+        store.validate(&boundary, Admission::NewLanding).unwrap();
+        record["summary"] = json!(boundary.summary);
+        assert!(store.land(record.clone()).is_err());
+        assert_eq!(
+            serde_json::to_value(store.records().unwrap()).unwrap(),
+            before
+        );
+        record["summary"] = json!("replacement explanation");
         record["replace"] = json!(true);
         store.land(record).unwrap();
         assert_eq!(
@@ -175,4 +200,83 @@ fn record_landing_b3_latest_summary_replaces_prose_while_failure_sticks() {
             Some(WorkflowV2Status::NeedsReview)
         );
     }
+}
+
+#[test]
+fn record_landing_read_only_snapshot_leaves_interrupted_store_byte_identical() {
+    use sha2::{Digest, Sha256};
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path(), RecordKind::Skeleton);
+    seed(&store);
+    let mut changed = task();
+    changed["source_sections"] = json!(["2"]);
+    store
+        .land(json!({"subject":"TASK-X-001","task":changed}))
+        .unwrap();
+    let record_path = dir
+        .path()
+        .join(format!("record-{:x}.json", Sha256::digest(b"TASK-X-001")));
+    // Record bytes reached disk but the atomic call-state rename did not.
+    std::fs::write(
+        &record_path,
+        serde_json::to_vec(&json!({"subject":"TASK-X-001","task":task()})).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("record-uncommitted.json"), b"{}").unwrap();
+    let hashes = || -> BTreeMap<String, Vec<u8>> {
+        std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                (
+                    path.file_name().unwrap().to_str().unwrap().to_owned(),
+                    Sha256::digest(std::fs::read(path).unwrap()).to_vec(),
+                )
+            })
+            .collect()
+    };
+    let before = hashes();
+    let reader = RecordLanding::open_read_only(
+        dir.path().into(),
+        "call".into(),
+        RecordKind::Skeleton,
+        vec![],
+        true,
+    )
+    .unwrap();
+    assert_eq!(
+        reader.compose_reply(&json!({"records_landed":1})).unwrap()["tasks"][0]["source_sections"],
+        json!(["2"])
+    );
+    assert_eq!(hashes(), before);
+    assert!(
+        reader
+            .land(json!({"subject":"TASK-X-001","task":task()}))
+            .is_err()
+    );
+    assert_eq!(hashes(), before);
+    drop(reader);
+    let writer = open(dir.path(), RecordKind::Skeleton);
+    assert!(!dir.path().join("record-uncommitted.json").exists());
+    assert_eq!(
+        writer.compose_reply(&json!({"records_landed":1})).unwrap()["tasks"][0]["source_sections"],
+        json!(["2"])
+    );
+}
+
+#[test]
+fn record_landing_read_only_open_does_not_create_missing_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("missing");
+    assert!(
+        RecordLanding::open_read_only(
+            root.clone(),
+            "call".into(),
+            RecordKind::Skeleton,
+            vec![],
+            true
+        )
+        .is_err()
+    );
+    assert!(!root.exists());
 }

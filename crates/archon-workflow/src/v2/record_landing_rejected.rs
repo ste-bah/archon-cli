@@ -3,6 +3,7 @@ use super::*;
 
 impl RecordLanding {
     pub fn land(&self, value: Value) -> WorkflowResult<()> {
+        self.ensure_writable()?;
         let _lock = self.lock.lock().map_err(invalid)?;
         let subject = value
             .get("subject")

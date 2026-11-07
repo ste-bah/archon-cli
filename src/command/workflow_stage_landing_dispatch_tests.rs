@@ -118,7 +118,7 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
 
 // B-store.md:99-102: raw R/V receipts must expand the same landed findings.
 #[test]
-fn stage_landing_b4_raw_receipts_keep_findings() {
+fn stage_landing_b4_raw_receipts_keep_findings_and_enforce_verification_failure() {
     for kind in [RecordKind::Review, RecordKind::Verify] {
         for receipt in [
             json!({"records_landed":1}),
@@ -134,14 +134,35 @@ fn stage_landing_b4_raw_receipts_keep_findings() {
             )
             .unwrap();
             records.land(json!({"subject":"TASK-X-001","status":"failed","summary":"counterexample",
-                "findings":[{"claim":"counterexample"}],"evidence":[{"kind":"inspection","summary":"read source"}]})).unwrap();
-            let result: Value =
-                serde_json::from_str(&compose_raw_reply(&records, &receipt.to_string()).unwrap())
-                    .unwrap();
+                "commands_run":[{"kind":"test","command":"check","status":"failed","exit_code":1,"output_summary":"counterexample captured"}],"findings":[{"claim":"counterexample"}],"evidence":[{"kind":"inspection","summary":"read source"}]})).unwrap();
+            let composed = compose_raw_reply(&records, &receipt.to_string());
+            if kind == RecordKind::Verify && receipt.get("data").is_none() {
+                assert!(
+                    composed
+                        .unwrap_err()
+                        .to_string()
+                        .contains("verification failure")
+                );
+                continue;
+            }
+            let result: Value = serde_json::from_str(&composed.unwrap()).unwrap();
             let data = result.get("data").unwrap_or(&result);
             assert_eq!(data["findings"][0]["claim"], "counterexample");
             if kind == RecordKind::Verify {
                 assert_eq!(data["verification_records"][0]["status"], "failed");
+                assert_eq!(result["status"], "needs_review");
+                assert_eq!(result["residual_gaps"][0]["id"], "TASK-X-001");
+                assert!(
+                    result["residual_gaps"][0]["description"]
+                        .as_str()
+                        .unwrap()
+                        .contains("counterexample")
+                );
+                assert_eq!(result["evidence"][0]["summary"], "read source");
+                assert_eq!(
+                    result["commands_run"][0]["output_summary"],
+                    "counterexample captured"
+                );
             }
         }
     }
