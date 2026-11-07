@@ -41,3 +41,6 @@ fn merging_a_supplementary_subset_preserves_reused_acceptance_verdicts() {
     );
     assert_eq!(contract.supplementary[0].judgment.host_call_id, "new");
 }
+
+#[path = "workflow_judge_argv_lint_tests.rs"]
+mod argv_lint_tests;

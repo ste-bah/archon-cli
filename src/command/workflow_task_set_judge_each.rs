@@ -106,9 +106,11 @@ fn mark_undecided(entry: &mut AcceptanceCriterion, message: &str) {
 
 /// The author note of `entry`, when the host did not judge it.
 pub(crate) fn not_judged(entry: &AcceptanceCriterion) -> Option<&str> {
-    (entry.judgment.verdict == JudgeDecision::Refuted
-        && entry.judgment.host_call_id == format!("{NOT_JUDGED_CALL}{}", entry.id))
-    .then_some(entry.judgment.reason.as_str())
+    super::super::passability::lint_finding(entry).or_else(|| {
+        (entry.judgment.verdict == JudgeDecision::Refuted
+            && entry.judgment.host_call_id == format!("{NOT_JUDGED_CALL}{}", entry.id))
+        .then_some(entry.judgment.reason.as_str())
+    })
 }
 
 /// What the author of a check that is not accepted is told: the note of a
@@ -144,13 +146,21 @@ pub(crate) fn not_judged_findings_of<'a>(
 ) -> Vec<GateFinding> {
     (entries.into_iter())
         .filter_map(|entry| {
-            Some(GateFinding::new(
+            let finding = GateFinding::new(
                 GateId::FreezeAcceptance,
                 not_judged(entry)?.to_string(),
                 entry.id.clone(),
                 Some(contract_path.to_path_buf()),
                 archon_workflow::RemediationScope::CandidateArtifact,
-            ))
+            );
+            Some(
+                if super::super::passability::lint_finding(entry).is_some() {
+                    // Preserve passability finding keys across pre-run lint and post-failure diagnosis.
+                    finding.judged_at(crate::command::workflow_gate::GateStage::Passability, None)
+                } else {
+                    finding
+                },
+            )
         })
         .collect()
 }
@@ -173,7 +183,39 @@ fn single(contract: &AcceptanceContract, id: &str) -> AcceptanceContract {
 /// with no usable verdict in the judge's own replies marks its check not
 /// judged (#552) and is no failure; the result names every check a failed
 /// call left without a verdict.
+/// Command lint runs here for every subset, including reauthor, republish,
+/// and v3 mid-run authoring, before named-file reads or judge calls.
 pub(crate) async fn judge_each<F, Fut>(
+    contract: AcceptanceContract,
+    roots: &JudgeRoots,
+    judge_one: F,
+) -> Result<AcceptanceContract>
+where
+    F: Fn(AcceptanceContract) -> Fut,
+    Fut: std::future::Future<Output = Result<AcceptanceContract>>,
+{
+    let mut contract = contract;
+    let linted = super::super::passability::lint_commands(&mut contract);
+    let mut subset = contract.clone();
+    subset
+        .acceptance
+        .retain(|entry| !linted.contains(&entry.id));
+    subset
+        .supplementary
+        .retain(|entry| !linted.contains(&entry.id));
+    if subset.acceptance.is_empty() && subset.supplementary.is_empty() {
+        return Ok(contract);
+    }
+    match judge_unlinted_each(subset, roots, judge_one).await {
+        Ok(answered) => {
+            rounds::merge_judged_entries(&mut contract, &answered);
+            Ok(contract)
+        }
+        Err(error) => Err(lint_stop::with_decided(error, &contract, &linted, roots)),
+    }
+}
+
+async fn judge_unlinted_each<F, Fut>(
     contract: AcceptanceContract,
     roots: &JudgeRoots,
     judge_one: F,
@@ -275,3 +317,6 @@ where
 #[cfg(test)]
 #[path = "workflow_task_set_judge_each_tests.rs"]
 mod tests;
+
+#[path = "workflow_task_set_judge_lint_stop.rs"]
+mod lint_stop;
