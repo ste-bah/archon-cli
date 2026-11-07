@@ -234,8 +234,8 @@ async function seededAndFrozenRepairsContinueAfterMalformedReply() {
     else await ctx.repairFrozenStage(w, {gateEnvelope:{report:JSON.stringify({acceptance:entries, supplementary:[]})}}, findings);
     assert.deepEqual(calls, ['A','B','C','A'], mode);
     const prior = task => task.split('Previously completed entries')[1].split('\n').filter(line => line.startsWith('- ')).map(line => line.split(' ')[1]);
-    assert.deepEqual(prior(prompts[1]), ['D'], `${mode}: refused A omitted, carried D retained`);
-    assert.deepEqual(prior(prompts[2]), ['D','B'], `${mode}: later success in the same round`);
+    assert.deepEqual(prior(prompts[1]), ['A','C','D'], `${mode}: B sees pre-round siblings including previous best rewrites`);
+    assert.deepEqual(prior(prompts[2]), ['A','B','D'], `${mode}: C sees pre-round siblings, excluding itself`);
     assert.equal(freezes, 1);
   }
 }

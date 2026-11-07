@@ -50,7 +50,7 @@ test('site PATH is a fact in initial, repaired and supplementary author prompts 
   }
 });
 
-test('same-round repaired sibling is shown without a stale gate mark', async () => {
+test('rewrite prompt shows the pre-round sibling version', async () => {
   const ctx = context(line), tasks = [];
   ctx.args.acceptanceCriteria = {B:'criterion b', C:'criterion c'};
   const w = {agent:async (_id, options) => {
@@ -65,7 +65,8 @@ test('same-round repaired sibling is shown without a stale gate mark', async () 
   await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 2, state);
   const prompt = tasks.find(text => text.includes('Author ONLY entry C:'));
   const record = prompt.split('\n').find(text => text.startsWith('- B sha256:'));
-  assert.match(record, /covers=\[REQ-X\] command cwd=repo_root: repairedtool run/);
+  assert.match(record, /covers=\[REQ-X\] command cwd=repo_root: fixturetool extra/);
+  assert.doesNotMatch(record, /repairedtool run/);
   assert.doesNotMatch(record, /not a working example/);
 });
 
