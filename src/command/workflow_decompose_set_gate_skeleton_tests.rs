@@ -71,7 +71,7 @@ const w = {{ checkpoint: async () => {{}},
     let content = "# body " + id;
     if (id.startsWith("acceptance-author-")) content = JSON.stringify({{ id: "AC-X-001" }});
     if (id.startsWith("skeleton-author-")) content = skeletons[Math.min(skeletonReplies++, skeletons.length - 1)];
-    return {{ status: "accepted", stopReason: "end_turn", content }};
+    return {{ status: "accepted", stopReason: "end_turn", content, retainedLandings: id.startsWith("skeleton-author-") }};
   }},
   hostCommand: async (capability, options) => {{
     hostCalls.push(capability);

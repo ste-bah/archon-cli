@@ -205,7 +205,7 @@ function previousSkeletonContext(content) {
   if (typeof content !== "string" || content.length === 0) return "";
   const file = contextFile("json", content);
   return `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
-    + "\nWhatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the receipt's Landed subjects with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed in the receipt have been retained. Re-land changed tasks. "
+    + "\nWhatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the Landed subjects list at the end of this prompt with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed there have been retained. Re-land changed tasks. "
     + (frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null ? "Keep every frozen task_id and file_name." : "Use remove:true to drop a draft task.");
 }
 

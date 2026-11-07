@@ -16,7 +16,7 @@ const skeleton = repaired => JSON.stringify({ schema_version: 1, acceptance_dige
 
 for (const retained of [true, false]) {
   for (const refusal of ['Syntax at line 1', 'missing required field']) {
-    test(`artifact refusal keeps authoritative findings and ${retained ? 'retained records' : 'accepted candidate'}: ${refusal}`, async () => {
+    test(`artifact refusal keeps authoritative findings and the prior judged candidate: ${refusal}`, async () => {
       const ctx = withAuthorContext({ args: { gateMode: 'enforce' } });
       vm.createContext(ctx);
       vm.runInContext(source, ctx);
@@ -47,7 +47,7 @@ for (const retained of [true, false]) {
       }, { phase: 'skeleton', capability: 'freeze-skeleton', prompt: () => 'Author records',
         retryScopes: new Set(['skeleton', 'candidate_artifact']) });
       assert.equal(options.length, 3);
-      assert.equal(options[2].previousSkeleton, retained ? repaired : candidate);
+      assert.equal(options[2].previousSkeleton, candidate);
       for (const finding of findings) {
         assert.ok(options[2].task.includes(finding));
         assert.ok(options[2].openFindings.includes(finding));
@@ -102,7 +102,7 @@ test('retained landing provenance survives replay after a gate outage', async ()
     pause: async () => { throw Error('unexpected pause'); }
   }, { phase: 'skeleton', capability: 'freeze-skeleton', prompt: () => 'Author records', retryScopes: new Set(['skeleton', 'candidate_artifact']) });
   assert.equal(options.length, 2);
-  assert.equal(options[1].previousSkeleton, candidate);
+  assert.equal(options[1].previousSkeleton, null);
 });
 
 test('resumed skeleton seed gives retained tasks and all nine findings to the next author', async () => {
