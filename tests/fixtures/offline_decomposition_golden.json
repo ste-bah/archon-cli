@@ -16,8 +16,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              84,
-              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+              85,
+              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -68,8 +68,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              84,
-              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+              85,
+              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -99,8 +99,8 @@
           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
           "sampling": {
             "logic_identity": [
-              84,
-              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+              85,
+              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
               "claude-sonnet-5",
               "anthropic"
             ],
@@ -170,7 +170,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -230,7 +230,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -249,7 +249,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"<repo_root or project_root>\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every file (source, test or data) it reads by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-002: SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nIts covers is exactly [\"REQ-X-002\"]; it must fail whenever REQ-X-002 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-002': PRD requirement REQ-X-002 is covered by no acceptance check; author supplementary check SUP-REQ-X-002 with covers [\"REQ-X-002\"] that fails whenever REQ-X-002 is violated: The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 2, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep names, flags and formats consistent; a regression guard still names its own deciding file. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. Duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\n- SUP-REQ-X-001 sha256:de8c0875d25eef2712bd9acfb0e05963c1302e774adbe3db94e49be077ae0d77 covers=[REQ-X-001] command cwd=repo_root: test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nCommand examples: {\"kind\":\"command\",\"cwd\":\"repo_root\",\"command\":\"make test\"} and {\"kind\":\"command\",\"cwd\":\"project_root\",\"command\":\"./verify\"}.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
+            "task": "Author exactly one acceptance entry identified below, not the whole contract.\nRead the PRD at <project-root>/prd.md.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nUse the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.\nWhere a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; project_root may reach repository files via ../<repository dir>/ when the repository directory sits beside the project and the check names an existing path in that tree (the site then links the repository copy there); repo_root names repository paths relative to repo_root and cannot use `..` to reach project_root or its own repository. If a check passes before implementation, data it writes itself is never evidence; movable inputs must exist under its selected root before the run. To guard behaviour implemented in code, select the root that contains the existing implementation or test dependency and name it relative to that root. The check's pass or fail must be decided by the existing test or implementation it names, and it must fail whenever that test fails. Naming a file or asserting that it exists does not make it the deciding assertion. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. A status-discarding sequence, a run whose failure cannot fail the check, or matching text in a source or test file does not establish the criterion. The move-aside proof applies only to inputs the host actually moves: the host may prove the guard by moving such a literally named input aside and requiring the check to fail, and that proof is never a counterexample; the check's own script, a script run through an interpreter, a directory it changes into and a build manifest are never moved and do not qualify.\nIn every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (<project-root>/repository, <project-root>) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.\nA named path marked absent means the host found no file at that path; it may be a pattern or text argument, not a file, and absence alone is not evidence that behaviour is missing. Only when the path is established to name a deciding file does its absence mean behaviour not implemented yet, judged by the general rules; a named deciding input whose content is not supplied has unknown assertions, so the check cannot be accepted as a regression guard on assumed content.\nReply format: see the end of this task.\n[{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"floor\",\"contract\":{\"kind\":\"<deliverable kind>\",\"artifact_path\":\"<repository-relative artifact path>\",\"artifact_format\":\"json\",\"required_true_fields\":[\"<field that must be true>\"],\"typed_verifier_command\":\"<command that exercises the deliverable and fails when the criterion is false>\"}},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}},{\"id\":\"<exact acceptance id defined by the PRD>\",\"criterion\":\"\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"<repo_root or project_root>\"},\"gap_permitted\":false,\"covers\":[\"<REQ- requirement id from the PRD whose violation makes this check fail>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}]\nA check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.\nEvery check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every file (source, test or data) it reads by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.\nUse the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.\ncovers lists every one of the PRD's REQ- requirement ids (requirement bullets or obligation-table rows that start with REQ-) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD REQ- requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.\nFor a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nDo not run commands or write files.\nRe-author a complete replacement from fresh context. Keep the subject contract and repair every current finding.\nRepair operation r2, cycle 2, authored call 2.\nLogical attempt: 2.\nAuthor ONLY entry SUP-REQ-X-002: SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nIts covers is exactly [\"REQ-X-002\"]; it must fail whenever REQ-X-002 is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.\nRepair this entry's gate findings open in the latest gate result:\n- check 'SUP-REQ-X-002': PRD requirement REQ-X-002 is covered by no acceptance check; author supplementary check SUP-REQ-X-002 with covers [\"REQ-X-002\"] that fails whenever REQ-X-002 is violated: The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.\nAll criterion IDs and text (for consistency): {\"AC-X-001\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\"}\nPreviously completed entries: 1, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep names, flags and formats consistent; a regression guard still names its own deciding file. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. Duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at <project-root>/.archon/workflows/<run-id>/author-context/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).\n- AC-X-001 sha256:57793ba0ee7a625290efb1f6bdf9bfa623ffb57acc83f9a4e295ace6bab52372 covers=[] command cwd=repo_root: python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: []\nReturn exactly one complete reply with one entry and one check.\nCommand examples: {\"kind\":\"command\",\"cwd\":\"repo_root\",\"command\":\"make test\"} and {\"kind\":\"command\",\"cwd\":\"project_root\",\"command\":\"./verify\"}.\nA complete reply looks exactly like this (each fence line alone on its line):\n```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n```\n```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```\n\nEvery fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.\nChoose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true and NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence. Never write an empty check block.\nFor a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nThe entry shapes earlier in this task are examples only; return one entry.\nReturn exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences."
           }
         },
         "depends_on": [],
@@ -290,7 +290,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -350,7 +350,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -410,7 +410,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -434,7 +434,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Land task records for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nCite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). For every host-listed qualifying PRD section, cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements); a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.\nQualifying PRD sections (key: title):\n\"0\": Artifact Preparation\nFull PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nEach landed task must deserialize into this shape:\n{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation or constraint id the host lists>\"],\"source_sections\":[\"<PRD section key the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"min_instances\":1}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nEach deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path. Optional string fields must be concrete and nonblank; omit unused fields. A present verifier must be falsifiable even with a floor or binding.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nLand each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. Every author call must make at least one byte-changing landing; the gate then judges the whole set again.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Land task records for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nCite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). For every host-listed qualifying PRD section, cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements); a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.\nQualifying PRD sections (key: title):\n\"0\": Artifact Preparation\nFull PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nEach landed task must deserialize into this shape:\n{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation or constraint id the host lists>\"],\"source_sections\":[\"<PRD section key the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"min_instances\":1}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nEach deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path. Optional string fields must be concrete and nonblank; omit unused fields. A present verifier must be falsifiable even with a floor or binding.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nLand each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. A call with open findings must make at least one byte-changing landing; a call with an empty task store must land at least one task. The gate then judges the whole set again.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -489,7 +489,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -571,8 +571,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
-            "logicVersion": 84,
+            "logicDigest": "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
+            "logicVersion": 85,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -582,7 +582,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "4fcb85c6b1dd4d5431f8b23d1be975c57a3ccfd9f3fc8a931cb2cb33c67f3308",
+                  "blake3": "d031a670051f02e5f5def922aa1ece509c3dbb0d49344e5bd0d6f4f73ff735d8",
                   "content": {
                     "acceptance": [
                       {
@@ -600,8 +600,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              84,
-                              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                              85,
+                              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -653,8 +653,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              84,
-                              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                              85,
+                              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -684,8 +684,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              84,
-                              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                              85,
+                              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -703,11 +703,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "c1c708de307936c6cc9408676810221c0c906e41e2a1e63b1f9ff306bc6bc0f7",
+                  "blake3": "18834bf9ec0ad32f65ccc68f8d28ff8b92fc09ec124a437d8b8a24fd24798a8a",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+                    "digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -719,18 +719,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f",
+                  "blake3": "76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7",
                   "content": {
-                    "acceptance_digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+                    "acceptance_digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-2a6aeaa07dcb",
+                    "freeze_event_id": "acceptance-freeze-a078264f67b0",
                     "lineage_recording": 1,
-                    "skeleton_digest": "ad18a8dd0fd8ee5dcf71273d04caa45fb213d37add5c964523185d87a5bc96ca",
+                    "skeleton_digest": "8ef055b36cc4f9f0060f97553a1695e51b84bc8a9aeeb7e3a75f4133977cf1a7",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -804,7 +804,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -859,8 +859,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
-            "logicVersion": 84,
+            "logicDigest": "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
+            "logicVersion": 85,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -870,7 +870,7 @@
               "command_id": "freeze-acceptance",
               "entries": [
                 {
-                  "blake3": "4fcb85c6b1dd4d5431f8b23d1be975c57a3ccfd9f3fc8a931cb2cb33c67f3308",
+                  "blake3": "d031a670051f02e5f5def922aa1ece509c3dbb0d49344e5bd0d6f4f73ff735d8",
                   "content": {
                     "acceptance": [
                       {
@@ -888,8 +888,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              84,
-                              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                              85,
+                              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -941,8 +941,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              84,
-                              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                              85,
+                              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -972,8 +972,8 @@
                           "reason": "The command directly checks the declared outcome and exits non-zero when it is false.",
                           "sampling": {
                             "logic_identity": [
-                              84,
-                              "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                              85,
+                              "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                               "claude-sonnet-5",
                               "anthropic"
                             ],
@@ -992,11 +992,11 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "c1c708de307936c6cc9408676810221c0c906e41e2a1e63b1f9ff306bc6bc0f7",
+                  "blake3": "18834bf9ec0ad32f65ccc68f8d28ff8b92fc09ec124a437d8b8a24fd24798a8a",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
-                    "digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+                    "digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1009,18 +1009,18 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f",
+                  "blake3": "76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7",
                   "content": {
-                    "acceptance_digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+                    "acceptance_digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-2a6aeaa07dcb",
+                    "freeze_event_id": "acceptance-freeze-a078264f67b0",
                     "lineage_recording": 1,
-                    "skeleton_digest": "ad18a8dd0fd8ee5dcf71273d04caa45fb213d37add5c964523185d87a5bc96ca",
+                    "skeleton_digest": "8ef055b36cc4f9f0060f97553a1695e51b84bc8a9aeeb7e3a75f4133977cf1a7",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1049,7 +1049,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
             "stderrBytes": 647,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"4fcb85c6b1dd4d5431f8b23d1be975c57a3ccfd9f3fc8a931cb2cb33c67f3308\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"c1c708de307936c6cc9408676810221c0c906e41e2a1e63b1f9ff306bc6bc0f7\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"41092eeae79a53bf6db23ac597fe489323d6f08f014693f957ad8bb99cbb85eb\",\"exists\":true},\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"d031a670051f02e5f5def922aa1ece509c3dbb0d49344e5bd0d6f4f73ff735d8\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"18834bf9ec0ad32f65ccc68f8d28ff8b92fc09ec124a437d8b8a24fd24798a8a\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"3bcdfe5dd8ed3a82988d5d991e4356d6535fc43259ceacc95f5a7666147bfe20\",\"exists\":true},\"schema_version\":1}",
             "stdoutBytes": 799,
             "stdoutTruncated": false,
             "timedOut": false
@@ -1068,7 +1068,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1123,7 +1123,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+            "logicDigest": "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
             "logicVersion": 11,
             "postcondition": {
               "satisfied": true,
@@ -1134,18 +1134,18 @@
               "command_id": "freeze-skeleton",
               "entries": [
                 {
-                  "blake3": "706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f",
+                  "blake3": "76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7",
                   "content": {
-                    "acceptance_digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+                    "acceptance_digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
                     "acceptance_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     },
-                    "freeze_event_id": "acceptance-freeze-2a6aeaa07dcb",
+                    "freeze_event_id": "acceptance-freeze-a078264f67b0",
                     "lineage_recording": 1,
-                    "skeleton_digest": "ad18a8dd0fd8ee5dcf71273d04caa45fb213d37add5c964523185d87a5bc96ca",
+                    "skeleton_digest": "8ef055b36cc4f9f0060f97553a1695e51b84bc8a9aeeb7e3a75f4133977cf1a7",
                     "skeleton_gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1169,9 +1169,9 @@
                   "relative_path": "gate-envelope.json"
                 },
                 {
-                  "blake3": "aa82bdbd299ebb98e3096f58999b0104695df29da1249543c183d729b622b053",
+                  "blake3": "227eecdc3b67eb9a06d9c7da72aed40eedc46daad28eee197d8e79cc84bcff19",
                   "content": {
-                    "acceptance_digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+                    "acceptance_digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
                     "schema_version": 1,
                     "tasks": [
                       {
@@ -1254,11 +1254,11 @@
                   "relative_path": "task-skeleton.json"
                 },
                 {
-                  "blake3": "8e36de088f208896fa78f797fd318a6af85bed0f88f882b1069eb4aaaef73870",
+                  "blake3": "5a9d47e9ccc9666c0cf810ca012cd400de13ff39550cf6ab1254e2bab57c0ee2",
                   "content": {
-                    "acceptance_digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+                    "acceptance_digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
                     "algorithm": "blake3",
-                    "digest": "ad18a8dd0fd8ee5dcf71273d04caa45fb213d37add5c964523185d87a5bc96ca",
+                    "digest": "8ef055b36cc4f9f0060f97553a1695e51b84bc8a9aeeb7e3a75f4133977cf1a7",
                     "gate": {
                       "binary_commit": "<binary-commit>",
                       "finding_count": 0,
@@ -1275,7 +1275,7 @@
             "stderr": "",
             "stderrBytes": 0,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"aa82bdbd299ebb98e3096f58999b0104695df29da1249543c183d729b622b053\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"8e36de088f208896fa78f797fd318a6af85bed0f88f882b1069eb4aaaef73870\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"227eecdc3b67eb9a06d9c7da72aed40eedc46daad28eee197d8e79cc84bcff19\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"5a9d47e9ccc9666c0cf810ca012cd400de13ff39550cf6ab1254e2bab57c0ee2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
             "stdoutBytes": 662,
             "stdoutTruncated": false,
             "subjects": [
@@ -1304,7 +1304,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1367,7 +1367,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+            "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
             "logicVersion": 33,
             "postcondition": {
               "satisfied": true,
@@ -1424,7 +1424,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1487,7 +1487,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+            "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
             "logicVersion": 33,
             "postcondition": {
               "satisfied": true,
@@ -1544,7 +1544,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1598,7 +1598,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "d0f407489e6af6c10e7789bbcee7e78aab06404d4f2b8c953be3e2fb5db0f3b7",
+            "logicDigest": "13258c08a2180787eae239f9c23961b10765411aa6c2dba93ecdce90efa4d962",
             "logicVersion": 15,
             "postcondition": {
               "satisfied": true,
@@ -1653,7 +1653,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1707,7 +1707,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+            "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
             "logicVersion": 29,
             "postcondition": {
               "satisfied": true,
@@ -1762,7 +1762,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1793,8 +1793,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
-                  "logicVersion": 84,
+                  "logicDigest": "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
+                  "logicVersion": 85,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1804,13 +1804,13 @@
                     "command_id": "freeze-acceptance",
                     "entries": [
                       {
-                        "blake3": "4fcb85c6b1dd4d5431f8b23d1be975c57a3ccfd9f3fc8a931cb2cb33c67f3308",
+                        "blake3": "d031a670051f02e5f5def922aa1ece509c3dbb0d49344e5bd0d6f4f73ff735d8",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.json"
                       },
                       {
-                        "blake3": "c1c708de307936c6cc9408676810221c0c906e41e2a1e63b1f9ff306bc6bc0f7",
+                        "blake3": "18834bf9ec0ad32f65ccc68f8d28ff8b92fc09ec124a437d8b8a24fd24798a8a",
                         "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                         "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.lock"
@@ -1856,8 +1856,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
-                      "logicVersion": 84,
+                      "logicDigest": "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
+                      "logicVersion": 85,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1867,13 +1867,13 @@
                         "command_id": "freeze-acceptance",
                         "entries": [
                           {
-                            "blake3": "4fcb85c6b1dd4d5431f8b23d1be975c57a3ccfd9f3fc8a931cb2cb33c67f3308",
+                            "blake3": "d031a670051f02e5f5def922aa1ece509c3dbb0d49344e5bd0d6f4f73ff735d8",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.json",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.json"
                           },
                           {
-                            "blake3": "c1c708de307936c6cc9408676810221c0c906e41e2a1e63b1f9ff306bc6bc0f7",
+                            "blake3": "18834bf9ec0ad32f65ccc68f8d28ff8b92fc09ec124a437d8b8a24fd24798a8a",
                             "destination_path": "<project-root>/tasks/PRD-X/acceptance-contract.lock",
                             "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.lock"
@@ -1895,7 +1895,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                       "stderrBytes": 647,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"4fcb85c6b1dd4d5431f8b23d1be975c57a3ccfd9f3fc8a931cb2cb33c67f3308\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"c1c708de307936c6cc9408676810221c0c906e41e2a1e63b1f9ff306bc6bc0f7\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"41092eeae79a53bf6db23ac597fe489323d6f08f014693f957ad8bb99cbb85eb\",\"exists\":true},\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"d031a670051f02e5f5def922aa1ece509c3dbb0d49344e5bd0d6f4f73ff735d8\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"18834bf9ec0ad32f65ccc68f8d28ff8b92fc09ec124a437d8b8a24fd24798a8a\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"3bcdfe5dd8ed3a82988d5d991e4356d6535fc43259ceacc95f5a7666147bfe20\",\"exists\":true},\"schema_version\":1}",
                       "stdoutBytes": 799,
                       "stdoutTruncated": false,
                       "timedOut": false
@@ -1917,7 +1917,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 4\narchon-host-progress: 5\narchon-host-progress: 6\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\nacceptance judge batch started checks=2\narchon-host-activity: child making progress\narchon-host-progress: 7\narchon-host-progress: 8\nacceptance judge batch completed checks=2\n",
                   "stderrBytes": 647,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"4fcb85c6b1dd4d5431f8b23d1be975c57a3ccfd9f3fc8a931cb2cb33c67f3308\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"c1c708de307936c6cc9408676810221c0c906e41e2a1e63b1f9ff306bc6bc0f7\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"41092eeae79a53bf6db23ac597fe489323d6f08f014693f957ad8bb99cbb85eb\",\"exists\":true},\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"d031a670051f02e5f5def922aa1ece509c3dbb0d49344e5bd0d6f4f73ff735d8\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"18834bf9ec0ad32f65ccc68f8d28ff8b92fc09ec124a437d8b8a24fd24798a8a\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"expected_acceptance_contract\":{\"digest\":\"3bcdfe5dd8ed3a82988d5d991e4356d6535fc43259ceacc95f5a7666147bfe20\",\"exists\":true},\"schema_version\":1}",
                   "stdoutBytes": 799,
                   "stdoutTruncated": false,
                   "summary": "host command '<host-call-id>' completed with exit Some(0)",
@@ -1939,7 +1939,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                  "logicDigest": "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                   "logicVersion": 11,
                   "postcondition": {
                     "satisfied": true,
@@ -1950,7 +1950,7 @@
                     "command_id": "freeze-skeleton",
                     "entries": [
                       {
-                        "blake3": "706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f",
+                        "blake3": "76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7",
                         "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                         "prior_blake3": "<receipt-digest-of-overwritten-content>",
                         "relative_path": "acceptance-pin.json"
@@ -1961,12 +1961,12 @@
                         "relative_path": "gate-envelope.json"
                       },
                       {
-                        "blake3": "aa82bdbd299ebb98e3096f58999b0104695df29da1249543c183d729b622b053",
+                        "blake3": "227eecdc3b67eb9a06d9c7da72aed40eedc46daad28eee197d8e79cc84bcff19",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                         "relative_path": "task-skeleton.json"
                       },
                       {
-                        "blake3": "8e36de088f208896fa78f797fd318a6af85bed0f88f882b1069eb4aaaef73870",
+                        "blake3": "5a9d47e9ccc9666c0cf810ca012cd400de13ff39550cf6ab1254e2bab57c0ee2",
                         "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                         "relative_path": "task-skeleton.lock"
                       }
@@ -2000,7 +2000,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+                      "logicDigest": "cf95d553dc009769f7c359a3b850c4140e82521b2fb4fb0f831d9c797d7e4ce4",
                       "logicVersion": 11,
                       "postcondition": {
                         "satisfied": true,
@@ -2011,7 +2011,7 @@
                         "command_id": "freeze-skeleton",
                         "entries": [
                           {
-                            "blake3": "706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f",
+                            "blake3": "76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7",
                             "destination_path": "<project-root>/.archon/task-set-pins/<pin>.json",
                             "prior_blake3": "<receipt-digest-of-overwritten-content>",
                             "relative_path": "acceptance-pin.json"
@@ -2022,12 +2022,12 @@
                             "relative_path": "gate-envelope.json"
                           },
                           {
-                            "blake3": "aa82bdbd299ebb98e3096f58999b0104695df29da1249543c183d729b622b053",
+                            "blake3": "227eecdc3b67eb9a06d9c7da72aed40eedc46daad28eee197d8e79cc84bcff19",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.json",
                             "relative_path": "task-skeleton.json"
                           },
                           {
-                            "blake3": "8e36de088f208896fa78f797fd318a6af85bed0f88f882b1069eb4aaaef73870",
+                            "blake3": "5a9d47e9ccc9666c0cf810ca012cd400de13ff39550cf6ab1254e2bab57c0ee2",
                             "destination_path": "<project-root>/tasks/PRD-X/task-skeleton.lock",
                             "relative_path": "task-skeleton.lock"
                           }
@@ -2037,7 +2037,7 @@
                       "stderr": "",
                       "stderrBytes": 0,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"aa82bdbd299ebb98e3096f58999b0104695df29da1249543c183d729b622b053\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"8e36de088f208896fa78f797fd318a6af85bed0f88f882b1069eb4aaaef73870\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"227eecdc3b67eb9a06d9c7da72aed40eedc46daad28eee197d8e79cc84bcff19\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"5a9d47e9ccc9666c0cf810ca012cd400de13ff39550cf6ab1254e2bab57c0ee2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                       "stdoutBytes": 662,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2069,7 +2069,7 @@
                   "stderr": "",
                   "stderrBytes": 0,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"706c4e055deed18457f5c1fe2e55467d8d6cf6a26fa6389f14ab739dbdff8f5f\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"aa82bdbd299ebb98e3096f58999b0104695df29da1249543c183d729b622b053\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"8e36de088f208896fa78f797fd318a6af85bed0f88f882b1069eb4aaaef73870\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"76f3e512484087301e0b15b5817235b3cd4c1a657004bd77bfe6903f0df8b3d7\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"227eecdc3b67eb9a06d9c7da72aed40eedc46daad28eee197d8e79cc84bcff19\",\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"5a9d47e9ccc9666c0cf810ca012cd400de13ff39550cf6ab1254e2bab57c0ee2\",\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                   "stdoutBytes": 662,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2101,7 +2101,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+                  "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
                   "logicVersion": 33,
                   "postcondition": {
                     "satisfied": true,
@@ -2151,7 +2151,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+                      "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
                       "logicVersion": 33,
                       "postcondition": {
                         "satisfied": true,
@@ -2233,7 +2233,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+                  "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
                   "logicVersion": 33,
                   "postcondition": {
                     "satisfied": true,
@@ -2283,7 +2283,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+                      "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
                       "logicVersion": 33,
                       "postcondition": {
                         "satisfied": true,
@@ -2365,7 +2365,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+                  "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
                   "logicVersion": 29,
                   "postcondition": {
                     "satisfied": true,
@@ -2410,7 +2410,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8cac3cc434048fe8a7cbec2eb1b7f8a9d39852ecf03361e49aba02778ee21551",
+                      "logicDigest": "3d99b29c920523483f2d96458604cba84c42b89b9b877627f66d33b31aa537a0",
                       "logicVersion": 29,
                       "postcondition": {
                         "satisfied": true,
@@ -2495,7 +2495,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "d0f407489e6af6c10e7789bbcee7e78aab06404d4f2b8c953be3e2fb5db0f3b7",
+                  "logicDigest": "13258c08a2180787eae239f9c23961b10765411aa6c2dba93ecdce90efa4d962",
                   "logicVersion": 15,
                   "postcondition": {
                     "satisfied": true,
@@ -2540,7 +2540,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "d0f407489e6af6c10e7789bbcee7e78aab06404d4f2b8c953be3e2fb5db0f3b7",
+                      "logicDigest": "13258c08a2180787eae239f9c23961b10765411aa6c2dba93ecdce90efa4d962",
                       "logicVersion": 15,
                       "postcondition": {
                         "satisfied": true,
@@ -2709,7 +2709,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -2757,14 +2757,14 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "226e49b3c6805e174cd3c89543608b3dfb6144a2127a45c999dd323e4b4aaff5",
+        "scaffold_hash": "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
     ]
   ],
   "skeleton": {
-    "acceptance_digest": "2a6aeaa07dcbd87097f55235b5acf5dbd1a9fa0dfef4aaff04c360a1ba487016",
+    "acceptance_digest": "a078264f67b04e897712b828376eca78c209b8389e0e4b001a9b70b8e81fde0c",
     "schema_version": 1,
     "tasks": [
       {
