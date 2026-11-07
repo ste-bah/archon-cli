@@ -65,6 +65,7 @@ function seedAuthorLoop(policy, state) {
 // than a phase seed. Reopening one must start from the live feedback, never
 // resubmit the seed's older candidate unchanged.
 function seedWouldReplaceLiveFeedback(policy) {
+  if (policy.directive) return true;
   if (Array.isArray(policy.initialFeedback) && policy.initialFeedback.length > 0) return true;
   const frozen = args.frozenChain || {};
   if (policy.phase === "acceptance" && frozen.acceptance === true) return true;
@@ -233,5 +234,7 @@ function seedArtifact(seed, policy) {
     throw new Error(`phase seed for ${policy.phase} carries no candidate`);
   }
   const repair = seed.gate ? seedRepairFindings(seed.gate, policy).map((finding) => String(finding.text)) : [];
-  return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: seed.candidate };
+  const refused = (seed.gate?.findings || []).some(f => f.remediation_scope === "candidate_artifact");
+  const usable = policy.phase !== "skeleton" || (parsedSkeletonCandidate(seed.candidate) && !refused);
+  return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: usable ? seed.candidate : undefined, retainedLandings: policy.phase === "skeleton" && usable && seed.retained_landings === true };
 }

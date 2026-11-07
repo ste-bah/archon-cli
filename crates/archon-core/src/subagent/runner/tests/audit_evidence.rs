@@ -6,6 +6,30 @@ struct Host {
     records: Mutex<std::collections::BTreeSet<String>>,
 }
 impl LandingHost for Host {
+    fn accepts_record_arrays(&self) -> bool {
+        false
+    }
+    fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+        archon_tools::audit_landing::EmptyReplyPolicy::Resend
+    }
+    fn receipt_envelope_pointer(&self) -> &'static str {
+        "/data/repository_audit"
+    }
+    fn progress_key_fields(&self) -> &'static [&'static str] {
+        &["declared_path"]
+    }
+    fn allows_unreceipted_reply(&self) -> bool {
+        true
+    }
+    fn normalize_record_reply(&self) -> bool {
+        true
+    }
+    fn tool_name(&self) -> &'static str {
+        "land-audit-record"
+    }
+    fn schema(&self) -> Option<serde_json::Value> {
+        None
+    }
     fn land(&self, value: Value) -> Result<String, String> {
         self.records
             .lock()

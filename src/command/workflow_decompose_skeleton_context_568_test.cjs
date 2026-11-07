@@ -30,7 +30,7 @@ function assertPrevious(prompt, files, content) {
   assert(prompt.includes(`The previous candidate is in ${path} (sha256 ${sha256}; host-written context for this call: read it by its exact path).`));
   assert.equal(files.get(path), content);
   assert(!prompt.includes(content), 'candidate bytes never inline');
-  assert(prompt.includes('Whatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Re-land only changed tasks; unlisted tasks are retained.'));
+  assert(prompt.includes('Whatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the Landed subjects list at the end of this prompt with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed there have been retained. Re-land changed tasks.'));
   assert(!prompt.includes('Repair the previous candidate.'));
   assert(!prompt.includes('Change only what the current findings name.'));
   assert(Buffer.byteLength(prompt) <= 262144);
@@ -41,7 +41,7 @@ async function run(ctx, replies, gates, policy = ctx.skeletonPolicy([]), onPause
     agent:async (_id, options) => {
       prompts.push(options.task);
       assert(prompts.length <= replies.length, 'bounded author calls');
-      return {status:'accepted', stopReason:'end_turn', content:replies[prompts.length - 1]};
+      return {status:'accepted', stopReason:'end_turn', retainedLandings:true, content:replies[prompts.length - 1]};
     },
     hostCommand:async (_id, options) => { stdins.push(options.stdin); return gates[stdins.length - 1]; },
     pause:async () => { if (onPause) onPause(); else throw new Error('unexpected pause'); }
@@ -57,7 +57,11 @@ test('skeleton retries reference the latest judged candidate; the first prompt p
   // #599 adds the deliverable contract rule to the first prompt.
   // SHA-256 of the dispatched first prompt without #568 (main plus #569, the #572 obligation sentence, the #574 table-row constraint wording and the #575 source_sections shape field), with these exact args.
   // P5 replaces the whole-document prompt with one-task landing and exact receipt wording.
-  assert.equal(digest(out.prompts[0]), 'e4812e9af5d78988850e6bda5feb43e734fc765e9d5d483aa4c0c90cc3eccecd');
+  // Pin the new condition explicitly; preserve the existing prompt golden.
+  const landingRule = 'A call with open findings must make at least one byte-changing landing; a call with an empty task store must land at least one task. The gate then judges the whole set again.';
+  assert(out.prompts[0].includes(landingRule));
+  const baseline = out.prompts[0].replace(landingRule, 'Every author call must make at least one byte-changing landing; the gate then judges the whole set again.');
+  assert.equal(digest(baseline), 'b43667c9511cc122a61162b4f2b8acc3345ee60c7a4c350c9394d558f8ae4368');
   assert(!out.prompts[0].includes('The previous candidate is in'));
   assert.equal(files.size, 2);
   assertPrevious(out.prompts[1], files, replies[0]);
@@ -82,7 +86,7 @@ for (const frozen of [false, true]) test(`set-gate skeleton re-author ${frozen ?
   const prompts = [];
   ctx.authorBodies = async () => {};
   await ctx.reauthorSkeleton({
-    agent:async (_id, options) => { prompts.push(options.task); return {status:'accepted', stopReason:'end_turn', content:candidate(1)}; },
+    agent:async (_id, options) => { prompts.push(options.task); return {status:'accepted', stopReason:'end_turn', retainedLandings:true, content:candidate(1)}; },
     hostCommand:async () => clean()
   }, chain, new Map(), [finding], [], 2);
   assert.equal(prompts.length, 1);
@@ -166,10 +170,10 @@ for (const scope of ['skeleton', 'body']) {
             skeletonAuthors++;
             assert.equal(scope, 'skeleton');
             assert(options.task.includes(text), 'skeleton receives the finding');
-            // A valid existing skeleton has nothing to change for a body omission.
+            // C6: a zero-landing unchanged attempt is refused; the retry lands a changed task.
             const next = JSON.parse(previous);
-            if (skeletonChanges) next.tasks[0].source_sections = ['1'];
-            return {status:'accepted', stopReason:'end_turn', content:JSON.stringify(next)};
+            if (skeletonChanges || skeletonAuthors > 1) next.tasks[0].source_sections = ['1'];
+            return {status:'accepted', stopReason:'end_turn', retainedLandings:skeletonChanges || skeletonAuthors > 1, content:JSON.stringify(next)};
           }
           bodyAuthors++;
           assert(options.task.includes(text), 'named body receives the finding even with identical frozen fields');
@@ -190,10 +194,10 @@ for (const scope of ['skeleton', 'body']) {
       };
       await ctx.runSetGateLoop(w, chain, bodies);
       assert.equal(lintCalls, 2);
-      assert.equal(skeletonAuthors, scope === 'skeleton' ? 1 : 0);
+      assert.equal(skeletonAuthors, scope === 'skeleton' ? (skeletonChanges ? 1 : 2) : 0);
       assert.equal(bodyAuthors, 1);
       assert.equal(ctx.skeletonCandidateContent(chain.outcome), scope === 'body' ? previous
-        : skeletonChanges ? JSON.stringify({...JSON.parse(previous), tasks:[{...JSON.parse(previous).tasks[0], source_sections:['1']}]}) : previous);
+        : JSON.stringify({...JSON.parse(previous), tasks:[{...JSON.parse(previous).tasks[0], source_sections:['1']}]}));
     });
   }
 }

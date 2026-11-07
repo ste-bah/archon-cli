@@ -62,7 +62,7 @@ pub fn is_transport_failure(error: &str) -> bool {
     // A session that spent its turn bound is a bounded cut of the work, not
     // a dropped connection: re-asking it with a fresh bound would multiply
     // the bound (Batch O review).
-    if lower.contains("reached max turns") {
+    if lower.contains("reached max turns") || lower.contains("output limit:") {
         return false;
     }
     lower.contains("agent transport failed")
@@ -106,3 +106,12 @@ pub fn is_content_rejection(error: &str) -> bool {
 #[cfg(test)]
 #[path = "transport_retry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[test]
+fn transport_retry_empty_max_tokens_is_reaskable_not_transport() {
+    // A-runner.md D7 / matrix #10: an empty output-budget stop is authored.
+    let error = "agent transport failed: output limit: empty reply; finish_reason=max_tokens";
+    assert!(!is_transport_failure(error));
+    assert!(!is_content_rejection(error));
+}

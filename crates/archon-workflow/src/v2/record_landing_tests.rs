@@ -174,9 +174,10 @@ fn replace_on_a_verify_record_drops_the_inherited_failure() {
         record["status"], "failed",
         "without replace the earlier failure is inherited"
     );
+    // An inherited failure retains both its verdict and its explanation.
     assert_eq!(
         record["summary"],
-        "first attempt failed; second attempt passed"
+        "second attempt passed\nfirst attempt failed"
     );
     landing.land(json!({"subject":"S","status":"accepted","summary":"second attempt passed","evidence":evidence,"commands_run":passed,"replace":true})).unwrap();
     let record =
@@ -307,7 +308,12 @@ fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema
     assert!(error.contains("a skeleton task must name the obligations it implements and/or the artifacts it delivers"), "{error}");
     assert!(error.contains("implements"), "{error}");
     assert!(error.contains("Expected schema:"), "{error}");
-    assert!(landing.hint().unwrap().contains("Host retained 0 records."));
+    assert!(
+        landing
+            .hint()
+            .unwrap()
+            .contains("Host retained 0 records; 0 new landings in this call (seeds do not count).")
+    );
     assert!(
         landing.assemble(&json!({"records_landed":0})).is_err(),
         "a rejected subject must be repaired before completion"

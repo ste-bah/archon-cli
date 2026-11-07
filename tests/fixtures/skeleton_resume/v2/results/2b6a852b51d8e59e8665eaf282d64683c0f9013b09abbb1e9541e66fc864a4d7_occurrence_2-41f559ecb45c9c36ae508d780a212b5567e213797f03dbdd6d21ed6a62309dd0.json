@@ -1,0 +1,316 @@
+{
+  "run_id": "wf-e1d6ee46-c91b-4bfa-aefb-47d008079b4c",
+  "call": {
+    "id": "2b6a852b51d8e59e8665eaf282d64683c0f9013b09abbb1e9541e66fc864a4d7:occurrence:2",
+    "method": "hostCommand",
+    "options": {
+      "host_command": {
+        "commandId": "freeze-skeleton",
+        "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-AHDM-003\",\"TASK-AHDM-004\"],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/evidence/kb-rule-inventory.md\",\"instance_artifact_field\":\"inventory_path\",\"kind\":\"kb-evidence-inventory\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/evidence/citations.json\",\"instance_artifact_field\":\"citations_path\",\"kind\":\"ahdm-citations\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"}],\"file_name\":\"TASK-AHDM-001.md\",\"implements\":[\"REQ-AHDM-001\",\"REQ-AHDM-002\",\"REQ-AHDM-003\",\"REQ-AHDM-004\",\"REQ-AHDM-020\",\"REQ-AHDM-021\",\"G-AHDM-002\"],\"source_sections\":[\"9\",\"27\",\"28\"],\"task_id\":\"TASK-AHDM-001\"},{\"blocks\":[\"TASK-AHDM-003\",\"TASK-AHDM-004\"],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json\",\"instance_artifact_field\":\"spec_path\",\"kind\":\"ahdm-strategy-spec\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/evidence/citations.json\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-001\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-010\"}],\"file_name\":\"TASK-AHDM-002.md\",\"implements\":[\"REQ-AHDM-005\",\"REQ-AHDM-020\",\"REQ-AHDM-021\",\"REQ-AHDM-022\",\"REQ-AHDM-030\",\"REQ-AHDM-031\",\"REQ-AHDM-032\",\"AC-AHDM-001\",\"G-AHDM-003\"],\"source_sections\":[\"27\",\"28\",\"9\"],\"task_id\":\"TASK-AHDM-002\"},{\"blocks\":[\"TASK-AHDM-005\"],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-indicator.pine\",\"kind\":\"pine-v6-indicator\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-strategy.pine\",\"kind\":\"pine-v6-strategy\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/pine/compile-report.json\",\"kind\":\"pine-compile-report\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-002\"}],\"file_name\":\"TASK-AHDM-003.md\",\"implements\":[\"REQ-AHDM-006\",\"REQ-AHDM-007\",\"REQ-AHDM-022\",\"REQ-AHDM-023\",\"AC-AHDM-002\"],\"source_sections\":[\"27\",\"9\"],\"task_id\":\"TASK-AHDM-003\"},{\"blocks\":[\"TASK-AHDM-005\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\",\"kind\":\"ahdm-native-backtest-engine\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-002\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/backtest_gates.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-010\"}],\"file_name\":\"TASK-AHDM-004.md\",\"implements\":[\"REQ-AHDM-008\",\"REQ-AHDM-010\",\"REQ-AHDM-024\",\"REQ-AHDM-030\",\"REQ-AHDM-031\",\"REQ-AHDM-032\",\"REQ-AHDM-033\",\"REQ-BT-001\",\"REQ-BT-002\",\"REQ-BT-003\",\"REQ-BT-004\",\"AC-AHDM-003\"],\"source_sections\":[\"28\",\"29\",\"10\"],\"task_id\":\"TASK-AHDM-004\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/readiness/paper-trading-readiness.md\",\"kind\":\"paper-readiness-report\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/backtests/adversarial-review.md\",\"kind\":\"aggregate-adversarial-review\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-AHDM-003\"}],\"file_name\":\"TASK-AHDM-005.md\",\"implements\":[\"REQ-AHDM-009\",\"REQ-AHDM-010\",\"REQ-AHDM-023\",\"REQ-AHDM-024\",\"REQ-AHDM-033\",\"REQ-BT-003\",\"AC-AHDM-004\",\"NFR-005\"],\"source_sections\":[\"27\",\"32\",\"9\"],\"task_id\":\"TASK-AHDM-005\"},{\"blocks\":[\"TASK-TDL-002\",\"TASK-TDL-003\",\"TASK-TDL-004\",\"TASK-TDL-009\",\"TASK-TDL-010\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/lib.rs\",\"kind\":\"prd-contract-statement\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[],\"file_name\":\"TASK-TDL-001.md\",\"implements\":[\"REQ-DL-082\",\"G-DL-001\",\"G-DL-002\",\"G-DL-003\",\"G-DL-001... placeholder check\"],\"source_sections\":[\"0\",\"1\",\"2\",\"14\",\"15\"],\"task_id\":\"TASK-TDL-001\"},{\"blocks\":[\"TASK-TDL-003\",\"TASK-TDL-004\",\"TASK-TDL-005\",\"TASK-TDL-006\",\"TASK-TDL-007\",\"TASK-TDL-008\",\"TASK-TDL-009\",\"TASK-TDL-010\",\"TASK-AHDM-002\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\",\"kind\":\"registry-v2-store\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\"crates/archon-trading/src/data_lake/migration.rs\",\"kind\":\"registry-migration\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\"crates/archon-trading/src/data_store/migration.rs\",\"kind\":\"store-migration-repair\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-002.md\",\"implements\":[\"REQ-DL-001\",\"REQ-DL-002\",\"REQ-DL-003\",\"REQ-DL-004\",\"REQ-DL-005\",\"REQ-DL-010\",\"REQ-DL-070\",\"REQ-DL-071\",\"REQ-DL-072\",\"REQ-DL-073\",\"REQ-DL-074\",\"REQ-DL-080\",\"REQ-DL-081\",\"REQ-DL-082\",\"REQ-DL-083\",\"REQ-DL-084\",\"REQ-DL-085\",\"REQ-DL-090\",\"REQ-DL-130\",\"REQ-DL-131\",\"REQ-DL-132\",\"REQ-DL-133\",\"AC-DL-001\",\"AC-DL-003\",\"NFR-006\",\"RD-001\"],\"source_sections\":[\"2\",\"17\",\"18\",\"19\",\"26\"],\"task_id\":\"TASK-TDL-002\"},{\"blocks\":[\"TASK-TDL-010\",\"TASK-TDL-009\",\"TASK-AHDM-004\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/validation/report.rs\",\"kind\":\"validation-engine\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-003.md\",\"implements\":[\"REQ-DL-020\",\"REQ-DL-021\",\"REQ-DL-050\",\"REQ-DL-051\",\"REQ-DL-052\",\"REQ-DL-053\",\"REQ-DL-054\",\"REQ-DL-055\",\"REQ-DL-056\",\"REQ-DL-091\",\"REQ-DL-092\",\"REQ-DL-093\",\"REQ-DL-094\",\"REQ-DL-095\",\"REQ-DL-096\",\"REQ-DL-097\",\"REQ-DL-098\",\"REQ-DL-100\",\"REQ-DL-101\",\"REQ-DL-102\",\"REQ-DL-103\",\"AC-DL-005\",\"AC-DL-006\",\"RD-002\",\"RD-003\"],\"source_sections\":[\"20\",\"21\",\"8.6\",\"6\",\"8.1\",\"8.2\",\"8.3\",\"11\",\"12\",\"13\"],\"task_id\":\"TASK-TDL-003\"},{\"blocks\":[\"TASK-TDL-005\",\"TASK-TDL-006\",\"TASK-TDL-007\",\"TASK-TDL-008\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\",\"kind\":\"provider-capability-engine\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-004.md\",\"implements\":[\"REQ-DL-003\",\"REQ-DL-022\",\"REQ-DL-030\",\"REQ-DL-031\",\"REQ-DL-032\",\"REQ-DL-110\",\"REQ-DL-111\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-002\",\"NFR-003\",\"RD-002\"],\"source_sections\":[\"7\",\"22\",\"8.4\"],\"task_id\":\"TASK-TDL-004\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/tradingview.rs\",\"kind\":\"tradingview-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-005.md\",\"implements\":[\"REQ-DL-011\",\"REQ-DL-023\",\"REQ-DL-033\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-004\",\"TF-001\",\"TF-002\",\"TF-003\",\"TF-004\",\"TF-005\"],\"source_sections\":[\"7\",\"25.1\",\"8.4\"],\"task_id\":\"TASK-TDL-005\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/openbb_polygon.rs\",\"kind\":\"openbb-polygon-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-006.md\",\"implements\":[\"REQ-DL-012\",\"REQ-DL-023\",\"REQ-DL-034\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-005\"],\"source_sections\":[\"7\",\"25.2\",\"8.4\"],\"task_id\":\"TASK-TDL-006\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/stooq.rs\",\"kind\":\"stooq-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-007.md\",\"implements\":[\"REQ-DL-012\",\"REQ-DL-023\",\"REQ-DL-035\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-006\"],\"source_sections\":[\"7\",\"25.3\",\"8.4\"],\"task_id\":\"TASK-TDL-007\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/yfinance.rs\",\"kind\":\"yfinance-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-008.md\",\"implements\":[\"REQ-DL-013\",\"REQ-DL-023\",\"REQ-DL-036\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-007\"],\"source_sections\":[\"7\",\"25.4\",\"8.4\"],\"task_id\":\"TASK-TDL-008\"},{\"blocks\":[\"TASK-TDL-010\",\"TASK-AHDM-001\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/coverage.rs\",\"cells_field\":\"cells\",\"kind\":\"coverage-matrix\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0,\"universe_fields\":[\"canonical_instrument\",\"timeframe\"]},{\"artifact_path\":\"src/command/trading_data.rs\",\"kind\":\"cli-command-surface\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/validation/report.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-003\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-005\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-006\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-007\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-008\"}],\"file_name\":\"TASK-TDL-009.md\",\"implements\":[\"REQ-DL-040\",\"REQ-DL-041\",\"REQ-DL-042\",\"REQ-DL-060\",\"REQ-DL-061\",\"REQ-DL-062\",\"REQ-DL-120\",\"REQ-DL-121\",\"REQ-DL-122\",\"REQ-DL-123\",\"REQ-DL-124\",\"AC-DL-004\",\"G-DL-004\"],\"source_sections\":[\"23\",\"24\",\"8.5\",\"8.7\"],\"task_id\":\"TASK-TDL-009\"},{\"blocks\":[\"TASK-AHDM-004\",\"TASK-AHDM-005\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/backtest_gates.rs\",\"kind\":\"backtest-data-gates\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/validation/report.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-003\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-010.md\",\"implements\":[\"REQ-DL-022\",\"REQ-DL-103\",\"REQ-BT-001\",\"REQ-BT-002\",\"REQ-BT-003\",\"REQ-BT-004\",\"G-DL-005\",\"NFR-005\"],\"source_sections\":[\"10\",\"17\",\"29\",\"11\",\"12\",\"13\"],\"task_id\":\"TASK-TDL-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\"src/command/trading_backtest.rs\",\"kind\":\"cli-backtest-command\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"}],\"file_name\":\"TASK-TDL-011.md\",\"implements\":[\"REQ-DL-060\",\"REQ-DL-061\",\"REQ-DL-062\",\"REQ-AHDM-008\",\"REQ-BT-002\",\"NFR-004\"],\"source_sections\":[\"24\",\"8.7\"],\"task_id\":\"TASK-TDL-011\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/tests/nfr_gates.rs\",\"kind\":\"constraint-guard-tests\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\"registry-migration-report.json\",\"instance_artifact_field\":\"report_path\",\"kind\":\"root-migration-report-placeholder\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-003\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-010\"},{\"ordering_only\":true,\"task_id\":\"TASK-AHDM-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-AHDM-005\"}],\"file_name\":\"TASK-TDL-012.md\",\"implements\":[\"DONE-1\",\"DONE-2\",\"DONE-3\",\"DONE-4\",\"DONE-5\",\"DONE-6\",\"DONE-7\",\"DONE-8\",\"DONE-9\",\"DONE-10\",\"DONE-11\",\"DONE-12\",\"DONE-13\",\"DONE-14\",\"NFR-001\",\"NFR-002\",\"NFR-003\",\"NFR-004\",\"NFR-005\",\"NFR-006\",\"TF-001\",\"TF-002\",\"TF-003\",\"TF-004\",\"TF-005\"],\"source_sections\":[\"30\",\"31\",\"32\",\"33\",\"11\",\"12\",\"13\"],\"task_id\":\"TASK-TDL-012\"},{\"blocks\":[\"TASK-TDL-014\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/lib.rs\",\"kind\":\"milestone-gate-statement\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-003\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-010\"}],\"file_name\":\"TASK-TDL-013.md\",\"implements\":[\"G-AHDM-001\",\"RD-008\"],\"source_sections\":[\"3\",\"5\",\"16\"],\"task_id\":\"TASK-TDL-013\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/backtests\",\"kind\":\"backtest-run-outputs\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-013\"}],\"file_name\":\"TASK-TDL-014.md\",\"implements\":[\"G-AHDM-002\",\"REQ-AHDM-008\"],\"source_sections\":[\"5\",\"31\"],\"task_id\":\"TASK-TDL-014\"}]}"
+      },
+      "target_files": [],
+      "target_files_from_item": false,
+      "extra": {
+        "commandId": "freeze-skeleton",
+        "host_command_occurrence": 2,
+        "stdin": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-AHDM-003\",\"TASK-AHDM-004\"],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/evidence/kb-rule-inventory.md\",\"instance_artifact_field\":\"inventory_path\",\"kind\":\"kb-evidence-inventory\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/evidence/citations.json\",\"instance_artifact_field\":\"citations_path\",\"kind\":\"ahdm-citations\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"}],\"file_name\":\"TASK-AHDM-001.md\",\"implements\":[\"REQ-AHDM-001\",\"REQ-AHDM-002\",\"REQ-AHDM-003\",\"REQ-AHDM-004\",\"REQ-AHDM-020\",\"REQ-AHDM-021\",\"G-AHDM-002\"],\"source_sections\":[\"9\",\"27\",\"28\"],\"task_id\":\"TASK-AHDM-001\"},{\"blocks\":[\"TASK-AHDM-003\",\"TASK-AHDM-004\"],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json\",\"instance_artifact_field\":\"spec_path\",\"kind\":\"ahdm-strategy-spec\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/evidence/citations.json\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-001\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-010\"}],\"file_name\":\"TASK-AHDM-002.md\",\"implements\":[\"REQ-AHDM-005\",\"REQ-AHDM-020\",\"REQ-AHDM-021\",\"REQ-AHDM-022\",\"REQ-AHDM-030\",\"REQ-AHDM-031\",\"REQ-AHDM-032\",\"AC-AHDM-001\",\"G-AHDM-003\"],\"source_sections\":[\"27\",\"28\",\"9\"],\"task_id\":\"TASK-AHDM-002\"},{\"blocks\":[\"TASK-AHDM-005\"],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-indicator.pine\",\"kind\":\"pine-v6-indicator\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-strategy.pine\",\"kind\":\"pine-v6-strategy\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/pine/compile-report.json\",\"kind\":\"pine-compile-report\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-002\"}],\"file_name\":\"TASK-AHDM-003.md\",\"implements\":[\"REQ-AHDM-006\",\"REQ-AHDM-007\",\"REQ-AHDM-022\",\"REQ-AHDM-023\",\"AC-AHDM-002\"],\"source_sections\":[\"27\",\"9\"],\"task_id\":\"TASK-AHDM-003\"},{\"blocks\":[\"TASK-AHDM-005\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\",\"kind\":\"ahdm-native-backtest-engine\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-002\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/backtest_gates.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-010\"}],\"file_name\":\"TASK-AHDM-004.md\",\"implements\":[\"REQ-AHDM-008\",\"REQ-AHDM-010\",\"REQ-AHDM-024\",\"REQ-AHDM-030\",\"REQ-AHDM-031\",\"REQ-AHDM-032\",\"REQ-AHDM-033\",\"REQ-BT-001\",\"REQ-BT-002\",\"REQ-BT-003\",\"REQ-BT-004\",\"AC-AHDM-003\"],\"source_sections\":[\"28\",\"29\",\"10\"],\"task_id\":\"TASK-AHDM-004\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/readiness/paper-trading-readiness.md\",\"kind\":\"paper-readiness-report\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/backtests/adversarial-review.md\",\"kind\":\"aggregate-adversarial-review\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-AHDM-003\"}],\"file_name\":\"TASK-AHDM-005.md\",\"implements\":[\"REQ-AHDM-009\",\"REQ-AHDM-010\",\"REQ-AHDM-023\",\"REQ-AHDM-024\",\"REQ-AHDM-033\",\"REQ-BT-003\",\"AC-AHDM-004\",\"NFR-005\"],\"source_sections\":[\"27\",\"32\",\"9\"],\"task_id\":\"TASK-AHDM-005\"},{\"blocks\":[\"TASK-TDL-002\",\"TASK-TDL-003\",\"TASK-TDL-004\",\"TASK-TDL-009\",\"TASK-TDL-010\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/lib.rs\",\"kind\":\"prd-contract-statement\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[],\"file_name\":\"TASK-TDL-001.md\",\"implements\":[\"REQ-DL-082\",\"G-DL-001\",\"G-DL-002\",\"G-DL-003\",\"G-DL-001... placeholder check\"],\"source_sections\":[\"0\",\"1\",\"2\",\"14\",\"15\"],\"task_id\":\"TASK-TDL-001\"},{\"blocks\":[\"TASK-TDL-003\",\"TASK-TDL-004\",\"TASK-TDL-005\",\"TASK-TDL-006\",\"TASK-TDL-007\",\"TASK-TDL-008\",\"TASK-TDL-009\",\"TASK-TDL-010\",\"TASK-AHDM-002\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\",\"kind\":\"registry-v2-store\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\"crates/archon-trading/src/data_lake/migration.rs\",\"kind\":\"registry-migration\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\"crates/archon-trading/src/data_store/migration.rs\",\"kind\":\"store-migration-repair\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-002.md\",\"implements\":[\"REQ-DL-001\",\"REQ-DL-002\",\"REQ-DL-003\",\"REQ-DL-004\",\"REQ-DL-005\",\"REQ-DL-010\",\"REQ-DL-070\",\"REQ-DL-071\",\"REQ-DL-072\",\"REQ-DL-073\",\"REQ-DL-074\",\"REQ-DL-080\",\"REQ-DL-081\",\"REQ-DL-082\",\"REQ-DL-083\",\"REQ-DL-084\",\"REQ-DL-085\",\"REQ-DL-090\",\"REQ-DL-130\",\"REQ-DL-131\",\"REQ-DL-132\",\"REQ-DL-133\",\"AC-DL-001\",\"AC-DL-003\",\"NFR-006\",\"RD-001\"],\"source_sections\":[\"2\",\"17\",\"18\",\"19\",\"26\"],\"task_id\":\"TASK-TDL-002\"},{\"blocks\":[\"TASK-TDL-010\",\"TASK-TDL-009\",\"TASK-AHDM-004\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/validation/report.rs\",\"kind\":\"validation-engine\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-003.md\",\"implements\":[\"REQ-DL-020\",\"REQ-DL-021\",\"REQ-DL-050\",\"REQ-DL-051\",\"REQ-DL-052\",\"REQ-DL-053\",\"REQ-DL-054\",\"REQ-DL-055\",\"REQ-DL-056\",\"REQ-DL-091\",\"REQ-DL-092\",\"REQ-DL-093\",\"REQ-DL-094\",\"REQ-DL-095\",\"REQ-DL-096\",\"REQ-DL-097\",\"REQ-DL-098\",\"REQ-DL-100\",\"REQ-DL-101\",\"REQ-DL-102\",\"REQ-DL-103\",\"AC-DL-005\",\"AC-DL-006\",\"RD-002\",\"RD-003\"],\"source_sections\":[\"20\",\"21\",\"8.6\",\"6\",\"8.1\",\"8.2\",\"8.3\",\"11\",\"12\",\"13\"],\"task_id\":\"TASK-TDL-003\"},{\"blocks\":[\"TASK-TDL-005\",\"TASK-TDL-006\",\"TASK-TDL-007\",\"TASK-TDL-008\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\",\"kind\":\"provider-capability-engine\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-004.md\",\"implements\":[\"REQ-DL-003\",\"REQ-DL-022\",\"REQ-DL-030\",\"REQ-DL-031\",\"REQ-DL-032\",\"REQ-DL-110\",\"REQ-DL-111\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-002\",\"NFR-003\",\"RD-002\"],\"source_sections\":[\"7\",\"22\",\"8.4\"],\"task_id\":\"TASK-TDL-004\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/tradingview.rs\",\"kind\":\"tradingview-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-005.md\",\"implements\":[\"REQ-DL-011\",\"REQ-DL-023\",\"REQ-DL-033\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-004\",\"TF-001\",\"TF-002\",\"TF-003\",\"TF-004\",\"TF-005\"],\"source_sections\":[\"7\",\"25.1\",\"8.4\"],\"task_id\":\"TASK-TDL-005\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/openbb_polygon.rs\",\"kind\":\"openbb-polygon-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-006.md\",\"implements\":[\"REQ-DL-012\",\"REQ-DL-023\",\"REQ-DL-034\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-005\"],\"source_sections\":[\"7\",\"25.2\",\"8.4\"],\"task_id\":\"TASK-TDL-006\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/stooq.rs\",\"kind\":\"stooq-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-007.md\",\"implements\":[\"REQ-DL-012\",\"REQ-DL-023\",\"REQ-DL-035\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-006\"],\"source_sections\":[\"7\",\"25.3\",\"8.4\"],\"task_id\":\"TASK-TDL-007\"},{\"blocks\":[\"TASK-TDL-009\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/providers/yfinance.rs\",\"kind\":\"yfinance-adapter\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"}],\"file_name\":\"TASK-TDL-008.md\",\"implements\":[\"REQ-DL-013\",\"REQ-DL-023\",\"REQ-DL-036\",\"REQ-DL-112\",\"REQ-DL-113\",\"AC-DL-007\",\"RD-007\"],\"source_sections\":[\"7\",\"25.4\",\"8.4\"],\"task_id\":\"TASK-TDL-008\"},{\"blocks\":[\"TASK-TDL-010\",\"TASK-AHDM-001\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/coverage.rs\",\"cells_field\":\"cells\",\"kind\":\"coverage-matrix\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0,\"universe_fields\":[\"canonical_instrument\",\"timeframe\"]},{\"artifact_path\":\"src/command/trading_data.rs\",\"kind\":\"cli-command-surface\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/validation/report.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-003\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/providers/mod.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-005\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-006\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-007\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-008\"}],\"file_name\":\"TASK-TDL-009.md\",\"implements\":[\"REQ-DL-040\",\"REQ-DL-041\",\"REQ-DL-042\",\"REQ-DL-060\",\"REQ-DL-061\",\"REQ-DL-062\",\"REQ-DL-120\",\"REQ-DL-121\",\"REQ-DL-122\",\"REQ-DL-123\",\"REQ-DL-124\",\"AC-DL-004\",\"G-DL-004\"],\"source_sections\":[\"23\",\"24\",\"8.5\",\"8.7\"],\"task_id\":\"TASK-TDL-009\"},{\"blocks\":[\"TASK-AHDM-004\",\"TASK-AHDM-005\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/backtest_gates.rs\",\"kind\":\"backtest-data-gates\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/data_store.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-002\"},{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/validation/report.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-TDL-003\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-001\"}],\"file_name\":\"TASK-TDL-010.md\",\"implements\":[\"REQ-DL-022\",\"REQ-DL-103\",\"REQ-BT-001\",\"REQ-BT-002\",\"REQ-BT-003\",\"REQ-BT-004\",\"G-DL-005\",\"NFR-005\"],\"source_sections\":[\"10\",\"17\",\"29\",\"11\",\"12\",\"13\"],\"task_id\":\"TASK-TDL-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\"src/command/trading_backtest.rs\",\"kind\":\"cli-backtest-command\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"}],\"file_name\":\"TASK-TDL-011.md\",\"implements\":[\"REQ-DL-060\",\"REQ-DL-061\",\"REQ-DL-062\",\"REQ-AHDM-008\",\"REQ-BT-002\",\"NFR-004\"],\"source_sections\":[\"24\",\"8.7\"],\"task_id\":\"TASK-TDL-011\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/tests/nfr_gates.rs\",\"kind\":\"constraint-guard-tests\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_path\":\"registry-migration-report.json\",\"instance_artifact_field\":\"report_path\",\"kind\":\"root-migration-report-placeholder\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-003\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-010\"},{\"ordering_only\":true,\"task_id\":\"TASK-AHDM-002\"},{\"ordering_only\":true,\"task_id\":\"TASK-AHDM-005\"}],\"file_name\":\"TASK-TDL-012.md\",\"implements\":[\"DONE-1\",\"DONE-2\",\"DONE-3\",\"DONE-4\",\"DONE-5\",\"DONE-6\",\"DONE-7\",\"DONE-8\",\"DONE-9\",\"DONE-10\",\"DONE-11\",\"DONE-12\",\"DONE-13\",\"DONE-14\",\"NFR-001\",\"NFR-002\",\"NFR-003\",\"NFR-004\",\"NFR-005\",\"NFR-006\",\"TF-001\",\"TF-002\",\"TF-003\",\"TF-004\",\"TF-005\"],\"source_sections\":[\"30\",\"31\",\"32\",\"33\",\"11\",\"12\",\"13\"],\"task_id\":\"TASK-TDL-012\"},{\"blocks\":[\"TASK-TDL-014\"],\"deliverable_contracts\":[{\"artifact_path\":\"crates/archon-trading/src/lib.rs\",\"kind\":\"milestone-gate-statement\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"ordering_only\":true,\"task_id\":\"TASK-TDL-003\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-009\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-010\"}],\"file_name\":\"TASK-TDL-013.md\",\"implements\":[\"G-AHDM-001\",\"RD-008\"],\"source_sections\":[\"3\",\"5\",\"16\"],\"task_id\":\"TASK-TDL-013\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_path\":\".archon/trading-lab/strategies/AHDM-v1/backtests\",\"kind\":\"backtest-run-outputs\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"crates/archon-trading/src/ahdm_backtest.rs\"}],\"ordering_only\":false,\"task_id\":\"TASK-AHDM-004\"},{\"ordering_only\":true,\"task_id\":\"TASK-TDL-013\"}],\"file_name\":\"TASK-TDL-014.md\",\"implements\":[\"G-AHDM-002\",\"REQ-AHDM-008\"],\"source_sections\":[\"5\",\"31\"],\"task_id\":\"TASK-TDL-014\"}]}"
+      }
+    }
+  },
+  "attempt": 1,
+  "schema_version": "workflow-result-v2",
+  "started_at": "2026-11-07T03:13:46.591599+00:00",
+  "admission_sequence": 156,
+  "finished_at": "2026-11-07T03:13:47.284690+00:00",
+  "input_hash": "1a8f40645862445e4ae3593ed91aa05dcfc2fc89556e3da02834f45ce8f3bbe1",
+  "output_hash": "e63fc01e9a1d0899d6789c7a3de2ba1a193603383e1efa106bdc8c0d89f2424a",
+  "status": "needs_review",
+  "result": {
+    "status": "needs_review",
+    "summary": "host command '2b6a852b51d8e59e8665eaf282d64683c0f9013b09abbb1e9541e66fc864a4d7:occurrence:2' completed with exit Some(0)",
+    "evidence": [
+      {
+        "kind": "implementation",
+        "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=665, stderr_bytes=208"
+      }
+    ],
+    "artifacts": [],
+    "commands_run": [
+      {
+        "kind": "inspect",
+        "command": "hostCommand:freeze-skeleton",
+        "status": "succeeded",
+        "exit_code": 0,
+        "output_summary": "trusted symbolic capability completed with 665 stdout bytes and 208 stderr bytes"
+      }
+    ],
+    "files_read": [],
+    "files_changed": [],
+    "task_coverage": [],
+    "residual_gaps": [],
+    "data": {
+      "exitCode": 0,
+      "gateEnvelope": {
+        "policy_findings": [
+          {
+            "deterministic_defect": {
+              "code": "unknown_obligation",
+              "location": "implements/4",
+              "provenance": "host_validator",
+              "stage": "contracts",
+              "subject": "TASK-TDL-001"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "implements",
+            "text": "implements: task 'TASK-TDL-001' claims id 'G-DL-001... placeholder check' that is not a host-listed PRD obligation or constraint id; remove it or use a host-listed id from requirement bullets, obligation table rows, numbered done-definition items, or PRD constraint list items or table rows"
+          },
+          {
+            "deterministic_defect": {
+              "code": "missing_consumer_declaration",
+              "location": "blocks/0",
+              "provenance": "host_validator",
+              "stage": "graph",
+              "subject": "TASK-AHDM-001"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "blocks",
+            "text": "blocks: block-only edge 'TASK-AHDM-001 -> TASK-AHDM-003' has no consumer-side structured declaration; add TASK-AHDM-001 to TASK-AHDM-003 depends_on with a non-empty consumes list or ordering_only: true"
+          },
+          {
+            "deterministic_defect": {
+              "code": "missing_consumer_declaration",
+              "location": "blocks/1",
+              "provenance": "host_validator",
+              "stage": "graph",
+              "subject": "TASK-AHDM-001"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "blocks",
+            "text": "blocks: block-only edge 'TASK-AHDM-001 -> TASK-AHDM-004' has no consumer-side structured declaration; add TASK-AHDM-001 to TASK-AHDM-004 depends_on with a non-empty consumes list or ordering_only: true"
+          },
+          {
+            "deterministic_defect": {
+              "code": "missing_consumer_declaration",
+              "location": "blocks/2",
+              "provenance": "host_validator",
+              "stage": "graph",
+              "subject": "TASK-TDL-001"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "blocks",
+            "text": "blocks: block-only edge 'TASK-TDL-001 -> TASK-TDL-004' has no consumer-side structured declaration; add TASK-TDL-001 to TASK-TDL-004 depends_on with a non-empty consumes list or ordering_only: true"
+          },
+          {
+            "deterministic_defect": {
+              "code": "missing_consumer_declaration",
+              "location": "blocks/2",
+              "provenance": "host_validator",
+              "stage": "graph",
+              "subject": "TASK-TDL-003"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "blocks",
+            "text": "blocks: block-only edge 'TASK-TDL-003 -> TASK-AHDM-004' has no consumer-side structured declaration; add TASK-TDL-003 to TASK-AHDM-004 depends_on with a non-empty consumes list or ordering_only: true"
+          },
+          {
+            "deterministic_defect": {
+              "code": "missing_consumer_declaration",
+              "location": "blocks/1",
+              "provenance": "host_validator",
+              "stage": "graph",
+              "subject": "TASK-TDL-010"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "blocks",
+            "text": "blocks: block-only edge 'TASK-TDL-010 -> TASK-AHDM-005' has no consumer-side structured declaration; add TASK-TDL-010 to TASK-AHDM-005 depends_on with a non-empty consumes list or ordering_only: true"
+          },
+          {
+            "deterministic_defect": {
+              "code": "unowned_repository_path",
+              "location": "owner",
+              "provenance": "host_validator",
+              "stage": "contracts",
+              "subject": "crates/archon-trading/src/data_lake.rs"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "deliverable_contracts",
+            "text": "repository file `crates/archon-trading/src/data_lake.rs` is named by the PRD and exists at base commit 6cd0a28bdc61ec04cdec51eeaa3d7bc59cbac6d4 but no task owns it; give it an owning task (a deliverable_contracts artifact_path in the skeleton, or Files Expected to Change in a body)"
+          },
+          {
+            "deterministic_defect": {
+              "code": "task_without_check",
+              "location": "implements",
+              "provenance": "host_validator",
+              "stage": "contracts",
+              "subject": "tasks/16"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "implements",
+            "text": "tasks.TASK-TDL-012.implements: task TASK-TDL-012 implements nothing a frozen acceptance check answers for (no check's id or covers is in its implements), so no check can show its work done; give it the acceptance or requirement id its work is checked by"
+          },
+          {
+            "deterministic_defect": {
+              "code": "task_without_check",
+              "location": "implements",
+              "provenance": "host_validator",
+              "stage": "contracts",
+              "subject": "tasks/17"
+            },
+            "remediation_scope": "skeleton",
+            "source_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "subject": "implements",
+            "text": "tasks.TASK-TDL-013.implements: task TASK-TDL-013 implements nothing a frozen acceptance check answers for (no check's id or covers is in its implements), so no check can show its work done; give it the acceptance or requirement id its work is checked by"
+          }
+        ],
+        "report": "",
+        "schema_version": 1
+      },
+      "interrupted": false,
+      "limitsFingerprint": [
+        2,
+        7800,
+        2097152,
+        2097152,
+        2097152
+      ],
+      "logicBuild": "a3d03d23a06e9e82dae4a473e7c3c34587582d74dbff1bd7166c6dbd6aa400c1",
+      "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+      "logicVersion": 11,
+      "postcondition": {
+        "satisfied": true,
+        "summary": "authoritative frozen skeleton chain evaluated"
+      },
+      "publicationReceipt": {
+        "call_id": "2b6a852b51d8e59e8665eaf282d64683c0f9013b09abbb1e9541e66fc864a4d7",
+        "command_id": "freeze-skeleton",
+        "committed_at": "2026-11-07T03:13:47.062886+00:00",
+        "entries": [
+          {
+            "blake3": "6590bdf2532fea2e7dae17f4aafe80531a673430f50b8d1906de384147b844c7",
+            "byte_len": 873,
+            "destination_path": "/Volumes/Externalwork/archon-cli/project-1/.archon/task-set-pins/8f927b45b9568536f32a3fb3d89dfada7525dc7e7de24b77e04593c5ed3d58da.json",
+            "prior_blake3": "3ab2f060180a9464302ff4dfeb1a7c3291c67c2a0f182d0a06375ab79035f90f",
+            "relative_path": "acceptance-pin.json"
+          },
+          {
+            "blake3": "7671022f5b42648e795c7ea611ba9507c43ca3586d35e6402a2fb3217e556691",
+            "byte_len": 6172,
+            "destination_path": "/Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-e1d6ee46-c91b-4bfa-aefb-47d008079b4c/host-command-results/2b6a852b51d8e59e8665eaf282d64683c0f9013b09abbb1e9541e66fc864a4d7/gate-envelope.json",
+            "prior_blake3": "7671022f5b42648e795c7ea611ba9507c43ca3586d35e6402a2fb3217e556691",
+            "relative_path": "gate-envelope.json"
+          },
+          {
+            "blake3": "6ed139b4bcd49ca4ec28ba85637108d0f02fd8b803ba64f93bf877e5dc92a71a",
+            "byte_len": 26608,
+            "destination_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.json",
+            "prior_blake3": "6ed139b4bcd49ca4ec28ba85637108d0f02fd8b803ba64f93bf877e5dc92a71a",
+            "relative_path": "task-skeleton.json"
+          },
+          {
+            "blake3": "9ead818cc6367784a47884e188387031a351abd9a3cd1899a373f8f97c182c24",
+            "byte_len": 442,
+            "destination_path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001-R18/task-skeleton.lock",
+            "prior_blake3": "43d5d0d07a773fee607805a08dc3cde0ebff0c0ebe216b9026e06ab611f79743",
+            "relative_path": "task-skeleton.lock"
+          }
+        ],
+        "schema_version": 1
+      },
+      "stderr": "warning: workflow.generated.write_call_time_budget_secs in /Volumes/Externalwork/archon-cli/project-1/.archon/config.toml: obsolete config key is ignored because write branches have only a no-progress window\n",
+      "stderrBytes": 208,
+      "stderrTruncated": false,
+      "stdout": "{\"schema_version\":1,\"call_id\":\"2b6a852b51d8e59e8665eaf282d64683c0f9013b09abbb1e9541e66fc864a4d7\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"relative_path\":\"acceptance-pin.json\",\"byte_len\":873,\"blake3\":\"6590bdf2532fea2e7dae17f4aafe80531a673430f50b8d1906de384147b844c7\"},{\"relative_path\":\"gate-envelope.json\",\"byte_len\":6172,\"blake3\":\"7671022f5b42648e795c7ea611ba9507c43ca3586d35e6402a2fb3217e556691\"},{\"relative_path\":\"task-skeleton.json\",\"byte_len\":26608,\"blake3\":\"6ed139b4bcd49ca4ec28ba85637108d0f02fd8b803ba64f93bf877e5dc92a71a\"},{\"relative_path\":\"task-skeleton.lock\",\"byte_len\":442,\"blake3\":\"9ead818cc6367784a47884e188387031a351abd9a3cd1899a373f8f97c182c24\"}]}",
+      "stdoutBytes": 665,
+      "stdoutTruncated": false,
+      "subjects": [
+        {
+          "fileName": "TASK-AHDM-001.md",
+          "taskId": "TASK-AHDM-001"
+        },
+        {
+          "fileName": "TASK-AHDM-002.md",
+          "taskId": "TASK-AHDM-002"
+        },
+        {
+          "fileName": "TASK-AHDM-003.md",
+          "taskId": "TASK-AHDM-003"
+        },
+        {
+          "fileName": "TASK-AHDM-004.md",
+          "taskId": "TASK-AHDM-004"
+        },
+        {
+          "fileName": "TASK-AHDM-005.md",
+          "taskId": "TASK-AHDM-005"
+        },
+        {
+          "fileName": "TASK-TDL-001.md",
+          "taskId": "TASK-TDL-001"
+        },
+        {
+          "fileName": "TASK-TDL-002.md",
+          "taskId": "TASK-TDL-002"
+        },
+        {
+          "fileName": "TASK-TDL-003.md",
+          "taskId": "TASK-TDL-003"
+        },
+        {
+          "fileName": "TASK-TDL-004.md",
+          "taskId": "TASK-TDL-004"
+        },
+        {
+          "fileName": "TASK-TDL-005.md",
+          "taskId": "TASK-TDL-005"
+        },
+        {
+          "fileName": "TASK-TDL-006.md",
+          "taskId": "TASK-TDL-006"
+        },
+        {
+          "fileName": "TASK-TDL-007.md",
+          "taskId": "TASK-TDL-007"
+        },
+        {
+          "fileName": "TASK-TDL-008.md",
+          "taskId": "TASK-TDL-008"
+        },
+        {
+          "fileName": "TASK-TDL-009.md",
+          "taskId": "TASK-TDL-009"
+        },
+        {
+          "fileName": "TASK-TDL-010.md",
+          "taskId": "TASK-TDL-010"
+        },
+        {
+          "fileName": "TASK-TDL-011.md",
+          "taskId": "TASK-TDL-011"
+        },
+        {
+          "fileName": "TASK-TDL-012.md",
+          "taskId": "TASK-TDL-012"
+        },
+        {
+          "fileName": "TASK-TDL-013.md",
+          "taskId": "TASK-TDL-013"
+        },
+        {
+          "fileName": "TASK-TDL-014.md",
+          "taskId": "TASK-TDL-014"
+        }
+      ],
+      "timedOut": false
+    }
+  },
+  "depends_on": [],
+  "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711"
+}

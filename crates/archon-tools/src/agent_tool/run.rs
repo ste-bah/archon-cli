@@ -16,46 +16,7 @@ use crate::tool::ToolContext;
 
 const FOREGROUND_CANCEL_CLEANUP_SECS: u64 = 30;
 
-struct ExecutionResult {
-    result: Result<crate::subagent_executor::SubagentCompletion, ExecutorError>,
-    cancelled: bool,
-}
-
-impl ExecutionResult {
-    fn outcome(&self) -> SubagentOutcome {
-        if self.cancelled {
-            SubagentOutcome::Cancelled
-        } else {
-            match &self.result {
-                Ok(completion) => SubagentOutcome::Completed(completion.clone()),
-                Err(ExecutorError::ProviderFailure {
-                    message,
-                    status,
-                    retry_after_secs,
-                    overloaded,
-                    source,
-                }) => SubagentOutcome::FailedWithProvider {
-                    message: message.clone(),
-                    status: *status,
-                    retry_after_secs: *retry_after_secs,
-                    overloaded: *overloaded,
-                    source: source.clone(),
-                },
-                Err(error) => SubagentOutcome::Failed(error.to_string()),
-            }
-        }
-    }
-
-    fn terminal_status(&self) -> AgentStatus {
-        if self.cancelled {
-            AgentStatus::Cancelled
-        } else if self.result.is_ok() {
-            AgentStatus::Finished
-        } else {
-            AgentStatus::Failed
-        }
-    }
-}
+include!("run_result.rs");
 
 /// Marks a subagent as running in `BACKGROUND_AGENTS` for exactly as long as
 /// its runner lives.
@@ -399,7 +360,7 @@ async fn run_subagent_owned(
                 return SubagentOutcome::Completed(completed);
             }
         }
-        SubagentOutcome::Failed(err) => {
+        SubagentOutcome::Failed(err) | SubagentOutcome::InvalidAnswer(err) => {
             let _ = exec
                 .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
                 .await;
@@ -417,6 +378,11 @@ async fn run_subagent_owned(
         // to enforce it (#184 M6).
         SubagentOutcome::AutoBackgrounded => {
             exec.on_auto_backgrounded(&subagent_id);
+        }
+        SubagentOutcome::ControlPaused(message) => {
+            let _ = exec
+                .on_visible_complete(subagent_id.clone(), Err(message.clone()), nested)
+                .await;
         }
         SubagentOutcome::Cancelled => {
             let _ = exec

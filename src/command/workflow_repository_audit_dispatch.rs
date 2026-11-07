@@ -146,6 +146,30 @@ impl AuditDispatch {
 
 struct LandingBridge(Arc<archon_workflow::repository_audit::landing::AuditLanding>);
 impl archon_tools::audit_landing::LandingHost for LandingBridge {
+    fn accepts_record_arrays(&self) -> bool {
+        false
+    }
+    fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+        archon_tools::audit_landing::EmptyReplyPolicy::Resend
+    }
+    fn receipt_envelope_pointer(&self) -> &'static str {
+        "/data/repository_audit"
+    }
+    fn progress_key_fields(&self) -> &'static [&'static str] {
+        &["declared_path"]
+    }
+    fn allows_unreceipted_reply(&self) -> bool {
+        true
+    }
+    fn normalize_record_reply(&self) -> bool {
+        true
+    }
+    fn tool_name(&self) -> &'static str {
+        archon_tools::tool::Tool::name(&archon_tools::audit_landing::LandAuditRecordTool)
+    }
+    fn schema(&self) -> Option<serde_json::Value> {
+        None
+    }
     fn land(&self, value: serde_json::Value) -> Result<String, String> {
         let record =
             serde_json::from_value(value).map_err(|e| format!("invalid AuditRecord: {e}"))?;

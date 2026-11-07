@@ -466,3 +466,29 @@ async fn continuation_applies_the_same_alias_resolution_as_a_new_run() {
         .unwrap_err();
     assert_eq!(fallback.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+#[test]
+fn landed_invalid_answer_keeps_a_downcastable_cause_through_the_pipeline() {
+    let error = llm_response_for_subagent_outcome(
+        SubagentOutcome::InvalidAnswer("missing receipt".into()),
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+            .is_some()
+    );
+    let ordinary = llm_response_for_subagent_outcome(
+        SubagentOutcome::Failed("invalid_answer: missing receipt".into()),
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        ordinary
+            .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+            .is_none()
+    );
+}

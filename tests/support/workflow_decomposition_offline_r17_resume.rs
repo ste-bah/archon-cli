@@ -124,11 +124,15 @@ fn v8_no_progress_pause_then_different_build_restores_skeleton_loop() {
         .copied()
         .unwrap_or_default();
     // Baseline plus three non-improving attempts exhaust the existing window.
-    assert_eq!(before, 8);
+    // Issue 630: the baseline lands and replies (2 requests). Each repair
+    // call lands no changed task, and the runner refuses its reply in-session
+    // until the incomplete-reply bound ends the call: 3 replies, 3 requests.
+    assert_eq!(before, 2 + 3 * 3);
     p.provider
         .set_variant_preserving_history(server::Variant::R17(Cell::V0));
     success(&project::resume(p.path(), &project::run_id(p.path())));
-    shared(&p, 5, [1, 1], 1);
+    // The fresh fifth author lands and replies: 2 more skeleton requests.
+    shared_with_skeleton_exchanges(&p, 5, [1, 1], 1, before + 2);
     let resumed = events(&p);
     assert!(resumed.iter().any(|e| e["kind"] == "binary_revision_drift"));
     // A build-only drift replays durable calls; a script change uses a

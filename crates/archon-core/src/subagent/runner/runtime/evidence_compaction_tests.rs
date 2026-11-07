@@ -5,6 +5,30 @@ use serde_json::json;
 use std::sync::Arc;
 struct Landed;
 impl archon_tools::audit_landing::LandingHost for Landed {
+    fn accepts_record_arrays(&self) -> bool {
+        false
+    }
+    fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+        archon_tools::audit_landing::EmptyReplyPolicy::Resend
+    }
+    fn receipt_envelope_pointer(&self) -> &'static str {
+        "/data/repository_audit"
+    }
+    fn progress_key_fields(&self) -> &'static [&'static str] {
+        &["declared_path"]
+    }
+    fn allows_unreceipted_reply(&self) -> bool {
+        true
+    }
+    fn normalize_record_reply(&self) -> bool {
+        true
+    }
+    fn tool_name(&self) -> &'static str {
+        "land-audit-record"
+    }
+    fn schema(&self) -> Option<serde_json::Value> {
+        None
+    }
     fn land(&self, _: serde_json::Value) -> Result<String, String> {
         unreachable!()
     }

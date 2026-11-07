@@ -17,10 +17,12 @@ pub(super) fn register_once(handle: BackgroundAgentHandle) -> Result<(), Registr
 pub(super) fn board_outcome(outcome: &SubagentOutcome) -> Option<DelegatedOutcome> {
     match outcome {
         SubagentOutcome::Completed(_) => Some(DelegatedOutcome::Completed),
-        SubagentOutcome::Failed(_) | SubagentOutcome::FailedWithProvider { .. } => {
-            Some(DelegatedOutcome::Failed)
+        SubagentOutcome::Failed(_)
+        | SubagentOutcome::InvalidAnswer(_)
+        | SubagentOutcome::FailedWithProvider { .. } => Some(DelegatedOutcome::Failed),
+        SubagentOutcome::ControlPaused(_) | SubagentOutcome::Cancelled => {
+            Some(DelegatedOutcome::Stopped)
         }
-        SubagentOutcome::Cancelled => Some(DelegatedOutcome::Stopped),
         SubagentOutcome::AutoBackgrounded => None,
     }
 }

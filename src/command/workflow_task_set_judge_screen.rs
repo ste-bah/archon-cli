@@ -3,6 +3,9 @@ use super::*;
 
 use super::schema::RefutationKind;
 
+#[path = "workflow_task_set_judge_screen_mutation.rs"]
+mod mutation;
+
 #[derive(Default)]
 pub(super) struct Screen {
     reasks: BTreeMap<String, usize>,
@@ -160,15 +163,7 @@ impl Screen {
                     .iter()
                     .any(|path| named_files::same_check_in_base(path, entry, resolved_roots));
             let mut prefetch = false;
-            let fault = if denial {
-                Some("Your refutation contradicts its own evidence: it denies an in-bounds counterexample state. Describe a constructible state or accept the check.".to_string())
-            } else if denial_claim(&prose) {
-                Some("Reconsider the denial within this refutation and describe the complete passing-but-false state. Preserve any constructive objection.".to_string())
-            } else if exact_duplicate {
-                Some("The cited existing check runs exactly the same command at the same working directory. Reconsider whether this is a refutation.".to_string())
-            } else if duplicate {
-                Some("Reconsider the duplicate claim: name a path that exists in the base tree and explain the passing-but-false state. A duplicate word alone proves no fault in a check.".to_string())
-            } else if decision.kind == RefutationKind::Coverage
+            let coverage_fault = if decision.kind == RefutationKind::Coverage
                 && !self.coverage_shown.contains(&decision.id)
             {
                 let mut remaining = archon_workflow::check_source_settle::MAX_JUDGED_SOURCE_BYTES;
@@ -199,6 +194,21 @@ impl Screen {
                 } else {
                     None
                 }
+            } else {
+                None
+            };
+            let fault = if coverage_fault.is_some() {
+                coverage_fault
+            } else if denial {
+                Some("Your refutation contradicts its own evidence: it denies an in-bounds counterexample state. Describe a constructible state or accept the check.".to_string())
+            } else if denial_claim(&prose) {
+                Some("Reconsider the denial within this refutation and describe the complete passing-but-false state. Preserve any constructive objection.".to_string())
+            } else if exact_duplicate {
+                Some("The cited existing check runs exactly the same command at the same working directory. Reconsider whether this is a refutation.".to_string())
+            } else if duplicate {
+                Some("Reconsider the duplicate claim: name a path that exists in the base tree and explain the passing-but-false state. A duplicate word alone proves no fault in a check.".to_string())
+            } else if mutation::mutation_only(&decision) {
+                Some(mutation::MUTATION_FACT.to_string())
             } else if toolchain_claim(&prose) {
                 Some(TOOLCHAIN_FACT.to_string())
             } else {
@@ -207,6 +217,11 @@ impl Screen {
             if let Some(fault) = fault {
                 let count = self.reasks.entry(decision.id.clone()).or_default();
                 if prefetch || *count < 2 {
+                    tracing::info!(
+                        entry = %decision.id,
+                        counterexample = %decision.counterexample,
+                        "screened judge refutation; requesting reconsideration"
+                    );
                     if !prefetch {
                         *count += 1;
                     }
@@ -222,6 +237,11 @@ impl Screen {
                         }
                         .to_string();
                     } else {
+                        tracing::info!(
+                            entry = %decision.id,
+                            counterexample = %decision.counterexample,
+                            "forwarded persistent judge refutation"
+                        );
                         entry.judgment.reason = format!(
                             "[kind={}] {}",
                             serde_json::to_value(&decision.kind)?.as_str().unwrap(),
@@ -293,3 +313,7 @@ mod safety_tests;
 #[cfg(test)]
 #[path = "workflow_task_set_judge_r16_dry_run_tests.rs"]
 mod r16_dry_run_tests;
+
+#[cfg(test)]
+#[path = "workflow_task_set_judge_screen_mutation_tests.rs"]
+mod mutation_tests;

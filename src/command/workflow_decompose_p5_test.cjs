@@ -64,8 +64,13 @@ async function seedRound(first, refusal, resume = false, previous) {
   if (resume) ctx.args.phaseSeed = {subjects:{skeleton:{kind:'artifact',candidate:first,gate:{findings:refusal}}}};
   const options = [], inputs = [];
   await ctx.authorCandidate({
-    agent:async (_id, opts) => { options.push(opts); return {status:'accepted',stopReason:'end_turn',content:options.length === 1 && !resume ? first : candidate}; },
-    hostCommand:async (_id, opts) => { inputs.push(opts.stdin); return inputs.length === 1 && !resume ? gate(refusal) : clean(); },
+    agent:async (_id, opts) => {
+      options.push(opts);
+      if (options.length === 1 && !resume && (first === 'Landed tasks.' || first.includes('invalid.md')))
+        return {status:'failed',invalid_answer:true,summary:refusal[0].text};
+      return {status:'accepted',stopReason:'end_turn',retainedLandings:true,content:options.length === 1 && !resume ? first : candidate};
+    },
+    hostCommand:async (_id, opts) => { inputs.push(opts.stdin); return inputs.length === 1 && !resume && first === candidate ? gate(refusal) : clean(); },
     pause:async () => { throw new Error('unexpected pause'); }
   }, ctx.skeletonPolicy([], undefined, previous));
   return {ctx, options, inputs};
@@ -109,7 +114,7 @@ test('M2_P5_28_stale_resume_seed_does_not_drop_later_reopen_candidate', async ()
     let hostCalls = 0;
     const options = [];
     const w = {
-      agent:async (_id, opts) => { options.push(opts); return {status:'accepted',stopReason:'end_turn',content:candidate}; },
+      agent:async (_id, opts) => { options.push(opts); return {status:'accepted',stopReason:'end_turn',retainedLandings:true,content:candidate}; },
       hostCommand:async () => ++hostCalls === 1 && findings.length ? gate(findings) : clean(),
       pause:async () => { throw new Error('unexpected pause'); }
     };
@@ -122,7 +127,7 @@ test('M2_P5_28_stale_resume_seed_does_not_drop_later_reopen_candidate', async ()
     const reopened = options.at(-1);
     assert.equal(reopened.previousSkeleton, candidate);
     assert.ok(reopened.task.includes('The previous candidate is in'));
-    assert.ok(reopened.task.includes('Re-land only changed tasks; unlisted tasks are retained.'));
+    assert.ok(reopened.task.includes('Compare the Landed subjects list at the end of this prompt with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed there have been retained. Re-land changed tasks.'));
     assert.ok(reopened.task.includes('Keep every frozen task_id and file_name.'));
   }
 });

@@ -1,5 +1,6 @@
 use super::*;
 
+mod await_round;
 mod cargo_credit;
 mod completion_usage;
 mod context_fit;
@@ -26,6 +27,7 @@ mod tool_round;
 #[path = "runtime/read_range_history_recovery_tests.rs"]
 mod read_range_history_recovery_tests;
 
+use await_round::{RoundEnd, await_cancellable_inference, await_tool_round};
 use cargo_credit::CargoCredit;
 use message_history::MessageHistory;
 use progress_window::ProgressWindow;
@@ -85,7 +87,9 @@ impl SubagentRunner {
             // the window and the last novel activity, so a reader can tell a
             // looping session from a slow one.
             if window.expired() {
-                return Err(window.stall_error("between turns", turn.saturating_add(1)));
+                return self.complete_landed_or_error(
+                    window.stall_error("between turns", turn.saturating_add(1)),
+                );
             }
 
             // Check for graceful shutdown request
@@ -93,7 +97,17 @@ impl SubagentRunner {
                 .shutdown_flag
                 .load(std::sync::atomic::Ordering::Relaxed)
             {
-                return Ok(completion_usage::shutdown());
+                return self
+                    .retained_landed_completion()
+                    .map(|content| {
+                        completion_usage::from_stream(
+                            content,
+                            Some("shutdown".into()),
+                            self.progress.as_ref(),
+                        )
+                    })
+                    .map(Ok)
+                    .unwrap_or_else(|| Ok(completion_usage::shutdown()));
             }
 
             if !inspection_tools_withdrawn
@@ -103,8 +117,11 @@ impl SubagentRunner {
                     .as_ref()
                     .filter(|guard| guard.inspection_withdrawn_for(&self.tool_context))
             {
-                let note =
+                let mut note =
                     withdrawn_note(guard.withdrawal_reason_for(&self.tool_context).as_deref());
+                if let Some(landing) = &self.tool_context.audit_landing {
+                    note.push_str(&format!("\n{}", landing.hint().unwrap_or_default()));
+                }
                 let message = flatten_history::flatten_history(
                     messages.as_slice(),
                     initial_prompt,
@@ -116,19 +133,23 @@ impl SubagentRunner {
                 inspection_tools_withdrawn = true;
             }
 
-            if let Some(landing) = &self.tool_context.audit_landing
-                && let Some(text) = landing.progress_message().map_err(anyhow::Error::msg)?
-            {
-                let message = serde_json::json!({"role":"user","content":text});
-                self.record_transcript(&message);
-                messages.push(message);
+            if let Some(landing) = &self.tool_context.audit_landing {
+                match landing.progress_message() {
+                    Ok(Some(text)) => {
+                        let message = serde_json::json!({"role":"user","content":text});
+                        self.record_transcript(&message);
+                        messages.push(message);
+                    }
+                    Ok(None) => {}
+                    Err(error) => return self.complete_landed_or_error(anyhow::Error::msg(error)),
+                }
             }
             let request_deadline = adjusted_deadline(
                 window.deadline(),
                 &cargo_credit,
                 &self.tool_context.session_id,
             );
-            let prepared_request = Box::pin(provider_open::prepare(
+            let prepared_request = match Box::pin(provider_open::prepare(
                 self,
                 request_deadline,
                 &window,
@@ -139,7 +160,18 @@ impl SubagentRunner {
                 reasoning_encrypted.clone(),
                 turn,
             ))
-            .await?;
+            .await
+            {
+                Ok(request) => request,
+                Err(error)
+                    if error
+                        .downcast_ref::<progress_window::WindowExpired>()
+                        .is_some() =>
+                {
+                    return self.complete_landed_or_error(error);
+                }
+                Err(error) => return Err(error),
+            };
             let offered_tool_names = prepared_request
                 .template
                 .tools
@@ -186,9 +218,32 @@ impl SubagentRunner {
                     window_ref.stall_error("during LLM inference", turn.saturating_add(1))
                 })?
             };
-            let stream =
-                await_cancellable_inference(inference, self.tool_context.cancel_parent.as_ref())
-                    .await?;
+            let stream = match await_cancellable_inference(
+                inference,
+                self.tool_context.cancel_parent.as_ref(),
+            )
+            .await
+            {
+                Ok(stream) => stream,
+                Err(error)
+                    if error
+                        .downcast_ref::<progress_window::WindowExpired>()
+                        .is_some() =>
+                {
+                    return self.complete_landed_or_error(error);
+                }
+                Err(error)
+                    if error
+                        .downcast_ref::<archon_tools::audit_landing::EmptyOutputLimit>()
+                        .is_some()
+                        || error
+                            .downcast_ref::<stream_round::EmptyReplyExhausted>()
+                            .is_some() =>
+                {
+                    return self.complete_landed_or_error(error);
+                }
+                Err(error) => return Err(error),
+            };
             if stream.retry_after_compact {
                 continue;
             }
@@ -320,7 +375,9 @@ impl SubagentRunner {
                 anyhow::bail!("Subagent cancelled during tool round at turn {turn}");
             }
             if round_end == RoundEnd::TimedOut {
-                return Err(window.stall_error("during a tool round", turn.saturating_add(1)));
+                return self.complete_landed_or_error(
+                    window.stall_error("during a tool round", turn.saturating_add(1)),
+                );
             }
             // A novel request earns progress only when its result was admitted.
             // New assistant text remains independent progress.
@@ -345,7 +402,7 @@ impl SubagentRunner {
                     guard.charge_terminal_to_parent(&self.tool_context);
                 }
                 self.emit_activity_stream("error", reason.clone(), None, true);
-                anyhow::bail!("{reason}");
+                return self.complete_landed_or_error(anyhow::anyhow!(reason));
             }
             // Issue-213 C2d: still repeating after the reminder, tree unchanged.
             if let Some(reason) = progress_stop
@@ -391,7 +448,10 @@ impl SubagentRunner {
             None,
             true,
         );
-        anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
+        self.complete_landed_or_error(anyhow::anyhow!(
+            "Subagent reached max turns ({})",
+            self.max_turns
+        ))
     }
 }
 
@@ -408,78 +468,6 @@ fn withdrawn_note(reason: Option<&str>) -> String {
             .unwrap_or_default(),
         archon_tools::workflow_read_guard::ANSWER_IN_TASK_FORMAT
     )
-}
-
-async fn await_cancellable_inference<F, T>(
-    inference: F,
-    cancel: Option<&tokio_util::sync::CancellationToken>,
-) -> anyhow::Result<T>
-where
-    F: std::future::Future<Output = anyhow::Result<T>>,
-{
-    let Some(cancel) = cancel else {
-        return inference.await;
-    };
-    tokio::select! {
-        biased;
-        _ = cancel.cancelled() => anyhow::bail!("Subagent cancelled during LLM inference"),
-        result = inference => result,
-    }
-}
-
-/// How a tool round ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RoundEnd {
-    Finished,
-    /// The session's no-progress window ran out.
-    TimedOut,
-    /// The session was cancelled from above while the round ran.
-    Cancelled,
-}
-
-/// Grace a cut round's tools get to wind down before they are dropped.
-const ROUND_CLEANUP: Duration = Duration::from_secs(2);
-
-async fn await_tool_round<F>(
-    future: F,
-    round_cancel: tokio_util::sync::CancellationToken,
-    session_id: &str,
-    deadline: Option<tokio::time::Instant>,
-    credit: &CargoCredit,
-) -> (RoundEnd, Vec<progress_novelty::ObservedCall>)
-where
-    F: std::future::Future<Output = Vec<progress_novelty::ObservedCall>>,
-{
-    tokio::pin!(future);
-    loop {
-        let adjusted = deadline.map(|deadline| deadline + credit.live(session_id));
-        let expiry = async {
-            match adjusted {
-                Some(at) => tokio::time::sleep_until(at).await,
-                None => std::future::pending::<()>().await,
-            }
-        };
-        tokio::select! {
-            biased;
-            _ = expiry => {
-                let Some(deadline) = deadline else { continue };
-                if tokio::time::Instant::now() < deadline + credit.live(session_id) {
-                    continue;
-                }
-                round_cancel.cancel();
-                let _ = tokio::time::timeout(ROUND_CLEANUP, &mut future).await;
-                return (RoundEnd::TimedOut, Vec::new());
-            }
-            result = &mut future => return (RoundEnd::Finished, result),
-            // Issue-136: the round's token is the session's child, so a
-            // cancelled session is seen here; tools that watch the token end
-            // themselves, and the rest are dropped after the grace.
-            _ = round_cancel.cancelled() => {
-                let _ = tokio::time::timeout(ROUND_CLEANUP, &mut future).await;
-                return (RoundEnd::Cancelled, Vec::new());
-            }
-        }
-    }
 }
 
 fn summarize_tool_output(output: &str) -> String {

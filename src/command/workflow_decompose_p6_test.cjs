@@ -111,17 +111,23 @@ test('P6_15_pending_body_shadow_reauthors_skeleton_then_bodies', async () => {
   await ctx.workflow(w);
   assert.equal(skeletonCalls, 2);
   assert.equal(bodyCalls, 2);
-  // A pending re-author can already have an older published body. Even an
-  // unchanged skeleton must retry the candidate that requested its repair.
+  // A pending re-author can already have an older published body.
+  // C6: an unchanged zero-landing reply must be refused before a changed landing retries the body.
   const skeleton = JSON.stringify({tasks:[{task_id:subject.taskId, file_name:subject.fileName}]});
   const prior = committed([]);
   ctx.recordSkeletonTasks(prior, skeleton);
   const bodies = new Map([[subject.fileName, committed([])]]);
   bodyCalls = 0;
-  w.agent = async id => ({status:'accepted', stopReason:'end_turn',
-    content:id.startsWith('skeleton-') ? skeleton : '# body'});
+  let skeletonAttempts = 0;
+  w.agent = async id => {
+    if (!id.startsWith('skeleton-')) return {status:'accepted', stopReason:'end_turn', content:'# body'};
+    const changed = ++skeletonAttempts > 1;
+    return {status:'accepted', stopReason:'end_turn', retainedLandings:changed,
+      content:changed ? JSON.stringify({tasks:[{...JSON.parse(skeleton).tasks[0], source_sections:['1']}]}) : skeleton};
+  };
   await ctx.authorBodies(w, [[subject, []]], bodies, {outcome:prior, subjects:[subject]});
   assert.equal(bodyCalls, 2);
+  assert.equal(skeletonAttempts, 2);
 });
 test('P6_16_unattributed_body_finding_is_logged_and_sent_as_skeleton_context', async () => {
   const unknown = {text:'unattributed content defect', remediation_scope:'body', source_path:'prd.md'};

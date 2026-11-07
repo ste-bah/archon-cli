@@ -282,6 +282,30 @@ fn guard_is_workflow_only_and_needs_a_shell_an_inspection_or_a_write_tool() {
 async fn audit_tool_contract_lists_only_host_granted_landing_tool() {
     struct Host;
     impl archon_tools::audit_landing::LandingHost for Host {
+        fn accepts_record_arrays(&self) -> bool {
+            false
+        }
+        fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+            archon_tools::audit_landing::EmptyReplyPolicy::Resend
+        }
+        fn receipt_envelope_pointer(&self) -> &'static str {
+            "/data/repository_audit"
+        }
+        fn progress_key_fields(&self) -> &'static [&'static str] {
+            &["declared_path"]
+        }
+        fn allows_unreceipted_reply(&self) -> bool {
+            true
+        }
+        fn normalize_record_reply(&self) -> bool {
+            true
+        }
+        fn tool_name(&self) -> &'static str {
+            "land-audit-record"
+        }
+        fn schema(&self) -> Option<serde_json::Value> {
+            None
+        }
         fn land(&self, _: serde_json::Value) -> Result<String, String> {
             Ok(String::new())
         }
@@ -308,4 +332,21 @@ async fn audit_tool_contract_lists_only_host_granted_landing_tool() {
     })
     .await;
     assert!(!SubagentPipelineClient::allowed_tools(&request).contains(&"land-audit-record".into()));
+}
+
+#[test]
+fn shutdown_outcome_keeps_a_typed_control_pause_through_the_pipeline() {
+    let error = super::llm_response_for_subagent_outcome(
+        SubagentOutcome::ControlPaused("shutdown".into()),
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error
+            .downcast_ref::<archon_tools::subagent_executor::ControlPaused>()
+            .unwrap()
+            .0,
+        "shutdown"
+    );
 }

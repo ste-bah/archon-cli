@@ -153,10 +153,13 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // #593: a shape refusal no longer stops the acceptance author window.
     // #599: deliverable contract rule in the skeleton prompt.
     // Issue 601: body repair retains the best actionable candidate within one author episode; authors no longer write observations.
+    // Issue 611: acceptance authoring runs as a bounded pool with prompts frozen before fan-out.
+    // Issues 623/624/625: skeleton landing refuses seed-only and prose replies, keeps landings on refusal and resumes from the latest judged candidate.
+    // Issue 630: one skeleton author landing domain; a repair call with no byte-changing landing, or an empty store, is refused.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711"
+        "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464"
     );
 }

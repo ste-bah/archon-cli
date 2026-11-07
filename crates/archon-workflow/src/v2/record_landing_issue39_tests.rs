@@ -60,7 +60,12 @@ fn skeleton_contract_with_blank_kind_or_path_is_rejected_by_path() {
         "{error}"
     );
     assert!(error.contains("Expected schema:"), "{error}");
-    assert!(landing.hint().unwrap().contains("Host retained 0 records."));
+    assert!(
+        landing
+            .hint()
+            .unwrap()
+            .contains("Host retained 0 records; 0 new landings in this call (seeds do not count).")
+    );
     assert!(
         landing.assemble(&json!({"records_landed":0})).is_err(),
         "a rejected subject must be repaired before completion"

@@ -209,3 +209,37 @@ async fn llm_retry_r6_send_reads_visible_wrapper_text_like_main() {
     .unwrap();
     assert_eq!(fake.0.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test(start_paused = true)]
+async fn transport_retry_shutdown_pause_is_typed_and_never_retried() {
+    struct PausedClient(AtomicUsize);
+    #[async_trait::async_trait]
+    impl WorkflowLlmClient for PausedClient {
+        async fn send_message(
+            &self,
+            _: Vec<Value>,
+            _: Vec<Value>,
+            _: Vec<Value>,
+            _: &str,
+        ) -> WorkflowResult<WorkflowAgentOutcome> {
+            unreachable!()
+        }
+        async fn run_agent(&self, _: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
+            assert_eq!(self.0.fetch_add(1, Ordering::SeqCst), 0, "shutdown retried");
+            Err(WorkflowError::port(
+                archon_tools::subagent_executor::ControlPaused(
+                    "shutdown after connection reset".into(),
+                ),
+            ))
+        }
+    }
+    let fake = Arc::new(PausedClient(AtomicUsize::new(0)));
+    let client: Arc<dyn WorkflowLlmClient> = fake.clone();
+    let error = run_agent_with_transient_retry(&client, super::tests::request(false), |_| async {
+        panic!("shutdown scheduled a retry")
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(error, WorkflowError::ControlPaused(_)));
+    assert_eq!(fake.0.load(Ordering::SeqCst), 1);
+}

@@ -41,7 +41,7 @@ impl WorkflowLlmClient for BatchLlm {
             .and_then(|line| line.split(':').next())
             .unwrap_or("unused");
         Ok(WorkflowAgentOutcome {
-            content: super::super::authored_entry(serde_json::json!({"id":id})),
+            content: super::super::authored_decomposition_reply(serde_json::json!({"id":id})).await,
             stop_reason: Some("end_turn".into()),
             ..Default::default()
         })
@@ -73,9 +73,8 @@ async fn fixed_author_pool_overlaps_through_real_quickjs_host_and_keeps_read_pol
     assert_eq!(llm.active.load(Ordering::SeqCst), 0);
 }
 
-/// The script-level schedule proofs (virtual clock): pool and prefix-window
-/// makespans, in-flight cap, index-only acceptance prompts, failure and stop
-/// semantics (Issue-247).
+/// The script-level schedule proofs (virtual clock): pool makespan, in-flight
+/// cap, pre-round acceptance prompts, failure and stop semantics.
 #[test]
 fn bounded_author_pool_schedule_prompts_and_failures() {
     let output = std::process::Command::new("node")
@@ -92,11 +91,11 @@ fn bounded_author_pool_schedule_prompts_and_failures() {
     );
 }
 
-/// Acceptance authors driven through the real QuickJS host (Issue-247). The
-/// first entry holds until its two window siblings have ended; the script
-/// must not start the fourth entry before the first one ends, and a pause
-/// written mid-pool must stop new dispatch.
-struct WindowLlm {
+/// Acceptance authors driven through the real QuickJS host. The first entry
+/// waits for the fourth to start in a freed slot; prompts use pre-round state,
+/// and, in pause mode, the second, fifth and sixth hold all slots until a
+/// pause is written so the next dispatch must encounter it at the host.
+struct PoolLlm {
     events: Mutex<Vec<(&'static str, String, String)>>,
     active: AtomicUsize,
     peak: AtomicUsize,
@@ -105,7 +104,7 @@ struct WindowLlm {
     started_after_pause: AtomicUsize,
 }
 
-impl WindowLlm {
+impl PoolLlm {
     fn new(pause: Option<(WorkflowStore, String)>) -> Self {
         Self {
             events: Mutex::new(vec![]),
@@ -135,6 +134,17 @@ impl WindowLlm {
         panic!("calls {ids:?} never had a {kind} event");
     }
 
+    /// Keep the other slots occupied until the pause has been written.
+    async fn wait_for_pause(&self) {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !self.paused.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("pause was never written while AC-X-005 and AC-X-006 held their slots");
+    }
+
     fn position(&self, kind: &str, id: &str) -> usize {
         let events = self.events.lock().unwrap();
         events
@@ -145,7 +155,7 @@ impl WindowLlm {
 }
 
 #[async_trait::async_trait]
-impl WorkflowLlmClient for WindowLlm {
+impl WorkflowLlmClient for PoolLlm {
     /// Scripted replies stand for one continued session (#241).
     async fn continue_agent(
         &self,
@@ -190,24 +200,26 @@ impl WorkflowLlmClient for WindowLlm {
             .unwrap()
             .push(("start", id.clone(), prior));
         match (id.as_str(), &self.pause) {
-            // The first window is held open until all three of its calls have
+            // The initial pool is held open until all three of its calls have
             // started, so the peak of 3 is a gate, not a race between sleeps.
             ("AC-X-002" | "AC-X-003", None) => {
                 self.wait_for("start", &["AC-X-001", "AC-X-002", "AC-X-003"])
                     .await;
             }
             ("AC-X-001", None) => {
-                self.wait_for("end", &["AC-X-002", "AC-X-003"]).await;
-                // Room for a barrier-free scheduler to start AC-X-004 early.
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                self.wait_for("start", &["AC-X-004"]).await;
             }
             ("AC-X-002", Some((store, run_id))) => {
                 self.wait_for("end", &["AC-X-001", "AC-X-003", "AC-X-004"])
                     .await;
+                self.wait_for("start", &["AC-X-005", "AC-X-006"]).await;
                 archon_workflow::LifecycleController::new(store.clone())
                     .apply(run_id, archon_workflow::LifecycleAction::Pause)
                     .expect("pause the run mid-pool");
                 self.paused.store(true, Ordering::SeqCst);
+            }
+            ("AC-X-005" | "AC-X-006", Some(_)) => {
+                self.wait_for_pause().await;
             }
             _ => tokio::time::sleep(std::time::Duration::from_millis(5)).await,
         }
@@ -217,17 +229,17 @@ impl WorkflowLlmClient for WindowLlm {
             .unwrap()
             .push(("end", id.clone(), String::new()));
         Ok(WorkflowAgentOutcome {
-            content: super::super::authored_entry(serde_json::json!({"id":id})),
+            content: super::super::authored_decomposition_reply(serde_json::json!({"id":id})).await,
             stop_reason: Some("end_turn".into()),
             ..Default::default()
         })
     }
 }
 
-async fn run_window(
+async fn run_pool(
     with_pause: bool,
 ) -> (
-    Arc<WindowLlm>,
+    Arc<PoolLlm>,
     archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
 ) {
     let temp = tempfile::tempdir().unwrap();
@@ -236,7 +248,7 @@ async fn run_window(
     let run = store.create_run(spec.clone()).unwrap();
     let v2 = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
     let (sink, _rx) = default_workflow_ui_sink();
-    let llm = Arc::new(WindowLlm::new(
+    let llm = Arc::new(PoolLlm::new(
         with_pause.then(|| (store.clone(), run.id.clone())),
     ));
     let client = LiveV2AgentClient::new(llm.clone(), sink, vec![], run.id.clone(), None, Some(10))
@@ -244,7 +256,7 @@ async fn run_window(
     let criteria = (1..=7)
         .map(|n| (format!("AC-X-{n:03}"), format!("criterion {n}")))
         .collect::<std::collections::BTreeMap<_, _>>();
-    let result = WorkflowV2ScriptRunner::new("window proof".into(),test_runtime(&spec),WorkflowV2AgentAdapter::new(),client,v2,store,run.id,true,None,
+    let result = WorkflowV2ScriptRunner::new("pool proof".into(),test_runtime(&spec),WorkflowV2AgentAdapter::new(),client,v2,store,run.id,true,None,
         Some(crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(&serde_json::json!({"projectRoot":temp.path(),"repositoryRoot":temp.path(),"prdPath":temp.path().join("prd.md"),"prdDigest":"a".repeat(64),"taskRoot":temp.path().join("tasks"),"gateMode":"observe","acceptanceCriteria":criteria,"authorMaxParallelism":3}), "")))
         .with_raw_outcomes(true).with_host_command_executor(Arc::new(PhaseHost {calls:Mutex::new(vec![])}))
         .run(crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE).await;
@@ -252,16 +264,16 @@ async fn run_window(
 }
 
 #[tokio::test]
-async fn fixed_acceptance_window_holds_only_calls_behind_a_slow_entry() {
-    let (llm, result) = run_window(false).await;
+async fn fixed_acceptance_pool_fills_freed_slots_with_pre_round_prompts() {
+    let (llm, result) = run_pool(false).await;
     assert_eq!(result.unwrap().status, WorkflowV2Status::Accepted);
     assert_eq!(llm.peak.load(Ordering::SeqCst), 3);
     let first_end = llm.position("end", "AC-X-001");
     assert!(llm.position("start", "AC-X-002") < first_end);
     assert!(llm.position("start", "AC-X-003") < first_end);
     assert!(
-        llm.position("start", "AC-X-004") > first_end,
-        "entry 4 started inside the window of the unfinished entry 1"
+        llm.position("start", "AC-X-004") < first_end,
+        "entry 4 must start in a freed slot while entry 1 is unfinished"
     );
     let events = llm.events.lock().unwrap();
     let prior = |id: &str| -> Vec<String> {
@@ -276,17 +288,15 @@ async fn fixed_acceptance_window_holds_only_calls_behind_a_slow_entry() {
             .map(|(id, _)| id.to_string())
             .collect()
     };
-    assert!(prior("AC-X-003").is_empty());
-    assert_eq!(prior("AC-X-004"), ["AC-X-001"]);
-    assert_eq!(
-        prior("AC-X-007"),
-        ["AC-X-001", "AC-X-002", "AC-X-003", "AC-X-004"]
-    );
+    for n in 1..=7 {
+        assert!(prior(&format!("AC-X-{n:03}")).is_empty());
+    }
 }
 
-/// End-to-end guarantee: once a pause is written mid-pool, no model call
-/// starts and the caller sees the pause. Scope: this cannot catch a script
-/// that dispatches after a stop, because the host polls run control before
+/// End-to-end guarantee: all three slots stay occupied until the pause is
+/// written, so entry 7 reaches host run control after the pause and never
+/// starts a model call; the caller sees the pause. Scope: this cannot catch
+/// a script that dispatches after a stop, because the host polls run control before
 /// every dispatch (`workflow_live_v2_script_host_exec.rs`) and refuses such a
 /// call before anything observable happens. The script's own stop rules (no
 /// launch after a failure or a thrown stop, queued launches skipped, started
@@ -295,7 +305,7 @@ async fn fixed_acceptance_window_holds_only_calls_behind_a_slow_entry() {
 /// which are the authority for them.
 #[tokio::test]
 async fn fixed_acceptance_pause_mid_pool_stops_new_dispatch() {
-    let (llm, result) = run_window(true).await;
+    let (llm, result) = run_pool(true).await;
     let error = result.expect_err("a paused run must unwind the script");
     assert!(
         matches!(error, WorkflowError::ControlPaused(_)),

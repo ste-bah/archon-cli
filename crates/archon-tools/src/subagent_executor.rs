@@ -48,6 +48,11 @@ impl std::error::Error for ProviderSource {
     }
 }
 
+/// A resumable control stop, preserved independently of provider failures.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{0}")]
+pub struct ControlPaused(pub String);
+
 /// Error surface returned by `SubagentExecutor::run_to_completion`.
 #[derive(Debug, Clone)]
 pub enum ExecutorError {
@@ -60,6 +65,8 @@ pub enum ExecutorError {
     /// An internal executor error. The string is the user-facing
     /// reason surfaced in the resulting `ToolResult::error`.
     Internal(String),
+    InvalidAnswer(String),
+    ControlPaused(String),
     /// Provider retry metadata preserved across the subagent result boundary.
     ProviderFailure {
         message: String,
@@ -74,7 +81,7 @@ impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotInstalled => write!(f, "subagent executor not installed"),
-            Self::Internal(m) => write!(f, "{m}"),
+            Self::Internal(m) | Self::InvalidAnswer(m) | Self::ControlPaused(m) => write!(f, "{m}"),
             Self::ProviderFailure { message, .. } => write!(f, "{message}"),
         }
     }
@@ -101,6 +108,8 @@ pub enum SubagentClassification {
 /// terminal arms of the AGT-025 `tokio::select!` race.
 #[derive(Debug, Clone)]
 pub enum SubagentOutcome {
+    InvalidAnswer(String),
+    ControlPaused(String),
     /// Runner finished successfully before the timer (or with no
     /// timer). Carries the final text to return to the caller.
     Completed(SubagentCompletion),

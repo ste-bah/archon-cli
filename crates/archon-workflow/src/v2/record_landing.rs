@@ -19,6 +19,11 @@ pub enum RecordKind {
     Verify,
     Skeleton,
 }
+impl RecordKind {
+    pub fn host_composes_artifact(self) -> bool {
+        matches!(self, Self::Skeleton)
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StageRecord {
@@ -34,7 +39,7 @@ pub struct StageRecord {
     #[serde(default)]
     summary: String,
     #[serde(default)]
-    task: Option<crate::task_skeleton::FrozenTask>,
+    pub(super) task: Option<crate::task_skeleton::FrozenTask>,
     /// Issue-36: a write-time instruction, never persisted state. When true the record supersedes the earlier landing for its subject instead of unioning with it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     replace: bool,
@@ -75,15 +80,19 @@ fn with_schema(err: WorkflowError, kind: RecordKind) -> WorkflowError {
     }
 }
 pub struct RecordLanding {
-    root: PathBuf,
+    pub(super) root: PathBuf,
+    pub(super) read_snapshot: Option<BTreeMap<String, Value>>,
     pub(super) kind: RecordKind,
     subjects: Vec<String>,
     subjects_are_tasks: bool,
     lock: Mutex<()>,
     frozen_tasks: Mutex<Option<BTreeMap<String, String>>>,
     rejected: Mutex<BTreeMap<String, Vec<String>>>,
+    pub(super) landed_here: Mutex<std::collections::BTreeSet<String>>,
+    pub(super) repair_required: Mutex<bool>,
+    pub(super) pre_call_tasks: Mutex<BTreeMap<String, Option<Vec<u8>>>>,
 }
-fn invalid(e: impl std::fmt::Display) -> WorkflowError {
+pub(super) fn invalid(e: impl std::fmt::Display) -> WorkflowError {
     WorkflowError::ArtifactInvalid(e.to_string())
 }
 tokio::task_local! { static RECORDS: Arc<RecordLanding>; }
@@ -103,35 +112,6 @@ pub(super) enum Admission {
 }
 
 impl RecordLanding {
-    /// `subjects_are_tasks` says whether each subject is a canonical task id (map calls) or an opaque call id (reduce calls); it decides whether the subject may stand in for a finding's task.
-    pub fn open(
-        root: PathBuf,
-        identity: String,
-        kind: RecordKind,
-        subjects: Vec<String>,
-        subjects_are_tasks: bool,
-    ) -> WorkflowResult<Self> {
-        std::fs::create_dir_all(&root).map_err(invalid)?;
-        let path = root.join("contract.json");
-        let expected = json!({"identity":identity,"kind":kind,"subjects":subjects});
-        if path.exists() {
-            let saved: Value = serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
-            if saved != expected {
-                return Err(invalid("record landing identity changed"));
-            }
-        } else {
-            write(&path, &expected)?;
-        }
-        Ok(Self {
-            root,
-            kind,
-            subjects,
-            subjects_are_tasks,
-            lock: Mutex::new(()),
-            frozen_tasks: Mutex::new(None),
-            rejected: Mutex::new(BTreeMap::new()),
-        })
-    }
     pub fn kind(&self) -> RecordKind {
         self.kind
     }
@@ -266,8 +246,14 @@ impl RecordLanding {
                 )
             ) {
                 record.status = previous.status;
-                if !previous.summary.is_empty() {
-                    record.summary = format!("{}; {}", previous.summary, record.summary);
+                // Keep the failure explanation without duplicating repeated landings.
+                // The normal record size validation bounds the combined summary.
+                if !previous.summary.is_empty() && !record.summary.contains(&previous.summary) {
+                    record.summary = if previous.summary.contains(&record.summary) {
+                        previous.summary
+                    } else {
+                        format!("{}\n{}", record.summary, previous.summary)
+                    };
                 }
             }
             self.validate(&record, Admission::NewLanding)
@@ -277,17 +263,12 @@ impl RecordLanding {
     }
     pub(super) fn records(&self) -> WorkflowResult<BTreeMap<String, StageRecord>> {
         let mut records = BTreeMap::new();
-        for entry in std::fs::read_dir(&self.root).map_err(invalid)? {
-            let path = entry.map_err(invalid)?.path();
-            if !path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|s| s.starts_with("record-") && s.ends_with(".json"))
-            {
-                continue;
-            }
-            let record: StageRecord =
-                serde_json::from_slice(&std::fs::read(path).map_err(invalid)?)?;
+        let snapshot = match &self.read_snapshot {
+            Some(records) => records.clone(),
+            None => self.saved_records()?,
+        };
+        for value in snapshot.into_values() {
+            let record: StageRecord = serde_json::from_value(value)?;
             self.validate(&record, Admission::Persisted)?;
             if records.insert(record.subject.clone(), record).is_some() {
                 return Err(invalid("duplicate persisted record subject"));
@@ -310,7 +291,7 @@ impl RecordLanding {
             return self.skeleton_hint(&records);
         }
         Ok(format!(
-            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Schema: {}",
+            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Findings, evidence and commands are unioned; the latest summary retains any inherited failure explanation. A failed, blocked or needs_review verdict persists unless replace:true supersedes it. Schema: {}",
             records.len(),
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
             serde_json::to_string(&self.remaining()?)?,
@@ -410,7 +391,7 @@ pub(super) fn captured(output_summary: &str) -> bool {
             .starts_with(super::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)
 }
 /// The task ids a finding names for itself: `canonical_task_ids`, else `task_ids`, else `[task_id]`; `None` when it names no task.
-fn finding_task_ids(finding: &Value) -> Option<Value> {
+pub(super) fn finding_task_ids(finding: &Value) -> Option<Value> {
     let nonempty = |key: &str| {
         finding
             .get(key)
@@ -454,3 +435,10 @@ mod patch;
 
 #[path = "record_landing_rejected.rs"]
 mod rejected;
+
+#[cfg(test)]
+#[path = "record_landing_resume_tests.rs"]
+mod resume_tests;
+
+#[path = "record_landing_state.rs"]
+mod state;

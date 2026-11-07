@@ -65,9 +65,13 @@ pub(super) fn settle_claimed_task(task_id: Option<&String>, outcome: &SubagentOu
             let _ = TASK_MANAGER.set_status(task_id, TaskStatus::Completed);
         }
         SubagentOutcome::Failed(_)
+        | SubagentOutcome::InvalidAnswer(_)
         | SubagentOutcome::FailedWithProvider { .. }
         | SubagentOutcome::Cancelled => {
             let _ = TASK_MANAGER.set_status(task_id, TaskStatus::Failed);
+        }
+        SubagentOutcome::ControlPaused(_) => {
+            let _ = TASK_MANAGER.set_status(task_id, TaskStatus::Stopped);
         }
         SubagentOutcome::AutoBackgrounded => {}
     }
