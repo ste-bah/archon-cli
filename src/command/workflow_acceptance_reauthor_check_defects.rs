@@ -18,6 +18,11 @@ pub(super) fn check_defects(
     }
     let mut probe = working.clone();
     *super::entry_mut(&mut probe, &candidate.id).expect("named id") = candidate.clone();
+    if super::passability::lint_commands(&mut probe).contains(&candidate.id) {
+        return Err(super::judge::author_note(
+            super::entry(&probe, &candidate.id).expect("named id"),
+        ));
+    }
     let prefix = format!("{}.check", candidate.id);
     let policy = crate::command::acceptance_scratch_policy::authoring_policy(
         &scope.project_root,
