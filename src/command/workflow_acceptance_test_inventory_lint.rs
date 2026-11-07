@@ -40,41 +40,10 @@ pub(crate) fn cargo_lint_forms(text: &str) -> Vec<String> {
             .split([' ', '\t'])
             .filter(|word| !word.is_empty())
             .collect();
-        if words.iter().any(|word| {
-            word.contains("PATH")
-                || protected_assignment(word)
-                || matches!(
-                    *word,
-                    "if" | "then"
-                        | "fi"
-                        | "elif"
-                        | "else"
-                        | "for"
-                        | "in"
-                        | "do"
-                        | "done"
-                        | "while"
-                        | "until"
-                        | "case"
-                        | "esac"
-                        | "select"
-                        | "function"
-                        | "trap"
-                        | "eval"
-                        | "source"
-                        | "."
-                        | "hash"
-                        | "alias"
-                        | "shopt"
-                        | "exit"
-                        | "return"
-                        | "exec"
-                        | "command"
-                        | "builtin"
-                        | "enable"
-                        | "PATH"
-                )
-        }) {
+        if words
+            .iter()
+            .any(|word| word.contains("PATH") || protected_assignment(word))
+        {
             return Vec::new();
         }
         if words
@@ -111,6 +80,41 @@ pub(crate) fn cargo_lint_forms(text: &str) -> Vec<String> {
             }
         }
         if rest.is_empty() || rest[0].starts_with('-') {
+            return Vec::new();
+        }
+        // Reserved words and state-changing builtins matter in command
+        // position. Literal operands such as `echo done` do not alter flow.
+        if matches!(
+            rest[0],
+            "if" | "then"
+                | "fi"
+                | "elif"
+                | "else"
+                | "for"
+                | "in"
+                | "do"
+                | "done"
+                | "while"
+                | "until"
+                | "case"
+                | "esac"
+                | "select"
+                | "function"
+                | "trap"
+                | "eval"
+                | "source"
+                | "."
+                | "hash"
+                | "alias"
+                | "shopt"
+                | "exit"
+                | "return"
+                | "exec"
+                | "command"
+                | "builtin"
+                | "enable"
+                | "PATH"
+        ) {
             return Vec::new();
         }
         commands.push((false, rest.join(" ")));
@@ -226,6 +230,27 @@ fn strict_multi_names(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::cargo_lint_forms;
+
+    #[test]
+    fn argv_lint_test_inventory_keywords_as_literal_operands() {
+        // The Windows CI failure used these exact LF bytes; no host shell,
+        // PATH lookup or platform-specific line ending is involved.
+        assert_eq!(
+            cargo_lint_forms("set -eu\ncargo test first second\necho done"),
+            vec!["'cargo' 'test' 'first' 'second'"]
+        );
+        for word in ["done", "if", "fi", "for", "while", "eval", "exit"] {
+            assert_eq!(
+                cargo_lint_forms(&format!("set -eu\ncargo test first second\necho {word}")),
+                vec!["'cargo' 'test' 'first' 'second'"],
+                "{word} is an operand"
+            );
+            for prefix in ["", "env ", "time ", "nohup ", "FOO=1 "] {
+                let script = format!("set -eu\ncargo test first second\n{prefix}{word} command");
+                assert!(cargo_lint_forms(&script).is_empty(), "{script}");
+            }
+        }
+    }
 
     #[test]
     fn refuses_comment_continuations_and_non_shell_whitespace() {
