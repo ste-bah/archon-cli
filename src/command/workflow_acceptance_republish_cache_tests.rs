@@ -33,6 +33,9 @@ fn prompt_and_judge_digest_covers_every_static_source_contributor() {
     // are therefore covered by hashing the source that defines this function.
     assert!(judge.contains("pub(super) fn batched_judge_prompt("));
     assert!(listed.contains("workflow_task_set_judge.rs"));
+    // Corrective re-asks also contribute judge instructions.
+    assert!(listed.contains("workflow_task_set_judge_screen.rs"));
+    assert!(listed.contains("workflow_task_set_judge_screen_mutation.rs"));
 
     let before = prompt_and_judge_source_digest(PROMPT_AND_JUDGE_SOURCES);
     let changed_reauthor = reauthor.replace("ENTRY_SHAPES", "ENTRY_SHAPES_CHANGED");

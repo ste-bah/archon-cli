@@ -7,7 +7,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
         // Earlier bump and re-pin notes: workflow_host_command_logic_catalog_history.rs.
-        version: 84, // #599: acceptance republish also validates the retained skeleton contracts (83: #597 fatal check expansion diagnostics override masked exit status).
+        version: 85, // #618: screen host file move/rename probes before forwarding refutations.
         // #584 P5 bump: republish now refuses legacy skeleton entry and constraint defects; operator re-pins digest.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -68,6 +68,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "freeze-skeleton",
+        // #618 re-pin only: shares acceptance judge sources; skeleton verdict rules are unchanged.
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
