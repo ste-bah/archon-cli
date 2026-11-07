@@ -453,3 +453,7 @@ mod p5_tests;
 #[cfg(test)]
 #[path = "workflow_stage_landing_reply_tests.rs"]
 mod reply_tests;
+
+#[cfg(test)]
+#[path = "workflow_landing_corpus_tests.rs"]
+mod corpus_tests;

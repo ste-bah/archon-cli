@@ -1,0 +1,9 @@
+All nine authoritative findings are repaired and every retained record has been re-landed with its repair state:
+
+- **TASK-TDL-001**: placeholder id replaced by host-listed `G-DL-001`; `REQ-DL-082`/`G-DL-002`/`G-DL-003` kept.
+- **Block edges** `TDL-001→TDL-003/009/010`, `TDL-001→TDL-004` (producer retained, consumer pair from earlier), `TDL-003→AHDM-004`, `TDL-010→AHDM-005`: all now have consumer-side `depends_on` entries (ordering-only or consumes), paired with unchanged producer `blocks`.
+- **`crates/archon-trading/src/data_lake.rs`**: owned by TASK-TDL-003 via a new `data-lake-domain-gates` deliverable (file verified in repo; REQ-DL-020/021 already in its implements).
+- **TASK-TDL-012 / TASK-TDL-013**: implements carry the DONE/NFR/TF and G-AHDM-001/RD-008 ids a frozen check answers for (earlier repair preserved).
+- Earlier attempt repairs (REQ-DL-082 owner, adapter consumes paths, section citations, TDL-003/009/010 consumer edges) all remain satisfied; nothing reverted.
+
+{"records_landed":19}
