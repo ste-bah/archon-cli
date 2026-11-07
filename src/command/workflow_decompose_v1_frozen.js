@@ -193,7 +193,7 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       deliverableContractRule(),
       "The deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.",
       "Generate large or repetitive fixture data with code rather than writing it literally.",
-      "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. When findings are open, change at least one task record in this call; the gate then judges the whole set again.",
+      "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. Every author call must make at least one byte-changing landing; the gate then judges the whole set again.",
       "Do not run commands or write files."
     ].join("\n") + previousSkeletonContext(previous)
   };
@@ -205,7 +205,7 @@ function previousSkeletonContext(content) {
   if (typeof content !== "string" || content.length === 0) return "";
   const file = contextFile("json", content);
   return `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
-    + "\nWhatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Re-land only changed tasks; unlisted tasks are retained. "
+    + "\nWhatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the receipt's Landed subjects with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed in the receipt have been retained. Re-land changed tasks. "
     + (frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null ? "Keep every frozen task_id and file_name." : "Use remove:true to drop a draft task.");
 }
 
@@ -438,4 +438,16 @@ function skeletonPreviousCandidate(policy, previous, seeded) {
   if (seeded && seed?.candidate === previous && (!seed?.gate || ((seed.gate.findings || []).length > 0
     && seed.gate.findings.every(f => f.remediation_scope === "candidate_artifact")))) return undefined;
   return parsedSkeletonCandidate(previous) ? previous : undefined;
+}
+
+// C6: raw dispatch composes a zero-landing receipt into an empty or seeded
+// artifact. Refuse it before the gate; durable seed replay bypasses this check.
+function refuseUnchangedSkeleton(authored, carry) {
+  if (carry !== null || authored.status === "failed" ||
+      authored.stopReason !== "end_turn" || authored.retainedLandings === true) return authored;
+  let tasks;
+  try { tasks = JSON.parse(authored.content).tasks; } catch (_) { return authored; }
+  if (!Array.isArray(tasks)) return authored;
+  return { ...authored, status: "failed", invalid_answer: true,
+    summary: "This call made no byte-changing landing. Land at least one new or changed task record before replying; the gate judges the retained set." };
 }

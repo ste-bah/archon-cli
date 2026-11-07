@@ -234,5 +234,5 @@ function seedArtifact(seed, policy) {
   }
   const repair = seed.gate ? seedRepairFindings(seed.gate, policy).map((finding) => String(finding.text)) : [];
   const usable = policy.phase !== "skeleton" || parsedSkeletonCandidate(seed.candidate);
-  return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: usable ? seed.candidate : undefined };
+  return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: usable ? seed.candidate : undefined, retainedLandings: policy.phase === "skeleton" && usable && typeof seed.candidate_call === "string" };
 }

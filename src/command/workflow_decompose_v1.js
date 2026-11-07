@@ -186,7 +186,7 @@ async function authorCandidate(w, policy) {
     : null;
   if (seeded) [feedback, lastFindings, openFindings] = [seeded.feedback.slice(), seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
-  let carriedLandings = false;
+  let carriedLandings = seeded?.retainedLandings === true;
   let previousCandidate = skeletonPreviousCandidate(policy, seeded ? seeded.previousCandidate : policy.previousCandidate, seeded);
   let lastAcceptedCandidate = previousCandidate;
   for (;;) {
@@ -265,7 +265,7 @@ async function authorCandidate(w, policy) {
           AUTHOR_CALLS.set(policy.phase, call);
           authored = await w.agent(`${policy.phase}-author-${call}`, {
             task, tier: "planner", resultMode: "rawOutcome",
-            ...(policy.phase === "skeleton" ? { recordLanding: "skeleton", openFindings: promptFeedback, previousSkeleton: skeletonLandingSeed(previousCandidate), frozenSkeleton: frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null } : {})
+            ...(policy.phase === "skeleton" ? { recordLanding: "skeleton", openFindings: openFindings.slice(), previousSkeleton: skeletonLandingSeed(previousCandidate), frozenSkeleton: frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null } : {})
           });
         }
       }
@@ -291,6 +291,7 @@ async function authorCandidate(w, policy) {
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
     const round = authorRoundReport(policy, authorState);
+    if (policy.phase === "skeleton") authored = refuseUnchangedSkeleton(authored, carry);
     if (authored.invalid_answer === true) authored = { ...authored, malformed: true };
     if (policy.phase === "skeleton" && authored.retainedLandings === true && typeof authored.content === "string") {
       previousCandidate = authored.content;
@@ -303,7 +304,7 @@ async function authorCandidate(w, policy) {
         recordRepairs(progress, call, authored.refusals, round, !measuredReplies, advanced);
         lastFindings = authored.findings.map(progressText);
       } else if (authored.malformed) {
-        recordAnswered(progress, call, "entries", advanced, !measuredReplies, round);
+        recordAnswered(progress, call, policy.phase === "skeleton" ? "malformed" : "entries", advanced, !measuredReplies, round);
         feedback = [...openFindings, authored.summary || "malformed replies"];
         lastFindings = feedback.slice();
       } else {

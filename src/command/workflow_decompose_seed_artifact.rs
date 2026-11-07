@@ -29,6 +29,13 @@ pub(super) fn derive(
             .rfind(|(_, _, stdin, _)| *stdin == candidate)
             .map(|(_, _, _, gate)| gate.clone());
         if subject == "skeleton"
+            && skeleton(candidate)
+            && record.result.data["retainedLandings"] == true
+            && gate.as_ref().is_some_and(artifact_only)
+        {
+            gate = None;
+        }
+        if subject == "skeleton"
             && (!skeleton(candidate) || gate.as_ref().is_some_and(artifact_only))
             && let Some((_, _, stdin, judged)) = gates.iter().rfind(|(_, command, stdin, gate)| {
                 *command == "freeze-skeleton" && skeleton(stdin) && !artifact_only(gate)
@@ -38,6 +45,16 @@ pub(super) fn derive(
             gate = Some(judged.clone());
             // A gate can hold host-composed bytes that no author returned verbatim.
             candidate_call = judged.call_id.clone();
+        }
+        if subject == "skeleton" && gate.is_none() {
+            gate = gates
+                .iter()
+                .rfind(|(gate_record, command, _, gate)| {
+                    *command == "freeze-skeleton"
+                        && !artifact_only(gate)
+                        && gate_record.started_at <= record.started_at
+                })
+                .map(|(_, _, _, gate)| gate.clone());
         }
         derived.subjects.insert(
             subject,
@@ -59,35 +76,31 @@ pub(crate) fn retain_skeleton(
     records: &[WorkflowV2CallRecord],
     v2_root: &Path,
 ) -> Result<()> {
-    let Some(SubjectSeed::Artifact {
-        candidate,
-        candidate_call,
-        ..
-    }) = derived.subjects.get_mut("skeleton")
-    else {
-        return Ok(());
-    };
-    let latest = records
-        .iter()
-        .filter_map(|record| {
-            let (subject, _, ordinal) = author_call(&record.call.id)?;
-            (subject == "skeleton")
-                .then(|| reply_content(record).map(|text| (ordinal, text)))
-                .flatten()
-        })
-        .max_by_key(|(ordinal, _)| *ordinal);
     let ordered = ordered(records)?;
-    if let Some((_, text)) = latest
-        && skeleton(text)
-        && !ordered
-            .iter()
-            .filter_map(|record| judged_gate(record))
-            .filter(|(command, stdin, _)| *command == "freeze-skeleton" && *stdin == text)
-            .next_back()
-            .is_some_and(|(_, _, gate)| artifact_only(&gate))
-    {
-        return Ok(());
-    }
+    let held_call = match derived.subjects.get("skeleton") {
+        Some(SubjectSeed::Artifact { candidate_call, .. }) => Some(candidate_call.as_str()),
+        _ => None,
+    };
+    // An older store must never replace a newer reply or judged candidate.
+    let floor = held_call
+        .and_then(author_call)
+        .map(|(_, _, n)| n)
+        .unwrap_or_else(|| {
+            let judged = ordered
+                .iter()
+                .find(|r| Some(r.call.id.as_str()) == held_call);
+            records
+                .iter()
+                .filter(|r| {
+                    r.invalidated_by.is_none()
+                        && judged.is_some_and(|g| r.started_at <= g.started_at)
+                })
+                .filter_map(|r| author_call(&r.call.id))
+                .filter(|(subject, _, _)| subject == "skeleton")
+                .map(|(_, _, n)| n)
+                .max()
+                .unwrap_or(0)
+        });
     let root = v2_root.join("stage-records");
     let identities = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
@@ -172,7 +185,10 @@ pub(crate) fn retain_skeleton(
         })
         .collect();
     authors.sort_by_key(|(ordinal, _)| std::cmp::Reverse(*ordinal));
-    for (_, record) in authors {
+    for (ordinal, record) in authors {
+        if ordinal < floor {
+            continue;
+        }
         let start = started(record)?;
         let end = chrono::DateTime::parse_from_rfc3339(&record.finished_at).ok();
         for (path, identity, owner, created) in &stores {
@@ -194,15 +210,22 @@ pub(crate) fn retain_skeleton(
                 if !landing.has_landed_records()? {
                     return Ok(None);
                 }
-                landing
-                    .retained_completion()?
-                    .map(|receipt| landing.compose(&receipt).map_err(Into::into))
-                    .transpose()
+                landing.retained_artifact().map_err(Into::into)
             })();
             match retained {
                 Ok(Some(value)) => {
-                    *candidate = serde_json::to_string(&value)?;
-                    *candidate_call = record.call.id.clone();
+                    let gate = match derived.subjects.get("skeleton") {
+                        Some(SubjectSeed::Artifact { gate, .. }) => gate.clone(),
+                        _ => None,
+                    };
+                    derived.subjects.insert(
+                        "skeleton".into(),
+                        SubjectSeed::Artifact {
+                            candidate: serde_json::to_string(&value)?,
+                            candidate_call: record.call.id.clone(),
+                            gate,
+                        },
+                    );
                     return Ok(());
                 }
                 Ok(None) => {}

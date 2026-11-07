@@ -131,9 +131,11 @@ fn started(record: &WorkflowV2CallRecord) -> Result<chrono::DateTime<chrono::Fix
 /// A complete reply of an answered author call.
 fn reply_content(record: &WorkflowV2CallRecord) -> Option<&str> {
     let data = &record.result.data;
-    (record.status == WorkflowV2Status::Accepted
+    let retained_skeleton =
+        record.call.id.starts_with("skeleton-author-") && data["retainedLandings"] == true;
+    ((retained_skeleton
+        || (record.status == WorkflowV2Status::Accepted && data["stopReason"] == "end_turn"))
         && record.invalidated_by.is_none()
-        && data["stopReason"] == "end_turn"
         && data["dry_run"] != true)
         .then(|| data["content"].as_str())
         .flatten()
