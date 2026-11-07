@@ -19,6 +19,127 @@ fn names() -> Vec<String> {
 }
 
 #[test]
+fn single_dead_filter_preserves_the_exact_finding() {
+    let invocation = invocations("cargo test -p package --test target -- missing").remove(0);
+    let names = inventory(
+        &Runner::Cargo,
+        "module::test_alpha: test\n1 test, 0 benchmarks",
+    )
+    .unwrap();
+    assert_eq!(
+        mismatch_for_run(Some(0), &invocation, Some(&names)).unwrap(),
+        format!(
+            "{} ran 0 matching tests: filter `missing` matched no test in its selected base-tree target; if the work adds this test, it does not exist yet at base and the check must fail there when no test runs; otherwise check the full test path against the nearest real test paths: module::test_alpha",
+            invocation.line
+        )
+    );
+}
+
+#[test]
+fn multi_filter_dead_filter_counts_the_union_of_sibling_matches() {
+    for (command, listing) in [
+        (
+            "cargo test -p package --test target -- missing alpha tests::alpha beta",
+            "module::tests::alpha: test\nmodule::tests::beta: test\nmodule::tests::gamma: test",
+        ),
+        (
+            "cargo nextest run -p package --test target -- missing alpha tests::alpha beta",
+            r#"{"rust-suites":{"target":{"testcases":{"module::tests::alpha":{},"module::tests::beta":{},"module::tests::gamma":{}}}}}"#,
+        ),
+    ] {
+        let invocations = invocations(command);
+        assert_eq!(invocations.len(), 4);
+        let names = inventory(&invocations[0].runner, listing).unwrap();
+        let findings: Vec<_> = invocations
+            .iter()
+            .filter_map(|invocation| mismatch_for_run(Some(0), invocation, Some(&names)))
+            .collect();
+        assert_eq!(findings.len(), 1);
+        let finding = &findings[0];
+        assert!(finding.contains(&format!(
+            "filter `missing` in {} matches no test",
+            invocations[0].line
+        )));
+        assert!(
+            finding.contains("other named filters (`alpha`, `tests::alpha`, `beta`) match 2 tests")
+        );
+        assert!(finding.contains(
+            "every named test must exist or the check must fail at base when it does not run"
+        ));
+        assert!(finding.contains("nearest real test paths: module::tests::"));
+        assert!(!finding.contains("ran 0 matching tests"));
+    }
+}
+
+#[test]
+fn multi_filter_all_dead_names_every_filter_and_reports_zero_tests() {
+    let invocations = invocations("cargo test -p package --test target -- missing absent");
+    assert_eq!(invocations.len(), 2);
+    let names = inventory(&Runner::Cargo, "module::test_alpha: test").unwrap();
+    for invocation in &invocations {
+        let finding = mismatch_for_run(Some(0), invocation, Some(&names)).unwrap();
+        assert!(finding.contains(&format!(
+            "{} ran 0 matching tests: filters `missing`, `absent` matched no test",
+            invocation.line
+        )));
+        assert!(finding.contains("nearest real test paths: module::test_alpha"));
+    }
+}
+
+#[test]
+fn multi_filter_exact_matching_does_not_count_substring_matches() {
+    let invocations = invocations(
+        "cargo test -p package --test target -- tests::alpha module::tests::beta --exact",
+    );
+    assert_eq!(invocations.len(), 2);
+    let names = inventory(
+        &Runner::Cargo,
+        "module::tests::alpha: test\nmodule::tests::beta: test\nmodule::tests::beta_extra: test",
+    )
+    .unwrap();
+    let finding = mismatch_for_run(Some(0), &invocations[0], Some(&names)).unwrap();
+    assert!(finding.contains("filter `tests::alpha` in "));
+    assert!(finding.contains("other named filters (`module::tests::beta`) match 1 tests"));
+    assert!(!finding.contains("ran 0 matching tests"));
+    assert!(mismatch_for_run(Some(0), &invocations[1], Some(&names)).is_none());
+}
+
+#[test]
+fn sibling_filters_stay_with_their_command() {
+    let invocations =
+        invocations("cargo test --test first -- missing absent; cargo test --test second -- alpha");
+    assert_eq!(invocations.len(), 3);
+    let names = inventory(&Runner::Cargo, "alpha: test").unwrap();
+    let finding = mismatch_for_run(Some(0), &invocations[0], Some(&names)).unwrap();
+    assert!(finding.contains("ran 0 matching tests: filters `missing`, `absent`"));
+    assert!(mismatch_for_run(Some(0), &invocations[2], Some(&names)).is_none());
+}
+
+#[test]
+fn pytest_dead_filter_and_node_matching_are_unchanged() {
+    let names = inventory(
+        &Runner::Pytest,
+        "t.py::test_alpha[1]\nt.py::TestC::test_beta",
+    )
+    .unwrap();
+    for command in [
+        "pytest -k ALPHA",
+        "pytest t.py::TestC",
+        "pytest t.py::test_alpha",
+    ] {
+        let invocation = invocations(command).remove(0);
+        assert!(mismatch_for_run(Some(0), &invocation, Some(&names)).is_none());
+    }
+    let invocation = invocations("pytest -k missing").remove(0);
+    let finding = mismatch_for_run(Some(0), &invocation, Some(&names)).unwrap();
+    assert!(finding.starts_with(&format!(
+        "{} ran 0 matching tests: filter `missing` matched no test",
+        invocation.line
+    )));
+    assert!(finding.contains("does not exist yet at base and the check must fail there"));
+}
+
+#[test]
 #[allow(non_snake_case)]
 fn P3_3_all_zero_names_each_invocation_and_nearest_paths() {
     assert!(archon_workflow::acceptance::output_reports_zero_work(
@@ -121,7 +242,7 @@ async fn R4_inventory_findings_uses_base_cache_for_successful_partial_zero_work(
         repository: root.path().into(),
         commit: "base".into(),
     };
-    let command = "cargo test -p package tests::alpha -- --exact";
+    let command = "cargo test -p package -- missing module::tests::alpha --exact";
     let contract = serde_json::from_value(serde_json::json!({
         "schema_version":1,"prd":{"path":"requirements.md","digest":"d"},
         "gap_policy":{"permitted_acceptance_ids":[],"forbidden_phrases":[],"required_fields":[]},
@@ -161,7 +282,10 @@ async fn R4_inventory_findings_uses_base_cache_for_successful_partial_zero_work(
     )
     .await;
     assert!(findings["check"].contains("module::tests::alpha"));
-    assert!(findings["check"].contains("must fail there"));
+    assert!(findings["check"].contains("match 1 tests"));
+    assert!(findings["check"].contains("must fail at base"));
+    assert!(!findings["check"].contains("zero work"));
+    assert!(!findings["check"].contains("ran 0 matching tests"));
 }
 
 #[test]

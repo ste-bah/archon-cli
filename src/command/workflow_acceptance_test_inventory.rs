@@ -14,7 +14,25 @@ pub(crate) struct Invocation {
     pub(crate) line: String,
     pub(crate) list: String,
     pub(crate) filter: String,
+    /// All positional filters from this command, sharing its target and match mode.
+    pub(crate) filters: Vec<String>,
     pub(crate) exact: bool,
+}
+
+impl Invocation {
+    fn matches(&self, name: &str, filter: &str) -> bool {
+        if self.exact {
+            name == filter
+                || (self.runner == Runner::Pytest
+                    && (name.starts_with(&format!("{filter}["))
+                        || name.starts_with(&format!("{filter}::"))))
+        } else if self.runner == Runner::Pytest {
+            name.to_ascii_lowercase()
+                .contains(&filter.to_ascii_lowercase())
+        } else {
+            name.contains(filter)
+        }
+    }
 }
 
 fn quote(text: &str) -> String {
@@ -142,7 +160,7 @@ pub(crate) fn invocations(text: &str) -> Vec<Invocation> {
         if filters.is_empty() {
             filters.push(String::new());
         }
-        for mut filter in filters {
+        for mut filter in filters.clone() {
             let exact = (runner == Runner::Pytest && !args.iter().any(|arg| arg == "-k"))
                 || args[before..].iter().any(|arg| arg == "--exact");
             let mut list_args = match runner {
@@ -173,6 +191,7 @@ pub(crate) fn invocations(text: &str) -> Vec<Invocation> {
                 line: rendered(program, args),
                 list: format!("{prefix}{}", rendered(program, &list_args)),
                 filter,
+                filters: filters.clone(),
                 exact,
             });
         }
@@ -380,23 +399,48 @@ pub(crate) fn mismatch_for_run(
 
 pub(crate) fn mismatch(invocation: &Invocation, names: &[String]) -> Option<String> {
     if invocation.filter.is_empty()
-        || names.iter().any(|name| {
-            if invocation.exact {
-                name == &invocation.filter
-                    || (invocation.runner == Runner::Pytest
-                        && (name.starts_with(&format!("{}[", invocation.filter))
-                            || name.starts_with(&format!("{}::", invocation.filter))))
-            } else if invocation.runner == Runner::Pytest {
-                name.to_ascii_lowercase()
-                    .contains(&invocation.filter.to_ascii_lowercase())
-            } else {
-                name.contains(&invocation.filter)
-            }
-        })
+        || names
+            .iter()
+            .any(|name| invocation.matches(name, &invocation.filter))
     {
         return None;
     }
     let nearest = nearest_paths(invocation, names);
+    if invocation.filters.len() > 1 {
+        let others = invocation
+            .filters
+            .iter()
+            .filter(|filter| *filter != &invocation.filter)
+            .collect::<Vec<_>>();
+        let matched = names
+            .iter()
+            .filter(|name| others.iter().any(|filter| invocation.matches(name, filter)))
+            .count();
+        let named = |filters: &[&String]| {
+            filters
+                .iter()
+                .map(|filter| format!("`{filter}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        return Some(if matched > 0 {
+            format!(
+                "filter `{}` in {} matches no test in its selected base-tree target while the other named filters ({}) match {} tests; every named test must exist or the check must fail at base when it does not run; check the full test path against the nearest real test paths: {}",
+                invocation.filter,
+                invocation.line,
+                named(&others),
+                matched,
+                nearest.join(", ")
+            )
+        } else {
+            format!(
+                "{} ran 0 matching tests: filters {} matched no test in their selected base-tree target; every named test must exist or the check must fail at base when it does not run; check the full test path against the nearest real test paths: {}",
+                invocation.line,
+                named(&invocation.filters.iter().collect::<Vec<_>>()),
+                nearest.join(", ")
+            )
+        });
+    }
     Some(format!(
         "{} ran 0 matching tests: filter `{}` matched no test in its selected base-tree target; if the work adds this test, it does not exist yet at base and the check must fail there when no test runs; otherwise check the full test path against the nearest real test paths: {}",
         invocation.line,
