@@ -12,10 +12,34 @@ const ROUNDS_TO_STOP: usize = 16;
 #[derive(Default)]
 struct Host {
     records: Mutex<Vec<Value>>,
+    baseline: Mutex<Option<Vec<Value>>>,
 }
 impl Host {
     fn count(&self) -> usize {
         self.records.lock().unwrap().len()
+    }
+    fn new_count(&self) -> usize {
+        let baseline = self.baseline.lock().unwrap();
+        let Some(before) = baseline.as_ref() else {
+            return 0;
+        };
+        let records = self.records.lock().unwrap();
+        let subjects: std::collections::BTreeSet<_> = before
+            .iter()
+            .chain(records.iter())
+            .map(|v| v["subject"].as_str().unwrap())
+            .collect();
+        subjects
+            .into_iter()
+            .filter(|subject| {
+                let task = |rows: &[Value]| {
+                    rows.iter()
+                        .find(|v| v["subject"] == *subject)
+                        .map(|v| v["task"].clone())
+                };
+                task(before) != task(&records)
+            })
+            .count()
     }
 }
 impl LandingHost for Host {
@@ -26,26 +50,45 @@ impl LandingHost for Host {
         if value.get("task").is_none() {
             return Err("skeleton record requires task".into());
         }
-        self.records.lock().unwrap().push(value);
+        {
+            let mut baseline = self.baseline.lock().unwrap();
+            let mut records = self.records.lock().unwrap();
+            baseline.get_or_insert_with(|| records.clone());
+            if let Some(record) = records
+                .iter_mut()
+                .find(|v| v["subject"] == value["subject"])
+            {
+                *record = value;
+            } else {
+                records.push(value);
+            }
+        }
         self.hint()
     }
     fn hint(&self) -> Result<String, String> {
         Ok(format!(
-            "Host retained {0} records. Final reply: {{\"records_landed\":{0}}}",
-            self.count()
+            "Host retained {} records; {} new landings in this call (seeds do not count). When no task is left to land, your final reply is exactly {{\"records_landed\":{}}}",
+            self.count(),
+            self.new_count(),
+            self.new_count()
         ))
     }
     fn complete(&self, value: &Value) -> Result<(), String> {
         match value["records_landed"].as_u64() {
-            Some(n) if n as usize == self.count() => Ok(()),
+            Some(n)
+                if n as usize == self.new_count()
+                    && value.as_object().is_some_and(|v| v.len() == 1) =>
+            {
+                Ok(())
+            }
             _ => Err(format!(
-                "records_landed=missing but host retained {} record(s)",
-                self.count()
+                "reply must count {} new landings in this call, excluding seeds",
+                self.new_count()
             )),
         }
     }
     fn retained_completion(&self) -> Option<Value> {
-        (self.count() > 0).then(|| json!({"records_landed": self.count()}))
+        (self.new_count() > 0).then(|| json!({"records_landed": self.new_count()}))
     }
 }
 
@@ -285,6 +328,57 @@ async fn landed_non_skeleton_record_replies_exhaust_the_incomplete_budget() {
     );
     assert_eq!(host.0.lock().unwrap().len(), 3);
     assert_eq!(provider.requests().len(), 3);
+}
+
+// D2, D-doubles.md §4.1: retained seeds and identical re-landings are not new work.
+#[test]
+fn landed_fake_host_counts_only_this_calls_byte_changing_subjects() {
+    let seed: Value = serde_json::from_str(&record("TASK-X-001")).unwrap();
+    let host = Host::default();
+    host.records.lock().unwrap().push(seed.clone());
+    assert!(
+        host.retained_completion().is_none(),
+        "seed-only store cannot complete"
+    );
+    host.land(seed.clone()).unwrap();
+    assert!(
+        host.retained_completion().is_none(),
+        "identical seed is not new work"
+    );
+    let mut changed = seed.clone();
+    changed["task"]["implements"] = json!(["REQ-2"]);
+    host.land(changed).unwrap();
+    assert_eq!(
+        host.retained_completion(),
+        Some(json!({"records_landed":1}))
+    );
+    host.land(seed).unwrap();
+    assert!(
+        host.retained_completion().is_none(),
+        "restoring seed bytes is not new work"
+    );
+    let mut metadata = serde_json::from_str::<Value>(&record("TASK-X-001")).unwrap();
+    metadata["summary"] = json!("same task, different inspection summary");
+    host.land(metadata).unwrap();
+    assert!(
+        host.retained_completion().is_none(),
+        "only task bytes count"
+    );
+    let next: Value = serde_json::from_str(&record("TASK-X-002")).unwrap();
+    host.land(next.clone()).unwrap();
+    host.land(next).unwrap();
+    assert_eq!(host.count(), 2, "same subject replaces rather than appends");
+    assert_eq!(
+        host.retained_completion(),
+        Some(json!({"records_landed":1}))
+    );
+    assert!(host.complete(&json!({"records_landed":1})).is_ok());
+    assert!(host.complete(&json!({"records_landed":2})).is_err());
+    assert!(
+        host.complete(&json!({"records_landed":1,"extra":true}))
+            .is_err()
+    );
+    assert!(host.hint().unwrap().contains("your final reply is exactly"));
 }
 
 #[path = "landing_audit_tests.rs"]
