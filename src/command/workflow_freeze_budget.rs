@@ -316,7 +316,11 @@ impl FreezeIncomplete {
             }
         }
         self.subjects = subjects;
-        self.known_findings.extend(findings);
+        for finding in findings {
+            if !self.known_findings.contains(&finding) {
+                self.known_findings.push(finding);
+            }
+        }
     }
 
     /// The findings this freeze already had when a later step stalled.

@@ -162,3 +162,6 @@
 // Guarded scripts and heredoc data supply no B2 finding; only workspace package
 // selectors are scanned. verify-frozen-acceptance stays 21 (runs no probe).
 // Re-pin other changed closures only; their verdict rules do not use B2.
+
+// 84: #599 acceptance republish also validates the retained skeleton contracts.
+// 83: #597 fatal check expansion diagnostics override masked exit status.

@@ -112,7 +112,9 @@ pub(super) fn keep_pinned_entries(
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
-        if entry.judgment.verdict == JudgeDecision::Accepted {
+        if passability::lint_finding(entry).is_some()
+            || entry.judgment.verdict == JudgeDecision::Accepted
+        {
             continue;
         }
         let Some(old) = base
@@ -241,6 +243,7 @@ pub(super) async fn judge(
     store: Option<&super::judge_store::JudgeStore>,
     roots: &super::judge::JudgeRoots,
 ) -> Result<AcceptanceContract> {
+    let linted = passability::lint_commands(&mut contract);
     let tasks_root = tasks
         .canonicalize()
         .with_context(|| format!("could not canonicalize task root {}", tasks.display()))?;
@@ -264,6 +267,9 @@ pub(super) async fn judge(
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
+        if linted.contains(&entry.id) {
+            continue;
+        }
         let named_file_digest = super::judge::named_files_content_digest(entry, roots);
         let Some((key, named_file_digest)) = entry_key_with_named_digest(
             client,

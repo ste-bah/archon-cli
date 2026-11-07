@@ -21,8 +21,8 @@
 //! ([`judge_baseline_failures`]) and every re-authored replacement
 //! ([`cannot_pass_findings`], from `workflow_acceptance_reauthor`).
 //!
-//! Order in the freeze: the adversarial judge first (its batch, its saved
-//! verdicts and their keys are unchanged), then the probe (which runs only
+//! Command-text argument lint runs before judgment and cache reuse.
+//! Remaining checks reach the adversarial judge, then the probe (which runs only
 //! the checks that judge accepted), then this pass over the accepted checks
 //! that failed on its evidence tree. Each verdict here is saved per check under
 //! the digest of its exact input -- this instruction, the check, the
@@ -56,7 +56,9 @@ pub(super) use audit::verdict_key;
 #[cfg(test)]
 pub(crate) use evidence::test_secret;
 use evidence::{Evidence, Redactor};
-pub(crate) use usage::{cannot_pass_findings, original_usage_error, silent_stall_finding};
+pub(crate) use usage::{
+    cannot_pass_findings, lint_commands, lint_finding, original_usage_error, silent_stall_finding,
+};
 
 /// What every finding for a check that cannot pass says, after its id.
 pub(crate) const CANNOT_PASS: &str = "cannot pass as written";

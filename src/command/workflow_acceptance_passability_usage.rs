@@ -497,3 +497,4 @@ pub(crate) fn original_usage_error(
 #[path = "workflow_acceptance_passability_usage_diagnosis.rs"]
 mod diagnosis;
 pub(super) use diagnosis::parser_diagnosis;
+pub(crate) use diagnosis::{lint_commands, lint_finding};

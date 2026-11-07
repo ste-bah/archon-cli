@@ -93,6 +93,30 @@ pub(in crate::command::workflow_task_set) fn stamp_judgment_with_content_digest(
 /// named-file evidence helper supplies the contents included in that prompt.
 pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
     (
+        "workflow_acceptance_executability_verdict_shell.rs",
+        include_bytes!("workflow_acceptance_executability_verdict_shell.rs"),
+    ),
+    (
+        "workflow_acceptance_test_inventory_lint.rs",
+        include_bytes!("workflow_acceptance_test_inventory_lint.rs"),
+    ),
+    (
+        "workflow_acceptance_test_inventory.rs",
+        include_bytes!("workflow_acceptance_test_inventory.rs"),
+    ),
+    (
+        "workflow_acceptance_passability_usage_diagnosis.rs",
+        include_bytes!("workflow_acceptance_passability_usage_diagnosis.rs"),
+    ),
+    (
+        "workflow_acceptance_reauthor_check_defects.rs",
+        include_bytes!("workflow_acceptance_reauthor_check_defects.rs"),
+    ),
+    (
+        "workflow_task_set_judge_lint_stop.rs",
+        include_bytes!("workflow_task_set_judge_lint_stop.rs"),
+    ),
+    (
         "workflow_acceptance_reauthor_author.rs",
         include_bytes!("workflow_acceptance_reauthor_author.rs"),
     ),

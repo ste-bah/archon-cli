@@ -276,6 +276,24 @@ pub(crate) fn shell_commands(text: &str) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
+const CARGO_TEST_VALUE_OPTIONS: &[&str] = &[
+    "-p",
+    "--package",
+    "--manifest-path",
+    "--test",
+    "--bin",
+    "--example",
+    "--features",
+    "-F",
+    "--target-dir",
+    "--exclude",
+    "--target",
+    "--profile",
+    "-j",
+    "--jobs",
+    "--color",
+];
+
 pub(crate) fn cargo_multi_names(text: &str) -> Vec<String> {
     simple_commands(text)
         .into_iter()
@@ -290,25 +308,7 @@ pub(crate) fn cargo_multi_names(text: &str) -> Vec<String> {
                 if std::mem::take(&mut skip) {
                     continue;
                 }
-                if [
-                    "-p",
-                    "--package",
-                    "--manifest-path",
-                    "--test",
-                    "--bin",
-                    "--example",
-                    "--features",
-                    "-F",
-                    "--target-dir",
-                    "--exclude",
-                    "--target",
-                    "--profile",
-                    "-j",
-                    "--jobs",
-                    "--color",
-                ]
-                .contains(&arg.as_str())
-                {
+                if CARGO_TEST_VALUE_OPTIONS.contains(&arg.as_str()) {
                     skip = true;
                 } else if !arg.starts_with('-') {
                     names += 1;
@@ -465,3 +465,7 @@ pub(crate) fn located_shell_commands(
         .map(|(command, cwd)| (command.word, command.args, cwd))
         .collect()
 }
+
+#[path = "workflow_acceptance_test_inventory_lint.rs"]
+mod lint;
+pub(crate) use lint::cargo_lint_forms;

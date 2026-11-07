@@ -6,8 +6,9 @@ use super::{CONTRACT, CapabilityLogic, FREEZE, GATE, LINT, TRACE, VERIFY};
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
+        // #617: argument-text lint runs before judgment and verdict reuse; its grammar and cache source closure are updated.
         // Earlier bump and re-pin notes: workflow_host_command_logic_catalog_history.rs.
-        version: 84, // #599: acceptance republish also validates the retained skeleton contracts (83: #597 fatal check expansion diagnostics override masked exit status).
+        version: 85, // #617: Command-text argument lint precedes judgment and verdict reuse.
         // #584 P5 bump: republish now refuses legacy skeleton entry and constraint defects; operator re-pins digest.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -68,6 +69,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "freeze-skeleton",
+        // #617 re-pin only: the shared freeze closure includes argument-text lint and cache source changes; skeleton verdict rules are unchanged.
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
@@ -117,6 +119,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "land-task-body",
+        // #617 re-pin only: the shared task-set closure includes argument-text lint and cache source changes; body verdict rules are unchanged.
         // 3: R8 body packaging strips chat around the one frozen subject's task
         // file and binds by its task_id; the fidelity critic re-asks on an
         // unparseable answer while it makes progress.
@@ -195,6 +198,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "task-set-lint",
+        // #617 re-pin only: the shared task-set closure includes argument-text lint and cache source changes; task-set lint verdict rules are unchanged.
         // 3: the fidelity critic re-asks on an unparseable answer while it
         // makes progress (R8).
         // 4: #380's obligation model changes the frozen contract verdict.
@@ -259,6 +263,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "requirements-trace",
+        // #617 re-pin only: shared catalog notes change; requirements trace verdict rules are unchanged.
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #442 a `path::symbol` or `path:line` span is a path plus an anchor judged in that file; a
         // package-relative path is read against every base path it is a suffix of (the claiming task's
@@ -286,6 +291,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
+        // #617 re-pin only: the shared catalog records the acceptance lint version; frozen verification uses stored judgments and its verdict rules are unchanged.
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
         // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
@@ -348,6 +354,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
+        // #617 re-pin only: the shared catalog records the acceptance lint version; frozen verification uses stored judgments and its verdict rules are unchanged.
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: #491 a skeleton bound to the prior acceptance is pending and skipped by the frozen snapshot.

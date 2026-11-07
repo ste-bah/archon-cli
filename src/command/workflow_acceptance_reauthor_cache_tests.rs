@@ -83,6 +83,10 @@ fn forgetting_a_check_archives_its_saved_accepted_judgment() {
 fn named_file_helpers_are_bound_into_candidate_reuse() {
     for name in [
         "workflow_task_set_judge_named_files_text.rs",
+        "workflow_acceptance_test_inventory_lint.rs",
+        "workflow_acceptance_executability_verdict_shell.rs",
+        "workflow_acceptance_test_inventory.rs",
+        "workflow_acceptance_passability_usage_diagnosis.rs",
         "workflow_task_set_judge_named_files_repository.rs",
     ] {
         let source = PROMPT_AND_JUDGE_SOURCES
