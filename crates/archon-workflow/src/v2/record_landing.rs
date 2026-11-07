@@ -125,7 +125,7 @@ impl RecordLanding {
         } else {
             write(&path, &expected)?;
         }
-        Ok(Self {
+        let store = Self {
             root,
             kind,
             subjects,
@@ -136,7 +136,9 @@ impl RecordLanding {
             landed_here: Mutex::new(Default::default()),
             repair_required: Mutex::new(false),
             pre_call_tasks: Mutex::new(Default::default()),
-        })
+        };
+        store.restore_call()?;
+        Ok(store)
     }
     pub fn kind(&self) -> RecordKind {
         self.kind
@@ -272,9 +274,8 @@ impl RecordLanding {
                 )
             ) {
                 record.status = previous.status;
-                if !previous.summary.is_empty() {
-                    record.summary = format!("{}; {}", previous.summary, record.summary);
-                }
+                // The latest summary replaces prose; only the failure verdict sticks.
+                // replace:true above explicitly supersedes both verdict and record.
             }
             self.validate(&record, Admission::NewLanding)
                 .map_err(|e| with_schema(e, self.kind))?;
@@ -316,7 +317,7 @@ impl RecordLanding {
             return self.skeleton_hint(&records);
         }
         Ok(format!(
-            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Schema: {}",
+            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Findings, evidence and commands are unioned; the latest summary replaces the previous summary. A failed, blocked or needs_review verdict persists unless replace:true supersedes it. Schema: {}",
             records.len(),
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
             serde_json::to_string(&self.remaining()?)?,
@@ -460,3 +461,10 @@ mod patch;
 
 #[path = "record_landing_rejected.rs"]
 mod rejected;
+
+#[cfg(test)]
+#[path = "record_landing_resume_tests.rs"]
+mod resume_tests;
+
+#[path = "record_landing_state.rs"]
+mod state;

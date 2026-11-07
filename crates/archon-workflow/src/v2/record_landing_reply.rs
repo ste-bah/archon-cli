@@ -51,12 +51,6 @@ impl RecordLanding {
         ))
     }
 
-    /// Whether this call must repair open findings, rather than author a first draft.
-    pub fn require_new_landings(&self, required: bool) -> WorkflowResult<()> {
-        *self.repair_required.lock().map_err(invalid)? = required;
-        Ok(())
-    }
-
     /// Open findings require at least one byte-changing landing in this call.
     pub fn require_finding_landings(&self, findings: &[Value]) -> WorkflowResult<()> {
         self.require_new_landings(!findings.is_empty())
@@ -98,9 +92,16 @@ impl RecordLanding {
         self.compose(&json!({"records_landed":self.records()?.len()}))
     }
 
-    /// Seed records contain only subject/task; landed records use the full
-    /// serialized StageRecord format, including its default fields.
+    /// Current stores use the durable per-call change set, including removals.
+    /// Legacy stores fall back to full serialized records as evidence of work.
     pub fn has_landed_records(&self) -> WorkflowResult<bool> {
+        if self.root.join("call-state.json").exists() {
+            return Ok(self.new_landing_count()? > 0);
+        }
+        self.has_full_records()
+    }
+
+    fn has_full_records(&self) -> WorkflowResult<bool> {
         for entry in std::fs::read_dir(&self.root).map_err(invalid)? {
             let path = entry.map_err(invalid)?.path();
             if !path
@@ -120,15 +121,19 @@ impl RecordLanding {
     }
 
     /// The artifact a `records_landed` reply stands for. A skeleton is
-    /// composed whole from the retained records; any other kind keeps the
-    /// reply and takes its tasks from them. The count check still applies.
+    /// composed whole from retained tasks; other kinds keep the reply and add
+    /// landed findings and verification records. The count check still applies.
     pub fn compose(&self, reply: &Value) -> WorkflowResult<Value> {
-        let tasks = self.assemble(reply)?["tasks"].take();
+        let mut assembled = self.assemble(reply)?;
+        let tasks = assembled["tasks"].take();
         if self.kind == RecordKind::Skeleton {
             return Ok(json!({"schema_version":1,"acceptance_digest":"","tasks":tasks}));
         }
         let mut value = reply.clone();
-        value["tasks"] = tasks;
+        value["findings"] = assembled["findings"].take();
+        if self.kind == RecordKind::Verify {
+            value["verification_records"] = assembled["verification_records"].take();
+        }
         if let Some(object) = value.as_object_mut() {
             object.remove("records_landed");
         }
@@ -154,7 +159,7 @@ impl RecordLanding {
     /// Preserve valid retained tasks even when this call cannot complete.
     pub fn retained_artifact(&self) -> WorkflowResult<Option<Value>> {
         if self.kind != RecordKind::Skeleton
-            || (!self.has_landed_records()? && self.new_landing_count()? == 0)
+            || (!self.has_full_records()? && self.new_landing_count()? == 0)
         {
             return Ok(None);
         }

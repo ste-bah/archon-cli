@@ -109,3 +109,34 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
         }
     }
 }
+
+// B-store.md:99-102: raw R/V receipts must expand the same landed findings.
+#[test]
+fn stage_landing_b4_raw_receipts_keep_findings() {
+    for kind in [RecordKind::Review, RecordKind::Verify] {
+        for receipt in [
+            json!({"records_landed":1}),
+            json!({"status":"accepted","data":{"records_landed":1}}),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let records = RecordLanding::open(
+                temp.path().into(),
+                "call".into(),
+                kind,
+                vec!["TASK-X-001".into()],
+                true,
+            )
+            .unwrap();
+            records.land(json!({"subject":"TASK-X-001","status":"failed","summary":"counterexample",
+                "findings":[{"claim":"counterexample"}],"evidence":[{"kind":"inspection","summary":"read source"}]})).unwrap();
+            let result: Value =
+                serde_json::from_str(&compose_raw_reply(&records, &receipt.to_string()).unwrap())
+                    .unwrap();
+            let data = result.get("data").unwrap_or(&result);
+            assert_eq!(data["findings"][0]["claim"], "counterexample");
+            if kind == RecordKind::Verify {
+                assert_eq!(data["verification_records"][0]["status"], "failed");
+            }
+        }
+    }
+}

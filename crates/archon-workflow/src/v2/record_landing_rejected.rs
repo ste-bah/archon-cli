@@ -38,15 +38,18 @@ impl RecordLanding {
             match std::fs::read(path) {
                 Ok(bytes) => {
                     let record: StageRecord = serde_json::from_slice(&bytes)?;
-                    Ok(Some(serde_json::to_vec(&record.task)?))
+                    let bytes = if self.kind == RecordKind::Skeleton {
+                        serde_json::to_vec(&record.task)?
+                    } else {
+                        serde_json::to_vec(&record)?
+                    };
+                    Ok(Some(Sha256::digest(bytes).to_vec()))
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(error) => Err(invalid(error)),
             }
         };
-        if self.kind == RecordKind::Skeleton
-            && let (Some(subject), Some(path)) = (&subject, &path)
-        {
+        if let (Some(subject), Some(path)) = (&subject, &path) {
             let mut initial = self.pre_call_tasks.lock().map_err(invalid)?;
             if !initial.contains_key(subject) {
                 initial.insert(subject.clone(), task_bytes(path)?);
@@ -64,6 +67,8 @@ impl RecordLanding {
         } else {
             None
         };
+        // Commit the pre-operation image first, so a crash during mutation rolls back.
+        self.save_call()?;
         let result = self.land_record(value);
         if let Some(subject) = subject {
             let mut rejected = self.rejected.lock().map_err(invalid)?;
@@ -89,6 +94,7 @@ impl RecordLanding {
                 Err(_) => {}
             }
         }
+        self.save_call()?;
         result
     }
 

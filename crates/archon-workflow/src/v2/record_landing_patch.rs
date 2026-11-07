@@ -19,6 +19,7 @@ impl RecordLanding {
                 }
             };
         let _lock = self.lock.lock().map_err(invalid)?;
+        self.save_call()?;
         let mut identities = BTreeMap::new();
         for task in skeleton.tasks {
             let record = json!({"subject":task.task_id,"task":task});
@@ -30,14 +31,20 @@ impl RecordLanding {
             identities.insert(task.task_id.clone(), task.file_name.clone());
             let path = self.record_path(&task.task_id);
             // Existing landed tasks supersede the seed.
-            if !path.exists() {
+            if !path.exists()
+                && !self
+                    .pre_call_tasks
+                    .lock()
+                    .map_err(invalid)?
+                    .contains_key(&task.task_id)
+            {
                 write(&path, &record)?;
             }
         }
         if frozen {
             *self.frozen_tasks.lock().map_err(invalid)? = Some(identities);
         }
-        Ok(())
+        self.save_call()
     }
 
     // Frozen seeds retain repairable contracts; only new landings audit strength.
