@@ -74,10 +74,12 @@ fn cpu_time(pin: Pinned) -> io::Result<Option<u64>> {
             )
         };
         if written != size as i32 {
+            // Read errno before identity_of makes its own syscalls.
+            let failed = io::Error::last_os_error();
             if super::identity_of(pin.pid)? != Some(pin.start) {
                 return Ok(None);
             }
-            return Err(io::Error::last_os_error());
+            return Err(failed);
         }
         info.pti_total_user.saturating_add(info.pti_total_system)
     };

@@ -148,12 +148,10 @@ pub fn identity_of(pid: u32) -> io::Result<Option<u64>> {
         if let Some(info) = bsd_info(id) {
             return Ok((info.pbi_status != libc::SZOMB).then(|| start_of_info(&info)));
         }
-        // SAFETY: signal zero probes existence without delivering a signal.
-        if unsafe { libc::kill(id, 0) } < 0
-            && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-        {
-            return Ok(None);
-        }
+        // macOS proc_pidinfo misses zombies (ESRCH) and permission-hidden
+        // processes; kill(0) still sees zombies. Read KERN_PROC_PID instead,
+        // as psutil does: https://github.com/giampaolo/psutil/blob/master/psutil/arch/osx/proc_utils.c
+        return identity_from_kinfo(id);
     }
     #[cfg(not(target_os = "linux"))]
     Err(io::Error::other("process identity is unknown"))
@@ -293,6 +291,70 @@ fn start_of_info(info: &libc::proc_bsdinfo) -> u64 {
         .saturating_add(info.pbi_start_tvusec)
 }
 
+// libc 0.2.186 does not expose Apple's kinfo_proc. Match the 64-bit ABI in
+// <sys/proc.h> (extern_proc prefix) and <sys/sysctl.h> (648-byte record).
+// The start-time union occupies 16 bytes, as do two pointers; only its
+// timeval arm and p_stat are read. Everything after p_stat stays opaque.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct KinfoProc {
+    p_starttime: libc::timeval,
+    _p_vmspace: *mut libc::c_void,
+    _p_sigacts: *mut libc::c_void,
+    _p_flag: libc::c_int,
+    p_stat: libc::c_char,
+    _rest: [u8; 611],
+}
+
+#[cfg(target_os = "macos")]
+const _: () = {
+    assert!(std::mem::size_of::<KinfoProc>() == 648);
+    assert!(std::mem::offset_of!(KinfoProc, p_starttime) == 0);
+    assert!(std::mem::offset_of!(KinfoProc, p_stat) == 36);
+};
+
+#[cfg(target_os = "macos")]
+fn identity_from_kinfo(pid: libc::pid_t) -> io::Result<Option<u64>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+    // SAFETY: zero is valid for all fields, including the opaque bytes.
+    let mut info: KinfoProc = unsafe { std::mem::zeroed() };
+    let mut size = std::mem::size_of_val(&info);
+    // SAFETY: mib and the output buffer are valid for their supplied sizes;
+    // null newp and zero newlen request a read without changing kernel state.
+    let result = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            (&mut info as *mut KinfoProc).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if result != 0 {
+        let error = io::Error::last_os_error();
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(None)
+        } else {
+            Err(error)
+        };
+    }
+    if size == 0 {
+        return Ok(None);
+    }
+    if size != std::mem::size_of_val(&info) {
+        return Err(io::Error::other("unexpected kinfo_proc size"));
+    }
+    if u32::try_from(info.p_stat).ok() == Some(libc::SZOMB) {
+        return Ok(None);
+    }
+    let sec = u64::try_from(info.p_starttime.tv_sec)
+        .map_err(|_| io::Error::other("invalid process start seconds"))?;
+    let usec = u64::try_from(info.p_starttime.tv_usec)
+        .map_err(|_| io::Error::other("invalid process start microseconds"))?;
+    Ok(Some(sec.saturating_mul(1_000_000).saturating_add(usec)))
+}
+
 /// Every pid the kernel lists. A listing that fills its buffer may have been
 /// cut short, so it is asked again with a larger one; a zero or negative
 /// answer is a failed listing, never an empty table.
@@ -355,3 +417,7 @@ fn snapshot_libproc(deadline: Instant) -> io::Result<Table> {
     }
     Ok(table)
 }
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "process_tree_identity_macos_tests.rs"]
+mod macos_tests;
