@@ -25,6 +25,50 @@ pub(super) fn skeleton_message(request: &Value, candidate: &str) -> Value {
         let mut seen = std::collections::BTreeSet::new();
         sections.retain(|s| seen.insert(s.to_string()));
     }
+    // The test double follows the patch contract: send only task changes.
+    let previous = request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|m| {
+            if let Some(text) = m["content"].as_str() {
+                vec![text]
+            } else {
+                m["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|b| b["text"].as_str())
+                    .collect()
+            }
+        })
+        .find_map(|text| {
+            let path = text
+                .split_once("The previous candidate is in ")?
+                .1
+                .split_once(" (sha256 ")?
+                .0;
+            serde_json::from_slice::<Value>(&std::fs::read(path).ok()?).ok()
+        });
+    if let Some(previous) = previous {
+        let normalize = |task: &Value| {
+            serde_json::from_value::<archon_workflow::task_skeleton::FrozenTask>(task.clone())
+                .ok()
+                .and_then(|task| serde_json::to_value(task).ok())
+        };
+        tasks.retain(|task| {
+            !previous["tasks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|old| {
+                    old["task_id"] == task["task_id"]
+                        && normalize(old)
+                            .zip(normalize(task))
+                            .is_some_and(|(old, new)| old == new)
+                })
+        });
+    }
     let received = request["messages"]
         .as_array()
         .and_then(|messages| messages.last())
@@ -44,7 +88,7 @@ pub(super) fn skeleton_message(request: &Value, candidate: &str) -> Value {
             serde_json::from_str::<Value>(completion).ok()?["records_landed"].as_u64()
         })
         .unwrap_or(tasks.len() as u64);
-    let (content, stop) = if received {
+    let (content, stop) = if received || tasks.is_empty() {
         (
             json!([{"type":"text", "text":json!({"records_landed":receipt_count}).to_string()}]),
             "end_turn",
@@ -154,5 +198,90 @@ mod rejected_reply_tests {
         let mut expected = candidate["tasks"][0].clone();
         expected["source_sections"] = json!(["0", "2"]);
         assert_eq!(repair["content"][0]["input"]["task"], expected);
+    }
+}
+
+#[cfg(test)]
+mod retained_store_tests {
+    use super::*;
+    use archon_workflow::v2::record_landing::{RecordKind, RecordLanding};
+
+    #[test]
+    fn offline_skeleton_relands_seeded_tasks_and_uses_the_actual_new_count() {
+        let temp = tempfile::tempdir().unwrap();
+        let records = RecordLanding::open(
+            temp.path().join("records"),
+            "call".into(),
+            RecordKind::Skeleton,
+            vec![],
+            false,
+        )
+        .unwrap();
+        let candidate = json!({"schema_version":1,"acceptance_digest":"","tasks":[
+            {"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]},
+            {"task_id":"TASK-X-002","file_name":"TASK-X-002.md","implements":["REQ-2"]}
+        ]});
+        let candidate = serde_json::to_value(
+            serde_json::from_value::<archon_workflow::task_skeleton::TaskSkeleton>(candidate)
+                .unwrap(),
+        )
+        .unwrap();
+        let mut previous = candidate.clone();
+        for task in previous["tasks"].as_array_mut().unwrap() {
+            task["source_sections"] = json!(["1"]);
+        }
+        records.seed_skeleton(&previous, false).unwrap();
+        records.require_new_landings(true).unwrap();
+        let mut request = json!({"messages":[{"role":"user","content":"Author records"}],
+            "tools":[{"name":"land-skeleton-record","input_schema":{"properties":{"task":{}}}}]});
+        let landed = skeleton_message(&request, &candidate.to_string());
+        let mut results = Vec::new();
+        for call in landed["content"].as_array().unwrap() {
+            records.land(call["input"].clone()).unwrap();
+            results.push(json!({"type":"tool_result","content":records.hint().unwrap()}));
+            // A duplicate tool call does not add another new landing.
+            records.land(call["input"].clone()).unwrap();
+        }
+        assert_eq!(records.new_landing_count().unwrap(), 2);
+        request["messages"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"role":"user","content":results}));
+        let reply = skeleton_message(&request, &candidate.to_string());
+        let receipt: Value =
+            serde_json::from_str(reply["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(receipt, json!({"records_landed":2}));
+        assert_eq!(
+            records.compose_reply(&receipt).unwrap()["tasks"],
+            candidate["tasks"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod changed_task_tests {
+    use super::*;
+    #[test]
+    fn offline_skeleton_patch_skips_unchanged_tasks_from_previous_context() {
+        let temp = tempfile::tempdir().unwrap();
+        let previous = json!({"tasks":[
+            {"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]},
+            {"task_id":"TASK-X-002","file_name":"TASK-X-002.md","implements":["REQ-2"]}
+        ]});
+        let path = temp.path().join("previous.json");
+        std::fs::write(&path, previous.to_string()).unwrap();
+        let mut candidate = previous.clone();
+        candidate["tasks"][1]["source_sections"] = json!(["2"]);
+        let request = json!({"messages":[{"content":format!("The previous candidate is in {} (sha256 fixture; host-written context for this call: read it by its exact path).",path.display())}],
+            "tools":[{"name":"land-skeleton-record","input_schema":{"properties":{"task":{}}}}]});
+        let message = skeleton_message(&request, &candidate.to_string());
+        let calls = message["content"].as_array().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["input"]["subject"], "TASK-X-002");
+        assert_ne!(calls[0]["input"]["task"], previous["tasks"][1]);
+        assert_eq!(calls[0]["input"]["task"], candidate["tasks"][1]);
+        let unchanged = skeleton_message(&request, &previous.to_string());
+        assert_eq!(unchanged["stop_reason"], "end_turn");
+        assert_eq!(unchanged["content"][0]["text"], r#"{"records_landed":0}"#);
     }
 }

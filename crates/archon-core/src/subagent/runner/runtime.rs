@@ -103,8 +103,11 @@ impl SubagentRunner {
                     .as_ref()
                     .filter(|guard| guard.inspection_withdrawn_for(&self.tool_context))
             {
-                let note =
+                let mut note =
                     withdrawn_note(guard.withdrawal_reason_for(&self.tool_context).as_deref());
+                if let Some(landing) = &self.tool_context.audit_landing {
+                    note.push_str(&format!("\n{}", landing.hint().unwrap_or_default()));
+                }
                 let message = flatten_history::flatten_history(
                     messages.as_slice(),
                     initial_prompt,

@@ -233,5 +233,6 @@ function seedArtifact(seed, policy) {
     throw new Error(`phase seed for ${policy.phase} carries no candidate`);
   }
   const repair = seed.gate ? seedRepairFindings(seed.gate, policy).map((finding) => String(finding.text)) : [];
-  return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: seed.candidate };
+  const usable = policy.phase !== "skeleton" || parsedSkeletonCandidate(seed.candidate);
+  return { feedback: repair, carried: repair.length > 0 ? null : seed.candidate, previousCandidate: usable ? seed.candidate : undefined };
 }

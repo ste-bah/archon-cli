@@ -1,0 +1,96 @@
+{
+  "run_id": "wf-e1d6ee46-c91b-4bfa-aefb-47d008079b4c",
+  "call": {
+    "id": "fef38c2a0cb2a37df670e0bfd95bd896b9291756fd98b6c01313e52eabd3f9df",
+    "method": "hostCommand",
+    "options": {
+      "host_command": {
+        "commandId": "freeze-skeleton",
+        "stdin": "All nine authoritative findings are repaired and every retained record has been re-landed with its repair state:\n\n- **TASK-TDL-001**: placeholder id replaced by host-listed `G-DL-001`; `REQ-DL-082`/`G-DL-002`/`G-DL-003` kept.\n- **Block edges** `TDL-001→TDL-003/009/010`, `TDL-001→TDL-004` (producer retained, consumer pair from earlier), `TDL-003→AHDM-004`, `TDL-010→AHDM-005`: all now have consumer-side `depends_on` entries (ordering-only or consumes), paired with unchanged producer `blocks`.\n- **`crates/archon-trading/src/data_lake.rs`**: owned by TASK-TDL-003 via a new `data-lake-domain-gates` deliverable (file verified in repo; REQ-DL-020/021 already in its implements).\n- **TASK-TDL-012 / TASK-TDL-013**: implements carry the DONE/NFR/TF and G-AHDM-001/RD-008 ids a frozen check answers for (earlier repair preserved).\n- Earlier attempt repairs (REQ-DL-082 owner, adapter consumes paths, section citations, TDL-003/009/010 consumer edges) all remain satisfied; nothing reverted.\n\n{\"records_landed\":19}"
+      },
+      "target_files": [],
+      "target_files_from_item": false,
+      "extra": {
+        "commandId": "freeze-skeleton",
+        "stdin": "All nine authoritative findings are repaired and every retained record has been re-landed with its repair state:\n\n- **TASK-TDL-001**: placeholder id replaced by host-listed `G-DL-001`; `REQ-DL-082`/`G-DL-002`/`G-DL-003` kept.\n- **Block edges** `TDL-001→TDL-003/009/010`, `TDL-001→TDL-004` (producer retained, consumer pair from earlier), `TDL-003→AHDM-004`, `TDL-010→AHDM-005`: all now have consumer-side `depends_on` entries (ordering-only or consumes), paired with unchanged producer `blocks`.\n- **`crates/archon-trading/src/data_lake.rs`**: owned by TASK-TDL-003 via a new `data-lake-domain-gates` deliverable (file verified in repo; REQ-DL-020/021 already in its implements).\n- **TASK-TDL-012 / TASK-TDL-013**: implements carry the DONE/NFR/TF and G-AHDM-001/RD-008 ids a frozen check answers for (earlier repair preserved).\n- Earlier attempt repairs (REQ-DL-082 owner, adapter consumes paths, section citations, TDL-003/009/010 consumer edges) all remain satisfied; nothing reverted.\n\n{\"records_landed\":19}"
+      }
+    }
+  },
+  "attempt": 1,
+  "schema_version": "workflow-result-v2",
+  "started_at": "2026-11-07T03:21:52.522154+00:00",
+  "admission_sequence": 159,
+  "finished_at": "2026-11-07T03:21:52.799958+00:00",
+  "input_hash": "1a472b22f657b75f87f991619dfdb151b256feef78b1d989a67ac4bd4bdce81c",
+  "output_hash": "a6ac5cd7acb51ac41164f4ea6dd321a615da95969f6a9324a936d7bacc5d93cb",
+  "status": "needs_review",
+  "result": {
+    "status": "needs_review",
+    "summary": "host command 'fef38c2a0cb2a37df670e0bfd95bd896b9291756fd98b6c01313e52eabd3f9df' completed with exit Some(0)",
+    "evidence": [
+      {
+        "kind": "implementation",
+        "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=271, stderr_bytes=208"
+      }
+    ],
+    "artifacts": [],
+    "commands_run": [
+      {
+        "kind": "inspect",
+        "command": "hostCommand:freeze-skeleton",
+        "status": "succeeded",
+        "exit_code": 0,
+        "output_summary": "trusted symbolic capability completed with 271 stdout bytes and 208 stderr bytes"
+      }
+    ],
+    "files_read": [],
+    "files_changed": [],
+    "task_coverage": [],
+    "residual_gaps": [],
+    "data": {
+      "exitCode": 0,
+      "gateEnvelope": {
+        "policy_findings": [
+          {
+            "deterministic_defect": {
+              "code": "invalid_json",
+              "location": "parse",
+              "provenance": "host_validator",
+              "stage": "parse",
+              "subject": "candidate"
+            },
+            "remediation_scope": "candidate_artifact",
+            "subject": "skeleton",
+            "text": "candidate artifact was refused: Syntax at line 1 column 1; near `<HERE>All nine authoritative findings are repa`"
+          }
+        ],
+        "report": "candidate refused before staging",
+        "schema_version": 1
+      },
+      "interrupted": false,
+      "limitsFingerprint": [
+        2,
+        7800,
+        2097152,
+        2097152,
+        2097152
+      ],
+      "logicBuild": "a3d03d23a06e9e82dae4a473e7c3c34587582d74dbff1bd7166c6dbd6aa400c1",
+      "logicDigest": "e265efde6393c9ef1aaac2e529fa9885d4674a610143a96b763ee559b7081c83",
+      "logicVersion": 11,
+      "postcondition": {
+        "satisfied": false,
+        "summary": "candidate refused before staging"
+      },
+      "stderr": "warning: workflow.generated.write_call_time_budget_secs in /Volumes/Externalwork/archon-cli/project-1/.archon/config.toml: obsolete config key is ignored because write branches have only a no-progress window\n",
+      "stderrBytes": 208,
+      "stderrTruncated": false,
+      "stdout": "{\"schema_version\":1,\"call_id\":\"fef38c2a0cb2a37df670e0bfd95bd896b9291756fd98b6c01313e52eabd3f9df\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"relative_path\":\"gate-envelope.json\",\"byte_len\":519,\"blake3\":\"b07f74db9dbfbcf730549dc319f488da255ebe0efd1bab45e2af68b87b60ec78\"}]}",
+      "stdoutBytes": 271,
+      "stdoutTruncated": false,
+      "timedOut": false
+    }
+  },
+  "depends_on": [],
+  "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711"
+}

@@ -36,6 +36,9 @@ use host_owned::HostOwned;
 pub(super) mod record;
 pub(crate) use record::reply_entry;
 
+#[path = "workflow_decompose_seed_artifact.rs"]
+pub(super) mod artifact;
+
 /// The acceptance gate. Its stdin is the candidate the script assembled.
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
 const ACCEPTANCE_PREFIX: &str = "acceptance-author-";
@@ -84,7 +87,7 @@ pub(crate) enum SubjectSeed {
     Artifact {
         candidate: String,
         candidate_call: String,
-        /// The last gate that judged exactly this candidate.
+        /// The authoritative gate findings, retained across unjudged landings.
         gate: Option<GateSeed>,
     },
 }
@@ -244,22 +247,7 @@ pub(crate) fn derive_with_reply_markers(
             judged_gate(record).map(|(command, stdin, gate)| (*record, command, stdin, gate))
         })
         .collect();
-    for (subject, (_, record)) in artifacts {
-        let candidate = reply_content(record).unwrap_or_default();
-        // The last judgment of exactly these bytes, whichever reply held them.
-        let gate = gates
-            .iter()
-            .rfind(|(_, _, stdin, _)| *stdin == candidate)
-            .map(|(_, _, _, gate)| gate.clone());
-        derived.subjects.insert(
-            subject,
-            SubjectSeed::Artifact {
-                candidate: candidate.to_string(),
-                candidate_call: record.call.id.clone(),
-                gate,
-            },
-        );
-    }
+    artifact::derive(&mut derived, artifacts, &gates);
     if let Some(seed) = acceptance(
         &records,
         &gates,
@@ -494,3 +482,7 @@ fn acceptance(
 #[cfg(test)]
 #[path = "workflow_decompose_seed_derive_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "workflow_decompose_seed_skeleton_tests.rs"]
+mod skeleton_tests;
