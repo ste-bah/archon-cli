@@ -327,20 +327,17 @@ fn record_landing_unchanged_bytes_and_missing_removals_do_not_count() {
         false,
     )
     .unwrap();
+    // B1/B2: reopening the same call preserves its original pre-call snapshot.
     reopened.require_new_landings(true).unwrap();
     reopened.land(record.clone()).unwrap();
-    assert_eq!(reopened.new_landing_count().unwrap(), 0);
-    assert!(
-        reopened
-            .compose_reply(&json!({"records_landed":0}))
-            .is_err()
-    );
+    assert_eq!(reopened.new_landing_count().unwrap(), 1);
+    assert!(reopened.compose_reply(&json!({"records_landed":1})).is_ok());
     assert!(
         reopened
             .land(json!({"subject":"TASK-X-002","remove":true}))
             .is_err()
     );
-    assert_eq!(reopened.new_landing_count().unwrap(), 0);
+    assert_eq!(reopened.new_landing_count().unwrap(), 1);
     assert!(
         reopened
             .land(json!({"subject":"TASK-X-002","task":{
@@ -350,7 +347,7 @@ fn record_landing_unchanged_bytes_and_missing_removals_do_not_count() {
     reopened
         .land(json!({"subject":"TASK-X-002","remove":true}))
         .unwrap();
-    assert_eq!(reopened.new_landing_count().unwrap(), 0);
+    assert_eq!(reopened.new_landing_count().unwrap(), 1);
     let mut changed = record;
     changed["task"]["source_sections"] = json!(["2"]);
     reopened.land(changed).unwrap();
@@ -358,7 +355,7 @@ fn record_landing_unchanged_bytes_and_missing_removals_do_not_count() {
     reopened
         .land(json!({"subject":"TASK-X-001","remove":true}))
         .unwrap();
-    assert_eq!(reopened.new_landing_count().unwrap(), 1);
+    assert_eq!(reopened.new_landing_count().unwrap(), 0);
 }
 
 #[test]

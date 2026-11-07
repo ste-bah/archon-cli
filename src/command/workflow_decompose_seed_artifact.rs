@@ -194,10 +194,18 @@ pub(crate) fn retain_skeleton(
                 if !landing.has_landed_records()? {
                     return Ok(None);
                 }
-                landing
-                    .retained_completion()?
-                    .map(|receipt| landing.compose(&receipt).map_err(Into::into))
-                    .transpose()
+                if path.join("call-state.json").is_file() {
+                    landing
+                        .retained_reply()?
+                        .map(|receipt| landing.compose_reply(&receipt).map_err(Into::into))
+                        .transpose()
+                } else {
+                    // Legacy stores have no per-call receipt; preserve their existing recovery.
+                    landing
+                        .retained_completion()?
+                        .map(|receipt| landing.compose(&receipt).map_err(Into::into))
+                        .transpose()
+                }
             })();
             match retained {
                 Ok(Some(value)) => {
@@ -213,4 +221,84 @@ pub(crate) fn retain_skeleton(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod landing_resume_tests {
+    use super::super::tests::{gate, reply};
+    use super::*;
+    use serde_json::json;
+
+    // B-store.md:80-92: actual remove and identical re-land tool reply shapes.
+    #[test]
+    fn seed_b1_b2_resume_uses_persisted_call_changes() {
+        for mode in ["remove", "identical", "pending"] {
+            let temp = tempfile::tempdir().unwrap();
+            let task =
+                json!({"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]});
+            let candidate = json!({"schema_version":1,"acceptance_digest":"","tasks":[task]});
+            let history = vec![
+                reply("skeleton-author-1", "01:00:00", &candidate.to_string()),
+                gate(
+                    "freeze-skeleton",
+                    "01:01:00",
+                    &candidate.to_string(),
+                    vec![json!({"text":"repair task","remediation_scope":"skeleton"})],
+                    false,
+                ),
+                reply("skeleton-author-4", "01:02:00", "Repaired tasks."),
+            ];
+            let path = temp.path().join("stage-records/call/session");
+            let store = RecordLanding::open(
+                path.clone(),
+                "call".into(),
+                RecordKind::Skeleton,
+                vec![],
+                false,
+            )
+            .unwrap();
+            std::fs::write(path.join("author.json"), br#""skeleton-author-4""#).unwrap();
+            store.seed_skeleton(&candidate, false).unwrap();
+            if mode == "remove" {
+                store
+                    .land(json!({"subject":"TASK-X-001","remove":true}))
+                    .unwrap();
+            } else {
+                store
+                    .land(json!({"subject":"TASK-X-001","task":task}))
+                    .unwrap();
+                if mode == "pending" {
+                    let mut bad = task.clone();
+                    bad["implements"] = json!([]);
+                    assert!(
+                        store
+                            .land(json!({"subject":"TASK-X-001","task":bad}))
+                            .is_err()
+                    );
+                }
+            }
+            drop(store);
+            let mut derived = super::super::derive(&history, &[], &BTreeMap::new()).unwrap();
+            retain_skeleton(&mut derived, &history, temp.path()).unwrap();
+            let SubjectSeed::Artifact {
+                candidate: held,
+                candidate_call,
+                ..
+            } = &derived.subjects["skeleton"]
+            else {
+                panic!("artifact")
+            };
+            let held: Value = serde_json::from_str(held).unwrap();
+            if mode == "remove" {
+                assert_eq!(held["tasks"], json!([]));
+                assert_eq!(candidate_call, "skeleton-author-4");
+            } else {
+                assert_ne!(
+                    candidate_call, "skeleton-author-4",
+                    "{mode} is not completed work"
+                );
+                assert_eq!(held["tasks"], candidate["tasks"]);
+            }
+        }
+    }
 }

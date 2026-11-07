@@ -104,7 +104,16 @@ pub(super) fn compose_raw_reply(records: &RecordLanding, text: &str) -> Workflow
         return Ok(text.to_owned());
     }
     let artifact = match parsed {
-        Ok(value) => records.compose_reply(&value),
+        Ok(mut value) => {
+            if records.kind() != RecordKind::Skeleton
+                && value.pointer("/data/records_landed").is_some()
+            {
+                value["data"] = records.compose_reply(&value["data"])?;
+                Ok(value)
+            } else {
+                records.compose_reply(&value)
+            }
+        }
         Err(error) => Err(WorkflowError::ArtifactInvalid(error.to_string())),
     };
     let artifact = artifact.or_else(|error| match records.retained_reply()? {
