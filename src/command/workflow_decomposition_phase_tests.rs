@@ -34,7 +34,10 @@ impl WorkflowLlmClient for PhaseLlm {
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let ordinal = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         Ok(WorkflowAgentOutcome {
-            content: super::authored_entry(serde_json::json!({"id":"AC-X-001","ordinal":ordinal})),
+            content: super::authored_decomposition_reply(
+                serde_json::json!({"id":"AC-X-001","ordinal":ordinal}),
+            )
+            .await,
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })
@@ -229,7 +232,8 @@ impl WorkflowLlmClient for RetryLlm {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.prompts.lock().unwrap().push(request.task);
         Ok(WorkflowAgentOutcome {
-            content: super::authored_entry(serde_json::json!({"id":"AC-X-001"})),
+            content: super::authored_decomposition_reply(serde_json::json!({"id":"AC-X-001"}))
+                .await,
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })

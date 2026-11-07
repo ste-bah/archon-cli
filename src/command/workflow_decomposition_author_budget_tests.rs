@@ -45,7 +45,10 @@ impl WorkflowLlmClient for TransportLlm {
             ));
         }
         Ok(WorkflowAgentOutcome {
-            content: super::authored_entry(serde_json::json!({"id":"AC-X-001","ordinal":ordinal})),
+            content: super::authored_decomposition_reply(
+                serde_json::json!({"id":"AC-X-001","ordinal":ordinal}),
+            )
+            .await,
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })

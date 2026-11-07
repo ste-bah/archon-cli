@@ -92,3 +92,33 @@ fn authored_entry(mut entry: serde_json::Value) -> String {
 
 #[path = "workflow_live_v2_script_host_heal_tests.rs"]
 mod workflow_live_v2_script_host_heal_tests;
+
+/// Raw doubles must follow the live runner's skeleton receipt contract
+/// (`runtime/landed_reply.rs`); acceptance-entry JSON cannot finish that call.
+async fn authored_decomposition_reply(entry: serde_json::Value) -> String {
+    use archon_tools::tool::{Tool, ToolContext};
+    let Some(landing) = archon_tools::audit_landing::current() else {
+        return authored_entry(entry);
+    };
+    assert_eq!(landing.tool_name(), "land-skeleton-record");
+    let tool = archon_tools::audit_landing::ScopedLandingTool(landing.clone());
+    let result = tool
+        .execute(
+            serde_json::json!({
+                "subject":"TASK-X-010",
+                "task":{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","implements":["AC-X-001"]},
+                "summary":"fixture skeleton task",
+                "evidence":[{"kind":"inspection","summary":"inspected fixture requirements"}]
+            }),
+            &ToolContext {
+                audit_landing: Some(landing.clone()),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+    let reply = serde_json::json!({"records_landed":1});
+    landing.complete(&reply).expect("complete landed skeleton");
+    assert!(result.content.ends_with(&reply.to_string()));
+    reply.to_string()
+}
