@@ -170,7 +170,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -230,7 +230,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -290,7 +290,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -350,7 +350,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -410,7 +410,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -426,6 +426,7 @@
           "options": {
             "extra": {
               "frozenSkeleton": false,
+              "openFindings": [],
               "previousSkeleton": null,
               "recordLanding": "skeleton"
             },
@@ -433,7 +434,7 @@
             "role": "planner",
             "target_files": [],
             "target_files_from_item": false,
-            "task": "Land task records for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nCite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). For every host-listed qualifying PRD section, cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements); a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.\nQualifying PRD sections (key: title):\n\"0\": Artifact Preparation\nFull PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nEach landed task must deserialize into this shape:\n{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation or constraint id the host lists>\"],\"source_sections\":[\"<PRD section key the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"min_instances\":1}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nEach deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path. Optional string fields must be concrete and nonblank; omit unused fields. A present verifier must be falsifiable even with a floor or binding.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nLand each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
+            "task": "Land task records for the frozen acceptance contract.\nRead the PRD at <project-root>/prd.md, the task root at <project-root>/tasks/PRD-X, and the repository source you need.\nThe code repository is <project-root>/repository. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: node_modules, target, .git, __pycache__, .venv, dist, build, coverage, .tv, .archon, .claude, site-packages. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.\n<project-root> is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.\nStop reading once you can name what your entries assert.\nEvery artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.\nEvery PRD obligation id extracted by the host is in the implements of at least one task, and implements names only host-listed obligation or constraint ids. Obligations are requirement bullets, rows of tables whose header names an obligation, and numbered done-definition items (synthetic ids). The host also lists PRD constraints stated as list items or table rows that restrict work. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.\nExact PRD obligation ids extracted by the host: [\"AC-X-001\",\"REQ-X-001\",\"REQ-X-002\"]\nCite sections by the key the host lists (a section number, or the exact heading title of an unnumbered top-level section). For every host-listed qualifying PRD section, cite it in at least one task: every task whose work it justifies, or any one task when it justifies none (metadata, guidance or closing statements); a task cites every section its work comes from. Parent-only headings need no separate citation when their sub-sections are cited.\nQualifying PRD sections (key: title):\n\"0\": Artifact Preparation\nFull PRD section texts: Read <project-root>/.archon/workflows/<run-id>/author-context/eb40920b7ee944a6642bf534b2b333cd253b79f0d99809334b51ce9cb00b6c37.json (host-written context for this call: read it by its exact path).\nEach landed task must deserialize into this shape:\n{\"task_id\":\"<canonical task id>\",\"file_name\":\"<canonical task id>.md\",\"depends_on\":[{\"task_id\":\"<canonical id of the task depended on>\",\"consumes\":[{\"artifact_path\":\"<path this task reads from that one>\",\"instance_source_records_field\":\"<optional: exact instance_source_records_field value from the named producer contract>\",\"registry_records_field\":\"<optional: exact registry_records_field value from the named producer contract>\"}],\"ordering_only\":false}],\"blocks\":[\"<canonical id of a task that waits on this one>\"],\"implements\":[\"<obligation or constraint id the host lists>\"],\"source_sections\":[\"<PRD section key the host lists>\"],\"deliverable_contracts\":[{\"kind\":\"<short stable name for what this task produces>\",\"artifact_path\":\"<path this task produces, exactly as its dependents consume it>\",\"min_instances\":1}]}\nEvery <...> above is a placeholder describing the value, never a value: replace each one.\nOne task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.\nWrite task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.\ndepends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.\nEach depends_on entry declares a non-empty consumes list or ordering_only: true.\nThe consumes record-binding fields are optional: omit unused fields. For a multi-writer artifact_path, include the same record-binding field and exact value as the named producer's deliverable contract, or use a producer-specific artifact_path. Use instance_source_records_field when the producer declares it; otherwise use registry_records_field. These values name the producer's records field, not a task id or artifact path.\nEach deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path. Optional string fields must be concrete and nonblank; omit unused fields. A present verifier must be falsifiable even with a floor or binding.\nThe deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.\nGenerate large or repetitive fixture data with code rather than writing it literally.\nLand each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. When findings are open, change at least one task record in this call; the gate then judges the whole set again.\nDo not run commands or write files.\nRepair operation r1, cycle 1, authored call 1.\nLogical attempt: 1."
           }
         },
         "depends_on": [],
@@ -457,6 +458,7 @@
           ],
           "data": {
             "content": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_universe\":false,\"series_overlap_min_rows\":0},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"registry_minimum_count\":0,\"required_true_fields\":[\"ready\"],\"required_universe\":false,\"series_overlap_min_rows\":0}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"source_sections\":[\"0\"],\"task_id\":\"TASK-X-020\"}]}",
+            "retainedLandings": true,
             "stopReason": "end_turn",
             "tokensIn": 2,
             "tokensInUnknownReason": null,
@@ -487,7 +489,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -802,7 +804,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -1066,7 +1068,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1302,7 +1304,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1422,7 +1424,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1542,7 +1544,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1651,7 +1653,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1760,7 +1762,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -2707,7 +2709,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -2755,7 +2757,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "8fc84ea560c49e109fab5391f31b1ccf729a7c97033608624cab4a250221a711",
+        "scaffold_hash": "11732b9de3c3ced8821108c2515a942d3ad045fba7ea175bc09174dd0bfa9dc0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }

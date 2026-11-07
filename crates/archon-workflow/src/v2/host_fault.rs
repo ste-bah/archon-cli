@@ -204,6 +204,18 @@ impl crate::v2::WorkflowV2AgentError {
     /// agent layer. Only ordinary provider failures become transport.
     pub fn from_call_error(error: &WorkflowError) -> Self {
         match error {
+            WorkflowError::Port(cause)
+                if std::iter::successors(
+                    Some(cause.as_ref() as &(dyn std::error::Error + 'static)),
+                    |e| e.source(),
+                )
+                .any(|e| {
+                    e.downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+                        .is_some()
+                }) =>
+            {
+                Self::InvalidResult(error.to_string())
+            }
             WorkflowError::ControlPaused(message) => Self::ControlPaused(message.clone()),
             WorkflowError::ControlCancelled(message) => Self::ControlCancelled(message.clone()),
             WorkflowError::Io { path, source } => Self::HostIo {

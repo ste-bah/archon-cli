@@ -233,6 +233,7 @@ impl AgentSubagentExecutor {
         ))
         .catch_unwind()
         .await;
+        let invalid_answer = matches!(&runner_result, Ok(Err(error)) if error.downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>().is_some());
         let provider_source = match &runner_result {
             Ok(Err(error)) => error
                 .chain()
@@ -301,6 +302,7 @@ impl AgentSubagentExecutor {
                     source: provider_source,
                 })
             }
+            (Err(message), _) if invalid_answer => Err(ExecutorError::InvalidAnswer(message)),
             (Err(message), None) => Err(ExecutorError::Internal(message)),
             (Ok(completion), _) => Ok(completion),
         }

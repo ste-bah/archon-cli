@@ -6,6 +6,10 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
+/// A landing session exhausted its bounded final-answer corrections.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("incomplete landed artifact: {0}")]
+pub struct IncompleteLandedArtifact(pub String);
 pub trait LandingHost: Send + Sync {
     fn tool_name(&self) -> &'static str {
         "land-audit-record"

@@ -7,7 +7,7 @@
 //! the artifact: it composes it from the retained records, every receipt ends
 //! with the exact final reply, and a session that cannot give that reply can
 //! still be completed from what it retained.
-use super::record_landing::{RecordKind, RecordLanding, StageRecord, schema_hint};
+use super::record_landing::{RecordKind, RecordLanding, StageRecord, invalid, schema_hint};
 use super::record_landing_schema::field_list;
 use crate::WorkflowResult;
 use serde_json::{Value, json};
@@ -20,7 +20,7 @@ impl RecordLanding {
         &self,
         records: &BTreeMap<String, StageRecord>,
     ) -> WorkflowResult<String> {
-        // Before the first landing there is no count to state yet.
+        let new_count = self.new_landing_count()?;
         let pending = self.require_repaired().err();
         let last = if let Some(error) = pending {
             let action = if self.skeleton_is_frozen()? {
@@ -29,23 +29,94 @@ impl RecordLanding {
                 "Correct or withdraw these tasks before replying."
             };
             format!("Completion is pending: {error}. {action}")
+        } else if let Err(error) = self.require_finding_repairs() {
+            format!("Completion is pending: {error}")
         } else if records.is_empty() {
             "Land each task as one record; every landing receipt ends with the exact final reply."
                 .to_owned()
         } else {
             format!(
                 "When no task is left to land, your final reply is exactly {}",
-                json!({"records_landed": records.len()})
+                json!({"records_landed": new_count})
             )
         };
         Ok(format!(
-            "Host retained {} records. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
+            "Host retained {} records; {} new landings in this call (seeds do not count). When openFindings is non-empty, this call must make at least one byte-changing landing versus the pre-call snapshot: change a task record or remove an existing one. Identical task bytes or restoring original task bytes do not count. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
             records.len(),
+            new_count,
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
             self.tool_name(),
             field_list(self.kind),
             schema_hint(self.kind),
         ))
+    }
+
+    /// Whether this call must repair open findings, rather than author a first draft.
+    pub fn require_new_landings(&self, required: bool) -> WorkflowResult<()> {
+        *self.repair_required.lock().map_err(invalid)? = required;
+        Ok(())
+    }
+
+    /// Open findings require at least one byte-changing landing in this call.
+    pub fn require_finding_landings(&self, findings: &[Value]) -> WorkflowResult<()> {
+        self.require_new_landings(!findings.is_empty())
+    }
+
+    fn require_finding_repairs(&self) -> WorkflowResult<()> {
+        if !*self.repair_required.lock().map_err(invalid)? {
+            return Ok(());
+        }
+        let landed = self.landed_here.lock().map_err(invalid)?;
+        if landed.is_empty() {
+            return Err(invalid(
+                "openFindings is non-empty; this call must make at least one byte-changing landing versus the pre-call snapshot: change a task record or remove an existing one. Identical task bytes or restoring original task bytes do not count",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn new_landing_count(&self) -> WorkflowResult<usize> {
+        Ok(self.landed_here.lock().map_err(invalid)?.len())
+    }
+
+    /// Session receipts count this call's landed subjects. `assemble` and
+    /// `compose` consume the complete retained-store count internally.
+    pub fn compose_reply(&self, reply: &Value) -> WorkflowResult<Value> {
+        if self.kind != RecordKind::Skeleton {
+            return self.compose(reply);
+        }
+        let landed = self.new_landing_count()?;
+        if !reply.as_object().is_some_and(|o| o.len() == 1)
+            || reply.get("records_landed").and_then(Value::as_u64) != Some(landed as u64)
+        {
+            return Err(invalid(format!(
+                "reply must be exactly {} (new landings in this call, excluding seeds)",
+                json!({"records_landed":landed})
+            )));
+        }
+        self.require_finding_repairs()?;
+        self.compose(&json!({"records_landed":self.records()?.len()}))
+    }
+
+    /// Seed records contain only subject/task; landed records use the full
+    /// serialized StageRecord format, including its default fields.
+    pub fn has_landed_records(&self) -> WorkflowResult<bool> {
+        for entry in std::fs::read_dir(&self.root).map_err(invalid)? {
+            let path = entry.map_err(invalid)?.path();
+            if !path
+                .file_name()
+                .and_then(|v| v.to_str())
+                .is_some_and(|v| v.starts_with("record-") && v.ends_with(".json"))
+            {
+                continue;
+            }
+            let value: Value = serde_json::from_slice(&std::fs::read(path).map_err(invalid)?)?;
+            let record: StageRecord = serde_json::from_value(value.clone())?;
+            if serde_json::to_value(record)? == value {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// The artifact a `records_landed` reply stands for. A skeleton is
@@ -68,12 +139,43 @@ impl RecordLanding {
     /// one. Only a skeleton qualifies: its artifact is the retained records
     /// themselves and its gate judges them; a review or verify verdict is the
     /// agent's own and is never invented here.
+    pub fn retained_reply(&self) -> WorkflowResult<Option<Value>> {
+        if self.kind != RecordKind::Skeleton {
+            return Ok(None);
+        }
+        self.require_repaired()?;
+        let landed = self.new_landing_count()?;
+        if landed == 0 {
+            return Ok(None);
+        }
+        self.require_finding_repairs()?;
+        Ok(Some(json!({"records_landed": landed})))
+    }
+    /// Preserve valid retained tasks even when this call cannot complete.
+    pub fn retained_artifact(&self) -> WorkflowResult<Option<Value>> {
+        if self.kind != RecordKind::Skeleton
+            || (!self.has_landed_records()? && self.new_landing_count()? == 0)
+        {
+            return Ok(None);
+        }
+        let records = self.records()?;
+        let tasks: Vec<_> = records
+            .values()
+            .filter_map(|record| record.task.as_ref())
+            .collect();
+        Ok(Some(
+            json!({"schema_version":1,"acceptance_digest":"","tasks":tasks}),
+        ))
+    }
+
+    /// Store-level completion for callers using `assemble`/`compose` directly.
+    /// Sessions use `retained_reply`, which excludes seeded records.
     pub fn retained_completion(&self) -> WorkflowResult<Option<Value>> {
         if self.kind != RecordKind::Skeleton {
             return Ok(None);
         }
         self.require_repaired()?;
         let retained = self.records()?.len();
-        Ok((retained > 0).then(|| json!({"records_landed": retained})))
+        Ok((retained > 0).then(|| json!({"records_landed":retained})))
     }
 }

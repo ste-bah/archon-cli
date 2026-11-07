@@ -193,7 +193,7 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate) {
       deliverableContractRule(),
       "The deliverable_contracts record-binding fields are optional: omit unused fields; a producer of a multi-writer artifact that dependents bind by records declares the same records field and exact value in its deliverable contract as in the dependents' consumes bindings.",
       "Generate large or repetitive fixture data with code rather than writing it literally.",
-      "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt.",
+      "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. When findings are open, change at least one task record in this call; the gate then judges the whole set again.",
       "Do not run commands or write files."
     ].join("\n") + previousSkeletonContext(previous)
   };
@@ -435,6 +435,7 @@ function acceptedSkeletonCandidate(content, outcome) {
 function skeletonPreviousCandidate(policy, previous, seeded) {
   if (policy.phase !== "skeleton") return previous;
   const seed = args.phaseSeed?.subjects?.skeleton;
-  if (seeded && seed?.candidate === previous && (!seed?.gate || (seed.gate.findings || []).some(f => f.remediation_scope === "candidate_artifact"))) return undefined;
+  if (seeded && seed?.candidate === previous && (!seed?.gate || ((seed.gate.findings || []).length > 0
+    && seed.gate.findings.every(f => f.remediation_scope === "candidate_artifact")))) return undefined;
   return parsedSkeletonCandidate(previous) ? previous : undefined;
 }

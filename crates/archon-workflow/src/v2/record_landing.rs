@@ -34,7 +34,7 @@ pub struct StageRecord {
     #[serde(default)]
     summary: String,
     #[serde(default)]
-    task: Option<crate::task_skeleton::FrozenTask>,
+    pub(super) task: Option<crate::task_skeleton::FrozenTask>,
     /// Issue-36: a write-time instruction, never persisted state. When true the record supersedes the earlier landing for its subject instead of unioning with it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     replace: bool,
@@ -75,15 +75,18 @@ fn with_schema(err: WorkflowError, kind: RecordKind) -> WorkflowError {
     }
 }
 pub struct RecordLanding {
-    root: PathBuf,
+    pub(super) root: PathBuf,
     pub(super) kind: RecordKind,
     subjects: Vec<String>,
     subjects_are_tasks: bool,
     lock: Mutex<()>,
     frozen_tasks: Mutex<Option<BTreeMap<String, String>>>,
     rejected: Mutex<BTreeMap<String, Vec<String>>>,
+    pub(super) landed_here: Mutex<std::collections::BTreeSet<String>>,
+    pub(super) repair_required: Mutex<bool>,
+    pub(super) pre_call_tasks: Mutex<BTreeMap<String, Option<Vec<u8>>>>,
 }
-fn invalid(e: impl std::fmt::Display) -> WorkflowError {
+pub(super) fn invalid(e: impl std::fmt::Display) -> WorkflowError {
     WorkflowError::ArtifactInvalid(e.to_string())
 }
 tokio::task_local! { static RECORDS: Arc<RecordLanding>; }
@@ -130,6 +133,9 @@ impl RecordLanding {
             lock: Mutex::new(()),
             frozen_tasks: Mutex::new(None),
             rejected: Mutex::new(BTreeMap::new()),
+            landed_here: Mutex::new(Default::default()),
+            repair_required: Mutex::new(false),
+            pre_call_tasks: Mutex::new(Default::default()),
         })
     }
     pub fn kind(&self) -> RecordKind {
@@ -410,7 +416,7 @@ pub(super) fn captured(output_summary: &str) -> bool {
             .starts_with(super::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)
 }
 /// The task ids a finding names for itself: `canonical_task_ids`, else `task_ids`, else `[task_id]`; `None` when it names no task.
-fn finding_task_ids(finding: &Value) -> Option<Value> {
+pub(super) fn finding_task_ids(finding: &Value) -> Option<Value> {
     let nonempty = |key: &str| {
         finding
             .get(key)

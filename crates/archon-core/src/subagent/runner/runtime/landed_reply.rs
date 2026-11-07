@@ -65,6 +65,8 @@ impl SubagentRunner {
                 let compact = parsed.and_then(|v| {
                     if landing.tool_name() == "land-audit-record" {
                         v.pointer("/data/repository_audit")
+                    } else if landing.tool_name() == "land-skeleton-record" {
+                        Some(v)
                     } else {
                         v.get("data")
                             .filter(|d| d.get("records_landed").is_some())
@@ -76,7 +78,15 @@ impl SubagentRunner {
                         Ok(()) => return Ok(LandedReply::Final),
                         Err(error) => error,
                     },
-                    None => return Ok(LandedReply::Final),
+                    None if landing.tool_name() != "land-skeleton-record" => {
+                        return Ok(LandedReply::Final);
+                    }
+                    None => {
+                        if let Some(completion) = self.retained_landed_completion() {
+                            return Ok(LandedReply::Complete(completion));
+                        }
+                        "reply must be the exact landing receipt, without prose".to_owned()
+                    }
                 }
             }
         };
@@ -84,7 +94,7 @@ impl SubagentRunner {
             if let Some(completion) = self.retained_landed_completion() {
                 return Ok(LandedReply::Complete(completion));
             }
-            anyhow::bail!("incomplete landed artifact: {error}");
+            return Err(archon_tools::audit_landing::IncompleteLandedArtifact(error).into());
         }
         *incomplete += 1;
         Ok(LandedReply::Retry(format!(

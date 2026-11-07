@@ -85,7 +85,16 @@ impl WorkflowLlmClient for Authors {
         let content = match entry {
             Some("AC-2") if !self.strong.load(Ordering::SeqCst) => entry_text("AC-2", "weak"),
             Some(id) => entry_text(id, &format!("check {id}")),
-            None if request.task.contains("task-skeleton") => "skeleton candidate".into(),
+            None if archon_workflow::v2::record_landing::current().is_some_and(|records| {
+                records.kind() == archon_workflow::v2::record_landing::RecordKind::Skeleton
+            }) =>
+            {
+                let records =
+                    archon_workflow::v2::record_landing::current().expect("skeleton landing scope");
+                records.land(serde_json::json!({"subject":"TASK-X-010", "task":{
+                    "task_id":"TASK-X-010","file_name":"TASK-X-010.md","implements":["REQ-X-001"]}}))?;
+                serde_json::json!({"records_landed":records.new_landing_count()?}).to_string()
+            }
             None if self.weak_body.load(Ordering::SeqCst) => "weak body".into(),
             None => "good body".into(),
         };

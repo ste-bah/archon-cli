@@ -50,17 +50,23 @@ pub(super) fn prepare(
     subjects.dedup();
     use sha2::{Digest, Sha256};
     let identity = format!("{:x}", Sha256::digest(serde_json::to_vec(request)?));
+    let root = store
+        .root()
+        .join("stage-records")
+        .join(&identity)
+        .join(uuid::Uuid::new_v4().to_string());
     let records = Arc::new(RecordLanding::open(
-        store
-            .root()
-            .join("stage-records")
-            .join(&identity)
-            .join(uuid::Uuid::new_v4().to_string()),
+        root.clone(),
         identity,
         kind,
         subjects,
         subjects_are_tasks,
     )?);
+    crate::command::workflow_task_set::reauthor::cache::write_atomic(
+        &root.join("author.json"),
+        &serde_json::to_vec(&request.call.id)?,
+    )
+    .map_err(|error| WorkflowError::ArtifactInvalid(error.to_string()))?;
     if kind == RecordKind::Skeleton {
         if let Some(previous) = extra
             .get("previousSkeleton")
@@ -75,9 +81,56 @@ pub(super) fn prepare(
                 extra.get("frozenSkeleton").and_then(Value::as_bool) == Some(true),
             )?;
         }
+        records.require_finding_landings(
+            extra
+                .get("openFindings")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )?;
     }
     request.task.push_str(&format!("\n{}", records.hint()?));
     Ok(Some(records))
+}
+/// Enforce the landing contract at raw dispatch too; alternate clients cannot
+/// turn prose into candidate bytes by bypassing the runner.
+pub(super) fn compose_raw_reply(records: &RecordLanding, text: &str) -> WorkflowResult<String> {
+    let parsed = serde_json::from_str::<Value>(text);
+    if records.kind() != RecordKind::Skeleton
+        && parsed.as_ref().ok().is_none_or(|value| {
+            value.get("records_landed").is_none() && value.pointer("/data/records_landed").is_none()
+        })
+    {
+        return Ok(text.to_owned());
+    }
+    let artifact = match parsed {
+        Ok(value) => records.compose_reply(&value),
+        Err(error) => Err(WorkflowError::ArtifactInvalid(error.to_string())),
+    };
+    let artifact = artifact.or_else(|error| match records.retained_reply()? {
+        Some(completion) => records.compose_reply(&completion),
+        None => Err(error),
+    })?;
+    Ok(serde_json::to_string(&artifact)?)
+}
+/// A contract refusal keeps the call's valid landings available to its next author.
+pub(super) fn refused_reply(
+    call_id: &str,
+    error: WorkflowError,
+    records: Option<&RecordLanding>,
+) -> WorkflowV2Result {
+    let mut result = archon_workflow::v2::host_fault::invalid_answer_result(call_id, error);
+    if let Some(records) = records {
+        match records.retained_artifact() {
+            Ok(Some(artifact)) => {
+                result.data["content"] = json!(artifact.to_string());
+                result.data["retainedLandings"] = json!(true);
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "could not read retained landing artifact"),
+        }
+    }
+    result
 }
 struct Bridge(Arc<RecordLanding>);
 impl archon_tools::audit_landing::LandingHost for Bridge {
@@ -131,12 +184,12 @@ impl archon_tools::audit_landing::LandingHost for Bridge {
     }
     fn complete(&self, value: &Value) -> Result<(), String> {
         self.0
-            .assemble(value)
+            .compose_reply(value)
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
     fn retained_completion(&self) -> Option<Value> {
-        self.0.retained_completion().ok().flatten()
+        self.0.retained_reply().ok().flatten()
     }
 }
 pub(crate) async fn scope<T>(
@@ -396,3 +449,7 @@ mod tests {
 #[cfg(test)]
 #[path = "workflow_stage_landing_p5_tests.rs"]
 mod p5_tests;
+
+#[cfg(test)]
+#[path = "workflow_stage_landing_reply_tests.rs"]
+mod reply_tests;
