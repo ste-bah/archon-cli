@@ -127,7 +127,8 @@ pub(super) async fn collect_stream_round(
             if archon_llm::retry::stream_error_is_retryable(error_type, message));
         let empty_terminal = text_content.trim().is_empty()
             && pending_tools.is_empty()
-            && !matches!(finish_reason.as_deref(), Some("max_tokens" | "length"));
+            && !matches!(finish_reason.as_deref(), Some("max_tokens" | "length"))
+            && runner.tool_context.audit_landing.is_none();
         let interrupted = received.is_err()
             || transport_failure
             || matches!(&received, Ok(None))
@@ -321,7 +322,12 @@ pub(super) async fn collect_stream_round(
         }
     }
 
-    if !retry_after_compact && text_content.trim().is_empty() && pending_tools.is_empty() {
+    if !retry_after_compact
+        && text_content.trim().is_empty()
+        && pending_tools.is_empty()
+        && (runner.tool_context.audit_landing.is_none()
+            || matches!(finish_reason.as_deref(), Some("max_tokens" | "length")))
+    {
         let reason = finish_reason.as_deref().unwrap_or("unavailable");
         if matches!(reason, "max_tokens" | "length") {
             return Err(archon_tools::audit_landing::EmptyOutputLimit(reason.into()).into());

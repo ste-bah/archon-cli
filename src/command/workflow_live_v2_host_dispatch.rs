@@ -334,7 +334,8 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                         || call_error::is_no_progress_stop_text(&text)
                         || call_error::is_inactivity_timeout_text(&text)
                         || call_error::is_read_wall_thrash_text(&text)
-                        || text.contains("reached max turns");
+                        || text.contains("reached max turns")
+                        || text.contains(archon_llm::transport_idle::TRANSPORT_STALL_MARKER);
                     match records
                         .as_ref()
                         .filter(|_| stopped)

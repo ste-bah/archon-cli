@@ -83,8 +83,7 @@ pub fn is_transport_failure(error: &str) -> bool {
 /// `ContextWindowExceeded` display text.
 pub fn is_content_rejection(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("output limit:")
-        || lower.contains("entire patch is rejected")
+    lower.contains("entire patch is rejected")
         || lower.contains("outside declared")
         || lower.contains("changed files outside")
         || lower.contains("agent result failed validation")
@@ -110,9 +109,9 @@ mod tests;
 
 #[cfg(test)]
 #[test]
-fn transport_retry_empty_max_tokens_is_content_not_transport() {
+fn transport_retry_empty_max_tokens_is_reaskable_not_transport() {
     // A-runner.md D7 / matrix #10: an empty output-budget stop is authored.
     let error = "agent transport failed: output limit: empty reply; finish_reason=max_tokens";
     assert!(!is_transport_failure(error));
-    assert!(is_content_rejection(error));
+    assert!(!is_content_rejection(error));
 }

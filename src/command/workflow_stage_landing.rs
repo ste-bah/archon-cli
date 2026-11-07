@@ -143,6 +143,9 @@ pub(super) fn refused_reply(
 }
 struct Bridge(Arc<RecordLanding>);
 impl archon_tools::audit_landing::LandingHost for Bridge {
+    fn normalize_reply(&self, text: &str) -> Option<Value> {
+        archon_workflow::v2::parse_landing_envelope(text)
+    }
     fn tool_name(&self) -> &'static str {
         self.0.tool_name()
     }

@@ -47,16 +47,19 @@ async fn landed_a1_expired_window_completes_from_store() {
 async fn landed_a1_shutdown_completes_from_store() {
     let runner = runner_with(Arc::new(MockProvider::new(vec![])), retained_host(), 2);
     runner.shutdown_flag.store(true, Ordering::Relaxed);
-    assert_eq!(
-        runner.run("continue").await.unwrap(),
-        r#"{"records_landed":1}"#
-    );
+    let completion = runner.run_with_completion("continue").await.unwrap();
+    assert_eq!(completion.content, r#"{"records_landed":1}"#);
+    assert_eq!(completion.stop_reason.as_deref(), Some("shutdown"));
 }
 
 #[tokio::test]
 async fn landed_a2_record_finals_are_bounded_and_good_landings_complete() {
     // Report D2 / matrix #12: repeated one-record JSON replies.
-    let provider = Arc::new(MockProvider::new(vec![text_response(&record("UNIT-1")); 8]));
+    let provider = Arc::new(MockProvider::new(
+        (1..=3)
+            .map(|n| text_response(&record(&format!("UNIT-{n}"))))
+            .collect(),
+    ));
     let host = Arc::new(Host::default());
     let runner = runner_with(provider.clone(), host.clone(), 9);
     let answer = archon_tools::provider_recovery::scope(runner.run("continue"))
@@ -98,26 +101,20 @@ async fn landed_a3_audit_declared_path_final_is_landed() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn landed_a4_empty_end_turn_resends_same_history() {
-    // Report D4 / matrix #1: MessageStop with no text must resend.
-    let provider = Arc::new(MockProvider::new(vec![
-        vec![
-            StreamEvent::MessageDelta {
-                stop_reason: Some("end_turn".into()),
-                usage: None,
-            },
-            StreamEvent::MessageStop,
-        ],
-        text_response(r#"{"records_landed":1}"#),
-    ]));
+async fn landed_a4_empty_end_turn_completes_from_store() {
+    let provider = Arc::new(MockProvider::new(vec![vec![
+        StreamEvent::MessageDelta {
+            stop_reason: Some("end_turn".into()),
+            usage: None,
+        },
+        StreamEvent::MessageStop,
+    ]]));
     let runner = runner_with(provider.clone(), retained_host(), 3);
     assert_eq!(
         runner.run("continue").await.unwrap(),
         r#"{"records_landed":1}"#
     );
-    let requests = provider.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].messages, requests[1].messages);
+    assert_eq!(provider.requests().len(), 1);
 }
 
 #[tokio::test]
@@ -179,8 +176,13 @@ async fn landed_a7_empty_max_tokens_is_an_authored_output_limit() {
             Some(host) => runner_with(provider.clone(), host, 3),
             None => make_runner(provider.clone(), 3),
         };
-        let error = runner.run("continue").await.unwrap_err();
-        assert!(error.to_string().contains("output limit"), "{error}");
+        let answer = runner.run("continue").await;
+        if runner.tool_context.audit_landing.is_some() {
+            assert_eq!(answer.unwrap(), r#"{"records_landed":1}"#);
+        } else {
+            let error = answer.unwrap_err();
+            assert!(error.to_string().contains("output limit"), "{error}");
+        }
         assert_eq!(provider.requests().len(), 1);
     }
 }
@@ -265,3 +267,6 @@ async fn landed_a1_tool_timeout_completes_from_store() {
         r#"{"records_landed":1}"#
     );
 }
+
+#[path = "landed_receipt_tests.rs"]
+mod landed_receipt_tests;

@@ -102,7 +102,7 @@ impl SubagentRunner {
                     .map(|content| {
                         completion_usage::from_stream(
                             content,
-                            Some("end_turn".into()),
+                            Some("shutdown".into()),
                             self.progress.as_ref(),
                         )
                     })
@@ -229,6 +229,16 @@ impl SubagentRunner {
                     if error
                         .downcast_ref::<progress_window::WindowExpired>()
                         .is_some() =>
+                {
+                    return self.complete_landed_or_error(error);
+                }
+                Err(error)
+                    if error
+                        .downcast_ref::<archon_tools::audit_landing::EmptyOutputLimit>()
+                        .is_some()
+                        || error
+                            .to_string()
+                            .contains(archon_llm::transport_idle::TRANSPORT_STALL_MARKER) =>
                 {
                     return self.complete_landed_or_error(error);
                 }

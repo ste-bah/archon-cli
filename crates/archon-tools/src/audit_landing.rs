@@ -24,6 +24,10 @@ pub trait LandingHost: Send + Sync {
     fn land(&self, record: Value) -> Result<String, String>;
     fn hint(&self) -> Result<String, String>;
     fn complete(&self, value: &Value) -> Result<(), String>;
+    /// Use the host's result-envelope parser before checking a receipt.
+    fn normalize_reply(&self, text: &str) -> Option<Value> {
+        serde_json::from_str(text).ok()
+    }
     /// Issue-550: the final reply the host can give from retained records
     /// alone when the session ends without one; `None` when it cannot.
     fn retained_completion(&self) -> Option<Value> {
@@ -93,6 +97,9 @@ impl AuditLanding {
     }
     pub fn complete(&self, value: &Value) -> Result<(), String> {
         self.host.complete(value)
+    }
+    pub fn normalize_reply(&self, text: &str) -> Option<Value> {
+        self.host.normalize_reply(text)
     }
     pub fn retained_completion(&self) -> Option<Value> {
         self.host.retained_completion()

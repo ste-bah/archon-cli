@@ -468,3 +468,8 @@ mod trailing_comma_tests {
         assert_eq!(strip_trailing_commas(input), input);
     }
 }
+
+/// Extract a landing result with the same parser used for agent output.
+pub fn parse_landing_envelope(text: &str) -> Option<Value> {
+    parse_envelope_document(text).ok()
+}

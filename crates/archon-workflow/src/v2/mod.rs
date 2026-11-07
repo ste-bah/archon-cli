@@ -12,6 +12,7 @@ pub mod acceptance_stage;
 pub mod agent_adapter;
 mod agent_output_fault;
 mod agent_output_normalize;
+pub use agent_output_normalize::parse_landing_envelope;
 mod agent_output_tolerance;
 mod agent_prompt;
 mod agent_repair;

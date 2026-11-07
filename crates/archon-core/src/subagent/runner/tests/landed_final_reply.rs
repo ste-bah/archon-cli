@@ -294,7 +294,7 @@ async fn landed_review_verify_replies_without_receipts_are_refused() {
 }
 
 #[tokio::test]
-async fn landed_non_skeleton_record_replies_exhaust_the_incomplete_budget() {
+async fn landed_non_skeleton_good_record_replies_continue_to_the_receipt() {
     struct ReviewHost(Mutex<Vec<Value>>);
     impl LandingHost for ReviewHost {
         fn tool_name(&self) -> &'static str {
@@ -315,19 +315,16 @@ async fn landed_non_skeleton_record_replies_exhaust_the_incomplete_budget() {
     let mut responses: Vec<_> = (1..=4)
         .map(|n| text_response(&json!({"subject":format!("UNIT-{n}")}).to_string()))
         .collect();
-    responses.push(text_response("Review complete."));
+    responses.push(text_response(r#"{"data":{"records_landed":4}}"#));
     let provider = Arc::new(MockProvider::new(responses));
     let mut runner = make_runner(provider.clone(), 8);
     runner.tool_context.audit_landing = Some(Arc::new(AuditLanding::new(host.clone(), None)));
-    // A-runner.md D2: good records land, but their missing final is bounded.
-    let error = runner.run("Review source").await.unwrap_err();
-    assert!(
-        error
-            .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
-            .is_some()
+    assert_eq!(
+        runner.run("Review source").await.unwrap(),
+        r#"{"data":{"records_landed":4}}"#
     );
-    assert_eq!(host.0.lock().unwrap().len(), 3);
-    assert_eq!(provider.requests().len(), 3);
+    assert_eq!(host.0.lock().unwrap().len(), 4);
+    assert_eq!(provider.requests().len(), 5);
 }
 
 // D2, D-doubles.md §4.1: retained seeds and identical re-landings are not new work.

@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
-    struct FailingRunner(bool, bool);
+    struct FailingRunner(bool, u8);
     #[async_trait::async_trait]
     impl archon_workflow::WorkflowLlmClient for FailingRunner {
         async fn send_message(
@@ -18,10 +18,16 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
             &self,
             _: archon_workflow::WorkflowAgentCall,
         ) -> WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
-            if self.1 {
+            if self.1 > 0 {
                 // A-runner.md D1 / host_dispatch:330: land, then host timeout.
                 let records = archon_workflow::v2::record_landing::current().unwrap();
                 records.land(record(1, true)).unwrap();
+                if self.1 == 2 {
+                    return Err(WorkflowError::StageFailed(format!(
+                        "{}: repeated empty streams",
+                        archon_llm::transport_idle::TRANSPORT_STALL_MARKER
+                    )));
+                }
                 return Err(WorkflowError::HostCallTimeout(
                     "stopped after landing".into(),
                 ));
@@ -48,7 +54,7 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
     let (sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
-    for (typed, stopped) in [(true, false), (false, false), (false, true)] {
+    for (typed, stopped) in [(true, 0), (false, 0), (false, 1), (false, 2)] {
         let client = super::super::super::LiveV2AgentClient::new(
             Arc::new(FailingRunner(typed, stopped)),
             sink.clone(),
@@ -87,7 +93,7 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
             true,
         )
         .await;
-        if stopped {
+        if stopped > 0 {
             let result = result.expect("a stopped call completes from its retained store");
             assert_eq!(result.data["stopReason"], "end_turn");
             assert_eq!(result.data["retainedLandings"], true);

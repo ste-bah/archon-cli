@@ -3,9 +3,9 @@
 Pure JSON receipt + new landings: compose the entire retained store.
 JSON receipt + zero new landings: first draft keeps its existing behavior;
   with open findings retry within the bounded budget, including seed-only receipts.
-Prose then JSON: retry unrecognised containers within the bounded correction budget.
+Prose then JSON receipt: check the new-landing count before composing.
 Pure prose: complete from this call's retained landings, else bounded retry.
-Empty: resend the same request; it is never a final answer.
+Empty: complete from new landings, otherwise ask for the receipt.
 Forced answer at the tool-call ceiling: apply the same rules; seeds alone
   cannot complete a repair, and prose never becomes candidate content.
 */
@@ -171,7 +171,6 @@ async fn all_reply_classes_compose_real_retained_records_or_retry() {
     ] {
         let (_temp, records) = seeded(true);
         let new = (1..=14).map(|n| record(n, true)).collect();
-        // A-runner.md D4: the old one-request assertion codified empty completion.
         let (runner, provider) = runner(
             records.clone(),
             vec![
@@ -195,11 +194,8 @@ async fn all_reply_classes_compose_real_retained_records_or_retry() {
             );
         }
         let requests = provider.requests.lock().unwrap();
-        let retried = text.is_empty() || text.starts_with("Repaired.\n");
+        let retried = text.starts_with("Repaired.\n");
         assert_eq!(requests.len(), if retried { 2 } else { 1 });
-        if text.is_empty() {
-            assert_eq!(requests[0].messages, requests[1].messages);
-        }
         assert_eq!(completion.stop_reason.as_deref(), Some("end_turn"));
     }
     for text in [
@@ -241,23 +237,16 @@ async fn seed_only_receipts_and_prose_exhaust_the_existing_retry_budget() {
         let (_temp, records) = seeded(true);
         let (runner, provider) = runner(
             records,
-            (0..if text.is_empty() { 100 } else { 3 })
-                .map(|_| (vec![], reply(text)))
-                .collect(),
+            (0..3).map(|_| (vec![], reply(text))).collect(),
             false,
         );
         let error = runner.run("Repair").await.unwrap_err().to_string();
         let requests = provider.requests.lock().unwrap();
-        if text.is_empty() {
-            // D4: repeated empty streams resend beyond the authored-final budget.
-            assert!(error.contains("without progress"), "{error}");
-            assert!(!error.contains("incomplete landed artifact"), "{error}");
-            assert!(requests.len() > 3);
-            assert!(requests.iter().all(|r| r.messages == requests[0].messages));
-        } else {
-            assert!(error.contains("incomplete landed artifact"), "{error}");
-            assert_eq!(requests.len(), 3);
-        }
+        assert!(error.contains("incomplete landed artifact"), "{error}");
+        assert_eq!(requests.len(), 3);
+        assert_ne!(requests[0].messages, requests[1].messages);
+        let feedback = serde_json::to_string(&requests[1].messages).unwrap();
+        assert!(feedback.contains("records_landed"), "{feedback}");
     }
 }
 

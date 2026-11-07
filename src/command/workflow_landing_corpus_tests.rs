@@ -112,28 +112,36 @@ struct Replay {
 }
 fn replay(rounds: Vec<Vec<StreamEvent>>, seeds: usize) -> Replay {
     let temp = tempfile::tempdir().unwrap();
-    let records = Arc::new(
-        RecordLanding::open(
-            temp.path().join("records"),
-            "corpus".into(),
-            RecordKind::Skeleton,
-            vec![],
-            false,
-        )
-        .unwrap(),
-    );
     let tasks: Vec<_> = blocks("landings.json")
         .into_iter()
         .take(seeds)
         .map(|b| b["input"]["task"].clone())
         .collect();
-    records
-        .seed_skeleton(
-            &json!({"schema_version":1,"acceptance_digest":"","tasks":tasks}),
-            false,
-        )
-        .unwrap();
-    records.require_new_landings(true).unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "corpus-author".into(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: WorkflowV2HostOptions {
+                extra: [
+                    ("recordLanding".into(), json!("skeleton")),
+                    ("openFindings".into(), json!(["repair task contracts"])),
+                    (
+                        "previousSkeleton".into(),
+                        json!({"schema_version":1,"acceptance_digest":"","tasks":tasks}),
+                    ),
+                ]
+                .into(),
+                ..Default::default()
+            },
+        },
+        input: json!({}),
+        depends_on: vec![],
+    };
+    let mut request =
+        archon_workflow::v2::call_data::v2_agent_request("Land records", None, &execution, None);
+    let records = prepare(&mut request, Some(&store)).unwrap().unwrap();
     let landing = Arc::new(AuditLanding::new(Arc::new(Bridge(records.clone())), None));
     let provider = Arc::new(Provider {
         rounds: Mutex::new(rounds.into()),
@@ -204,6 +212,14 @@ async fn receipt_case(name: &str, new: usize, seeds: usize, final_rounds: usize,
         run.provider.requests.lock().unwrap().len(),
         final_rounds + usize::from(new > 0)
     );
+    if name == "malformed" {
+        let requests = run.provider.requests.lock().unwrap();
+        let feedback = serde_json::to_string(&requests[usize::from(new > 0) + 1].messages).unwrap();
+        assert!(
+            feedback.contains("incomplete or malformed JSON"),
+            "{feedback}"
+        );
+    }
     if completes {
         let answer = answer.unwrap();
         assert_eq!(
@@ -249,13 +265,21 @@ case!(exact_r14_receipt, "exact_r14", 16, 0, 1, true);
 case!(under_count_receipt, "under_count", 3, 16, 3, true);
 case!(whole_store_receipt, "whole_store", 16, 3, 3, true);
 case!(seed_only_receipt, "seed_only", 0, 19, 3, false);
-case!(prose_and_receipt, "prose_receipt", 13, 6, 1, true);
+case!(prose_and_receipt, "prose_receipt", 19, 0, 1, true);
+case!(
+    prose_receipt_checks_new_count,
+    "prose_receipt",
+    13,
+    6,
+    3,
+    true
+);
 case!(skeleton_r8_refuses, "skeleton_r8", 0, 0, 3, false);
 case!(skeleton_r10_refuses, "skeleton_r10", 0, 0, 3, false);
 case!(skeleton_keeps_landed_work, "skeleton_r8", 2, 17, 1, true);
 case!(receipt_extra_keys, "extra_keys", 14, 5, 3, true);
 case!(receipt_count_as_list, "list_receipt", 2, 17, 3, true);
-case!(malformed_json, "malformed", 2, 17, 1, true);
+case!(malformed_json, "malformed", 2, 17, 3, true);
 #[tokio::test]
 async fn tool_call_as_text() {
     let mut rounds = vec![events(&[text("text_tool")], "end_turn")];
@@ -270,6 +294,12 @@ async fn tool_call_as_text() {
             .contains("incomplete landed artifact")
     );
     assert_eq!(run.provider.requests.lock().unwrap().len(), 4);
+    let feedback =
+        serde_json::to_string(&run.provider.requests.lock().unwrap()[1].messages).unwrap();
+    assert!(
+        feedback.contains("written as text") && feedback.contains("not run"),
+        "{feedback}"
+    );
     assert_eq!(run.records.new_landing_count().unwrap(), 0);
     assert!(compose_raw_reply(&run.records, &fixture("text_tool.txt")).is_err());
 }
@@ -348,7 +378,13 @@ async fn invalid_field(field: &str) {
         0,
     );
     // Pending rejection must refuse completion without losing the valid tool landing.
-    assert!(run.runner.run("Process records").await.is_err());
+    let error = run
+        .runner
+        .run("Process records")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("invalid type"), "{error}");
     assert_eq!(run.records.new_landing_count().unwrap(), 1);
     assert!(compose_raw_reply(&run.records, "{\"records_landed\":1}").is_err());
     let retained = run.records.retained_artifact().unwrap().unwrap();
@@ -360,6 +396,18 @@ async fn invalid_field(field: &str) {
         "{feedback}"
     );
     assert_eq!(requests.len(), 4);
+    let output = std::process::Command::new("node")
+        .arg("src/command/workflow_landing_corpus_replay.cjs")
+        .arg(retained.to_string())
+        .arg(&error)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 #[tokio::test]
 async fn string_commands_run_refuses_and_retains_work() {
@@ -443,3 +491,6 @@ async fn original_single_record_with_invalid_contract_refuses() {
     assert_eq!(run.records.new_landing_count().unwrap(), 0);
     assert!(compose_raw_reply(&run.records, &fixture("single_record.txt")).is_err());
 }
+
+#[path = "workflow_landing_corpus_normalize_tests.rs"]
+mod normalize_tests;
