@@ -20,7 +20,9 @@ pub(super) fn board_outcome(outcome: &SubagentOutcome) -> Option<DelegatedOutcom
         SubagentOutcome::Failed(_)
         | SubagentOutcome::InvalidAnswer(_)
         | SubagentOutcome::FailedWithProvider { .. } => Some(DelegatedOutcome::Failed),
-        SubagentOutcome::Cancelled => Some(DelegatedOutcome::Stopped),
+        SubagentOutcome::ControlPaused(_) | SubagentOutcome::Cancelled => {
+            Some(DelegatedOutcome::Stopped)
+        }
         SubagentOutcome::AutoBackgrounded => None,
     }
 }

@@ -43,17 +43,29 @@ test('C4 pause evidence names invalid skeleton answers malformed', async () => {
   assert.match(JSON.stringify(pause), /malformed/);
   assert.doesNotMatch(JSON.stringify(pause), /"kind":"entries"/);
 });
-for (const seeded of [false, true]) test(`C6 zero-landed ${seeded ? 'seed-only' : 'first draft'} stays out of gate`, async () => {
+test('C6 rebind with a seeded candidate and no findings permits zero landings', async () => {
+  const ctx = context(); let gates = 0; const options = [];
+  await ctx.authorCandidate({
+    agent: async (_, opts) => { options.push(opts); return { status: 'accepted', stopReason: 'end_turn', content: candidate }; },
+    hostCommand: async () => { gates++; return clean; },
+    pause: async () => { throw Error('unexpected pause'); }
+  }, { ...policy, previousCandidate: candidate });
+  assert.equal(options.length, 1);
+  assert.equal(options[0].previousSkeleton, candidate);
+  assert.deepEqual(Array.from(options[0].openFindings), []);
+  assert.equal(gates, 1);
+});
+for (const seeded of [false, true]) test(`C6 repair with findings and zero landings is refused (${seeded ? 'seeded' : 'unseeded'})`, async () => {
   const ctx = context(); let gates = 0; const options = [];
   const content = seeded ? candidate : JSON.stringify({ schema_version: 1, acceptance_digest: '', tasks: [] });
   await assert.rejects(ctx.authorCandidate({
     agent: async (_, opts) => { options.push(opts); return { status: 'accepted', stopReason: 'end_turn', content }; },
     hostCommand: async () => { gates++; return clean; },
     pause: async () => { throw Error('paused'); }
-  }, { ...policy, previousCandidate: seeded ? candidate : undefined }), /paused/);
+  }, { ...policy, initialFeedback: ['repair source'], previousCandidate: seeded ? candidate : undefined }), /paused/);
   assert.equal(gates, 0);
-  assert.match(options[1].task, /byte-changing landing/);
-  assert.deepEqual(Array.from(options[1].openFindings), []);
+  assert.match(options[1].task, /This call has open findings and made no byte-changing landing/);
+  assert.deepEqual(Array.from(options[1].openFindings), ['repair source']);
 });
 test('C2 refusal before any gate leaves the host finding list empty', async () => {
   const ctx = context(); const options = [];

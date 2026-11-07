@@ -167,6 +167,34 @@ pub(super) fn refused_reply(
 }
 struct Bridge(Arc<RecordLanding>);
 impl archon_tools::audit_landing::LandingHost for Bridge {
+    fn accepts_record_arrays(&self) -> bool {
+        self.0.kind().host_composes_artifact()
+    }
+    fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+        use archon_tools::audit_landing::EmptyReplyPolicy;
+        if self.0.kind().host_composes_artifact() {
+            EmptyReplyPolicy::RetainedCompletion
+        } else {
+            EmptyReplyPolicy::Resend
+        }
+    }
+    fn receipt_envelope_pointer(&self) -> &'static str {
+        if self.0.kind().host_composes_artifact() {
+            ""
+        } else {
+            "/data"
+        }
+    }
+    fn progress_key_fields(&self) -> &'static [&'static str] {
+        &["subject"]
+    }
+    fn allows_unreceipted_reply(&self) -> bool {
+        false
+    }
+    fn normalize_record_reply(&self) -> bool {
+        !self.0.kind().host_composes_artifact()
+    }
+
     fn normalize_reply(&self, text: &str) -> Option<Value> {
         archon_workflow::v2::parse_landing_envelope(text)
     }
@@ -248,239 +276,8 @@ pub(crate) async fn scope<T>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::*;
-    use super::*;
-    struct Port;
-    #[async_trait::async_trait]
-    impl WorkflowLlmClient for Port {
-        /// Scripted replies stand for one continued session (#241).
-        async fn continue_agent(
-            &self,
-            call: archon_workflow::WorkflowAgentCall,
-        ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
-            self.run_agent(call).await
-        }
-
-        async fn send_message(
-            &self,
-            _: Vec<Value>,
-            _: Vec<Value>,
-            _: Vec<Value>,
-            _: &str,
-        ) -> WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
-            unreachable!()
-        }
-        async fn run_agent(
-            &self,
-            _: archon_workflow::WorkflowAgentCall,
-        ) -> WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
-            let records = archon_workflow::v2::record_landing::current()
-                .expect("actual dispatch installed record scope");
-            assert_eq!(
-                archon_tools::audit_landing::current().unwrap().tool_name(),
-                "land-review-record"
-            );
-            records.land(json!({"subject":"UNIT-1","findings":[{"id":"F1","claim":"counterexample"}],"evidence":[{"kind":"inspection","summary":"inspected source"}]}))?;
-            Ok(archon_workflow::WorkflowAgentOutcome {
-                content: json!({"status":"accepted","data":{"records_landed":1}}).to_string(),
-                tool_uses: vec![],
-                tokens_in: Some(0),
-                tokens_out: Some(0),
-                stop_reason: Some("end_turn".into()),
-            })
-        }
-    }
-    #[tokio::test]
-    async fn typed_landing_actual_dispatch_reconstructs_review_without_changing_scope() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-        let (sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
-        let client = LiveV2AgentClient::new(
-            Arc::new(Port),
-            sink,
-            vec![],
-            "fixture".into(),
-            None,
-            Some(30),
-        );
-        let execution = WorkflowV2CallExecution {
-            call: WorkflowV2HostCall {
-                id: "review".into(),
-                method: WorkflowV2HostMethod::Agent,
-                write_mode: None,
-                options: WorkflowV2HostOptions {
-                    extra: [("reviewContract".into(), json!({"stage":"map"}))].into(),
-                    ..Default::default()
-                },
-            },
-            input: json!({"canonical_task_ids":["UNIT-1"]}),
-            depends_on: vec![],
-        };
-        let request =
-            archon_workflow::v2::call_data::v2_agent_request("review", None, &execution, None);
-        let result = run_v2_agent_call_with_rejected_output_log(
-            &WorkflowV2AgentAdapter::new(),
-            &client,
-            &request,
-            Some(&store),
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.data["findings"][0]["id"], "F1");
-        assert_eq!(
-            result.data["findings"][0]["canonical_task_ids"],
-            json!(["UNIT-1"])
-        );
-        assert!(archon_tools::audit_landing::current().is_none());
-    }
-    fn schema_for(kind: RecordKind) -> Value {
-        use archon_tools::audit_landing::LandingHost;
-        let temp = tempfile::tempdir().unwrap();
-        Bridge(Arc::new(
-            RecordLanding::open(temp.path().into(), "id".into(), kind, vec![], false).unwrap(),
-        ))
-        .schema()
-        .unwrap()
-    }
-    #[test]
-    fn skeleton_tool_schema_spells_out_the_task_entry() {
-        let schema = schema_for(RecordKind::Skeleton);
-        let task = &schema["properties"]["task"];
-        assert_eq!(task["required"], json!(["task_id", "file_name"]));
-        for field in [
-            "task_id",
-            "file_name",
-            "depends_on",
-            "blocks",
-            "implements",
-            "deliverable_contracts",
-        ] {
-            assert!(
-                task["properties"].get(field).is_some(),
-                "{field} missing from {task}"
-            );
-        }
-        assert_eq!(task["properties"]["implements"]["items"]["type"], "string");
-        assert_eq!(
-            task["properties"]["deliverable_contracts"]["items"]["required"],
-            json!(["kind", "artifact_path"])
-        );
-        assert_eq!(
-            task["properties"]["depends_on"]["items"]["properties"]["consumes"]["items"]["required"],
-            json!(["artifact_path"])
-        );
-        assert!(
-            task.get("additionalProperties").is_none(),
-            "FrozenTask accepts unknown keys, so the schema must too"
-        );
-        assert!(
-            schema["description"]
-                .as_str()
-                .unwrap()
-                .contains("deliverable_contracts")
-        );
-    }
-    // Issue-39: the schema the model sees is built per kind and states what `validate` enforces.
-    #[test]
-    fn tool_schema_required_lists_and_enums_follow_the_record_kind() {
-        let names = archon_workflow::v2::record_landing::enum_names();
-        for (kind, required) in [
-            (
-                RecordKind::Review,
-                json!(["subject", "evidence", "summary"]),
-            ),
-            (
-                RecordKind::Verify,
-                json!(["subject", "evidence", "summary", "status"]),
-            ),
-            (
-                RecordKind::Skeleton,
-                json!(["subject", "evidence", "summary"]),
-            ),
-        ] {
-            let schema = schema_for(kind);
-            assert_eq!(schema["required"], required, "{kind:?}");
-            assert_eq!(schema["additionalProperties"], json!(false));
-            let evidence = &schema["properties"]["evidence"]["items"];
-            assert_eq!(evidence["required"], json!(["kind", "summary"]), "{kind:?}");
-            assert_eq!(
-                evidence["properties"]["kind"]["enum"],
-                json!(names.evidence_kinds),
-                "{kind:?}"
-            );
-            assert!(
-                !evidence["properties"]["kind"]["enum"]
-                    .as_array()
-                    .unwrap()
-                    .is_empty()
-            );
-            let command = &schema["properties"]["commands_run"]["items"];
-            assert_eq!(
-                command["required"],
-                json!(["kind", "command", "status", "output_summary"]),
-                "{kind:?}"
-            );
-            assert_eq!(
-                command["properties"]["kind"]["enum"],
-                json!(names.command_kinds)
-            );
-            assert_eq!(
-                command["properties"]["status"]["enum"],
-                json!(names.command_statuses)
-            );
-            assert_eq!(
-                schema["properties"]["status"]["enum"],
-                json!(names.verify_verdicts),
-                "{kind:?}"
-            );
-            assert_eq!(
-                schema["properties"]["status"]["enum"],
-                json!(["accepted", "noop", "failed", "blocked", "needs_review"])
-            );
-            for key in schema["required"].as_array().unwrap() {
-                assert!(
-                    schema["properties"].get(key.as_str().unwrap()).is_some(),
-                    "{kind:?} requires {key} but does not describe it"
-                );
-            }
-        }
-        let (review, verify, skeleton) = (
-            schema_for(RecordKind::Review),
-            schema_for(RecordKind::Verify),
-            schema_for(RecordKind::Skeleton),
-        );
-        assert!(
-            review["properties"].get("task").is_none()
-                && verify["properties"].get("task").is_none(),
-            "task is a skeleton field"
-        );
-        assert!(
-            skeleton["properties"].get("findings").is_none(),
-            "findings are not skeleton fields"
-        );
-        let finding = &review["properties"]["findings"]["items"];
-        assert_eq!(
-            finding["anyOf"],
-            json!([{"required":["claim"]},{"required":["summary"]},{"required":["finding"]},{"required":["title"]}])
-        );
-        assert_eq!(
-            verify["properties"]["findings"]["items"]["anyOf"],
-            finding["anyOf"]
-        );
-        assert!(
-            verify["properties"]["status"]["description"]
-                .as_str()
-                .unwrap()
-                .contains("succeeded commands_run entry")
-        );
-        assert_eq!(
-            skeleton["properties"]["task"]["properties"]["deliverable_contracts"]["items"]["properties"]
-                ["artifact_path"]["minLength"],
-            json!(1)
-        );
-    }
-}
+#[path = "workflow_stage_landing_host_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "workflow_stage_landing_p5_tests.rs"]

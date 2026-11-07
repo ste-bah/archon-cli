@@ -291,7 +291,7 @@ async function authorCandidate(w, policy) {
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
     const round = authorRoundReport(policy, authorState);
-    if (policy.phase === "skeleton") authored = refuseUnchangedSkeleton(authored, carry);
+    if (policy.phase === "skeleton") authored = refuseUnchangedSkeleton(authored, carry, openFindings);
     if (authored.invalid_answer === true) authored = { ...authored, malformed: true };
     if (policy.phase === "skeleton" && authored.retainedLandings === true && typeof authored.content === "string") {
       previousCandidate = authored.content;

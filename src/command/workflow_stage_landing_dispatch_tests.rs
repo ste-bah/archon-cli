@@ -23,7 +23,9 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
                 let records = archon_workflow::v2::record_landing::current().unwrap();
                 records.land(record(1, true)).unwrap();
                 if self.1 == 2 {
-                    return Err(WorkflowError::StageFailed(format!(
+                    // A host cutoff carrying the exhausted transport window
+                    // must retain the pause marker, even though it says timeout.
+                    return Err(WorkflowError::HostCallTimeout(format!(
                         "{}: repeated empty streams",
                         archon_llm::transport_idle::TRANSPORT_STALL_MARKER
                     )));
@@ -93,8 +95,16 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
             true,
         )
         .await;
-        if stopped > 0 {
-            let result = result.expect("a stopped call completes from its retained store");
+        if stopped == 2 {
+            let error = result.expect_err("transport stalls must remain resumable");
+            assert!(
+                error
+                    .to_string()
+                    .contains(archon_llm::transport_idle::TRANSPORT_STALL_MARKER),
+                "{error}"
+            );
+        } else if stopped > 0 {
+            let result = result.expect("a host timeout completes from its retained store");
             assert_eq!(result.data["stopReason"], "end_turn");
             assert_eq!(result.data["retainedLandings"], true);
             assert!(result.data.get("invalid_answer").is_none());

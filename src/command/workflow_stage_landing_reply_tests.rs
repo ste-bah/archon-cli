@@ -1,8 +1,8 @@
 //! Session reply matrix, exercised with the real store, bridge and runner parser.
 /*
 Pure JSON receipt + new landings: compose the entire retained store.
-JSON receipt + zero new landings: first draft keeps its existing behavior;
-  with open findings retry within the bounded budget, including seed-only receipts.
+JSON receipt + zero new landings: empty stores and open findings retry within
+  the bounded budget; seeded stores without findings complete.
 Prose then JSON receipt: check the new-landing count before composing.
 Pure prose: complete from this call's retained landings, else bounded retry.
 Empty: complete from new landings, otherwise ask for the receipt.

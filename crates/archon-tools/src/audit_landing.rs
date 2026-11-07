@@ -14,13 +14,21 @@ pub struct IncompleteLandedArtifact(pub String);
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("output limit: provider returned an empty reply; finish_reason={0}")]
 pub struct EmptyOutputLimit(pub String);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptyReplyPolicy {
+    Resend,
+    RetainedCompletion,
+}
+
 pub trait LandingHost: Send + Sync {
-    fn tool_name(&self) -> &'static str {
-        "land-audit-record"
-    }
-    fn schema(&self) -> Option<Value> {
-        None
-    }
+    fn accepts_record_arrays(&self) -> bool;
+    fn empty_reply_policy(&self) -> EmptyReplyPolicy;
+    fn receipt_envelope_pointer(&self) -> &'static str;
+    fn progress_key_fields(&self) -> &'static [&'static str];
+    fn allows_unreceipted_reply(&self) -> bool;
+    fn normalize_record_reply(&self) -> bool;
+    fn tool_name(&self) -> &'static str;
+    fn schema(&self) -> Option<serde_json::Value>;
     fn land(&self, record: Value) -> Result<String, String>;
     fn hint(&self) -> Result<String, String>;
     fn complete(&self, value: &Value) -> Result<(), String>;
@@ -43,7 +51,7 @@ pub struct AuditLanding {
     host: Arc<dyn LandingHost>,
     path_timeout: Option<Duration>,
     progress: Mutex<Progress>,
-    landed: Mutex<std::collections::BTreeSet<String>>,
+    landed: Mutex<std::collections::BTreeMap<String, Value>>,
 }
 impl AuditLanding {
     pub fn new(host: Arc<dyn LandingHost>, seconds: Option<u64>) -> Self {
@@ -60,6 +68,24 @@ impl AuditLanding {
     }
     pub fn tool_name(&self) -> &'static str {
         self.host.tool_name()
+    }
+    pub fn accepts_record_arrays(&self) -> bool {
+        self.host.accepts_record_arrays()
+    }
+    pub fn empty_reply_policy(&self) -> EmptyReplyPolicy {
+        self.host.empty_reply_policy()
+    }
+    pub fn receipt_envelope_pointer(&self) -> &'static str {
+        self.host.receipt_envelope_pointer()
+    }
+    pub fn progress_key_fields(&self) -> &'static [&'static str] {
+        self.host.progress_key_fields()
+    }
+    pub fn allows_unreceipted_reply(&self) -> bool {
+        self.host.allows_unreceipted_reply()
+    }
+    pub fn normalize_record_reply(&self) -> bool {
+        self.host.normalize_record_reply()
     }
     pub fn schema(&self) -> Option<Value> {
         self.host.schema()
@@ -83,14 +109,14 @@ impl AuditLanding {
         }
         if progress.nudges >= 2 {
             return Err(format!(
-                "audit progress deadline ({} s since last landed record): two consecutive nudges produced no new landings",
+                "audit progress deadline ({} s since last new record key): two consecutive nudges produced no new landing keys",
                 elapsed.as_secs()
             ));
         }
         progress.nudges += 1;
         progress.last_nudge = Some(Instant::now());
         Ok(Some(format!(
-            "No record landed for {} s. Land every path you have established now, then continue. Progress nudge {}/2.",
+            "No new record key landed for {} s. Land any established records under keys not yet landed in this call, or send the final receipt when complete. Progress nudge {}/2.",
             elapsed.as_secs(),
             progress.nudges
         )))
@@ -106,21 +132,26 @@ impl AuditLanding {
     }
     /// Land one record, whether it came through the tool or as a final reply.
     pub fn land(&self, input: Value) -> Result<String, String> {
-        let path = input
-            .get("declared_path")
-            .or_else(|| input.get("subject"))
-            .and_then(Value::as_str)
+        self.land_with_progress(input).map(|(hint, _)| hint)
+    }
+    pub fn land_with_progress(&self, input: Value) -> Result<(String, bool), String> {
+        let path = self
+            .host
+            .progress_key_fields()
+            .iter()
+            .find_map(|key| input.get(*key).and_then(Value::as_str))
             .unwrap_or("")
             .to_string();
-        let hint = self.host.land(input)?;
-        if self.landed.lock().unwrap().insert(path) {
+        let hint = self.host.land(input.clone())?;
+        let changed = self.landed.lock().unwrap().insert(path, input).is_none();
+        if changed {
             *self.progress.lock().unwrap() = Progress {
                 last_landed: Instant::now(),
                 last_nudge: None,
                 nudges: 0,
             };
         }
-        Ok(hint)
+        Ok((hint, changed))
     }
 }
 tokio::task_local! { static CURRENT: Arc<AuditLanding>; }
@@ -205,6 +236,30 @@ mod progress_tests {
     use super::*;
     struct Host;
     impl LandingHost for Host {
+        fn accepts_record_arrays(&self) -> bool {
+            false
+        }
+        fn empty_reply_policy(&self) -> crate::audit_landing::EmptyReplyPolicy {
+            crate::audit_landing::EmptyReplyPolicy::Resend
+        }
+        fn receipt_envelope_pointer(&self) -> &'static str {
+            "/data/repository_audit"
+        }
+        fn progress_key_fields(&self) -> &'static [&'static str] {
+            &["declared_path"]
+        }
+        fn allows_unreceipted_reply(&self) -> bool {
+            true
+        }
+        fn normalize_record_reply(&self) -> bool {
+            true
+        }
+        fn tool_name(&self) -> &'static str {
+            "land-audit-record"
+        }
+        fn schema(&self) -> Option<serde_json::Value> {
+            None
+        }
         fn land(&self, _: Value) -> Result<String, String> {
             Ok("landed".into())
         }
@@ -245,6 +300,64 @@ mod progress_tests {
         assert!(result.is_error);
         assert!(result.content.contains("does not belong to this call"));
         assert!(result.is_guard_refusal());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn audit_landing_progress_uses_host_keys_for_distinct_records() {
+        struct UnitHost;
+        impl LandingHost for UnitHost {
+            fn accepts_record_arrays(&self) -> bool {
+                false
+            }
+            fn empty_reply_policy(&self) -> crate::audit_landing::EmptyReplyPolicy {
+                crate::audit_landing::EmptyReplyPolicy::Resend
+            }
+            fn receipt_envelope_pointer(&self) -> &'static str {
+                "/data/repository_audit"
+            }
+            fn allows_unreceipted_reply(&self) -> bool {
+                true
+            }
+            fn normalize_record_reply(&self) -> bool {
+                true
+            }
+            fn tool_name(&self) -> &'static str {
+                "land-audit-record"
+            }
+            fn schema(&self) -> Option<serde_json::Value> {
+                None
+            }
+            fn progress_key_fields(&self) -> &'static [&'static str] {
+                &["unit"]
+            }
+            fn land(&self, _: Value) -> Result<String, String> {
+                Ok("landed".into())
+            }
+            fn hint(&self) -> Result<String, String> {
+                Ok(String::new())
+            }
+            fn complete(&self, _: &Value) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let landing = AuditLanding::new(Arc::new(UnitHost), Some(10));
+        landing.land(json!({"unit":"first"})).unwrap();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(landing.progress_message().unwrap().unwrap().contains("1/2"));
+        landing.land(json!({"unit":"second"})).unwrap();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(landing.progress_message().unwrap().unwrap().contains("1/2"));
+        // Rewording a landed key cannot renew the deadline.
+        assert!(
+            !landing
+                .land_with_progress(json!({"unit":"second","summary":"reworded"}))
+                .unwrap()
+                .1
+        );
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(landing.progress_message().unwrap().unwrap().contains("2/2"));
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(landing.progress_message().is_err());
     }
 
     #[tokio::test(start_paused = true)]

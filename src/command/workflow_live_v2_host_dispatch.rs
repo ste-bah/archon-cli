@@ -328,49 +328,38 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                     ));
                 }
                 Err(error) => {
-                    use archon_workflow::error as call_error;
-                    let text = error.to_string();
-                    let stopped = call_error::is_host_call_timeout_text(&text)
-                        || call_error::is_no_progress_stop_text(&text)
-                        || call_error::is_inactivity_timeout_text(&text)
-                        || call_error::is_read_wall_thrash_text(&text)
-                        || text.contains("reached max turns")
-                        || text.contains(archon_llm::transport_idle::TRANSPORT_STALL_MARKER);
-                    match records
-                        .as_ref()
-                        .filter(|_| stopped)
-                        .and_then(|r| r.retained_reply().ok().flatten())
-                    {
-                        Some(completion) => archon_workflow::WorkflowAgentOutcome {
-                            content: completion.to_string(),
-                            stop_reason: Some("end_turn".into()),
-                            ..Default::default()
-                        },
+                    match stop_handling::retained_completion(&error, records.as_deref()) {
+                        Some(completion) => completion,
                         None => return Err(error.into_workflow_error()),
                     }
                 }
             };
+            let stop_reason = outcome.stop_reason.take().ok_or_else(|| {
+                WorkflowError::StageFailed(
+                    "raw provider outcome returned no typed stop reason".to_string(),
+                )
+            })?;
+            if stop_reason == "shutdown" {
+                return Err(WorkflowError::ControlPaused(
+                    "provider session stopped for shutdown".into(),
+                ));
+            }
             let retained_landings = records
                 .as_ref()
                 .is_some_and(|r| r.new_landing_count().is_ok_and(|n| n > 0));
-            if let Some(records) = records {
-                outcome.content = match stage_landing::compose_raw_reply(&records, &outcome.content)
+            if let Some(records) = records.as_ref() {
+                outcome.content = match stage_landing::compose_raw_reply(records, &outcome.content)
                 {
                     Ok(content) => content,
                     Err(error) => {
                         return Ok(stage_landing::refused_reply(
                             &request.call.id,
                             error,
-                            Some(&records),
+                            Some(records),
                         ));
                     }
                 };
             }
-            let stop_reason = outcome.stop_reason.take().ok_or_else(|| {
-                WorkflowError::StageFailed(
-                    "raw provider outcome returned no typed stop reason".to_string(),
-                )
-            })?;
             if outcome.content.is_empty() {
                 return Err(WorkflowError::StageFailed(
                     "raw provider outcome returned empty content".to_string(),
@@ -495,3 +484,10 @@ pub(crate) use provider_tier::provider_tier_for_v2_request;
 
 #[path = "workflow_repository_audit_direct.rs"]
 mod audited_direct;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_host_dispatch_stop_tests.rs"]
+mod stop_tests;
+
+#[path = "workflow_live_v2_host_dispatch_stop.rs"]
+mod stop_handling;

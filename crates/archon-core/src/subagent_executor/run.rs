@@ -233,6 +233,8 @@ impl AgentSubagentExecutor {
         ))
         .catch_unwind()
         .await;
+        let control_paused = matches!(&runner_result, Ok(Ok(completion))
+            if completion.stop_reason.as_deref() == Some("shutdown"));
         let invalid_answer = matches!(&runner_result, Ok(Err(error)) if error.chain().any(|cause|
             cause.downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>().is_some()
                 || cause.downcast_ref::<archon_tools::audit_landing::EmptyOutputLimit>().is_some()
@@ -271,6 +273,7 @@ impl AgentSubagentExecutor {
         let provider_failure =
             provider_failure.or_else(|| provider_source.as_ref().map(|_| (None, None, false)));
         let inner_result = match runner_result {
+            Ok(Ok(_)) if control_paused => Err("Subagent stopped for shutdown".into()),
             Ok(result) => result
                 .map(
                     |completion| archon_tools::subagent_executor::SubagentCompletion {
@@ -296,6 +299,7 @@ impl AgentSubagentExecutor {
         );
 
         match (inner_result, provider_failure) {
+            (Err(message), _) if control_paused => Err(ExecutorError::ControlPaused(message)),
             (Err(message), Some((status, retry_after_secs, overloaded))) => {
                 Err(ExecutorError::ProviderFailure {
                     message,
@@ -323,3 +327,7 @@ mod tests;
 #[cfg(test)]
 #[path = "run_followup_tests.rs"]
 mod followup_tests;
+
+#[cfg(test)]
+#[path = "run_shutdown_tests.rs"]
+mod shutdown_tests;

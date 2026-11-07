@@ -163,7 +163,7 @@ fn seed_skeleton_receipt_hint_counts_new_landings_truthfully() {
     let hint = store.hint().unwrap();
     assert!(hint.contains("{\"records_landed\":N}"), "{hint}");
     assert!(hint.contains("N is the new landings count from the last receipt"));
-    assert!(!hint.contains("exactly {\"records_landed\":0}"));
+    assert!(hint.contains("If no task needs a change, your final reply is exactly {\"records_landed\":0}; otherwise land each new or changed task, then reply with {\"records_landed\":N}, where N is the new landings count from the last receipt (seeds do not count)."), "{hint}");
     assert!(store.compose_reply(&json!({"records_landed":0})).is_ok());
     store
         .land(json!({"subject":"TASK-X-001","task":candidate("changed")["tasks"][0]}))

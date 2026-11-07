@@ -43,6 +43,28 @@ impl Host {
     }
 }
 impl LandingHost for Host {
+    fn schema(&self) -> Option<serde_json::Value> {
+        None
+    }
+    fn accepts_record_arrays(&self) -> bool {
+        true
+    }
+    fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+        archon_tools::audit_landing::EmptyReplyPolicy::RetainedCompletion
+    }
+    fn receipt_envelope_pointer(&self) -> &'static str {
+        ""
+    }
+    fn progress_key_fields(&self) -> &'static [&'static str] {
+        &["subject"]
+    }
+    fn allows_unreceipted_reply(&self) -> bool {
+        false
+    }
+    fn normalize_record_reply(&self) -> bool {
+        false
+    }
+
     fn tool_name(&self) -> &'static str {
         "land-skeleton-record"
     }
@@ -253,6 +275,27 @@ async fn issue550_a_host_completion_is_a_whole_reply_whatever_the_cut_off_stop_r
 async fn landed_review_verify_replies_without_receipts_are_refused() {
     struct OtherHost(&'static str);
     impl LandingHost for OtherHost {
+        fn accepts_record_arrays(&self) -> bool {
+            false
+        }
+        fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+            archon_tools::audit_landing::EmptyReplyPolicy::Resend
+        }
+        fn receipt_envelope_pointer(&self) -> &'static str {
+            "/data/repository_audit"
+        }
+        fn progress_key_fields(&self) -> &'static [&'static str] {
+            &["declared_path"]
+        }
+        fn normalize_record_reply(&self) -> bool {
+            true
+        }
+        fn schema(&self) -> Option<serde_json::Value> {
+            None
+        }
+        fn allows_unreceipted_reply(&self) -> bool {
+            self.0 == "land-audit-record"
+        }
         fn tool_name(&self) -> &'static str {
             self.0
         }
@@ -297,6 +340,27 @@ async fn landed_review_verify_replies_without_receipts_are_refused() {
 async fn landed_non_skeleton_good_record_replies_continue_to_the_receipt() {
     struct ReviewHost(Mutex<Vec<Value>>);
     impl LandingHost for ReviewHost {
+        fn accepts_record_arrays(&self) -> bool {
+            false
+        }
+        fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+            archon_tools::audit_landing::EmptyReplyPolicy::Resend
+        }
+        fn normalize_record_reply(&self) -> bool {
+            true
+        }
+        fn schema(&self) -> Option<serde_json::Value> {
+            None
+        }
+        fn allows_unreceipted_reply(&self) -> bool {
+            false
+        }
+        fn receipt_envelope_pointer(&self) -> &'static str {
+            "/data"
+        }
+        fn progress_key_fields(&self) -> &'static [&'static str] {
+            &["subject"]
+        }
         fn tool_name(&self) -> &'static str {
             "land-review-record"
         }
@@ -311,20 +375,21 @@ async fn landed_non_skeleton_good_record_replies_continue_to_the_receipt() {
             Ok(())
         }
     }
-    let host = Arc::new(ReviewHost(Mutex::new(vec![])));
-    let mut responses: Vec<_> = (1..=4)
-        .map(|n| text_response(&json!({"subject":format!("UNIT-{n}")}).to_string()))
-        .collect();
-    responses.push(text_response(r#"{"data":{"records_landed":4}}"#));
-    let provider = Arc::new(MockProvider::new(responses));
-    let mut runner = make_runner(provider.clone(), 8);
-    runner.tool_context.audit_landing = Some(Arc::new(AuditLanding::new(host.clone(), None)));
-    assert_eq!(
-        runner.run("Review source").await.unwrap(),
-        r#"{"data":{"records_landed":4}}"#
-    );
-    assert_eq!(host.0.lock().unwrap().len(), 4);
-    assert_eq!(provider.requests().len(), 5);
+    for count in [3, 4] {
+        let host = Arc::new(ReviewHost(Mutex::new(vec![])));
+        let mut responses: Vec<_> = (1..=count)
+            .map(|n| text_response(&json!({"subject":format!("UNIT-{n}")}).to_string()))
+            .collect();
+        let receipt = json!({"data":{"records_landed":count}}).to_string();
+        responses.push(text_response(&receipt));
+        let provider = Arc::new(MockProvider::new(responses));
+        let mut runner = make_runner(provider.clone(), 8);
+        runner.tool_context.audit_landing = Some(Arc::new(AuditLanding::new(host.clone(), None)));
+        let answer = runner.run("Review source").await;
+        assert_eq!(answer.unwrap(), receipt);
+        assert_eq!(host.0.lock().unwrap().len(), count);
+        assert_eq!(provider.requests().len(), count + 1);
+    }
 }
 
 // D2, D-doubles.md §4.1: retained seeds and identical re-landings are not new work.
@@ -380,3 +445,6 @@ fn landed_fake_host_counts_only_this_calls_byte_changing_subjects() {
 
 #[path = "landing_audit_tests.rs"]
 mod landing_audit_tests;
+
+#[path = "landed_policy_tests.rs"]
+mod landed_policy_tests;

@@ -223,3 +223,17 @@ fn this_builds_failed_results_are_classified_by_their_marker() {
     );
     assert!(!result_carries_no_verdict("author-1", &invalid));
 }
+
+#[test]
+fn host_fault_shutdown_preserves_control_pause_through_agent_boundary() {
+    let error = WorkflowError::port(archon_tools::subagent_executor::ControlPaused(
+        "shutdown".into(),
+    ));
+    let classified = crate::v2::WorkflowV2AgentError::from_call_error(&error);
+    assert!(
+        matches!(&classified, crate::v2::WorkflowV2AgentError::ControlPaused(message) if message == "shutdown")
+    );
+    assert!(
+        matches!(classified.into_workflow_error(), WorkflowError::ControlPaused(message) if message == "shutdown")
+    );
+}

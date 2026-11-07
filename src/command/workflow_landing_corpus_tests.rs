@@ -168,7 +168,7 @@ fn replay(rounds: Vec<Vec<StreamEvent>>, seeds: usize) -> Replay {
         "corpus".into(),
         8,
         10,
-        Arc::new(AgentConfig::default()),
+        Arc::new(pause_tests::corpus_config()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
             "test".into(),
@@ -347,17 +347,17 @@ async fn single_record_reply_lands_then_receipt_completes() {
     let record: Value = serde_json::from_str(&fixture("valid_record.txt")).unwrap();
     assert_tasks(&run.records, &artifact, &[record["task"].clone()]);
 }
-// P1/A2: successful record replies must consume the same bounded incomplete budget.
+// A new record preserves the receipt budget; three unchanged replies exhaust it.
 #[tokio::test]
 async fn repeated_record_replies_complete_within_budget() {
     let run = replay(
-        (0..3)
+        (0..4)
             .map(|_| events(&[text("valid_record")], "end_turn"))
             .collect(),
         0,
     );
     let answer = run.runner.run("Process records").await.unwrap();
-    assert_eq!(run.provider.requests.lock().unwrap().len(), 3);
+    assert_eq!(run.provider.requests.lock().unwrap().len(), 4);
     assert_eq!(run.records.new_landing_count().unwrap(), 1);
     let artifact: Value =
         serde_json::from_str(&compose_raw_reply(&run.records, &answer).unwrap()).unwrap();
@@ -494,3 +494,6 @@ async fn original_single_record_with_invalid_contract_refuses() {
 
 #[path = "workflow_landing_corpus_normalize_tests.rs"]
 mod normalize_tests;
+
+#[path = "workflow_landing_corpus_pause_tests.rs"]
+mod pause_tests;

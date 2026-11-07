@@ -8,8 +8,8 @@ use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
 };
 use archon_llm::streaming::StreamEvent;
-use archon_tools::tool::ToolContext;
 use archon_tools::tool::Tool;
+use archon_tools::tool::ToolContext;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -18,6 +18,7 @@ include!("stream_round_recovery_tests.rs");
 include!("stream_round_activity_tests.rs");
 include!("stream_round_wake_tests.rs");
 include!("stream_round_open_error_tests.rs");
+include!("stream_round_close_tests.rs");
 
 #[tokio::test]
 async fn cancellation_drops_stalled_provider_stream_promptly() {

@@ -203,6 +203,18 @@ impl crate::v2::WorkflowV2AgentError {
     /// Host control and infrastructure faults keep their kind through the
     /// agent layer. Only ordinary provider failures become transport.
     pub fn from_call_error(error: &WorkflowError) -> Self {
+        if let WorkflowError::Port(cause) = error {
+            let paused = std::iter::successors(
+                Some(cause.as_ref() as &(dyn std::error::Error + 'static)),
+                |error| error.source(),
+            )
+            .find_map(|error| {
+                error.downcast_ref::<archon_tools::subagent_executor::ControlPaused>()
+            });
+            if let Some(paused) = paused {
+                return Self::ControlPaused(paused.0.clone());
+            }
+        }
         match error {
             WorkflowError::Port(cause)
                 if std::iter::successors(

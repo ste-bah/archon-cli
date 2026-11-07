@@ -19,6 +19,10 @@ fn stream_idle_timeout(runner: &SubagentRunner) -> Duration {
     )
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(super) struct EmptyReplyExhausted(String);
+
 pub(super) struct StreamRoundResult {
     pub text_content: String,
     pub stop_reason: Option<String>,
@@ -128,7 +132,14 @@ pub(super) async fn collect_stream_round(
         let empty_terminal = text_content.trim().is_empty()
             && pending_tools.is_empty()
             && !matches!(finish_reason.as_deref(), Some("max_tokens" | "length"))
-            && runner.tool_context.audit_landing.is_none();
+            && runner
+                .tool_context
+                .audit_landing
+                .as_ref()
+                .is_none_or(|landing| {
+                    landing.empty_reply_policy()
+                        == archon_tools::audit_landing::EmptyReplyPolicy::Resend
+                });
         let interrupted = received.is_err()
             || transport_failure
             || matches!(&received, Ok(None))
@@ -170,9 +181,26 @@ pub(super) async fn collect_stream_round(
                 Ok(Some(StreamEvent::Error { error_type, .. })) if error_type != "protocol" => {
                     FailedAttempt::Unanswered("transport error")
                 }
+                _ if !terminal_marker
+                    && finish_reason.is_none()
+                    && text_content.is_empty()
+                    && pending_tools.is_empty() =>
+                {
+                    FailedAttempt::Unanswered("stream closed without an answer")
+                }
                 _ => FailedAttempt::Incomplete,
             };
-            let mut backoff = budget.failed(attempt).map_err(anyhow::Error::msg)?;
+            let mut backoff = budget.failed(attempt).map_err(|text| {
+                if attempt == FailedAttempt::Incomplete
+                    && empty_terminal
+                    && matches!(&received, Ok(None))
+                    && (terminal_marker || finish_reason.is_some())
+                {
+                    anyhow::Error::new(EmptyReplyExhausted(text))
+                } else {
+                    anyhow::Error::msg(text)
+                }
+            })?;
             if let Some(scope) = archon_observability::transport::current() {
                 scope.record(serde_json::json!({"kind":"stream_round_retry","attempt":budget.failures(),
                     "reason":if received.is_err(){"idle_timeout"}else{"incomplete_stream"},
@@ -325,7 +353,14 @@ pub(super) async fn collect_stream_round(
     if !retry_after_compact
         && text_content.trim().is_empty()
         && pending_tools.is_empty()
-        && (runner.tool_context.audit_landing.is_none()
+        && (runner
+            .tool_context
+            .audit_landing
+            .as_ref()
+            .is_none_or(|landing| {
+                landing.empty_reply_policy()
+                    == archon_tools::audit_landing::EmptyReplyPolicy::Resend
+            })
             || matches!(finish_reason.as_deref(), Some("max_tokens" | "length")))
     {
         let reason = finish_reason.as_deref().unwrap_or("unavailable");
@@ -436,46 +471,9 @@ fn append_tool_input_delta(
     }
 }
 
-/// Adds what one stream event grew the round's usage by (`before` to
-/// `after`, both from its [`archon_llm::usage::UsageAccumulator`]) to the
-/// subagent's progress tracker. The accumulator owns the stream usage rule:
-/// `message_delta` counts are cumulative for their message (Issue 424), and a
-/// count only a delta reports, or reports higher than `message_start` did, is
-/// counted (Issue 369). A resent round starts a fresh accumulator; the
-/// tracker keeps what the discarded attempt was billed.
-fn record_usage_growth(
-    runner: &SubagentRunner,
-    before: &archon_llm::types::Usage,
-    after: &archon_llm::types::Usage,
-) {
-    let grew = |after: u64, before: u64| after.saturating_sub(before);
-    let input = grew(after.input_tokens, before.input_tokens);
-    let output = grew(after.output_tokens, before.output_tokens);
-    let cache_creation = grew(
-        after.cache_creation_input_tokens,
-        before.cache_creation_input_tokens,
-    );
-    let cache_read = grew(
-        after.cache_read_input_tokens,
-        before.cache_read_input_tokens,
-    );
-    let newly_available = (after.input_tokens_available && !before.input_tokens_available)
-        || (after.output_tokens_available && !before.output_tokens_available);
-    if input == 0 && output == 0 && cache_creation == 0 && cache_read == 0 && !newly_available {
-        return;
-    }
-    if let Some(ref tracker) = runner.progress
-        && let Ok(mut guard) = tracker.lock()
-    {
-        guard.cumulative_input_tokens += input;
-        guard.cumulative_output_tokens += output;
-        guard.input_tokens_available |= after.input_tokens_available;
-        guard.output_tokens_available |= after.output_tokens_available;
-        guard.cumulative_cache_creation_tokens += cache_creation;
-        guard.cumulative_cache_read_tokens += cache_read;
-        guard.last_update = chrono::Utc::now();
-    }
-}
+#[path = "stream_round_usage.rs"]
+mod usage;
+use usage::record_usage_growth;
 
 #[cfg(test)]
 mod tests {

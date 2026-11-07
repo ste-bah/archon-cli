@@ -252,6 +252,9 @@ impl Tool for AgentTool {
                             Ok(format!("auto-backgrounded:{sid_spawn}")),
                         )
                     }
+                    SubagentOutcome::ControlPaused(message) => {
+                        (AgentStatus::Cancelled, Err(message.clone()))
+                    }
                     SubagentOutcome::Cancelled => {
                         (AgentStatus::Failed, Err("subagent cancelled".into()))
                     }
@@ -462,6 +465,7 @@ impl Tool for AgentTool {
                      use SendMessage with message_type=result to retrieve status/output without restarting it."
                 ))
             }
+            SubagentOutcome::ControlPaused(message) => ToolResult::error(message),
             SubagentOutcome::Cancelled => {
                 warn!(
                     subagent_id = %subagent_id,

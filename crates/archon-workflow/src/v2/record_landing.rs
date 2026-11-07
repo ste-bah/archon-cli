@@ -19,6 +19,11 @@ pub enum RecordKind {
     Verify,
     Skeleton,
 }
+impl RecordKind {
+    pub fn host_composes_artifact(self) -> bool {
+        matches!(self, Self::Skeleton)
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StageRecord {

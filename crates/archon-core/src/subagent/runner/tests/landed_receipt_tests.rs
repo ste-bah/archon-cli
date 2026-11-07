@@ -42,15 +42,20 @@ async fn landed_incidental_brackets_request_receipt_without_json_error() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn landed_recovery_transport_stall_completes_from_store() {
+async fn landed_recovery_transport_stall_preserves_resumable_pause() {
     // No terminal framing: the resend budget, rather than the final-reply judge, stops this.
     let provider = Arc::new(MockProvider::new(vec![vec![]; 32]));
     let mut runner = runner_with(provider.clone(), retained_host(), 4);
     runner.timeout_secs = 1;
     Arc::make_mut(&mut runner.agent_config).subagent_stream_idle_timeout_secs = 1;
-    let answer = archon_tools::provider_recovery::scope(runner.run("continue"))
+    let error = archon_tools::provider_recovery::scope(runner.run("continue"))
         .await
-        .unwrap();
-    assert_eq!(answer, r#"{"records_landed":1}"#);
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains(archon_llm::transport_idle::TRANSPORT_STALL_MARKER),
+        "{error}"
+    );
     assert!(provider.requests().len() > 3);
 }

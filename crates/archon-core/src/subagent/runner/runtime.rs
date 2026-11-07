@@ -237,8 +237,8 @@ impl SubagentRunner {
                         .downcast_ref::<archon_tools::audit_landing::EmptyOutputLimit>()
                         .is_some()
                         || error
-                            .to_string()
-                            .contains(archon_llm::transport_idle::TRANSPORT_STALL_MARKER) =>
+                            .downcast_ref::<stream_round::EmptyReplyExhausted>()
+                            .is_some() =>
                 {
                     return self.complete_landed_or_error(error);
                 }

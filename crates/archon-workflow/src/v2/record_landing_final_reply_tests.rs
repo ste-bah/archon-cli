@@ -452,3 +452,43 @@ fn record_landing_fresh_seed_identical_relanding_counts_zero() {
     assert!(landing.compose_reply(&json!({"records_landed":0})).is_ok());
     assert!(landing.retained_reply().unwrap().is_none());
 }
+
+#[test]
+fn record_landing_seeded_zero_reply_requires_no_open_findings() {
+    for has_findings in [false, true] {
+        let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+        let record = task_record("TASK-X-001");
+        landing
+            .seed_skeleton(
+                &json!({"schema_version":1,"acceptance_digest":"","tasks":[record["task"]]}),
+                false,
+            )
+            .unwrap();
+        let findings = if has_findings {
+            vec![json!({"claim":"repair task"})]
+        } else {
+            vec![]
+        };
+        landing.require_finding_landings(&findings).unwrap();
+        assert_eq!(landing.new_landing_count().unwrap(), 0);
+        let hint = landing.hint().unwrap();
+        assert!(hint.contains("An author call with open findings must make at least one byte-changing landing versus the pre-call snapshot: a new or changed task record."), "{hint}");
+        let zero_hint = "If no task needs a change, your final reply is exactly {\"records_landed\":0}; otherwise land each new or changed task, then reply with {\"records_landed\":N}, where N is the new landings count from the last receipt (seeds do not count).";
+        assert_eq!(hint.contains(zero_hint), !has_findings, "{hint}");
+        let result = landing.compose_reply(&json!({"records_landed":0}));
+        if has_findings {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("byte-changing landing")
+            );
+        } else {
+            let mut expected = record["task"].clone();
+            for field in ["blocks", "deliverable_contracts", "depends_on"] {
+                expected[field] = json!([]);
+            }
+            assert_eq!(result.unwrap()["tasks"], json!([expected]));
+        }
+    }
+}

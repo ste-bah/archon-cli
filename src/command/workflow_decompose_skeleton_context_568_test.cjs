@@ -57,8 +57,11 @@ test('skeleton retries reference the latest judged candidate; the first prompt p
   // #599 adds the deliverable contract rule to the first prompt.
   // SHA-256 of the dispatched first prompt without #568 (main plus #569, the #572 obligation sentence, the #574 table-row constraint wording and the #575 source_sections shape field), with these exact args.
   // P5 replaces the whole-document prompt with one-task landing and exact receipt wording.
-  // #630 C6 requires a byte-changing landing in every author call.
-  assert.equal(digest(out.prompts[0]), 'b43667c9511cc122a61162b4f2b8acc3345ee60c7a4c350c9394d558f8ae4368');
+  // Pin the new condition explicitly; preserve the existing prompt golden.
+  const landingRule = 'A call with open findings must make at least one byte-changing landing; a call with an empty task store must land at least one task. The gate then judges the whole set again.';
+  assert(out.prompts[0].includes(landingRule));
+  const baseline = out.prompts[0].replace(landingRule, 'Every author call must make at least one byte-changing landing; the gate then judges the whole set again.');
+  assert.equal(digest(baseline), 'b43667c9511cc122a61162b4f2b8acc3345ee60c7a4c350c9394d558f8ae4368');
   assert(!out.prompts[0].includes('The previous candidate is in'));
   assert.equal(files.size, 2);
   assertPrevious(out.prompts[1], files, replies[0]);

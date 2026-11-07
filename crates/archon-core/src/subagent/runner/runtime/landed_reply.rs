@@ -7,13 +7,14 @@ pub(super) enum LandedReply {
     Complete(String),
 }
 
-fn is_record(value: &serde_json::Value, tool: &str) -> bool {
-    let key = if tool == "land-audit-record" {
-        "declared_path"
-    } else {
-        "subject"
-    };
-    value.get(key).is_some_and(serde_json::Value::is_string)
+fn is_record(
+    value: &serde_json::Value,
+    landing: &archon_tools::audit_landing::AuditLanding,
+) -> bool {
+    landing
+        .progress_key_fields()
+        .iter()
+        .any(|key| value.get(*key).is_some_and(serde_json::Value::is_string))
         && value.get("records_landed").is_none()
         && value.get("data").is_none()
 }
@@ -21,15 +22,18 @@ fn is_record(value: &serde_json::Value, tool: &str) -> bool {
 /// Recognise record containers before considering a retained completion.
 /// Prose may contain exactly one complete object; ambiguous or broken JSON
 /// must be retried, so it cannot silently discard new records.
-fn record_reply(text: &str, tool: &str) -> Result<Option<Vec<serde_json::Value>>, String> {
+fn record_reply(
+    text: &str,
+    landing: &archon_tools::audit_landing::AuditLanding,
+) -> Result<Option<Vec<serde_json::Value>>, String> {
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
-        if is_record(&value, tool) {
+        if is_record(&value, landing) {
             return Ok(Some(vec![value]));
         }
-        if tool == "land-skeleton-record"
+        if landing.accepts_record_arrays()
             && let Some(values) = value.as_array()
         {
-            if !values.is_empty() && values.iter().all(|v| is_record(v, tool)) {
+            if !values.is_empty() && values.iter().all(|v| is_record(v, landing)) {
                 return Ok(Some(values.clone()));
             }
             return Err("a record array must contain only landing record objects".into());
@@ -37,22 +41,27 @@ fn record_reply(text: &str, tool: &str) -> Result<Option<Vec<serde_json::Value>>
         return Ok(None);
     }
     let values = embedded_values(text)?;
-    if values.len() == 1 && is_record(&values[0], tool) {
+    if values.len() == 1 && is_record(&values[0], landing) {
         return Ok(Some(values));
     }
-    if values.iter().any(|v| contains_record(v, tool)) {
-        return Err(
-            "prose contains ambiguous record objects or arrays; send one record object or a reply that is only a JSON array".into(),
-        );
+    if values.iter().any(|v| contains_record(v, landing)) {
+        return Err(if landing.accepts_record_arrays() {
+            "prose contains ambiguous record objects or arrays; send one record object or a reply that is only a JSON array"
+        } else {
+            "prose contains ambiguous record objects or arrays; send one record object"
+        }.into());
     }
     Ok(None)
 }
 
-fn contains_record(value: &serde_json::Value, tool: &str) -> bool {
-    is_record(value, tool)
+fn contains_record(
+    value: &serde_json::Value,
+    landing: &archon_tools::audit_landing::AuditLanding,
+) -> bool {
+    is_record(value, landing)
         || value
             .as_array()
-            .is_some_and(|items| items.iter().any(|item| contains_record(item, tool)))
+            .is_some_and(|items| items.iter().any(|item| contains_record(item, landing)))
 }
 
 fn embedded_values(text: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -114,19 +123,20 @@ impl SubagentRunner {
         };
         let normalized = landing.normalize_reply(text);
         let normalized_text = normalized.as_ref().map(ToString::to_string);
-        let record_text = if landing.tool_name() != "land-skeleton-record" {
+        let record_text = if landing.normalize_record_reply() {
             normalized_text.as_deref().unwrap_or(text)
         } else {
             text
         };
         let mut good_record = false;
-        let error = match record_reply(record_text, landing.tool_name()) {
+
+        let error = match record_reply(record_text, landing) {
             Ok(Some(records)) => {
                 let mut feedback = Vec::new();
                 for record in records {
-                    feedback.push(match landing.land(record) {
-                        Ok(receipt) => {
-                            good_record = true;
+                    feedback.push(match landing.land_with_progress(record) {
+                        Ok((receipt, first_landing)) => {
+                            good_record |= first_landing;
                             format!(
                                 "host landed the record through {}. {receipt}",
                                 landing.tool_name()
@@ -156,15 +166,8 @@ impl SubagentRunner {
                     values.pop()
                 });
                 let compact = parsed.as_ref().and_then(|v| {
-                    if landing.tool_name() == "land-audit-record" {
-                        v.pointer("/data/repository_audit")
-                    } else if landing.tool_name() == "land-skeleton-record" {
-                        Some(v)
-                    } else {
-                        v.get("data")
-                            .filter(|d| d.get("records_landed").is_some())
-                            .or(Some(v))
-                    }
+                    v.pointer(landing.receipt_envelope_pointer())
+                        .or_else(|| v.get("records_landed").map(|_| v))
                 });
                 match compact.filter(|v| v.get("records_landed").is_some()) {
                     Some(value) => match landing.complete(value) {
@@ -173,11 +176,12 @@ impl SubagentRunner {
                         }
                         Err(error) => error,
                     },
-                    None if landing.tool_name() == "land-audit-record" => {
+                    None if landing.allows_unreceipted_reply() && !text.trim().is_empty() => {
                         return Ok(LandedReply::Final);
                     }
                     None => {
-                        if landing.tool_name() == "land-skeleton-record"
+                        if landing.empty_reply_policy()
+                            == archon_tools::audit_landing::EmptyReplyPolicy::RetainedCompletion
                             && let Some(completion) = self.retained_landed_completion()
                         {
                             return Ok(LandedReply::Complete(completion));
@@ -187,17 +191,13 @@ impl SubagentRunner {
                 }
             }
         };
+        if good_record {
+            return Ok(LandedReply::Retry(format!(
+                "{error}. Continue landing established records, then send the final receipt. {}",
+                landing.hint().unwrap_or_default()
+            )));
+        }
         if *incomplete >= 2 {
-            if good_record {
-                if let Some(completion) = self.retained_landed_completion() {
-                    return Ok(LandedReply::Complete(completion));
-                }
-                *incomplete = incomplete.saturating_add(1);
-                return Ok(LandedReply::Retry(format!(
-                    "{error}. Send the final receipt with records_landed now. {}",
-                    landing.hint().unwrap_or_default()
-                )));
-            }
             if let Some(completion) = self.retained_landed_completion() {
                 return Ok(LandedReply::Complete(completion));
             }

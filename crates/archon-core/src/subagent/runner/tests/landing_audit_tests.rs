@@ -53,19 +53,19 @@ async fn landed_a1_shutdown_completes_from_store() {
 }
 
 #[tokio::test]
-async fn landed_a2_record_finals_are_bounded_and_good_landings_complete() {
+async fn landed_a2_record_finals_continue_until_the_receipt() {
     // Report D2 / matrix #12: repeated one-record JSON replies.
-    let provider = Arc::new(MockProvider::new(
-        (1..=3)
-            .map(|n| text_response(&record(&format!("UNIT-{n}"))))
-            .collect(),
-    ));
+    let mut replies: Vec<_> = (1..=3)
+        .map(|n| text_response(&record(&format!("UNIT-{n}"))))
+        .collect();
+    replies.push(text_response(r#"{"records_landed":3}"#));
+    let provider = Arc::new(MockProvider::new(replies));
     let host = Arc::new(Host::default());
     let runner = runner_with(provider.clone(), host.clone(), 9);
     let answer = archon_tools::provider_recovery::scope(runner.run("continue"))
         .await
         .unwrap();
-    assert_eq!(provider.requests().len(), 3);
+    assert_eq!(provider.requests().len(), 4);
     assert_eq!(host.count(), 3);
     assert_eq!(answer, r#"{"records_landed":3}"#);
 }
@@ -75,6 +75,30 @@ async fn landed_a3_audit_declared_path_final_is_landed() {
     // Report D3 / matrix #4: audit uses declared_path rather than subject.
     struct AuditHost(Mutex<Vec<Value>>);
     impl LandingHost for AuditHost {
+        fn accepts_record_arrays(&self) -> bool {
+            false
+        }
+        fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+            archon_tools::audit_landing::EmptyReplyPolicy::Resend
+        }
+        fn receipt_envelope_pointer(&self) -> &'static str {
+            "/data/repository_audit"
+        }
+        fn progress_key_fields(&self) -> &'static [&'static str] {
+            &["declared_path"]
+        }
+        fn allows_unreceipted_reply(&self) -> bool {
+            true
+        }
+        fn normalize_record_reply(&self) -> bool {
+            true
+        }
+        fn tool_name(&self) -> &'static str {
+            "land-audit-record"
+        }
+        fn schema(&self) -> Option<serde_json::Value> {
+            None
+        }
         fn land(&self, value: Value) -> Result<String, String> {
             self.0.lock().unwrap().push(value);
             Ok("record retained".into())

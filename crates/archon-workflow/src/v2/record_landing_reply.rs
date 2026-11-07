@@ -32,10 +32,10 @@ impl RecordLanding {
         } else if let Err(error) = self.require_finding_repairs() {
             format!("Completion is pending: {error}")
         } else if records.is_empty() {
-            "Land each task as one record; every landing receipt ends with the exact final reply."
+            "The task store is empty: land at least one task before replying; every landing receipt ends with the exact final reply."
                 .to_owned()
         } else if new_count == 0 {
-            "When no task is left to land, reply with {\"records_landed\":N}, where N is the new landings count from the last receipt (seeds do not count).".to_owned()
+            "If no task needs a change, your final reply is exactly {\"records_landed\":0}; otherwise land each new or changed task, then reply with {\"records_landed\":N}, where N is the new landings count from the last receipt (seeds do not count).".to_owned()
         } else {
             format!(
                 "With no task left to land, your final reply is exactly {}",
@@ -43,7 +43,7 @@ impl RecordLanding {
             )
         };
         Ok(format!(
-            "Host retained {} records; {} new landings in this call (seeds do not count). An author call with open findings must make at least one byte-changing landing versus the pre-call snapshot: change a task record. Identical task bytes or restoring original task bytes do not count. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
+            "Host retained {} records; {} new landings in this call (seeds do not count). An author call with open findings must make at least one byte-changing landing versus the pre-call snapshot: a new or changed task record. Identical task bytes or restoring original task bytes do not count. A call with an empty task store must land at least one task. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
             records.len(),
             new_count,
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
@@ -78,10 +78,18 @@ impl RecordLanding {
     /// Session receipts count this call's landed subjects. `assemble` and
     /// `compose` consume the complete retained-store count internally.
     pub fn compose_reply(&self, reply: &Value) -> WorkflowResult<Value> {
-        if self.kind != RecordKind::Skeleton {
+        if !self.kind.host_composes_artifact() {
             return self.compose(reply);
         }
         let landed = self.new_landing_count()?;
+        // Pending-work refusals come first: a count refusal must never ask
+        // for a reply that a later check refuses.
+        self.require_finding_repairs()?;
+        if landed == 0 && self.records()?.is_empty() {
+            return Err(invalid(
+                "The task store is empty: land at least one task before replying",
+            ));
+        }
         if !reply.as_object().is_some_and(|o| o.len() == 1)
             || reply.get("records_landed").and_then(Value::as_u64) != Some(landed as u64)
         {
@@ -90,7 +98,6 @@ impl RecordLanding {
                 json!({"records_landed":landed})
             )));
         }
-        self.require_finding_repairs()?;
         self.compose(&json!({"records_landed":self.records()?.len()}))
     }
 
@@ -123,7 +130,7 @@ impl RecordLanding {
     pub fn compose(&self, reply: &Value) -> WorkflowResult<Value> {
         let mut assembled = self.assemble(reply)?;
         let tasks = assembled["tasks"].take();
-        if self.kind == RecordKind::Skeleton {
+        if self.kind.host_composes_artifact() {
             return Ok(json!({"schema_version":1,"acceptance_digest":"","tasks":tasks}));
         }
         let mut value = reply.clone();
@@ -142,7 +149,7 @@ impl RecordLanding {
     /// themselves and its gate judges them; a review or verify verdict is the
     /// agent's own and is never invented here.
     pub fn retained_reply(&self) -> WorkflowResult<Option<Value>> {
-        if self.kind != RecordKind::Skeleton {
+        if !self.kind.host_composes_artifact() {
             return Ok(None);
         }
         self.require_repaired()?;
@@ -157,7 +164,7 @@ impl RecordLanding {
     }
     /// Preserve valid retained tasks even when this call cannot complete.
     pub fn retained_artifact(&self) -> WorkflowResult<Option<Value>> {
-        if self.kind != RecordKind::Skeleton
+        if !self.kind.host_composes_artifact()
             || (!self.has_full_records()? && self.new_landing_count()? == 0)
         {
             return Ok(None);
@@ -175,7 +182,7 @@ impl RecordLanding {
     /// Store-level completion for callers using `assemble`/`compose` directly.
     /// Sessions use `retained_reply`, which excludes seeded records.
     pub fn retained_completion(&self) -> WorkflowResult<Option<Value>> {
-        if self.kind != RecordKind::Skeleton {
+        if !self.kind.host_composes_artifact() {
             return Ok(None);
         }
         self.require_repaired()?;

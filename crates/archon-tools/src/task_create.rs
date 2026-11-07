@@ -244,7 +244,9 @@ impl Tool for TaskCreateTool {
                 SubagentOutcome::Failed(_)
                 | SubagentOutcome::InvalidAnswer(_)
                 | SubagentOutcome::FailedWithProvider { .. } => Some(TaskStatus::Failed),
-                SubagentOutcome::Cancelled => Some(TaskStatus::Stopped),
+                SubagentOutcome::ControlPaused(_) | SubagentOutcome::Cancelled => {
+                    Some(TaskStatus::Stopped)
+                }
                 // Inner runner keeps executing in a detached task. The
                 // TaskCreate-owned completion receiver applies final status.
                 SubagentOutcome::AutoBackgrounded => None,
@@ -360,6 +362,7 @@ impl Tool for TaskCreateTool {
                             }
                         }
                     }
+                    SubagentOutcome::ControlPaused(message) => ToolResult::error(message),
                     SubagentOutcome::Cancelled => ToolResult::error("subagent cancelled"),
                 }
             }
