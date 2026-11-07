@@ -131,7 +131,10 @@ pub(crate) async fn findings(
                     if let Some(reason) =
                         mismatch_for_run(result.exit_code, &invocation, Some(names))
                     {
-                        misses.push(reason);
+                        // Every dead filter of one all-dead command gives the same text.
+                        if !misses.contains(&reason) {
+                            misses.push(reason);
+                        }
                     } else if result.reports_zero_work() {
                         misses.push(format!(
                             "{} reported 0 tests; nearest real test paths: {}",
@@ -147,7 +150,7 @@ pub(crate) async fn findings(
             found.insert(
                 entry.id.clone(),
                 format!(
-                    "check '{}' exited successfully but reports zero work: {}",
+                    "check '{}' exited successfully but has a test inventory defect: {}",
                     entry.id,
                     super::super::super::passability::evidence::inert(
                         &redactor.redact(&misses.join("; "))
