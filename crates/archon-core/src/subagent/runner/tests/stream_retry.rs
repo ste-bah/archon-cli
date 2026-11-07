@@ -68,7 +68,13 @@ async fn dropped_stream_retries_are_bounded_by_a_no_progress_window() {
         error.starts_with(archon_llm::transport_idle::TRANSPORT_STALL_MARKER),
         "{error}"
     );
-    assert!(error.contains("no complete answer"), "{error}");
+    // Issue 630: a stream that closes after its start event, with no text,
+    // no tool call and no finish marker, is unanswered, not incomplete.
+    assert!(
+        error.contains("no answer from the provider")
+            && error.contains("stream closed without an answer"),
+        "{error}"
+    );
     let sent = provider.requests().len();
     assert!(
         sent > 4 && sent < 200,
