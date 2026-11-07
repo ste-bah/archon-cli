@@ -30,7 +30,7 @@ for (const retained of [true, false]) {
         agent: async (_id, opts) => {
           options.push(opts);
           return { status: 'accepted', stopReason: 'end_turn',
-            retainedLandings: options.length === 2 && retained,
+            retainedLandings: options.length !== 2 || retained,
             content: options.length === 1 ? candidate : options.length === 2 && !retained ? 'Unusable reply.' : repaired };
         },
         hostCommand: async (_capability, input) => {
@@ -69,7 +69,7 @@ test('invalid landing answers remain authored feedback and keep the gate finding
       options.push(opts);
       return options.length === 2
         ? { status: 'failed', invalid_answer: true, summary: 'repair has zero new landings' }
-        : { status: 'accepted', stopReason: 'end_turn', content: skeleton(false) };
+        : { status: 'accepted', stopReason: 'end_turn', retainedLandings: true, content: skeleton(false) };
     },
     hostCommand: async () => ++freezes === 1
       ? { gateEnvelope: { policy_findings: [{ text: 'repair task 1', remediation_scope: 'skeleton' }] } }
@@ -140,7 +140,7 @@ test('landing contract refusal carries retained tasks into the next author call'
         options.push(opts);
         return options.length === 2
           ? { status: 'failed', invalid_answer: true, summary, content: retained, retainedLandings: true }
-          : { status: 'accepted', stopReason: 'end_turn', content: skeleton(false) };
+          : { status: 'accepted', stopReason: 'end_turn', retainedLandings: true, content: skeleton(false) };
       },
       hostCommand: async () => ++freezes === 1
         ? { gateEnvelope: { policy_findings: [{ text: 'repair task 1', remediation_scope: 'skeleton' }] } }

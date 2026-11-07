@@ -36,12 +36,12 @@ impl RecordLanding {
                 .to_owned()
         } else {
             format!(
-                "When no task is left to land, your final reply is exactly {}",
+                "A zero count cannot finish an author call. With a positive count and no task left to land, your final reply is exactly {}",
                 json!({"records_landed": new_count})
             )
         };
         Ok(format!(
-            "Host retained {} records; {} new landings in this call (seeds do not count). When openFindings is non-empty, this call must make at least one byte-changing landing versus the pre-call snapshot: change a task record or remove an existing one. Identical task bytes or restoring original task bytes do not count. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
+            "Host retained {} records; {} new landings in this call (seeds do not count). Every author call must make at least one byte-changing landing versus the pre-call snapshot: change a task record. Identical task bytes or restoring original task bytes do not count. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
             records.len(),
             new_count,
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
@@ -63,7 +63,7 @@ impl RecordLanding {
         let landed = self.landed_here.lock().map_err(invalid)?;
         if landed.is_empty() {
             return Err(invalid(
-                "openFindings is non-empty; this call must make at least one byte-changing landing versus the pre-call snapshot: change a task record or remove an existing one. Identical task bytes or restoring original task bytes do not count",
+                "This call must make at least one byte-changing landing versus the pre-call snapshot: change a task record. Identical task bytes or restoring original task bytes do not count",
             ));
         }
         Ok(())

@@ -264,3 +264,185 @@ fn seed_skeleton_redispatched_author_uses_newest_store_and_skips_unreadable_stor
         json!(["3"])
     );
 }
+
+// C1, audit C section 3 D1: newer refused/failed/interrupted calls follow a judged draft.
+#[test]
+fn seed_skeleton_newer_failed_calls_keep_landed_work() {
+    use archon_workflow::v2::record_landing::{RecordKind, RecordLanding};
+    for retained_result in [true, false] {
+        let temp = tempfile::tempdir().unwrap();
+        let candidate = json!({"schema_version":1,"acceptance_digest":"","tasks":[
+            {"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]}
+        ]});
+        let mut failed = reply("skeleton-author-2", "01:02:00", "");
+        failed.status = WorkflowV2Status::Failed;
+        failed.result.status = WorkflowV2Status::Failed;
+        let mut task = candidate["tasks"][0].clone();
+        task["source_sections"] = json!(["repaired"]);
+        let repaired = json!({"schema_version":1,"acceptance_digest":"","tasks":[task.clone()]});
+        failed.result.data = if retained_result {
+            json!({"invalid_answer":true,"retainedLandings":true,"content":repaired.to_string()})
+        } else {
+            json!({"error":"interrupted after landing"})
+        };
+        let findings = vec![json!({"text":"repair source","remediation_scope":"skeleton"})];
+        let records = vec![
+            reply("skeleton-author-1", "01:00:00", &candidate.to_string()),
+            gate(
+                "freeze-skeleton",
+                "01:01:00",
+                &candidate.to_string(),
+                findings.clone(),
+                false,
+            ),
+            failed,
+        ];
+        if !retained_result {
+            let path = temp.path().join("stage-records/identity/session");
+            let store = RecordLanding::open(
+                path.clone(),
+                "identity".into(),
+                RecordKind::Skeleton,
+                vec![],
+                false,
+            )
+            .unwrap();
+            std::fs::write(
+                path.join("author.json"),
+                serde_json::to_vec("skeleton-author-2").unwrap(),
+            )
+            .unwrap();
+            store
+                .land(json!({"subject":"TASK-X-001","task":task}))
+                .unwrap();
+        }
+        let mut derived = derive(&records, &[], &BTreeMap::new()).unwrap();
+        artifact::retain_skeleton(&mut derived, &records, temp.path()).unwrap();
+        let SubjectSeed::Artifact {
+            candidate,
+            candidate_call,
+            gate,
+        } = &derived.subjects["skeleton"]
+        else {
+            panic!("artifact")
+        };
+        assert_eq!(candidate_call, "skeleton-author-2");
+        assert_eq!(
+            serde_json::from_str::<Value>(candidate).unwrap()["tasks"][0]["source_sections"],
+            json!(["repaired"])
+        );
+        assert_eq!(gate.as_ref().unwrap().findings, findings);
+    }
+}
+
+// C3/C5: audit C section 3 D3/D5, real skeleton seed and receipt shapes.
+#[test]
+fn seed_skeleton_hint_names_visible_contract_and_preserves_frozen_tasks() {
+    use archon_workflow::v2::record_landing::{RecordKind, RecordLanding};
+    let temp = tempfile::tempdir().unwrap();
+    let store = RecordLanding::open(
+        temp.path().into(),
+        "hint".into(),
+        RecordKind::Skeleton,
+        vec![],
+        false,
+    )
+    .unwrap();
+    store
+        .seed_skeleton(
+            &json!({"schema_version":1,"acceptance_digest":"","tasks":[
+                {"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]}
+            ]}),
+            true,
+        )
+        .unwrap();
+    store.require_new_landings(true).unwrap();
+    assert!(
+        store
+            .land(json!({"subject":"TASK-X-001","remove":true}))
+            .is_err()
+    );
+    let hint = store.hint().unwrap();
+    assert!(!hint.contains("openFindings"), "{hint}");
+    assert!(!hint.contains("or remove an existing one"), "{hint}");
+    assert!(hint.contains("change a task record"), "{hint}");
+}
+
+#[test]
+fn seed_skeleton_prompt_recovers_tasks_dropped_from_seed() {
+    use archon_workflow::v2::record_landing::{RecordKind, RecordLanding};
+    let temp = tempfile::tempdir().unwrap();
+    let store = RecordLanding::open(
+        temp.path().into(),
+        "seed".into(),
+        RecordKind::Skeleton,
+        vec![],
+        false,
+    )
+    .unwrap();
+    store
+        .seed_skeleton(
+            &json!({"schema_version":1,"acceptance_digest":"","tasks":[
+                {"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":[]}
+            ]}),
+            false,
+        )
+        .unwrap();
+    assert!(store.retained_completion().unwrap().is_none());
+    let prompt = include_str!("workflow_decompose_v1_frozen.js");
+    assert!(prompt.contains("Compare the receipt's Landed subjects with the previous candidate"));
+    assert!(prompt.contains("re-land every missing task"));
+}
+
+// C1 class H: even an interrupted first author has no earlier accepted reply.
+#[test]
+fn seed_skeleton_interrupted_first_call_recovers_its_store() {
+    use archon_workflow::v2::record_landing::{RecordKind, RecordLanding};
+    let temp = tempfile::tempdir().unwrap();
+    let mut record = reply("skeleton-author-1", "01:00:00", "");
+    record.status = WorkflowV2Status::Failed;
+    record.result.status = WorkflowV2Status::Failed;
+    record.result.data = json!({"error":"interrupted"});
+    let path = temp.path().join("stage-records/identity/session");
+    let store = RecordLanding::open(
+        path.clone(),
+        "identity".into(),
+        RecordKind::Skeleton,
+        vec![],
+        false,
+    )
+    .unwrap();
+    std::fs::write(
+        path.join("author.json"),
+        serde_json::to_vec(&record.call.id).unwrap(),
+    )
+    .unwrap();
+    store
+        .land(json!({"subject":"TASK-X-001","task":{
+            "task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]
+        }}))
+        .unwrap();
+    let records = vec![record];
+    let mut derived = derive(&records, &[], &BTreeMap::new()).unwrap();
+    artifact::retain_skeleton(&mut derived, &records, temp.path()).unwrap();
+    let SubjectSeed::Artifact {
+        candidate,
+        candidate_call,
+        gate,
+    } = &derived.subjects["skeleton"]
+    else {
+        panic!("artifact")
+    };
+    assert_eq!(candidate_call, "skeleton-author-1");
+    assert_eq!(
+        serde_json::from_str::<Value>(candidate).unwrap()["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(gate.is_none());
+}
+
+#[path = "workflow_decompose_seed_landing_audit_tests.rs"]
+mod landing_audit;
