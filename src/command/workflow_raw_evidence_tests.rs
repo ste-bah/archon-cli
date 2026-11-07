@@ -407,7 +407,22 @@ fn fallback_masks_mixed_case_service_accounts_and_warns_with_file_path() {
         .collect::<Vec<_>>();
 
     ::tracing::subscriber::with_default(subscriber, || {
-        ::tracing::callsite::rebuild_interest_cache();
+        // tracing-core's single-dispatcher fast path registers callsites using
+        // the registering thread's default. A sibling save() without a
+        // subscriber can cache Interest::never even while this capture is live.
+        // Keep a second dispatcher alive so registration consults every live
+        // subscriber, including this test's, regardless of the calling thread.
+        let _other_dispatch =
+            ::tracing::Dispatch::new(::tracing::subscriber::NoSubscriber::default());
+        // First register a callsite on a sibling thread with no subscriber,
+        // then emit from this test's subscriber at the very same callsite.
+        fn warning_from_either_thread() {
+            ::tracing::warn!("parallel warning capture probe");
+        }
+        std::thread::spawn(warning_from_either_thread)
+            .join()
+            .unwrap();
+        warning_from_either_thread();
         for (path, value) in &paths {
             save(path, value).unwrap();
         }
@@ -421,6 +436,10 @@ fn fallback_masks_mixed_case_service_accounts_and_warns_with_file_path() {
     }
     let captured = String::from_utf8(sink.lock().unwrap().clone()).unwrap();
     println!("warning readback: {captured}");
+    assert_eq!(
+        captured.matches("parallel warning capture probe").count(),
+        1
+    );
     for (path, _) in &paths {
         assert!(captured.contains(&path.display().to_string()), "{captured}");
     }
