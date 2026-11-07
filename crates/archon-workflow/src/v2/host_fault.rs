@@ -203,7 +203,33 @@ impl crate::v2::WorkflowV2AgentError {
     /// Host control and infrastructure faults keep their kind through the
     /// agent layer. Only ordinary provider failures become transport.
     pub fn from_call_error(error: &WorkflowError) -> Self {
+        if let WorkflowError::Port(cause) = error {
+            let paused = std::iter::successors(
+                Some(cause.as_ref() as &(dyn std::error::Error + 'static)),
+                |error| error.source(),
+            )
+            .find_map(|error| {
+                error.downcast_ref::<archon_tools::subagent_executor::ControlPaused>()
+            });
+            if let Some(paused) = paused {
+                return Self::ControlPaused(paused.0.clone());
+            }
+        }
         match error {
+            WorkflowError::Port(cause)
+                if std::iter::successors(
+                    Some(cause.as_ref() as &(dyn std::error::Error + 'static)),
+                    |e| e.source(),
+                )
+                .any(|e| {
+                    e.downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+                        .is_some()
+                        || e.downcast_ref::<archon_tools::audit_landing::EmptyOutputLimit>()
+                            .is_some()
+                }) =>
+            {
+                Self::InvalidResult(error.to_string())
+            }
             WorkflowError::ControlPaused(message) => Self::ControlPaused(message.clone()),
             WorkflowError::ControlCancelled(message) => Self::ControlCancelled(message.clone()),
             WorkflowError::Io { path, source } => Self::HostIo {
@@ -312,3 +338,21 @@ impl NeverStartedStreak {
 #[cfg(test)]
 #[path = "host_fault_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[test]
+fn host_fault_empty_max_tokens_is_invalid_result() {
+    // A-runner.md D7: this is the typed error from an empty max_tokens stream.
+    let cause: Box<dyn std::error::Error + Send + Sync> = Box::new(
+        archon_tools::audit_landing::EmptyOutputLimit("max_tokens".into()),
+    );
+    let error = WorkflowError::port(cause);
+    let classified = crate::v2::WorkflowV2AgentError::from_call_error(&error);
+    assert!(
+        matches!(
+            classified,
+            crate::v2::WorkflowV2AgentError::InvalidResult(_)
+        ),
+        "{classified:?}"
+    );
+}

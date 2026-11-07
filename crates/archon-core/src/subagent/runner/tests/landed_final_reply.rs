@@ -12,13 +12,59 @@ const ROUNDS_TO_STOP: usize = 16;
 #[derive(Default)]
 struct Host {
     records: Mutex<Vec<Value>>,
+    baseline: Mutex<Option<Vec<Value>>>,
 }
 impl Host {
     fn count(&self) -> usize {
         self.records.lock().unwrap().len()
     }
+    fn new_count(&self) -> usize {
+        let baseline = self.baseline.lock().unwrap();
+        let Some(before) = baseline.as_ref() else {
+            return 0;
+        };
+        let records = self.records.lock().unwrap();
+        let subjects: std::collections::BTreeSet<_> = before
+            .iter()
+            .chain(records.iter())
+            .map(|v| v["subject"].as_str().unwrap())
+            .collect();
+        subjects
+            .into_iter()
+            .filter(|subject| {
+                let task = |rows: &[Value]| {
+                    rows.iter()
+                        .find(|v| v["subject"] == *subject)
+                        .map(|v| v["task"].clone())
+                };
+                task(before) != task(&records)
+            })
+            .count()
+    }
 }
 impl LandingHost for Host {
+    fn schema(&self) -> Option<serde_json::Value> {
+        None
+    }
+    fn accepts_record_arrays(&self) -> bool {
+        true
+    }
+    fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+        archon_tools::audit_landing::EmptyReplyPolicy::RetainedCompletion
+    }
+    fn receipt_envelope_pointer(&self) -> &'static str {
+        ""
+    }
+    fn progress_key_fields(&self) -> &'static [&'static str] {
+        &["subject"]
+    }
+    fn allows_unreceipted_reply(&self) -> bool {
+        false
+    }
+    fn normalize_record_reply(&self) -> bool {
+        false
+    }
+
     fn tool_name(&self) -> &'static str {
         "land-skeleton-record"
     }
@@ -26,26 +72,45 @@ impl LandingHost for Host {
         if value.get("task").is_none() {
             return Err("skeleton record requires task".into());
         }
-        self.records.lock().unwrap().push(value);
+        {
+            let mut baseline = self.baseline.lock().unwrap();
+            let mut records = self.records.lock().unwrap();
+            baseline.get_or_insert_with(|| records.clone());
+            if let Some(record) = records
+                .iter_mut()
+                .find(|v| v["subject"] == value["subject"])
+            {
+                *record = value;
+            } else {
+                records.push(value);
+            }
+        }
         self.hint()
     }
     fn hint(&self) -> Result<String, String> {
         Ok(format!(
-            "Host retained {0} records. Final reply: {{\"records_landed\":{0}}}",
-            self.count()
+            "Host retained {} records; {} new landings in this call (seeds do not count). When no task is left to land, your final reply is exactly {{\"records_landed\":{}}}",
+            self.count(),
+            self.new_count(),
+            self.new_count()
         ))
     }
     fn complete(&self, value: &Value) -> Result<(), String> {
         match value["records_landed"].as_u64() {
-            Some(n) if n as usize == self.count() => Ok(()),
+            Some(n)
+                if n as usize == self.new_count()
+                    && value.as_object().is_some_and(|v| v.len() == 1) =>
+            {
+                Ok(())
+            }
             _ => Err(format!(
-                "records_landed=missing but host retained {} record(s)",
-                self.count()
+                "reply must count {} new landings in this call, excluding seeds",
+                self.new_count()
             )),
         }
     }
     fn retained_completion(&self) -> Option<Value> {
-        (self.count() > 0).then(|| json!({"records_landed": self.count()}))
+        (self.new_count() > 0).then(|| json!({"records_landed": self.new_count()}))
     }
 }
 
@@ -133,7 +198,13 @@ async fn issue550_without_retained_records_repeated_incomplete_replies_still_fai
     ]));
     let runner = runner_with(provider, Arc::new(Host::default()), 5);
 
-    let error = runner.run("author").await.unwrap_err().to_string();
+    let error = runner.run("author").await.unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+            .is_some()
+    );
+    let error = error.to_string();
 
     assert!(error.contains("incomplete landed artifact"), "{error}");
 }
@@ -199,3 +270,181 @@ async fn issue550_a_host_completion_is_a_whole_reply_whatever_the_cut_off_stop_r
     assert_eq!(completion.content, r#"{"records_landed":1}"#);
     assert_eq!(completion.stop_reason.as_deref(), Some("end_turn"));
 }
+
+#[tokio::test]
+async fn landed_review_verify_replies_without_receipts_are_refused() {
+    struct OtherHost(&'static str);
+    impl LandingHost for OtherHost {
+        fn accepts_record_arrays(&self) -> bool {
+            false
+        }
+        fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+            archon_tools::audit_landing::EmptyReplyPolicy::Resend
+        }
+        fn receipt_envelope_pointer(&self) -> &'static str {
+            "/data/repository_audit"
+        }
+        fn progress_key_fields(&self) -> &'static [&'static str] {
+            &["declared_path"]
+        }
+        fn normalize_record_reply(&self) -> bool {
+            true
+        }
+        fn schema(&self) -> Option<serde_json::Value> {
+            None
+        }
+        fn allows_unreceipted_reply(&self) -> bool {
+            self.0 == "land-audit-record"
+        }
+        fn tool_name(&self) -> &'static str {
+            self.0
+        }
+        fn land(&self, _: Value) -> Result<String, String> {
+            panic!("no landing")
+        }
+        fn hint(&self) -> Result<String, String> {
+            Ok(String::new())
+        }
+        fn complete(&self, _: &Value) -> Result<(), String> {
+            panic!("no receipt")
+        }
+    }
+    for kind in [
+        "land-review-record",
+        "land-verify-record",
+        "land-audit-record",
+    ] {
+        for text in ["Review complete.", r#"{"status":"accepted","data":{}}"#] {
+            let provider = Arc::new(MockProvider::new(vec![text_response(text); 3]));
+            let mut runner = make_runner(provider.clone(), 4);
+            runner.tool_context.audit_landing =
+                Some(Arc::new(AuditLanding::new(Arc::new(OtherHost(kind)), None)));
+            if kind == "land-audit-record" {
+                assert_eq!(runner.run("Inspect source").await.unwrap(), text);
+                assert_eq!(provider.requests().len(), 1);
+                continue;
+            }
+            // A-runner.md D6 / coverage line 210 asserted the defect for review/verify.
+            let error = runner.run("Inspect source").await.unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+                    .is_some()
+            );
+            assert_eq!(provider.requests().len(), 3);
+        }
+    }
+}
+
+#[tokio::test]
+async fn landed_non_skeleton_good_record_replies_continue_to_the_receipt() {
+    struct ReviewHost(Mutex<Vec<Value>>);
+    impl LandingHost for ReviewHost {
+        fn accepts_record_arrays(&self) -> bool {
+            false
+        }
+        fn empty_reply_policy(&self) -> archon_tools::audit_landing::EmptyReplyPolicy {
+            archon_tools::audit_landing::EmptyReplyPolicy::Resend
+        }
+        fn normalize_record_reply(&self) -> bool {
+            true
+        }
+        fn schema(&self) -> Option<serde_json::Value> {
+            None
+        }
+        fn allows_unreceipted_reply(&self) -> bool {
+            false
+        }
+        fn receipt_envelope_pointer(&self) -> &'static str {
+            "/data"
+        }
+        fn progress_key_fields(&self) -> &'static [&'static str] {
+            &["subject"]
+        }
+        fn tool_name(&self) -> &'static str {
+            "land-review-record"
+        }
+        fn land(&self, record: Value) -> Result<String, String> {
+            self.0.lock().unwrap().push(record);
+            Ok("Continue with the final verdict".into())
+        }
+        fn hint(&self) -> Result<String, String> {
+            Ok(String::new())
+        }
+        fn complete(&self, _: &Value) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    for count in [3, 4] {
+        let host = Arc::new(ReviewHost(Mutex::new(vec![])));
+        let mut responses: Vec<_> = (1..=count)
+            .map(|n| text_response(&json!({"subject":format!("UNIT-{n}")}).to_string()))
+            .collect();
+        let receipt = json!({"data":{"records_landed":count}}).to_string();
+        responses.push(text_response(&receipt));
+        let provider = Arc::new(MockProvider::new(responses));
+        let mut runner = make_runner(provider.clone(), 8);
+        runner.tool_context.audit_landing = Some(Arc::new(AuditLanding::new(host.clone(), None)));
+        let answer = runner.run("Review source").await;
+        assert_eq!(answer.unwrap(), receipt);
+        assert_eq!(host.0.lock().unwrap().len(), count);
+        assert_eq!(provider.requests().len(), count + 1);
+    }
+}
+
+// D2, D-doubles.md §4.1: retained seeds and identical re-landings are not new work.
+#[test]
+fn landed_fake_host_counts_only_this_calls_byte_changing_subjects() {
+    let seed: Value = serde_json::from_str(&record("TASK-X-001")).unwrap();
+    let host = Host::default();
+    host.records.lock().unwrap().push(seed.clone());
+    assert!(
+        host.retained_completion().is_none(),
+        "seed-only store cannot complete"
+    );
+    host.land(seed.clone()).unwrap();
+    assert!(
+        host.retained_completion().is_none(),
+        "identical seed is not new work"
+    );
+    let mut changed = seed.clone();
+    changed["task"]["implements"] = json!(["REQ-2"]);
+    host.land(changed).unwrap();
+    assert_eq!(
+        host.retained_completion(),
+        Some(json!({"records_landed":1}))
+    );
+    host.land(seed).unwrap();
+    assert!(
+        host.retained_completion().is_none(),
+        "restoring seed bytes is not new work"
+    );
+    let mut metadata = serde_json::from_str::<Value>(&record("TASK-X-001")).unwrap();
+    metadata["summary"] = json!("same task, different inspection summary");
+    host.land(metadata).unwrap();
+    assert!(
+        host.retained_completion().is_none(),
+        "only task bytes count"
+    );
+    let next: Value = serde_json::from_str(&record("TASK-X-002")).unwrap();
+    host.land(next.clone()).unwrap();
+    host.land(next).unwrap();
+    assert_eq!(host.count(), 2, "same subject replaces rather than appends");
+    assert_eq!(
+        host.retained_completion(),
+        Some(json!({"records_landed":1}))
+    );
+    assert!(host.complete(&json!({"records_landed":1})).is_ok());
+    assert!(host.complete(&json!({"records_landed":2})).is_err());
+    assert!(
+        host.complete(&json!({"records_landed":1,"extra":true}))
+            .is_err()
+    );
+    assert!(host.hint().unwrap().contains("your final reply is exactly"));
+}
+
+#[path = "landing_audit_tests.rs"]
+mod landing_audit_tests;
+
+#[path = "landed_policy_tests.rs"]
+mod landed_policy_tests;

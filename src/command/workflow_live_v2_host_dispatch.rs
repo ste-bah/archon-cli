@@ -318,25 +318,57 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             if let Some(evidence) = &mut evidence {
                 evidence.finish(&response)?;
             }
-            let mut outcome = response.map_err(WorkflowV2AgentError::into_workflow_error)?;
-            // Issue-550: a records_landed reply stands for the artifact the host composes.
-            if let Some(records) = records
-                && let Ok(value) = serde_json::from_str::<serde_json::Value>(&outcome.content)
-                && value.get("records_landed").is_some()
-            {
-                outcome.content = serde_json::to_string(&records.compose(&value)?)?;
-            }
+            let mut outcome = match response {
+                Ok(outcome) => outcome,
+                Err(error @ WorkflowV2AgentError::InvalidResult(_)) => {
+                    return Ok(stage_landing::refused_reply(
+                        &request.call.id,
+                        error.into_workflow_error(),
+                        records.as_deref(),
+                    ));
+                }
+                Err(error) => {
+                    match stop_handling::retained_completion(&error, records.as_deref()) {
+                        Some(completion) => completion,
+                        None => return Err(error.into_workflow_error()),
+                    }
+                }
+            };
             let stop_reason = outcome.stop_reason.take().ok_or_else(|| {
                 WorkflowError::StageFailed(
                     "raw provider outcome returned no typed stop reason".to_string(),
                 )
             })?;
+            if stop_reason == "shutdown" {
+                return Err(WorkflowError::ControlPaused(
+                    "provider session stopped for shutdown".into(),
+                ));
+            }
+            let retained_landings = records
+                .as_ref()
+                .is_some_and(|r| r.new_landing_count().is_ok_and(|n| n > 0));
+            if let Some(records) = records.as_ref() {
+                outcome.content = match stage_landing::compose_raw_reply(records, &outcome.content)
+                {
+                    Ok(content) => content,
+                    Err(error) => {
+                        return Ok(stage_landing::refused_reply(
+                            &request.call.id,
+                            error,
+                            Some(records),
+                        ));
+                    }
+                };
+            }
             if outcome.content.is_empty() {
                 return Err(WorkflowError::StageFailed(
                     "raw provider outcome returned empty content".to_string(),
                 ));
             }
             let mut result = raw_evidence::raw_outcome_result(outcome, stop_reason);
+            if retained_landings {
+                result.data["retainedLandings"] = serde_json::json!(true);
+            }
             archon_workflow::v2::tool_trace::mark_incomplete(&mut result, &captured.lost);
             return Ok(result);
         }
@@ -442,53 +474,9 @@ pub(super) async fn run_v2_agent_call_with_rejected_output_log(
     stage_landing::scope(records, work).await
 }
 
-async fn run_logged_agent_inner(
-    adapter: &WorkflowV2AgentAdapter,
-    client: &LiveV2AgentClient,
-    request: &archon_workflow::WorkflowV2AgentRequest,
-    v2_store: Option<&WorkflowV2ResultStore>,
-) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
-    let previous = archon_workflow::v2::repair_session::author_previous(request);
-    let generation = previous
-        .as_ref()
-        .map(|(id, _)| id.clone())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let prompt = adapter.build_prompt_parts(request).invocation;
-    let continuing = previous.is_some();
-    let request = previous
-        .as_ref()
-        .map(|(_, original)| original)
-        .unwrap_or(request);
-    archon_workflow::v2::repair_session::scope_id(generation, async {
-        let first = if continuing {
-            archon_workflow::v2::continuation::continue_or_restart(client, request, prompt).await?
-        } else {
-            client.run_agent_request(request, prompt).await?
-        };
-        archon_workflow::v2::repair_session::remember_author(request);
-        match adapter.parse_agent_output(request, &first) {
-            Ok(result) => {
-                save_rejected_write_result(v2_store, request, "first", &first, &result);
-                Ok(result)
-            }
-            Err(first_error) => {
-                save_rejected_output(v2_store, request, "first", &first, &first_error);
-                on_heap(|| {
-                    run_v2_agent_repair_with_rejected_output_log(
-                        adapter,
-                        client,
-                        request,
-                        v2_store,
-                        first,
-                        first_error,
-                    )
-                })
-                .await
-            }
-        }
-    })
-    .await
-}
+#[path = "workflow_live_v2_logged_agent.rs"]
+mod logged_agent;
+use logged_agent::run_logged_agent_inner;
 
 #[path = "workflow_live_v2_provider_tier.rs"]
 mod provider_tier;
@@ -496,3 +484,10 @@ pub(crate) use provider_tier::provider_tier_for_v2_request;
 
 #[path = "workflow_repository_audit_direct.rs"]
 mod audited_direct;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_host_dispatch_stop_tests.rs"]
+mod stop_tests;
+
+#[path = "workflow_live_v2_host_dispatch_stop.rs"]
+mod stop_handling;

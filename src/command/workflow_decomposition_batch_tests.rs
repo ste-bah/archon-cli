@@ -41,7 +41,7 @@ impl WorkflowLlmClient for BatchLlm {
             .and_then(|line| line.split(':').next())
             .unwrap_or("unused");
         Ok(WorkflowAgentOutcome {
-            content: super::super::authored_entry(serde_json::json!({"id":id})),
+            content: super::super::authored_decomposition_reply(serde_json::json!({"id":id})).await,
             stop_reason: Some("end_turn".into()),
             ..Default::default()
         })
@@ -229,7 +229,7 @@ impl WorkflowLlmClient for PoolLlm {
             .unwrap()
             .push(("end", id.clone(), String::new()));
         Ok(WorkflowAgentOutcome {
-            content: super::super::authored_entry(serde_json::json!({"id":id})),
+            content: super::super::authored_decomposition_reply(serde_json::json!({"id":id})).await,
             stop_reason: Some("end_turn".into()),
             ..Default::default()
         })

@@ -1,0 +1,98 @@
+{
+  "replies": {
+    "exact": "R18 skeleton-author-1 [248]",
+    "under_count": "R17 skeleton-author-3 [250]",
+    "whole_store": "R18 skeleton-author-2 [47]",
+    "seed_only": "R18 skeleton-author-3 [238]",
+    "prose_receipt": "R18 skeleton-author-4 [176]",
+    "skeleton_r8": "R8 skeleton-author-1 [23]",
+    "skeleton_r10": "R10 skeleton-author-5 [165]",
+    "single_record": "R10 skeleton-author-7 [220]",
+    "extra_keys": "R8 skeleton-author-2 [26]",
+    "malformed": "R10 skeleton-author-9 [247]",
+    "text_tool": "R10 skeleton-author-3 [127]",
+    "exact_r14": "R14 skeleton-author-1 [250]",
+    "string_commands_run": "R18 skeleton-author-2 [7], call_f8250115318c1e8e2c15e107",
+    "string_evidence": "R17 skeleton-author-2 [262], call_8612820668d9175290b1f6b5",
+    "list_receipt": "R10 skeleton-author-6 [252]",
+    "valid_record": "R18 skeleton-author-1, input excerpt of call_6351daca222d204d7c499f81 at turn 224"
+  },
+  "landings": [
+    {
+      "turn": 224,
+      "call_id": "call_6351daca222d204d7c499f81"
+    },
+    {
+      "turn": 224,
+      "call_id": "call_66d7fb5bc2410e1598683010"
+    },
+    {
+      "turn": 226,
+      "call_id": "call_22e4cf169e80c5ca24575354"
+    },
+    {
+      "turn": 226,
+      "call_id": "call_0f948dc09c9f9784e523c4b3"
+    },
+    {
+      "turn": 228,
+      "call_id": "call_525037e3089103ea91882ab9"
+    },
+    {
+      "turn": 228,
+      "call_id": "call_8f4a20061ed4df3fbfa28709"
+    },
+    {
+      "turn": 230,
+      "call_id": "call_58be606f0a110d2d0dc443cf"
+    },
+    {
+      "turn": 230,
+      "call_id": "call_92b9d53371cd99f79e725284"
+    },
+    {
+      "turn": 232,
+      "call_id": "call_e0ac0d75310d423ec8f151b8"
+    },
+    {
+      "turn": 232,
+      "call_id": "call_ecd5cd9609ead469a2464934"
+    },
+    {
+      "turn": 234,
+      "call_id": "call_2d44fa18e41f7cdfb5147ae5"
+    },
+    {
+      "turn": 234,
+      "call_id": "call_ca4707e15964668abd5c9039"
+    },
+    {
+      "turn": 236,
+      "call_id": "call_1a4e606e4ea1552bf3887846"
+    },
+    {
+      "turn": 238,
+      "call_id": "call_1f7cdbcbd3d321b93e601176"
+    },
+    {
+      "turn": 238,
+      "call_id": "call_51c2359e6889e06cb8f4752b"
+    },
+    {
+      "turn": 240,
+      "call_id": "call_082b94248b6479c8a68abf43"
+    },
+    {
+      "turn": 242,
+      "call_id": "call_b51a678430b0917370fa56df"
+    },
+    {
+      "turn": 242,
+      "call_id": "call_2b4d7ff5903a2476bc8f1cf7"
+    },
+    {
+      "turn": 246,
+      "call_id": "call_09bb5a9f5fb306098df8c7c1"
+    }
+  ]
+}

@@ -113,6 +113,14 @@ where
             }
             Err(error) if non_retryable_provider_error(&error) => return Err(error),
             Err(error) => {
+                let control = crate::v2::WorkflowV2AgentError::from_call_error(&error);
+                if matches!(
+                    control,
+                    crate::v2::WorkflowV2AgentError::ControlPaused(_)
+                        | crate::v2::WorkflowV2AgentError::ControlCancelled(_)
+                ) {
+                    return Err(control.into_workflow_error());
+                }
                 let message = error.to_string();
                 let provider = provider_error(&error);
                 let retryable = agent_error_retryable(&agent_request, &error, &message);

@@ -12,6 +12,7 @@ pub mod acceptance_stage;
 pub mod agent_adapter;
 mod agent_output_fault;
 mod agent_output_normalize;
+pub use agent_output_normalize::parse_landing_envelope;
 mod agent_output_tolerance;
 mod agent_prompt;
 mod agent_repair;
@@ -213,6 +214,9 @@ mod record_landing_issue39_tests;
 #[path = "record_landing_kind_scope_tests.rs"]
 mod record_landing_kind_scope_tests;
 mod record_landing_merge;
+#[cfg(test)]
+#[path = "record_landing_refusal_order_tests.rs"]
+mod record_landing_refusal_order_tests;
 mod record_landing_reply;
 mod record_landing_schema;
 #[cfg(test)]

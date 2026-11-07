@@ -313,3 +313,182 @@ fn record_landing_pending_new_task_hint_matches_draft_and_frozen_modes() {
         }
     }
 }
+
+#[test]
+fn record_landing_reopened_call_keeps_original_change_count_and_missing_removals_do_not_add_work() {
+    let (temp, landing) = open(RecordKind::Skeleton, &[]);
+    let record = task_record("TASK-X-001");
+    landing.land(record.clone()).unwrap();
+    let reopened = RecordLanding::open(
+        temp.path().join("records"),
+        "identity".into(),
+        RecordKind::Skeleton,
+        vec![],
+        false,
+    )
+    .unwrap();
+    // B1/B2: reopening the same call preserves its original pre-call snapshot.
+    reopened.require_new_landings(true).unwrap();
+    reopened.land(record.clone()).unwrap();
+    assert_eq!(reopened.new_landing_count().unwrap(), 1);
+    assert!(reopened.compose_reply(&json!({"records_landed":1})).is_ok());
+    assert!(
+        reopened
+            .land(json!({"subject":"TASK-X-002","remove":true}))
+            .is_err()
+    );
+    assert_eq!(reopened.new_landing_count().unwrap(), 1);
+    assert!(
+        reopened
+            .land(json!({"subject":"TASK-X-002","task":{
+        "task_id":"TASK-X-002","file_name":"TASK-X-002.md"}}))
+            .is_err()
+    );
+    reopened
+        .land(json!({"subject":"TASK-X-002","remove":true}))
+        .unwrap();
+    assert_eq!(reopened.new_landing_count().unwrap(), 1);
+    let mut changed = record;
+    changed["task"]["source_sections"] = json!(["2"]);
+    reopened.land(changed).unwrap();
+    assert_eq!(reopened.new_landing_count().unwrap(), 1);
+    reopened
+        .land(json!({"subject":"TASK-X-001","remove":true}))
+        .unwrap();
+    assert_eq!(reopened.new_landing_count().unwrap(), 0);
+}
+
+#[test]
+fn record_landing_repair_byte_changes_are_independent_of_finding_attribution() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let first = task_record("TASK-X-001");
+    let second = task_record("TASK-X-002");
+    landing.seed_skeleton(&json!({"schema_version":1,"acceptance_digest":"","tasks":[first["task"], second["task"]]}), false).unwrap();
+    landing
+        .require_finding_landings(&[
+            json!({"task_ids":["TASK-X-001","TASK-X-002"]}),
+            json!({"claim":"global repair"}),
+        ])
+        .unwrap();
+    landing.land(first.clone()).unwrap();
+    assert_eq!(
+        landing.new_landing_count().unwrap(),
+        0,
+        "seed encoding cannot count as a repair"
+    );
+    assert!(landing.compose_reply(&json!({"records_landed":0})).is_err());
+    let mut changed_first = first.clone();
+    changed_first["task"]["source_sections"] = json!(["2"]);
+    landing.land(changed_first).unwrap();
+    landing.compose_reply(&json!({"records_landed":1})).unwrap();
+    assert_eq!(
+        landing.retained_reply().unwrap(),
+        Some(json!({"records_landed":1}))
+    );
+    let mut changed_second = second;
+    changed_second["task"]["source_sections"] = json!(["3"]);
+    landing.land(changed_second).unwrap();
+    landing.compose_reply(&json!({"records_landed":2})).unwrap();
+    landing.land(first).unwrap();
+    assert_eq!(
+        landing.new_landing_count().unwrap(),
+        1,
+        "reverting a task removes its repair credit"
+    );
+    landing.compose_reply(&json!({"records_landed":1})).unwrap();
+    landing.land(task_record("TASK-X-002")).unwrap();
+    assert_eq!(landing.new_landing_count().unwrap(), 0);
+    assert!(landing.compose_reply(&json!({"records_landed":0})).is_err());
+}
+
+#[test]
+fn record_landing_non_skeleton_counts_changed_record_landings() {
+    for kind in [RecordKind::Review, RecordKind::Verify] {
+        let (_temp, landing) = open(kind, &["UNIT-1"]);
+        let record = json!({"subject":"UNIT-1","status":"failed","evidence":[{"kind":"inspection","summary":"read source"}]});
+        landing.land(record.clone()).unwrap();
+        assert_eq!(landing.new_landing_count().unwrap(), 1);
+        landing.land(record).unwrap();
+        assert_eq!(landing.new_landing_count().unwrap(), 1);
+    }
+}
+
+#[test]
+fn record_landing_finding_coverage_belongs_to_the_gate() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let first = task_record("TASK-X-001");
+    let second = task_record("TASK-X-002");
+    landing.seed_skeleton(&json!({"schema_version":1,"acceptance_digest":"","tasks":[first["task"], second["task"]]}), false).unwrap();
+    landing
+        .require_finding_landings(&[
+            json!({"task_id":"TASK-X-001","claim":"repair TASK-X-001"}),
+            json!({"task_ids":["TASK-X-003"],"claim":"missing task"}),
+        ])
+        .unwrap();
+    let mut changed = second;
+    changed["task"]["source_sections"] = json!(["2"]);
+    landing.land(changed).unwrap();
+    assert!(landing.compose_reply(&json!({"records_landed":1})).is_ok());
+    landing.land(task_record("TASK-X-002")).unwrap();
+    assert!(landing.compose_reply(&json!({"records_landed":0})).is_err());
+    landing
+        .land(json!({"subject":"TASK-X-002","remove":true}))
+        .unwrap();
+    assert!(landing.compose_reply(&json!({"records_landed":1})).is_ok());
+}
+
+#[test]
+fn record_landing_fresh_seed_identical_relanding_counts_zero() {
+    let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+    let record = task_record("TASK-X-001");
+    landing
+        .seed_skeleton(
+            &json!({"schema_version":1,"acceptance_digest":"","tasks":[record["task"]]}),
+            false,
+        )
+        .unwrap();
+    landing.land(record).unwrap();
+    assert_eq!(landing.new_landing_count().unwrap(), 0);
+    assert!(landing.compose_reply(&json!({"records_landed":0})).is_ok());
+    assert!(landing.retained_reply().unwrap().is_none());
+}
+
+#[test]
+fn record_landing_seeded_zero_reply_requires_no_open_findings() {
+    for has_findings in [false, true] {
+        let (_temp, landing) = open(RecordKind::Skeleton, &[]);
+        let record = task_record("TASK-X-001");
+        landing
+            .seed_skeleton(
+                &json!({"schema_version":1,"acceptance_digest":"","tasks":[record["task"]]}),
+                false,
+            )
+            .unwrap();
+        let findings = if has_findings {
+            vec![json!({"claim":"repair task"})]
+        } else {
+            vec![]
+        };
+        landing.require_finding_landings(&findings).unwrap();
+        assert_eq!(landing.new_landing_count().unwrap(), 0);
+        let hint = landing.hint().unwrap();
+        assert!(hint.contains("An author call with open findings must make at least one byte-changing landing versus the pre-call snapshot: a new or changed task record."), "{hint}");
+        let zero_hint = "If no task needs a change, your final reply is exactly {\"records_landed\":0}; otherwise land each new or changed task, then reply with {\"records_landed\":N}, where N is the new landings count from the last receipt (seeds do not count).";
+        assert_eq!(hint.contains(zero_hint), !has_findings, "{hint}");
+        let result = landing.compose_reply(&json!({"records_landed":0}));
+        if has_findings {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("byte-changing landing")
+            );
+        } else {
+            let mut expected = record["task"].clone();
+            for field in ["blocks", "deliverable_contracts", "depends_on"] {
+                expected[field] = json!([]);
+            }
+            assert_eq!(result.unwrap()["tasks"], json!([expected]));
+        }
+    }
+}

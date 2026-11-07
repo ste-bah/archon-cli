@@ -188,13 +188,14 @@ fn derive_seed(
 ) -> Result<PhaseSeed> {
     let results = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let records = results.load_call_records()?;
-    let derived = derive::derive_with_reply_markers(
+    let mut derived = derive::derive_with_reply_markers(
         &records,
         &taken_pauses(store, run_id)?,
         criteria,
         requirement_texts,
         reply_leaked_markers,
     )?;
+    derive::artifact::retain_skeleton(&mut derived, &records, results.root())?;
     let generation = store.load_state(run_id)?.generation;
     // Archived attempts included: a slot may hold a restored older attempt.
     let mut history_attempts = BTreeMap::new();

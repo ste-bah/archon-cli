@@ -236,7 +236,9 @@ impl Tool for AgentTool {
                     SubagentOutcome::Completed(completion) => {
                         (AgentStatus::Finished, Ok(completion.content.clone()))
                     }
-                    SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
+                    SubagentOutcome::Failed(err) | SubagentOutcome::InvalidAnswer(err) => {
+                        (AgentStatus::Failed, Err(err.clone()))
+                    }
                     SubagentOutcome::FailedWithProvider { message, .. } => {
                         (AgentStatus::Failed, Err(message.clone()))
                     }
@@ -249,6 +251,9 @@ impl Tool for AgentTool {
                             AgentStatus::Running,
                             Ok(format!("auto-backgrounded:{sid_spawn}")),
                         )
+                    }
+                    SubagentOutcome::ControlPaused(message) => {
+                        (AgentStatus::Cancelled, Err(message.clone()))
                     }
                     SubagentOutcome::Cancelled => {
                         (AgentStatus::Failed, Err("subagent cancelled".into()))
@@ -431,7 +436,7 @@ impl Tool for AgentTool {
                     }
                 }
             }
-            SubagentOutcome::Failed(err) => {
+            SubagentOutcome::Failed(err) | SubagentOutcome::InvalidAnswer(err) => {
                 error!(
                     subagent_id = %subagent_id,
                     subagent_type = ?subagent_type,
@@ -460,6 +465,7 @@ impl Tool for AgentTool {
                      use SendMessage with message_type=result to retrieve status/output without restarting it."
                 ))
             }
+            SubagentOutcome::ControlPaused(message) => ToolResult::error(message),
             SubagentOutcome::Cancelled => {
                 warn!(
                     subagent_id = %subagent_id,

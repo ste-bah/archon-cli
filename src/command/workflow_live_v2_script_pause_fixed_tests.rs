@@ -43,7 +43,13 @@ impl WorkflowLlmClient for CountingLlm {
                 "agent transport failed: stream ended before message_stop".to_string(),
             ));
         }
-        let content = if request.task.contains("Author ONLY entry AC-X-001") {
+        let content = if let Some(records) = archon_workflow::v2::record_landing::current()
+            && records.kind() == archon_workflow::v2::record_landing::RecordKind::Skeleton
+        {
+            records.land(serde_json::json!({"subject":"TASK-X-010",
+                "task":{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","implements":["REQ-X-001"]}}))?;
+            serde_json::json!({"records_landed":records.new_landing_count()?}).to_string()
+        } else if request.task.contains("Author ONLY entry AC-X-001") {
             super::super::authored_entry(serde_json::json!({"id": "AC-X-001"}))
         } else if self.repeat_body.load(Ordering::SeqCst)
             && request.task.contains("Author the complete TASK body")

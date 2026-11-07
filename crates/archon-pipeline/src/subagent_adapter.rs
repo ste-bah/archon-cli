@@ -414,6 +414,12 @@ pub(crate) fn llm_response_for_subagent_outcome(
             tokens_out: completion.tokens_out,
             stop_reason: completion.stop_reason,
         }),
+        SubagentOutcome::ControlPaused(message) => {
+            Err(archon_tools::subagent_executor::ControlPaused(message).into())
+        }
+        SubagentOutcome::InvalidAnswer(error) => {
+            Err(archon_tools::audit_landing::IncompleteLandedArtifact(error).into())
+        }
         SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
         SubagentOutcome::FailedWithProvider {
             message,

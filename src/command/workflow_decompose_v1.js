@@ -169,7 +169,7 @@ async function authorCandidate(w, policy) {
   let lastFindings = feedback.slice();
   // Issue 551: the findings open in the latest gate result. Earlier findings
   // stay in `history`, shown as ones not to regress, never as current.
-  let openFindings = [];
+  let openFindings = feedback.slice();
   let judgeFeedback = [];
   // #552: the latest round's freeze judged nothing (an unusable judge reply).
   let judgedNothing = false;
@@ -186,7 +186,9 @@ async function authorCandidate(w, policy) {
     : null;
   if (seeded) [feedback, lastFindings, openFindings] = [seeded.feedback.slice(), seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
+  let carriedLandings = seeded?.retainedLandings === true;
   let previousCandidate = skeletonPreviousCandidate(policy, seeded ? seeded.previousCandidate : policy.previousCandidate, seeded);
+  let lastAcceptedCandidate = previousCandidate;
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
@@ -242,7 +244,7 @@ async function authorCandidate(w, policy) {
     const group = repairRung === 3 && !policy.author ? `\nPrioritize this group first:\n- ${groupFeedback.join("\n- ")}` : "";
     let authored;
     try {
-      if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry };
+      if (carry !== null) authored = { status: "accepted", stopReason: "end_turn", content: carry, retainedLandings: carriedLandings };
       else {
         const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
         const bodyRepair = bodyRepairContext(policy, repairRung, bodyCandidate);
@@ -263,7 +265,7 @@ async function authorCandidate(w, policy) {
           AUTHOR_CALLS.set(policy.phase, call);
           authored = await w.agent(`${policy.phase}-author-${call}`, {
             task, tier: "planner", resultMode: "rawOutcome",
-            ...(policy.phase === "skeleton" ? { recordLanding: "skeleton", previousSkeleton: skeletonLandingSeed(previousCandidate), frozenSkeleton: frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null } : {})
+            ...(policy.phase === "skeleton" ? { recordLanding: "skeleton", openFindings: openFindings.slice(), previousSkeleton: skeletonLandingSeed(previousCandidate), frozenSkeleton: frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null } : {})
           });
         }
       }
@@ -289,6 +291,11 @@ async function authorCandidate(w, policy) {
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
     const round = authorRoundReport(policy, authorState);
+    if (policy.phase === "skeleton") authored = refuseUnchangedSkeleton(authored, carry, openFindings);
+    if (authored.invalid_answer === true) authored = { ...authored, malformed: true };
+    if (policy.phase === "skeleton" && authored.retainedLandings === true && typeof authored.content === "string") {
+      previousCandidate = authored.content;
+    }
     if (authored.status === "failed") {
       // Every kind of failed round credits the entries that passed in it and
       // counts any outage in it. Each entry reads its own refusal or note;
@@ -297,8 +304,9 @@ async function authorCandidate(w, policy) {
         recordRepairs(progress, call, authored.refusals, round, !measuredReplies, advanced);
         lastFindings = authored.findings.map(progressText);
       } else if (authored.malformed) {
-        recordAnswered(progress, call, "entries", advanced, !measuredReplies, round);
-        lastFindings = [authored.summary || "malformed replies"];
+        recordAnswered(progress, call, policy.phase === "skeleton" ? "malformed" : "entries", advanced, !measuredReplies, round);
+        feedback = [...openFindings, authored.summary || "malformed replies"];
+        lastFindings = feedback.slice();
       } else {
         recordOperational(progress, call, authored.summary, advanced, round, "provider");
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
@@ -320,7 +328,12 @@ async function authorCandidate(w, policy) {
       stdin: authored.content,
       ...(policy.target ? { target: policy.target } : {})
     });
-    if (policy.phase === "skeleton" && acceptedSkeletonCandidate(authored.content, outcome)) previousCandidate = authored.content;
+    // Skeleton landing calls reach this gate with host-composed records.
+    // Retained landings survive pre-gate refusals; other candidates need acceptance.
+    if (policy.phase === "skeleton") {
+      if (acceptedSkeletonCandidate(authored.content, outcome)) lastAcceptedCandidate = authored.content;
+      previousCandidate = lastAcceptedCandidate;
+    }
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (policy.capability === "land-task-body" && routed.shadow.length > 0 && routed.fatal.length === 0 && !routed.operational) {
@@ -381,6 +394,7 @@ async function authorCandidate(w, policy) {
       recordOperational(progress, call, routed.operational, advanced, round, policy.capability);
       lastFindings = [`${policy.capability}: ${routed.operational}`];
       carried = authored.content;
+      carriedLandings = authored.retainedLandings === true;
       continue;
     }
     const ownedFound = routed.fatalFindings.filter((finding) => {
@@ -457,6 +471,7 @@ async function authorCandidate(w, policy) {
       recordOperational(progress, call, texts.join(" | "), advanced, round, policy.capability);
       lastFindings = texts;
       carried = authored.content;
+      carriedLandings = authored.retainedLandings === true;
       continue;
     }
     if (routed.retry.length === 0) {
@@ -470,7 +485,10 @@ async function authorCandidate(w, policy) {
     judgedNothing = false;
     if (policy.author) judgeFeedback = feedback.slice();
     lastFindings = routed.retry.slice();
-    openFindings = routed.retry.slice();
+    const artifactRefused = routed.retryFindings.some(f => f.remediation_scope === "candidate_artifact")
+      && !routed.retryFindings.some(f => f.remediation_scope !== "candidate_artifact");
+    if (!artifactRefused) openFindings = routed.retry.slice();
+    else lastFindings = [...new Set([...lastFindings, ...openFindings])];
     // `advanced` is not credited here on purpose: the gate measured the whole
     // candidate, and that measure decides (Issue 261).
     recordAttempt(progress, call, routed.retryFindings, !measuredReplies, round);
