@@ -35,7 +35,8 @@ async function run(globalFinding = false, structural = false, refusal = null) {
   assert.equal(calls.filter(x=>x.round===1)[0].key,'AC-X-5');
   assert.equal(assembled[1].entries.find(x=>x.id==='AC-X-1').version,0,'clean entry retained byte-for-byte');
  }
- assert(/\n- AC-X-1 sha256:[0-9a-f]{64} /.test(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task),'an entry past the window sees the entries before it (Issue 288: one record line each)');
+ assert(!/\n- AC-X-1 sha256:[0-9a-f]{64} /.test(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task),'initial prompts contain no same-round entries');
+ assert(/\n- AC-X-1 sha256:[0-9a-f]{64} /.test(calls.find(x=>x.key==='AC-X-5'&&x.round===1).task),'rewrite prompts retain pre-round siblings');
 }
 async function failedEntry() {
  const context={args:{acceptanceCriteria:{A:'a',B:'b',C:'c',D:'d'},authorMaxParallelism:3},console};
@@ -50,10 +51,9 @@ async function failedEntry() {
  const state={entries:new Map(),retryIds:null};
  assert.equal((await context.authorAcceptanceEntries(w,'author',1,state)).status,'failed');
  assert.equal((await context.authorAcceptanceEntries(w,'author',2,state)).status,'accepted');
- // Every entry that succeeded is kept; only the failure is retried (Issue
- // 357). D's fixed prefix (A) holds no failure, so it starts whatever the
- // timing of B's failure, and its success is kept too.
- assert.deepEqual(calls,{A:1,B:2,C:1,D:1},'every entry that succeeded is kept');
+ // B's outage retains only A. C is treated as unrun even though it answered,
+ // so the next round authors B, C and D regardless of first-round timing.
+ assert.deepEqual(calls,{A:1,B:2,C:2,D:1},'only successes before the lowest operational failure are kept');
 }
 async function structuralRouting() {
  const ctx={};vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);

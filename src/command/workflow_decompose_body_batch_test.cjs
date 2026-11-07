@@ -24,7 +24,7 @@ function harness(cap, options = {}) {
    bodyCalls.push({id,taskId,peakAtStart:active+1,afterFailure:failedAt!==null}); active++;peak=Math.max(peak,active);
    if(options.holdFirst&&taskId==='TASK-X-1') {
     // Hold the first body until the fourth starts: a pool starts it in the
-    // slot a sibling frees; batches and a prefix window hold it behind this
+    // slot a sibling frees; barrier batches hold it behind this
     // call. The bound only ends a wrong scheduler's wait, it is not a timing.
     for(let i=0;i<200&&!bodyCalls.some(c=>c.taskId==='TASK-X-4');i++) await new Promise(resolve=>setTimeout(resolve,1));
     firstEndedAfterFourthStarted=bodyCalls.some(c=>c.taskId==='TASK-X-4');

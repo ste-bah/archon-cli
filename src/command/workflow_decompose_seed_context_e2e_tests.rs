@@ -6,14 +6,15 @@
 use super::super::*;
 use archon_workflow::v2::script::author_context::{AUTHOR_CONTEXT_DIR, sha256_hex};
 
-/// The earlier script with the old prior-entry section: every entry in full.
+/// The current script with earlier prompts and the old prior-entry section:
+/// every entry in full.
 fn full_prior_script() -> String {
     let script = earlier_script();
-    let marker = "function priorText(prior, id, order) {";
+    let marker = "function priorText(prior, id, order, pendingIds = new Set()) {";
     assert_eq!(script.matches(marker).count(), 1);
     script.replace(
         marker,
-        "function priorText(prior) {\n  if (prior.length === 0) return \"Previously completed entries: none.\";\n  return `Previously completed entries, one JSON line each:\\n- ${prior.map((entry) => JSON.stringify(entry)).join(\"\\n- \")}`;\n}\nfunction boundedPriorText(prior, id, order) {",
+        "function priorText(prior) {\n  if (prior.length === 0) return \"Previously completed entries: none.\";\n  return `Previously completed entries, one JSON line each:\\n- ${prior.map((entry) => JSON.stringify(entry)).join(\"\\n- \")}`;\n}\nfunction boundedPriorText(prior, id, order, pendingIds = new Set()) {",
     )
 }
 

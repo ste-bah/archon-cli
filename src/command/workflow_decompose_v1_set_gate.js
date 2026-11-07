@@ -32,35 +32,28 @@ function authorBatchSize() {
     ? args.authorMaxParallelism : 1;
 }
 
-// Runs `launch(index, settled)` for index 0..count-1 with at most `cap` in
+// Runs `launch(index)` for index 0..count-1 with at most `cap` in
 // flight, starting indices in order (Issue-247). Batches of `cap` left a freed
 // slot idle until the slowest call of its batch ended: live, 15-29 minutes per
 // slot on hour-long author calls.
-// - window false: a plain pool; the next index starts as soon as any call ends.
-// - window true: index i starts only once every index <= i - cap has settled,
-//   so `settled[0..i-cap]` is fixed when i starts and anything i reads from it
-//   depends on its index, never on which sibling happened to finish first.
-//   A slow call delays only the calls behind it, not a whole batch.
-// After a rejection (or, without the window, a value `failed` accepts) nothing
-// new starts. With the window, a failed value at index f stops only the
-// indices whose fixed prefix holds it (i >= f + cap): whether i starts then
-// depends on the results it waits for, never on when f landed. Every started
+// The next index starts as soon as any call ends. After a rejection or a
+// value `failed` accepts, nothing new starts. Which siblings started before
+// that outage settled can depend on timing; no prompt may depend on sibling
+// completion order. Callers must use inputs recorded before fan-out and retain
+// outage results by index, not by which calls happened to start. Every started
 // call settles before this returns: a sibling agent is never abandoned
 // mid-call. An index already queued when a rejection lands is checked again
 // just before its launch and skipped. `settled[i]` is `{status,
 // value|reason}` for a launched index and undefined for one never launched;
 // launched indices are always a prefix, `started` long.
-function runBounded(count, cap, window, launch, failed = () => false) {
+function runBounded(count, cap, launch, failed = () => false) {
   return new Promise((resolve) => {
     const settled = new Array(count);
     let next = 0;
     let started = 0;
     let running = 0;
-    let prefix = 0;
     let stopped = false;
-    // Window: the lowest settled index whose value `failed` accepts.
-    let failedAt = count;
-    const open = () => !stopped && next < count && (!window || next < failedAt + cap);
+    const open = () => !stopped && next < count;
     const finish = () => {
       if (running === 0 && !open()) resolve({ settled, started });
     };
@@ -70,22 +63,18 @@ function runBounded(count, cap, window, launch, failed = () => false) {
         settled[index] = outcome;
         try {
           if (outcome.status === "rejected") stopped = true;
-          else if (failed(outcome.value)) {
-            if (window) failedAt = Math.min(failedAt, index);
-            else stopped = true;
-          }
+          else if (failed(outcome.value)) stopped = true;
         } catch (reason) {
           // A predicate that throws must not strand the pool unresolved.
           settled[index] = { status: "rejected", reason };
           stopped = true;
         }
       }
-      while (prefix < count && settled[prefix]) prefix += 1;
       pump();
       finish();
     };
     const pump = () => {
-      while (open() && running < cap && (!window || next < prefix + cap)) {
+      while (open() && running < cap) {
         const index = next++;
         running += 1;
         Promise.resolve()
@@ -93,7 +82,7 @@ function runBounded(count, cap, window, launch, failed = () => false) {
             if (stopped) return null;
             started += 1;
             try {
-              return Promise.resolve(launch(index, settled))
+              return Promise.resolve(launch(index))
                 .then((value) => ({ status: "fulfilled", value }), (reason) => ({ status: "rejected", reason }));
             } catch (reason) {
               return { status: "rejected", reason };
@@ -118,7 +107,7 @@ function runBounded(count, cap, window, launch, failed = () => false) {
 // no failed value for a rejection to outrank.
 async function authorBodies(w, work, bodies, chain) {
   const skeleton = chain?.outcome;
-  const { settled } = await runBounded(work.length, authorBatchSize(), false,
+  const { settled } = await runBounded(work.length, authorBatchSize(),
     (index) => {
       const policy = bodyPolicy(work[index][0], work[index][1]);
       policy.deferAuthoredPending = true;

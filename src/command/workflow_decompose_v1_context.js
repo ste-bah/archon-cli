@@ -112,20 +112,23 @@ function checkSummary(check) {
 }
 // Issue 288: the completed entries an entry author keeps consistent with.
 // Each is one record line; its exact JSON is a host-written file.
-function priorText(prior, id, order) {
+function priorText(prior, id, order, pendingIds = new Set()) {
   if (prior.length === 0) return "Previously completed entries: none.";
   const records = prior.map((entry, index) => {
     const file = contextFile("json", JSON.stringify(entry));
     const covers = Array.isArray(entry.covers) ? entry.covers.join(",") : "";
-    return { id: entry.id, index, file, line: clipBytes(`${entry.id} sha256:${file.sha256} covers=[${covers}] ${checkSummary(entry.check)}`, RECORD_BYTES) };
+    const underRewrite = pendingIds.has(entry.id);
+    const marker = underRewrite ? " under rewrite this round: do not copy its check; keep only names consistent;" : "";
+    return { id: entry.id, index, file, underRewrite, line: clipBytes(`${entry.id} sha256:${file.sha256}${marker} covers=[${covers}] ${checkSummary(entry.check)}`, RECORD_BYTES) };
   });
   const ranked = nearestFirst(records, (record) => record.id, id, order);
   const count = fitLines(ranked.map((record) => record.line), PRIOR_SHARE).length;
-  // Listed in the order they were completed: earlier rounds first.
+  // Preserve the caller's pre-round entry order.
   const shown = ranked.slice(0, count).sort((a, b) => a.index - b.index);
   let text = `Previously completed entries: ${prior.length}, one line each with its id, the sha256 of its exact JSON, what it covers and a short summary of its check. Keep names, flags and formats consistent; a regression guard still names its own deciding file. A path the check reads by its literal relative path, as an operand of a command that reads it (an existence test included), is a move-aside handle: the host may move it aside to prove the check can fail. A handle is not the deciding assertion; the test or implementation run whose status decides the check must still decide it. Duplicate none. A summary is not the check: before you rely on an entry, Read its exact JSON at ${contextDir(records[0].file)}/<its sha256>.json (host-written context for this call: read these files by their exact path, although they sit under an excluded directory).`;
+  if (records.some(record => record.underRewrite)) text += " Records marked under rewrite this round are previous versions: do not copy their checks; keep only names consistent.";
   if (count < records.length) {
-    const index = contextFile("jsonl", records.map((record) => `${JSON.stringify({ id: record.id, sha256: record.file.sha256, path: record.file.path })}\n`).join(""));
+    const index = contextFile("jsonl", records.map((record) => `${JSON.stringify({ id: record.id, sha256: record.file.sha256, path: record.file.path, underRewrite: record.underRewrite })}\n`).join(""));
     text += ` The ${count} nearest this entry are listed; ${records.length - count} more are not, and every one is listed in ${index.path}.`;
   }
   return `${text}\n- ${shown.map((record) => record.line).join("\n- ")}`;
