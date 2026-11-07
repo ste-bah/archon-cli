@@ -27,6 +27,10 @@ use super::*;
 /// How much of a novel activity its record quotes.
 const ACTIVITY_PREVIEW_CHARS: usize = 160;
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(super) struct WindowExpired(String);
+
 pub(super) struct ProgressWindow {
     window: Option<Duration>,
     deadline: Option<Instant>,
@@ -132,14 +136,14 @@ impl ProgressWindow {
 
     /// The error the session ends with when the window ran out in `phase`.
     pub(super) fn stall_error(&self, phase: &str, turn: u32) -> anyhow::Error {
-        anyhow::anyhow!(
+        anyhow::Error::new(WindowExpired(format!(
             "subagent timed out after {}s without progress {phase} at turn {turn}: no new tool \
              call, no read of content not already given and no new assistant text for its \
              no-progress window of {}s, which renews on novel activity only; {}",
             self.renewed_at.elapsed().as_secs(),
             self.window.map_or(0, |window| window.as_secs()),
             self.progress_text(),
-        )
+        )))
     }
 
     /// The last novel activity (which names its turn) and the refused calls,

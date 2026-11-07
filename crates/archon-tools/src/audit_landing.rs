@@ -10,6 +10,10 @@ use tokio::time::Instant;
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("incomplete landed artifact: {0}")]
 pub struct IncompleteLandedArtifact(pub String);
+/// The provider spent its output budget without delivering text or tools.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("output limit: provider returned an empty reply; finish_reason={0}")]
+pub struct EmptyOutputLimit(pub String);
 pub trait LandingHost: Send + Sync {
     fn tool_name(&self) -> &'static str {
         "land-audit-record"

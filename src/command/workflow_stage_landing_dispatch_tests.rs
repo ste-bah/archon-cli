@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
-    struct FailingRunner(bool);
+    struct FailingRunner(bool, bool);
     #[async_trait::async_trait]
     impl archon_workflow::WorkflowLlmClient for FailingRunner {
         async fn send_message(
@@ -18,6 +18,14 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
             &self,
             _: archon_workflow::WorkflowAgentCall,
         ) -> WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+            if self.1 {
+                // A-runner.md D1 / host_dispatch:330: land, then host timeout.
+                let records = archon_workflow::v2::record_landing::current().unwrap();
+                records.land(record(1, true)).unwrap();
+                return Err(WorkflowError::HostCallTimeout(
+                    "stopped after landing".into(),
+                ));
+            }
             if !self.0 {
                 return Err(WorkflowError::StageFailed(
                     "invalid_answer: transport text".into(),
@@ -40,9 +48,9 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
     let (sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
-    for typed in [true, false] {
+    for (typed, stopped) in [(true, false), (false, false), (false, true)] {
         let client = super::super::super::LiveV2AgentClient::new(
-            Arc::new(FailingRunner(typed)),
+            Arc::new(FailingRunner(typed, stopped)),
             sink.clone(),
             vec![],
             "run".into(),
@@ -79,7 +87,15 @@ async fn host_dispatch_runner_landing_failure_becomes_invalid_answer() {
             true,
         )
         .await;
-        if typed {
+        if stopped {
+            let result = result.expect("a stopped call completes from its retained store");
+            assert_eq!(result.data["stopReason"], "end_turn");
+            assert_eq!(result.data["retainedLandings"], true);
+            assert!(result.data.get("invalid_answer").is_none());
+            let content: Value =
+                serde_json::from_str(result.data["content"].as_str().unwrap()).unwrap();
+            assert_eq!(content["tasks"].as_array().unwrap().len(), 1);
+        } else if typed {
             let result = result.unwrap();
             assert_eq!(result.data["invalid_answer"], true);
             assert!(!result.data.to_string().contains("host_fault"));

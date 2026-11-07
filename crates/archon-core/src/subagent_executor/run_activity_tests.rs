@@ -273,3 +273,60 @@ async fn a_queued_call_inside_another_agents_clock_session_has_no_clock_of_its_o
     assert!(queued.ends_with(NO_CLOCK), "{queued}");
     assert!(!acquired.contains("dispatch clock"), "{acquired}");
 }
+
+#[tokio::test]
+async fn landed_a7_executor_preserves_output_limit_as_invalid_answer() {
+    // A-runner.md D7: replay the empty max_tokens stream through the executor.
+    use archon_llm::provider::{
+        LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
+    };
+    use archon_llm::streaming::StreamEvent;
+    struct OutputLimited;
+    #[async_trait::async_trait]
+    impl LlmProvider for OutputLimited {
+        fn name(&self) -> &str {
+            "output-limited"
+        }
+        fn models(&self) -> Vec<ModelInfo> {
+            vec![]
+        }
+        fn supports_feature(&self, _: ProviderFeature) -> bool {
+            false
+        }
+        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
+            unreachable!()
+        }
+        async fn stream(
+            &self,
+            _: LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+            let (tx, rx) = tokio::sync::mpsc::channel(4);
+            tx.send(StreamEvent::MessageDelta {
+                stop_reason: Some("max_tokens".into()),
+                usage: None,
+            })
+            .await
+            .unwrap();
+            tx.send(StreamEvent::MessageStop).await.unwrap();
+            Ok(rx)
+        }
+    }
+    let mut executor = test_executor_with_sink(1, None);
+    Arc::get_mut(&mut executor).unwrap().client = Arc::new(OutputLimited);
+    let mut request = queued_request();
+    request.isolation = Some("shared".into());
+    let error = executor
+        .run_subagent_to_completion(
+            "output-limited".into(),
+            request,
+            ToolContext::default(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, ExecutorError::InvalidAnswer(_)),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("output limit"), "{error}");
+}

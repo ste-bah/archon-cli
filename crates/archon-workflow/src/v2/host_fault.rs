@@ -212,6 +212,8 @@ impl crate::v2::WorkflowV2AgentError {
                 .any(|e| {
                     e.downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
                         .is_some()
+                        || e.downcast_ref::<archon_tools::audit_landing::EmptyOutputLimit>()
+                            .is_some()
                 }) =>
             {
                 Self::InvalidResult(error.to_string())
@@ -324,3 +326,21 @@ impl NeverStartedStreak {
 #[cfg(test)]
 #[path = "host_fault_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[test]
+fn host_fault_empty_max_tokens_is_invalid_result() {
+    // A-runner.md D7: this is the typed error from an empty max_tokens stream.
+    let cause: Box<dyn std::error::Error + Send + Sync> = Box::new(
+        archon_tools::audit_landing::EmptyOutputLimit("max_tokens".into()),
+    );
+    let error = WorkflowError::port(cause);
+    let classified = crate::v2::WorkflowV2AgentError::from_call_error(&error);
+    assert!(
+        matches!(
+            classified,
+            crate::v2::WorkflowV2AgentError::InvalidResult(_)
+        ),
+        "{classified:?}"
+    );
+}

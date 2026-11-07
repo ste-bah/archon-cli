@@ -207,7 +207,7 @@ async fn issue550_a_host_completion_is_a_whole_reply_whatever_the_cut_off_stop_r
 }
 
 #[tokio::test]
-async fn landed_non_skeleton_replies_without_receipts_stay_final() {
+async fn landed_review_verify_replies_without_receipts_are_refused() {
     struct OtherHost(&'static str);
     impl LandingHost for OtherHost {
         fn tool_name(&self) -> &'static str {
@@ -229,18 +229,29 @@ async fn landed_non_skeleton_replies_without_receipts_stay_final() {
         "land-audit-record",
     ] {
         for text in ["Review complete.", r#"{"status":"accepted","data":{}}"#] {
-            let provider = Arc::new(MockProvider::new(vec![text_response(text)]));
+            let provider = Arc::new(MockProvider::new(vec![text_response(text); 3]));
             let mut runner = make_runner(provider.clone(), 4);
             runner.tool_context.audit_landing =
                 Some(Arc::new(AuditLanding::new(Arc::new(OtherHost(kind)), None)));
-            assert_eq!(runner.run("Inspect source").await.unwrap(), text);
-            assert_eq!(provider.requests().len(), 1);
+            if kind == "land-audit-record" {
+                assert_eq!(runner.run("Inspect source").await.unwrap(), text);
+                assert_eq!(provider.requests().len(), 1);
+                continue;
+            }
+            // A-runner.md D6 / coverage line 210 asserted the defect for review/verify.
+            let error = runner.run("Inspect source").await.unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+                    .is_some()
+            );
+            assert_eq!(provider.requests().len(), 3);
         }
     }
 }
 
 #[tokio::test]
-async fn landed_four_non_skeleton_record_replies_all_land_and_continue() {
+async fn landed_non_skeleton_record_replies_exhaust_the_incomplete_budget() {
     struct ReviewHost(Mutex<Vec<Value>>);
     impl LandingHost for ReviewHost {
         fn tool_name(&self) -> &'static str {
@@ -265,10 +276,16 @@ async fn landed_four_non_skeleton_record_replies_all_land_and_continue() {
     let provider = Arc::new(MockProvider::new(responses));
     let mut runner = make_runner(provider.clone(), 8);
     runner.tool_context.audit_landing = Some(Arc::new(AuditLanding::new(host.clone(), None)));
-    assert_eq!(
-        runner.run("Review source").await.unwrap(),
-        "Review complete."
+    // A-runner.md D2: good records land, but their missing final is bounded.
+    let error = runner.run("Review source").await.unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+            .is_some()
     );
-    assert_eq!(host.0.lock().unwrap().len(), 4);
-    assert_eq!(provider.requests().len(), 5);
+    assert_eq!(host.0.lock().unwrap().len(), 3);
+    assert_eq!(provider.requests().len(), 3);
 }
+
+#[path = "landing_audit_tests.rs"]
+mod landing_audit_tests;

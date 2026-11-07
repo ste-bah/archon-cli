@@ -327,7 +327,27 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                         records.as_deref(),
                     ));
                 }
-                Err(error) => return Err(error.into_workflow_error()),
+                Err(error) => {
+                    use archon_workflow::error as call_error;
+                    let text = error.to_string();
+                    let stopped = call_error::is_host_call_timeout_text(&text)
+                        || call_error::is_no_progress_stop_text(&text)
+                        || call_error::is_inactivity_timeout_text(&text)
+                        || call_error::is_read_wall_thrash_text(&text)
+                        || text.contains("reached max turns");
+                    match records
+                        .as_ref()
+                        .filter(|_| stopped)
+                        .and_then(|r| r.retained_reply().ok().flatten())
+                    {
+                        Some(completion) => archon_workflow::WorkflowAgentOutcome {
+                            content: completion.to_string(),
+                            stop_reason: Some("end_turn".into()),
+                            ..Default::default()
+                        },
+                        None => return Err(error.into_workflow_error()),
+                    }
+                }
             };
             let retained_landings = records
                 .as_ref()

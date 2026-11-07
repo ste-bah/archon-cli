@@ -233,7 +233,10 @@ impl AgentSubagentExecutor {
         ))
         .catch_unwind()
         .await;
-        let invalid_answer = matches!(&runner_result, Ok(Err(error)) if error.downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>().is_some());
+        let invalid_answer = matches!(&runner_result, Ok(Err(error)) if error.chain().any(|cause|
+            cause.downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>().is_some()
+                || cause.downcast_ref::<archon_tools::audit_landing::EmptyOutputLimit>().is_some()
+        ));
         let provider_source = match &runner_result {
             Ok(Err(error)) => error
                 .chain()

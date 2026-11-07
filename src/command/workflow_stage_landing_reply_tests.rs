@@ -3,9 +3,9 @@
 Pure JSON receipt + new landings: compose the entire retained store.
 JSON receipt + zero new landings: first draft keeps its existing behavior;
   with open findings retry within the bounded budget, including seed-only receipts.
-Prose then JSON: complete from this call's retained landings, else bounded retry.
+Prose then JSON: retry unrecognised containers within the bounded correction budget.
 Pure prose: complete from this call's retained landings, else bounded retry.
-Empty: complete from this call's retained landings, else bounded retry.
+Empty: resend the same request; it is never a final answer.
 Forced answer at the tool-call ceiling: apply the same rules; seeds alone
   cannot complete a repair, and prose never becomes candidate content.
 */
@@ -171,7 +171,15 @@ async fn all_reply_classes_compose_real_retained_records_or_retry() {
     ] {
         let (_temp, records) = seeded(true);
         let new = (1..=14).map(|n| record(n, true)).collect();
-        let (runner, provider) = runner(records.clone(), vec![(new, reply(text))], false);
+        // A-runner.md D4: the old one-request assertion codified empty completion.
+        let (runner, provider) = runner(
+            records.clone(),
+            vec![
+                (new, reply(text)),
+                (vec![], reply(r#"{"records_landed":14}"#)),
+            ],
+            false,
+        );
         let completion = runner
             .run_with_completion("Repair the open findings")
             .await
@@ -186,7 +194,12 @@ async fn all_reply_classes_compose_real_retained_records_or_retry() {
                 json!([if n < 14 { "2" } else { "1" }])
             );
         }
-        assert_eq!(provider.requests.lock().unwrap().len(), 1);
+        let requests = provider.requests.lock().unwrap();
+        let retried = text.is_empty() || text.starts_with("Repaired.\n");
+        assert_eq!(requests.len(), if retried { 2 } else { 1 });
+        if text.is_empty() {
+            assert_eq!(requests[0].messages, requests[1].messages);
+        }
         assert_eq!(completion.stop_reason.as_deref(), Some("end_turn"));
     }
     for text in [
@@ -217,7 +230,7 @@ async fn all_reply_classes_compose_real_retained_records_or_retry() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn seed_only_receipts_and_prose_exhaust_the_existing_retry_budget() {
     for text in [
         r#"{"records_landed":19}"#,
@@ -228,18 +241,23 @@ async fn seed_only_receipts_and_prose_exhaust_the_existing_retry_budget() {
         let (_temp, records) = seeded(true);
         let (runner, provider) = runner(
             records,
-            (0..3).map(|_| (vec![], reply(text))).collect(),
+            (0..if text.is_empty() { 100 } else { 3 })
+                .map(|_| (vec![], reply(text)))
+                .collect(),
             false,
         );
-        assert!(
-            runner
-                .run("Repair")
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("incomplete landed artifact")
-        );
-        assert_eq!(provider.requests.lock().unwrap().len(), 3);
+        let error = runner.run("Repair").await.unwrap_err().to_string();
+        let requests = provider.requests.lock().unwrap();
+        if text.is_empty() {
+            // D4: repeated empty streams resend beyond the authored-final budget.
+            assert!(error.contains("without progress"), "{error}");
+            assert!(!error.contains("incomplete landed artifact"), "{error}");
+            assert!(requests.len() > 3);
+            assert!(requests.iter().all(|r| r.messages == requests[0].messages));
+        } else {
+            assert!(error.contains("incomplete landed artifact"), "{error}");
+            assert_eq!(requests.len(), 3);
+        }
     }
 }
 
