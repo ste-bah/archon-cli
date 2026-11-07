@@ -34,14 +34,16 @@ impl RecordLanding {
         } else if records.is_empty() {
             "Land each task as one record; every landing receipt ends with the exact final reply."
                 .to_owned()
+        } else if new_count == 0 {
+            "When no task is left to land, reply with {\"records_landed\":N}, where N is the new landings count from the last receipt (seeds do not count).".to_owned()
         } else {
             format!(
-                "A zero count cannot finish an author call. With a positive count and no task left to land, your final reply is exactly {}",
+                "With no task left to land, your final reply is exactly {}",
                 json!({"records_landed": new_count})
             )
         };
         Ok(format!(
-            "Host retained {} records; {} new landings in this call (seeds do not count). Every author call must make at least one byte-changing landing versus the pre-call snapshot: change a task record. Identical task bytes or restoring original task bytes do not count. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
+            "Host retained {} records; {} new landings in this call (seeds do not count). An author call with open findings must make at least one byte-changing landing versus the pre-call snapshot: change a task record. Identical task bytes or restoring original task bytes do not count. Landed subjects: {}. Use {} with {}; each subject is a task id you establish, and landing a subject again replaces its task. Schema: {}. The host composes schema_version, acceptance_digest and tasks from the retained records: never send acceptance_digest, never send a record as your final reply. {last}",
             records.len(),
             new_count,
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,

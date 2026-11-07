@@ -42,7 +42,7 @@ fn seed_skeleton_syntax_refusal_keeps_the_last_judged_candidate_and_findings() {
 }
 
 #[test]
-fn seed_skeleton_real_resume_keeps_retained_tasks_and_nine_gate_findings() {
+fn seed_skeleton_real_resume_gates_retained_tasks_before_authoring() {
     let fixture =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/skeleton_resume");
     let temp = tempfile::tempdir().unwrap();
@@ -96,23 +96,16 @@ fn seed_skeleton_real_resume_keeps_retained_tasks_and_nine_gate_findings() {
         candidate,
         candidate_call,
         gate,
+        ..
     } = &derived.subjects["skeleton"]
     else {
         panic!("artifact seed")
     };
-    let gate = gate.as_ref().unwrap();
-    assert_eq!(gate.findings.len(), 9);
-    assert!(gate.call_id.starts_with("2b6a852b"));
-    let expected_gate = records.iter().find(|r| r.call.id == gate.call_id).unwrap();
-    assert_eq!(
-        serde_json::to_value(&gate.findings).unwrap(),
-        expected_gate.result.data["gateEnvelope"]["policy_findings"]
-    );
     assert!(
-        gate.findings
-            .iter()
-            .all(|finding| finding["remediation_scope"] == "skeleton")
+        gate.is_none(),
+        "author-4's retained bytes were never judged"
     );
+    landing_audit::assert_gate_first(&derived);
     let mut expected = BTreeMap::new();
     let store = std::fs::read_dir(root.join("v2/stage-records"))
         .unwrap()
@@ -197,6 +190,7 @@ fn seed_skeleton_uses_the_latest_landed_store_and_skips_a_later_seed_only_store(
         candidate,
         candidate_call,
         gate,
+        ..
     } = &derived.subjects["skeleton"]
     else {
         panic!("artifact seed")
@@ -204,7 +198,10 @@ fn seed_skeleton_uses_the_latest_landed_store_and_skips_a_later_seed_only_store(
     assert_eq!(candidate_call, "skeleton-author-4");
     let candidate: Value = serde_json::from_str(candidate).unwrap();
     assert_eq!(candidate["tasks"][0]["source_sections"], json!(["2"]));
-    assert_eq!(gate.as_ref().unwrap().findings, findings);
+    assert!(
+        gate.is_none(),
+        "unjudged landings must reach the gate first"
+    );
 }
 
 #[test]
@@ -322,6 +319,7 @@ fn seed_skeleton_newer_failed_calls_keep_landed_work() {
             candidate,
             candidate_call,
             gate,
+            ..
         } = &derived.subjects["skeleton"]
         else {
             panic!("artifact")
@@ -331,7 +329,10 @@ fn seed_skeleton_newer_failed_calls_keep_landed_work() {
             serde_json::from_str::<Value>(candidate).unwrap()["tasks"][0]["source_sections"],
             json!(["repaired"])
         );
-        assert_eq!(gate.as_ref().unwrap().findings, findings);
+        assert!(
+            gate.is_none(),
+            "unjudged landings must reach the gate first"
+        );
     }
 }
 
@@ -390,7 +391,9 @@ fn seed_skeleton_prompt_recovers_tasks_dropped_from_seed() {
         .unwrap();
     assert!(store.retained_completion().unwrap().is_none());
     let prompt = include_str!("workflow_decompose_v1_frozen.js");
-    assert!(prompt.contains("Compare the receipt's Landed subjects with the previous candidate"));
+    assert!(prompt.contains(
+        "Compare the Landed subjects list at the end of this prompt with the previous candidate"
+    ));
     assert!(prompt.contains("re-land every missing task"));
 }
 
@@ -429,6 +432,7 @@ fn seed_skeleton_interrupted_first_call_recovers_its_store() {
         candidate,
         candidate_call,
         gate,
+        ..
     } = &derived.subjects["skeleton"]
     else {
         panic!("artifact")

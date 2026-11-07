@@ -87,7 +87,10 @@ pub(crate) enum SubjectSeed {
     Artifact {
         candidate: String,
         candidate_call: String,
-        /// The authoritative gate findings, retained across unjudged landings.
+        /// Whether the host retained landed records for this candidate.
+        #[serde(default)]
+        retained_landings: bool,
+        /// The gate that judged these exact candidate bytes, if any.
         gate: Option<GateSeed>,
     },
 }

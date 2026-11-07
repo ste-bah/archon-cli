@@ -29,13 +29,6 @@ pub(super) fn derive(
             .rfind(|(_, _, stdin, _)| *stdin == candidate)
             .map(|(_, _, _, gate)| gate.clone());
         if subject == "skeleton"
-            && skeleton(candidate)
-            && record.result.data["retainedLandings"] == true
-            && gate.as_ref().is_some_and(artifact_only)
-        {
-            gate = None;
-        }
-        if subject == "skeleton"
             && (!skeleton(candidate) || gate.as_ref().is_some_and(artifact_only))
             && let Some((_, _, stdin, judged)) = gates.iter().rfind(|(_, command, stdin, gate)| {
                 *command == "freeze-skeleton" && skeleton(stdin) && !artifact_only(gate)
@@ -46,20 +39,12 @@ pub(super) fn derive(
             // A gate can hold host-composed bytes that no author returned verbatim.
             candidate_call = judged.call_id.clone();
         }
-        if subject == "skeleton" && gate.is_none() {
-            gate = gates
-                .iter()
-                .rfind(|(gate_record, command, _, gate)| {
-                    *command == "freeze-skeleton"
-                        && !artifact_only(gate)
-                        && gate_record.started_at <= record.started_at
-                })
-                .map(|(_, _, _, gate)| gate.clone());
-        }
         derived.subjects.insert(
             subject,
             SubjectSeed::Artifact {
                 candidate: candidate.to_owned(),
+                retained_landings: candidate_call == record.call.id
+                    && record.result.data["retainedLandings"] == true,
                 candidate_call,
                 gate,
             },
@@ -224,14 +209,16 @@ pub(crate) fn retain_skeleton(
             })();
             match retained {
                 Ok(Some(value)) => {
-                    let gate = match derived.subjects.get("skeleton") {
-                        Some(SubjectSeed::Artifact { gate, .. }) => gate.clone(),
-                        _ => None,
-                    };
+                    let candidate = serde_json::to_string(&value)?;
+                    let gate = ordered.iter().rev().find_map(|record| {
+                        let (command, stdin, gate) = judged_gate(record)?;
+                        (command == "freeze-skeleton" && stdin == candidate).then_some(gate)
+                    });
                     derived.subjects.insert(
                         "skeleton".into(),
                         SubjectSeed::Artifact {
-                            candidate: serde_json::to_string(&value)?,
+                            candidate,
+                            retained_landings: true,
                             candidate_call: record.call.id.clone(),
                             gate,
                         },

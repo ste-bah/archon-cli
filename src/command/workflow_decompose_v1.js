@@ -332,7 +332,7 @@ async function authorCandidate(w, policy) {
     // Retained landings survive pre-gate refusals; other candidates need acceptance.
     if (policy.phase === "skeleton") {
       if (acceptedSkeletonCandidate(authored.content, outcome)) lastAcceptedCandidate = authored.content;
-      previousCandidate = authored.retainedLandings === true ? authored.content : lastAcceptedCandidate;
+      previousCandidate = lastAcceptedCandidate;
     }
     if (policy.author && outcome && outcome.publicationReceipt) clearPublishedDrafts(authorState);
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);

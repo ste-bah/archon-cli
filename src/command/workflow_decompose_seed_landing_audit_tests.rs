@@ -11,7 +11,7 @@ fn candidate(section: &str) -> Value {
 }
 
 #[test]
-fn seed_skeleton_retained_result_survives_artifact_only_gate_refusal() {
+fn seed_skeleton_artifact_refusal_recovers_prior_judged_candidate() {
     let initial = candidate("initial").to_string();
     let repaired = candidate("repaired").to_string();
     let findings = vec![json!({"text":"repair source","remediation_scope":"skeleton"})];
@@ -42,12 +42,13 @@ fn seed_skeleton_retained_result_survives_artifact_only_gate_refusal() {
         candidate,
         candidate_call,
         gate,
+        ..
     } = &derived.subjects["skeleton"]
     else {
         panic!("artifact")
     };
-    assert_eq!(candidate, &repaired);
-    assert_eq!(candidate_call, "skeleton-author-2");
+    assert_eq!(candidate, &initial);
+    assert_eq!(candidate_call, &records[1].call.id);
     assert_eq!(gate.as_ref().unwrap().findings, findings);
 }
 
@@ -95,4 +96,79 @@ fn seed_skeleton_older_and_invalidated_stores_cannot_replace_newer_reply() {
         serde_json::from_str::<Value>(held).unwrap(),
         candidate("latest")
     );
+}
+
+// Exercise R18's actual Rust seed through the JavaScript resume loop.
+pub(super) fn assert_gate_first(derived: &Derived) {
+    let payload = json!({"subjects": derived.subjects, "author_ordinals": derived.author_ordinals});
+    let output = std::process::Command::new("node")
+        .arg("-e")
+        .arg("require(process.argv[1]).assertGateFirst(JSON.parse(process.argv[2])).catch(e => { console.error(e); process.exitCode = 1; })")
+        .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/command/workflow_decompose_seed_gate_first_test.cjs"))
+        .arg(payload.to_string())
+        .output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn seed_skeleton_accepted_reply_interrupted_before_gate_is_unjudged() {
+    for retained in [false, true] {
+        let initial = candidate("initial").to_string();
+        let changed = candidate("changed").to_string();
+        let mut accepted = reply("skeleton-author-2", "01:02:00", &changed);
+        accepted.result.data["retainedLandings"] = json!(retained);
+        let records = vec![
+            reply("skeleton-author-1", "01:00:00", &initial),
+            gate(
+                "freeze-skeleton",
+                "01:01:00",
+                &initial,
+                vec![json!({"text":"old finding","remediation_scope":"skeleton"})],
+                false,
+            ),
+            accepted,
+        ];
+        let derived = derive(&records, &[], &BTreeMap::new()).unwrap();
+        let SubjectSeed::Artifact {
+            candidate,
+            gate,
+            retained_landings,
+            ..
+        } = &derived.subjects["skeleton"]
+        else {
+            panic!("artifact")
+        };
+        assert_eq!(candidate, &changed);
+        assert!(gate.is_none());
+        assert_eq!(*retained_landings, retained);
+    }
+}
+
+#[test]
+fn seed_skeleton_receipt_hint_counts_new_landings_truthfully() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = RecordLanding::open(
+        temp.path().into(),
+        "hint".into(),
+        RecordKind::Skeleton,
+        vec![],
+        false,
+    )
+    .unwrap();
+    store.seed_skeleton(&candidate("initial"), false).unwrap();
+    let hint = store.hint().unwrap();
+    assert!(hint.contains("{\"records_landed\":N}"), "{hint}");
+    assert!(hint.contains("N is the new landings count from the last receipt"));
+    assert!(!hint.contains("exactly {\"records_landed\":0}"));
+    assert!(store.compose_reply(&json!({"records_landed":0})).is_ok());
+    store
+        .land(json!({"subject":"TASK-X-001","task":candidate("changed")["tasks"][0]}))
+        .unwrap();
+    let hint = store.hint().unwrap();
+    assert!(hint.contains("exactly {\"records_landed\":1}"), "{hint}");
+    assert!(store.compose_reply(&json!({"records_landed":1})).is_ok());
 }

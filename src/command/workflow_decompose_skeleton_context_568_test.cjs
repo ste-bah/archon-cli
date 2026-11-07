@@ -30,7 +30,7 @@ function assertPrevious(prompt, files, content) {
   assert(prompt.includes(`The previous candidate is in ${path} (sha256 ${sha256}; host-written context for this call: read it by its exact path).`));
   assert.equal(files.get(path), content);
   assert(!prompt.includes(content), 'candidate bytes never inline');
-  assert(prompt.includes('Whatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the receipt\'s Landed subjects with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed in the receipt have been retained. Re-land changed tasks.'));
+  assert(prompt.includes('Whatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the Landed subjects list at the end of this prompt with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed there have been retained. Re-land changed tasks.'));
   assert(!prompt.includes('Repair the previous candidate.'));
   assert(!prompt.includes('Change only what the current findings name.'));
   assert(Buffer.byteLength(prompt) <= 262144);

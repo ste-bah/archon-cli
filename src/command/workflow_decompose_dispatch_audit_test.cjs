@@ -79,9 +79,9 @@ test('C6 a changed landing reaches the gate and a durable seed can be rejudged',
   }
 });
 // C1 audit D1: a recovered call's bytes survive the gate's artifact refusal too.
-test('C1 recovered landing provenance survives rejudging and an artifact refusal', async () => {
+test('C1 artifact-refused recovered bytes never seed the next author', async () => {
   const ctx = context({ phaseSeed: { subjects: { skeleton: {
-    kind: 'artifact', candidate, candidate_call: 'skeleton-author-4'
+    kind: 'artifact', candidate, candidate_call: 'skeleton-author-4', retained_landings: true
   } } } });
   const options = []; let gates = 0;
   await ctx.authorCandidate({
@@ -91,6 +91,6 @@ test('C1 recovered landing provenance survives rejudging and an artifact refusal
     ] } } : clean,
     pause: async () => { throw Error('unexpected pause'); }
   }, policy);
-  assert.equal(options[0].previousSkeleton, candidate);
+  assert.equal(options[0].previousSkeleton, null);
   assert.deepEqual(Array.from(options[0].openFindings), []);
 });

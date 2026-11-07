@@ -127,7 +127,7 @@ test('M2_P5_28_stale_resume_seed_does_not_drop_later_reopen_candidate', async ()
     const reopened = options.at(-1);
     assert.equal(reopened.previousSkeleton, candidate);
     assert.ok(reopened.task.includes('The previous candidate is in'));
-    assert.ok(reopened.task.includes('Compare the receipt\'s Landed subjects with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed in the receipt have been retained. Re-land changed tasks.'));
+    assert.ok(reopened.task.includes('Compare the Landed subjects list at the end of this prompt with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed there have been retained. Re-land changed tasks.'));
     assert.ok(reopened.task.includes('Keep every frozen task_id and file_name.'));
   }
 });
