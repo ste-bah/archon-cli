@@ -133,7 +133,13 @@ async fn issue550_without_retained_records_repeated_incomplete_replies_still_fai
     ]));
     let runner = runner_with(provider, Arc::new(Host::default()), 5);
 
-    let error = runner.run("author").await.unwrap_err().to_string();
+    let error = runner.run("author").await.unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<archon_tools::audit_landing::IncompleteLandedArtifact>()
+            .is_some()
+    );
+    let error = error.to_string();
 
     assert!(error.contains("incomplete landed artifact"), "{error}");
 }
@@ -198,4 +204,71 @@ async fn issue550_a_host_completion_is_a_whole_reply_whatever_the_cut_off_stop_r
 
     assert_eq!(completion.content, r#"{"records_landed":1}"#);
     assert_eq!(completion.stop_reason.as_deref(), Some("end_turn"));
+}
+
+#[tokio::test]
+async fn landed_non_skeleton_replies_without_receipts_stay_final() {
+    struct OtherHost(&'static str);
+    impl LandingHost for OtherHost {
+        fn tool_name(&self) -> &'static str {
+            self.0
+        }
+        fn land(&self, _: Value) -> Result<String, String> {
+            panic!("no landing")
+        }
+        fn hint(&self) -> Result<String, String> {
+            Ok(String::new())
+        }
+        fn complete(&self, _: &Value) -> Result<(), String> {
+            panic!("no receipt")
+        }
+    }
+    for kind in [
+        "land-review-record",
+        "land-verify-record",
+        "land-audit-record",
+    ] {
+        for text in ["Review complete.", r#"{"status":"accepted","data":{}}"#] {
+            let provider = Arc::new(MockProvider::new(vec![text_response(text)]));
+            let mut runner = make_runner(provider.clone(), 4);
+            runner.tool_context.audit_landing =
+                Some(Arc::new(AuditLanding::new(Arc::new(OtherHost(kind)), None)));
+            assert_eq!(runner.run("Inspect source").await.unwrap(), text);
+            assert_eq!(provider.requests().len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn landed_four_non_skeleton_record_replies_all_land_and_continue() {
+    struct ReviewHost(Mutex<Vec<Value>>);
+    impl LandingHost for ReviewHost {
+        fn tool_name(&self) -> &'static str {
+            "land-review-record"
+        }
+        fn land(&self, record: Value) -> Result<String, String> {
+            self.0.lock().unwrap().push(record);
+            Ok("Continue with the final verdict".into())
+        }
+        fn hint(&self) -> Result<String, String> {
+            Ok(String::new())
+        }
+        fn complete(&self, _: &Value) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    let host = Arc::new(ReviewHost(Mutex::new(vec![])));
+    let mut responses: Vec<_> = (1..=4)
+        .map(|n| text_response(&json!({"subject":format!("UNIT-{n}")}).to_string()))
+        .collect();
+    responses.push(text_response("Review complete."));
+    let provider = Arc::new(MockProvider::new(responses));
+    let mut runner = make_runner(provider.clone(), 8);
+    runner.tool_context.audit_landing = Some(Arc::new(AuditLanding::new(host.clone(), None)));
+    assert_eq!(
+        runner.run("Review source").await.unwrap(),
+        "Review complete."
+    );
+    assert_eq!(host.0.lock().unwrap().len(), 4);
+    assert_eq!(provider.requests().len(), 5);
 }

@@ -41,6 +41,9 @@ impl ExecutionResult {
                     overloaded: *overloaded,
                     source: source.clone(),
                 },
+                Err(ExecutorError::InvalidAnswer(message)) => {
+                    SubagentOutcome::InvalidAnswer(message.clone())
+                }
                 Err(error) => SubagentOutcome::Failed(error.to_string()),
             }
         }
@@ -399,7 +402,7 @@ async fn run_subagent_owned(
                 return SubagentOutcome::Completed(completed);
             }
         }
-        SubagentOutcome::Failed(err) => {
+        SubagentOutcome::Failed(err) | SubagentOutcome::InvalidAnswer(err) => {
             let _ = exec
                 .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
                 .await;

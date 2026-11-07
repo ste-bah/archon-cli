@@ -142,7 +142,12 @@ fn skeleton_hollow_or_absent_task_is_still_rejected() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("task.implements[0]"), "{error}");
-    assert!(landing.hint().unwrap().contains("Host retained 0 records."));
+    assert!(
+        landing
+            .hint()
+            .unwrap()
+            .contains("Host retained 0 records; 0 new landings in this call (seeds do not count).")
+    );
     assert!(
         landing.assemble(&json!({"records_landed":0})).is_err(),
         "a rejected subject must be repaired before completion"

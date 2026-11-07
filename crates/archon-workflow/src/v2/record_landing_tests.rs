@@ -307,7 +307,12 @@ fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema
     assert!(error.contains("a skeleton task must name the obligations it implements and/or the artifacts it delivers"), "{error}");
     assert!(error.contains("implements"), "{error}");
     assert!(error.contains("Expected schema:"), "{error}");
-    assert!(landing.hint().unwrap().contains("Host retained 0 records."));
+    assert!(
+        landing
+            .hint()
+            .unwrap()
+            .contains("Host retained 0 records; 0 new landings in this call (seeds do not count).")
+    );
     assert!(
         landing.assemble(&json!({"records_landed":0})).is_err(),
         "a rejected subject must be repaired before completion"

@@ -125,7 +125,14 @@ pub(super) async fn collect_stream_round(
         let received = within(stream_idle_timeout(runner), rx.recv()).await;
         let transport_failure = matches!(&received, Ok(Some(StreamEvent::Error { error_type, message }))
             if archon_llm::retry::stream_error_is_retryable(error_type, message));
-        let empty_terminal = text_content.trim().is_empty()
+        let skeleton_reply = terminal_marker
+            && runner
+                .tool_context
+                .audit_landing
+                .as_ref()
+                .is_some_and(|landing| landing.tool_name() == "land-skeleton-record");
+        let empty_terminal = !skeleton_reply
+            && text_content.trim().is_empty()
             && pending_tools.is_empty()
             && !matches!(finish_reason.as_deref(), Some("max_tokens" | "length"));
         let interrupted = received.is_err()
@@ -321,7 +328,16 @@ pub(super) async fn collect_stream_round(
         }
     }
 
-    if !retry_after_compact && text_content.trim().is_empty() && pending_tools.is_empty() {
+    if !retry_after_compact
+        && text_content.trim().is_empty()
+        && pending_tools.is_empty()
+        && !(terminal_marker
+            && runner
+                .tool_context
+                .audit_landing
+                .as_ref()
+                .is_some_and(|landing| landing.tool_name() == "land-skeleton-record"))
+    {
         let reason = finish_reason.as_deref().unwrap_or("unavailable");
         if let Some(scope) = archon_observability::transport::current() {
             scope.record(
