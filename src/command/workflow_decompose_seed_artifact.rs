@@ -184,7 +184,7 @@ pub(crate) fn retain_skeleton(
                 continue;
             }
             let retained = (|| -> Result<Option<Value>> {
-                let landing = RecordLanding::open(
+                let landing = RecordLanding::open_read_only(
                     path.clone(),
                     identity.clone(),
                     RecordKind::Skeleton,

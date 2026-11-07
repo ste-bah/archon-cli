@@ -108,9 +108,33 @@ pub(super) fn compose_raw_reply(records: &RecordLanding, text: &str) -> Workflow
             if records.kind() != RecordKind::Skeleton
                 && value.pointer("/data/records_landed").is_some()
             {
+                let mut result: WorkflowV2Result = serde_json::from_value(value.clone())?;
+                records.expand(&mut result)?;
                 value["data"] = records.compose_reply(&value["data"])?;
+                let expanded = serde_json::to_value(result)?;
+                for field in [
+                    "status",
+                    "summary",
+                    "evidence",
+                    "commands_run",
+                    "residual_gaps",
+                ] {
+                    value[field] = expanded[field].clone();
+                }
                 Ok(value)
             } else {
+                if records.kind() == RecordKind::Verify {
+                    let mut result = WorkflowV2Result {
+                        data: value.clone(),
+                        ..Default::default()
+                    };
+                    records.expand(&mut result)?;
+                    if result.status == WorkflowV2Status::NeedsReview {
+                        return Err(WorkflowError::ArtifactInvalid(
+                            "retained verification failure requires a result envelope".into(),
+                        ));
+                    }
+                }
                 records.compose_reply(&value)
             }
         }

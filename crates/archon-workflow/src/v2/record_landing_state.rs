@@ -13,14 +13,84 @@ struct SavedCall {
     frozen_tasks: Option<BTreeMap<String, String>>,
 }
 impl RecordLanding {
+    /// `subjects_are_tasks` says whether each subject is a canonical task id (map calls) or an opaque call id (reduce calls); it decides whether the subject may stand in for a finding's task.
+    pub fn open(
+        root: PathBuf,
+        identity: String,
+        kind: RecordKind,
+        subjects: Vec<String>,
+        subjects_are_tasks: bool,
+    ) -> WorkflowResult<Self> {
+        Self::open_mode(root, identity, kind, subjects, subjects_are_tasks, false)
+    }
+
+    /// Read the committed call snapshot without creating, rewriting or removing files.
+    pub fn open_read_only(
+        root: PathBuf,
+        identity: String,
+        kind: RecordKind,
+        subjects: Vec<String>,
+        subjects_are_tasks: bool,
+    ) -> WorkflowResult<Self> {
+        Self::open_mode(root, identity, kind, subjects, subjects_are_tasks, true)
+    }
+
+    fn open_mode(
+        root: PathBuf,
+        identity: String,
+        kind: RecordKind,
+        subjects: Vec<String>,
+        subjects_are_tasks: bool,
+        read_only: bool,
+    ) -> WorkflowResult<Self> {
+        if !read_only {
+            std::fs::create_dir_all(&root).map_err(invalid)?;
+        }
+        let path = root.join("contract.json");
+        let expected = json!({"identity":identity,"kind":kind,"subjects":subjects});
+        if path.exists() {
+            let saved: Value = serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
+            if saved != expected {
+                return Err(invalid("record landing identity changed"));
+            }
+        } else if read_only {
+            return Err(invalid("missing record landing contract"));
+        } else {
+            write(&path, &expected)?;
+        }
+        let mut store = Self {
+            read_snapshot: None,
+            root,
+            kind,
+            subjects,
+            subjects_are_tasks,
+            lock: Mutex::new(()),
+            frozen_tasks: Mutex::new(None),
+            rejected: Mutex::new(BTreeMap::new()),
+            landed_here: Mutex::new(Default::default()),
+            repair_required: Mutex::new(false),
+            pre_call_tasks: Mutex::new(Default::default()),
+        };
+        if read_only {
+            store.read_snapshot = Some(if store.root.join("call-state.json").exists() {
+                BTreeMap::new()
+            } else {
+                store.saved_records()?
+            });
+        }
+        store.restore_call()?;
+        Ok(store)
+    }
+
     /// Whether this call must repair open findings, rather than author a first draft.
     pub fn require_new_landings(&self, required: bool) -> WorkflowResult<()> {
+        self.ensure_writable()?;
         let _lock = self.lock.lock().map_err(invalid)?;
         *self.repair_required.lock().map_err(invalid)? = required;
         self.save_call()
     }
 
-    fn saved_records(&self) -> WorkflowResult<BTreeMap<String, Value>> {
+    pub(in crate::v2) fn saved_records(&self) -> WorkflowResult<BTreeMap<String, Value>> {
         let mut records = BTreeMap::new();
         for entry in std::fs::read_dir(&self.root).map_err(invalid)? {
             let path = entry.map_err(invalid)?.path();
@@ -36,7 +106,14 @@ impl RecordLanding {
         }
         Ok(records)
     }
+    pub(super) fn ensure_writable(&self) -> WorkflowResult<()> {
+        if self.read_snapshot.is_some() {
+            return Err(invalid("record landing store is read-only"));
+        }
+        Ok(())
+    }
     pub(super) fn save_call(&self) -> WorkflowResult<()> {
+        self.ensure_writable()?;
         write(
             &self.root.join("call-state.json"),
             &SavedCall {
@@ -49,7 +126,7 @@ impl RecordLanding {
             },
         )
     }
-    pub(super) fn restore_call(&self) -> WorkflowResult<()> {
+    pub(super) fn restore_call(&mut self) -> WorkflowResult<()> {
         let path = self.root.join("call-state.json");
         if !path.exists() {
             return Ok(());
@@ -63,15 +140,19 @@ impl RecordLanding {
         }) {
             return Err(invalid("invalid saved record path"));
         }
-        // A process crash before the atomic state rename leaves the prior commit.
-        // Repeating this recovery after another crash is safe.
-        for name in self.saved_records()?.keys() {
-            if !saved.records.contains_key(name) {
-                std::fs::remove_file(self.root.join(name)).map_err(invalid)?;
+        if self.read_snapshot.is_some() {
+            self.read_snapshot = Some(saved.records);
+        } else {
+            // A process crash before the atomic state rename leaves the prior commit.
+            // Repeating this recovery after another crash is safe.
+            for name in self.saved_records()?.keys() {
+                if !saved.records.contains_key(name) {
+                    std::fs::remove_file(self.root.join(name)).map_err(invalid)?;
+                }
             }
-        }
-        for (name, record) in saved.records {
-            write(&self.root.join(name), &record)?;
+            for (name, record) in saved.records {
+                write(&self.root.join(name), &record)?;
+            }
         }
         *self.landed_here.lock().map_err(invalid)? = saved.changed;
         *self.pre_call_tasks.lock().map_err(invalid)? = saved.pre_call;

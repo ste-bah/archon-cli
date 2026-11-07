@@ -102,16 +102,11 @@ impl RecordLanding {
     }
 
     fn has_full_records(&self) -> WorkflowResult<bool> {
-        for entry in std::fs::read_dir(&self.root).map_err(invalid)? {
-            let path = entry.map_err(invalid)?.path();
-            if !path
-                .file_name()
-                .and_then(|v| v.to_str())
-                .is_some_and(|v| v.starts_with("record-") && v.ends_with(".json"))
-            {
-                continue;
-            }
-            let value: Value = serde_json::from_slice(&std::fs::read(path).map_err(invalid)?)?;
+        let snapshot = match &self.read_snapshot {
+            Some(records) => records.clone(),
+            None => self.saved_records()?,
+        };
+        for value in snapshot.into_values() {
             let record: StageRecord = serde_json::from_value(value.clone())?;
             if serde_json::to_value(record)? == value {
                 return Ok(true);
@@ -150,6 +145,8 @@ impl RecordLanding {
         }
         self.require_repaired()?;
         let landed = self.new_landing_count()?;
+        // An identical seed re-land still supplies the active session's artifact
+        // through compose_reply. Resume skips it: unchanged bytes prove no repair.
         if landed == 0 {
             return Ok(None);
         }
