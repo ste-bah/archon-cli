@@ -1,0 +1,15 @@
+{
+  "native": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "native_before": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "python": {
+    "exit": 0,
+    "stdout": "{\n  \"status\": \"substantive_deliverable_verified\",\n  \"required_cells\": 1,\n  \"verified_cells\": 1,\n  \"series_checked\": 0\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

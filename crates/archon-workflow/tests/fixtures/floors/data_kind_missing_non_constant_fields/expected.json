@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "record_series contract has no non_constant_fields"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"failures\": [\n    \"record_series contract has no non_constant_fields\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

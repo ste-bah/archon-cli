@@ -4,6 +4,9 @@ use serde_json::{Map, Value};
 
 use super::project_artifact_contract::artifact_requirement_paths_from_field;
 
+#[path = "project_artifact_command.rs"]
+mod command;
+
 pub fn stamp_project_artifact_paths(
     object: &mut Map<String, Value>,
     project_root: &str,
@@ -93,8 +96,37 @@ fn rewrite_focused_verification(
     let Some(verification) = object.get_mut("focused_verification") else {
         return;
     };
-    rewrite_value(verification, paths, true);
-    rewrite_dot_archon_paths(verification, project_root);
+    rewrite_verification(verification, project_root, paths);
+}
+
+fn rewrite_verification(value: &mut Value, root: &str, paths: &[(String, String)]) {
+    match value {
+        Value::String(text) => {
+            if let Some(rewritten) = command::rewrite(text, root) {
+                *text = rewritten;
+            } else {
+                let root = root.replace('\\', "/").replace('\'', "'\"'\"'");
+                let paths: Vec<_> = paths
+                    .iter()
+                    .map(|(raw, absolute)| {
+                        (
+                            raw.clone(),
+                            absolute.replace('\\', "/").replace('\'', "'\"'\"'"),
+                        )
+                    })
+                    .collect();
+                rewrite_string(text, &paths, true);
+                *text = expand_dot_archon_tokens(text, &root);
+            }
+        }
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(|v| rewrite_verification(v, root, paths)),
+        Value::Object(values) => values
+            .values_mut()
+            .for_each(|v| rewrite_verification(v, root, paths)),
+        _ => {}
+    }
 }
 
 fn rewrite_value(value: &mut Value, paths: &[(String, String)], embedded: bool) {
@@ -119,19 +151,6 @@ fn rewrite_string(text: &mut String, paths: &[(String, String)], embedded: bool)
         if embedded {
             *text = text.replace(raw, absolute);
         }
-    }
-}
-
-fn rewrite_dot_archon_paths(value: &mut Value, project_root: &str) {
-    match value {
-        Value::String(text) => *text = expand_dot_archon_tokens(text, project_root),
-        Value::Array(values) => values
-            .iter_mut()
-            .for_each(|value| rewrite_dot_archon_paths(value, project_root)),
-        Value::Object(object) => object
-            .values_mut()
-            .for_each(|value| rewrite_dot_archon_paths(value, project_root)),
-        _ => {}
     }
 }
 

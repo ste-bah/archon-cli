@@ -1,0 +1,21 @@
+{
+  "kind": "evidence",
+  "artifact_path": "artifact.json",
+  "required_universe": true,
+  "universe_fields": [
+    "axis"
+  ],
+  "cells_field": "cells",
+  "cell_identity_fields": [
+    "id"
+  ],
+  "registry_path": "registry.json",
+  "registry_records_field": "records",
+  "registry_key_fields": [
+    "id"
+  ],
+  "gaps_field": "gaps",
+  "required_nonempty_fields": [
+    "missing"
+  ]
+}

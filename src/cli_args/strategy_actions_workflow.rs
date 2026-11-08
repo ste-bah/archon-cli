@@ -113,6 +113,8 @@ pub enum WorkflowAction {
     /// Records the new outcome beside the kept failure; never changes the
     /// run's status.
     ObserveRunEnd(WorkflowObserveRunEndArgs),
+    /// Evaluate declared evidence without running commands.
+    VerifyDeliverable(WorkflowVerifyDeliverableArgs),
     /// List workflow runs
     List,
 }

@@ -1,0 +1,20 @@
+{
+  "native": {
+    "findings": [
+      "a payload row 0 t is not a parseable timestamp: bad",
+      "a payload row 1 t is not a parseable timestamp: bad"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 2,\n  \"failures\": [\n    \"a payload row 0 t is not a parseable timestamp: bad\",\n    \"a payload row 1 t is not a parseable timestamp: bad\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

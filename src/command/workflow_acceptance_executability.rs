@@ -1,22 +1,16 @@
 //! Executability gate for authored acceptance checks.
-//!
 //! The judge weighs whether a check PROVES its criterion; it never runs it.
-//! A check whose own script crashes (a helper called with the wrong
-//! arguments, a syntax error) is judged accepted, published, and then fails
+//! A check whose own script crashes can be published and then fail
 //! every acceptance round without ever asserting anything — and that failure
 //! used to be routed to the implementing tasks, which cannot edit the
 //! contract. So before an authored or re-authored check is published, the
-//! host runs it once, at the site the acceptance stage would run it (the
-//! `[workflow.acceptance_execution]` scratch observation when configured,
-//! otherwise the live target repository), against the current tree, and
-//! classifies the outcome with
-//! [`archon_workflow::acceptance_check_crash::classify_check_run`]:
+//! host runs it at the same site as the acceptance stage (the
+//! configured scratch observation, otherwise the live target repository), and
+//! classifies its execution:
 //!
-//! * passed, or failed with the check's own assertion signal: publishable —
-//!   the product may genuinely be failing;
+//! * passed, or failed with an assertion signal: publishable;
 //! * crashed in its own code: a finding for the author, like a judge
-//!   refutation, and the bounded re-author loop runs again.
-//!
+//!   refutation; bounded re-authoring runs again.
 //! A freeze (before any run) never executes authored scripts in the live
 //! repository: it probes in the hermetic scratch site when one is
 //! configured, and otherwise in the probe's own hermetic copy of the tree
@@ -25,7 +19,6 @@
 //! cannot be captured runs nothing at all. A check whose text names a live
 //! root by its absolute path is refused before it runs: a copy cannot keep
 //! it off the live tree.
-//!
 //! Batch O (A4, A5): a probe given a pre-implementation baseline
 //! ([`HostProbe::with_baseline`]; a freeze-time probe carries the task
 //! set's own) also proves each check CAN fail: it runs the check on the tree
@@ -324,6 +317,7 @@ mod silent_strike;
 mod sites;
 #[path = "workflow_acceptance_executability_verdict.rs"]
 mod verdict;
+pub(crate) use verdict::missing_site_program as missing_typed_program;
 #[path = "workflow_acceptance_executability_verdict_shell.rs"]
 mod verdict_shell;
 
@@ -497,3 +491,7 @@ pub(super) fn diagnostic_repository(project: &Path, tasks: &Path) -> Result<Path
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_baseline_outcome_tests.rs"]
 mod baseline_outcome_tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_floor_tests.rs"]
+mod floor_tests;

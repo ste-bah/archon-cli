@@ -126,6 +126,7 @@ pub(crate) struct Context {
 
 #[path = "workflow_acceptance_executability_verdict_requirements.rs"]
 mod requirements;
+pub(crate) use requirements::missing_site_program;
 
 impl Context {
     /// The site environment `environment`, from the site's own context

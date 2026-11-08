@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "deliverable contract registry_path is blank; supply a concrete value"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "declared registry is missing, empty, or not valid JSON"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": ""
+  },
+  "recorded_with": "Python 3.11.17"
+}

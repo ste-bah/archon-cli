@@ -46,7 +46,8 @@ pub use baseline_run_base::{
 #[cfg(test)]
 pub(crate) use contracts::demote_failed_contract;
 pub use contracts::{
-    enforce_declared_contracts, enforce_declared_contracts_watched, mark_branch_operational,
+    TypedProgramClassifier, enforce_declared_contracts, enforce_declared_contracts_classified,
+    enforce_declared_contracts_watched, mark_branch_operational,
 };
 pub(crate) use normalize::is_evidenced_pre_existing_failure;
 pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verification_input};

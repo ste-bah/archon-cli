@@ -60,3 +60,27 @@ impl Context {
         self
     }
 }
+
+/// Reuse the unchanged program-absence rules with the actual launch variables.
+pub(crate) fn missing_site_program(
+    command: &str,
+    result: &CheckResult,
+    environment: &BTreeMap<String, String>,
+) -> Option<String> {
+    let at = Context::at(environment.clone(), Vec::new());
+    let (_, cause) = no_verdict_cause(command, result, &at)?;
+    if !matches!(
+        cause,
+        UnprovenCause::ProgramAbsent | UnprovenCause::SiteLacks
+    ) {
+        return None;
+    }
+    let output = output(result);
+    let program = missing_program(&simple_commands(command), &output, &at)?;
+    let condition = if mutation::reported_permission_denied(&output, &program) {
+        "not executable"
+    } else {
+        "not found"
+    };
+    Some(format!("{program} {condition}"))
+}

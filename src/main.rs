@@ -38,6 +38,12 @@ use clap::Parser;
 use cli_args::Cli;
 
 fn main() -> Result<()> {
+    archon_workflow::v2::deliverable_contract::set_verifier_program(
+        std::env::current_exe().map_err(|error| error.to_string()),
+    );
+    if let Some(code) = command::workflow_verify_deliverable::early_entry() {
+        std::process::exit(code);
+    }
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--build-identity")) {
         println!(
             "{}",

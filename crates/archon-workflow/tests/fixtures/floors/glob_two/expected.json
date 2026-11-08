@@ -1,0 +1,17 @@
+{
+  "native": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "native_before": {
+    "findings": [
+      "parameterized deliverable collection is deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 0,
+    "stdout": "{\"status\": \"declared_deliverable_instances_present\", \"pattern\": \"out/<id>.json\", \"instance_count\": 2}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

@@ -111,7 +111,60 @@ fn the_floor_passes_a_directory_of_output_and_fails_an_empty_one() {
         panic!("an empty directory must still fail");
     };
     assert!(
-        findings[0].starts_with("declared deliverable missing or empty: artifacts/runs"),
+        findings[0]
+            == format!(
+                "declared deliverable missing or empty: {}/artifacts/runs",
+                empty.searched_roots[0].replace('\\', "/")
+            ),
         "{findings:?}"
+    );
+}
+
+#[test]
+fn invalid_instance_pattern_is_an_evidence_failure_instead_of_zero_matches() {
+    let directory = tempfile::tempdir().unwrap();
+    let roots =
+        super::contract_roots::ContractRoots::project_only(directory.path().to_string_lossy());
+    let contract = crate::task_universe::WorkflowV2DeliverableContract {
+        kind: "evidence".into(),
+        artifact_path: "[<id>".into(),
+        min_instances: 1,
+        ..Default::default()
+    };
+    let facts =
+        super::declarative_floor_collect::collect_declarative_floor_facts(&roots, &contract)
+            .unwrap();
+    let crate::FloorVerdict::Failed { findings } =
+        crate::evaluate_floor_predicates(&contract, &facts)
+    else {
+        panic!("invalid pattern passed");
+    };
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.starts_with("declared instance pattern is invalid: [<id>:")),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn unsupported_format_fails_for_bound_instances_too() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("one.txt"), "evidence").unwrap();
+    let roots =
+        super::contract_roots::ContractRoots::project_only(directory.path().to_string_lossy());
+    let contract = crate::task_universe::WorkflowV2DeliverableContract {
+        kind: "evidence".into(),
+        artifact_path: "<id>.txt".into(),
+        min_instances: 1,
+        artifact_format: Some("unknown".into()),
+        ..Default::default()
+    };
+    let facts = crate::collect_declarative_floor_facts(&roots, &contract).unwrap();
+    assert_eq!(
+        crate::evaluate_floor_predicates(&contract, &facts),
+        crate::FloorVerdict::Failed {
+            findings: vec!["unsupported declared artifact_format: unknown".into()]
+        }
     );
 }

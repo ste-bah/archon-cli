@@ -1,0 +1,21 @@
+{
+  "native": {
+    "findings": [
+      "missing required cell: [\"b\"]",
+      "extra undeclared cell: [\"a\"]"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "missing required cell: [\"b\"]",
+      "extra undeclared cell: [\"a\"]"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 2,\n  \"failures\": [\n    \"missing required cell: ('b',)\",\n    \"extra undeclared cell: ('a',)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

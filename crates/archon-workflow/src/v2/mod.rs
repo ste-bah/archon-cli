@@ -33,8 +33,17 @@ pub mod contract_roots;
 pub mod criterion_results;
 pub mod declarative_floor;
 mod declarative_floor_collect;
+pub mod declarative_floor_collect_refs;
 #[cfg(test)]
 mod declarative_floor_collect_tests;
+mod declarative_floor_consistency;
+pub mod declarative_floor_facts;
+mod declarative_floor_instances;
+mod declarative_floor_json;
+pub mod declarative_floor_output;
+mod declarative_floor_records;
+mod declarative_floor_series;
+pub mod declarative_floor_values;
 pub(crate) mod declared_output_contract;
 pub mod decomposed_prd_plan;
 pub mod decomposition;
@@ -109,8 +118,8 @@ pub use agent_adapter::{
 };
 pub use call_execution::WorkflowV2CallExecution;
 pub use declarative_floor::{
-    DeclarativeFloorEvaluation, DeclarativeFloorFacts, declarative_floor_deferral_reason,
-    evaluate_declarative_floor,
+    DeclarativeFloorEvaluation, DeclarativeFloorFacts, FloorVerdict,
+    declarative_floor_deferral_reason, evaluate_declarative_floor, evaluate_floor_predicates,
 };
 pub use declarative_floor_collect::collect_declarative_floor_facts;
 pub use decomposition::{
@@ -223,3 +232,6 @@ mod record_landing_schema;
 #[cfg(test)]
 #[path = "record_landing_tests.rs"]
 mod record_landing_tests;
+
+#[cfg(test)]
+mod deliverable_native_tests;
