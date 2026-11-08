@@ -247,8 +247,13 @@ async function reductionStopsWhenItFitsAndWriteFailureIsExplicit() {
 
 async function normalPromptIsByteIdentical() {
   const prompt = await acceptancePrompt(1, 3);
-  // Digest recorded from the pre-change sources for this exact fixture.
-  assert.equal(require('node:crypto').createHash('sha256').update(prompt).digest('hex'), 'a5c1d5ee56224e5bb1a54deece0b39ca06660ee31ae2dba765930d18993e3c2f');
+  // Verify both intentional additions, then retain the pre-merge digest for all other bytes.
+  const added = '\nCoverable IDs and exact texts: {}';
+  assert.equal(prompt.split(added).length, 2, 'exactly one coverable catalogue');
+  const cover = '"covers":["<coverable id>"]';
+  assert.equal(prompt.split(cover).length, 2, 'reply example uses a coverable id');
+  const legacy = prompt.replace(added, '').replace(cover, '"covers":["<REQ-ID>"]');
+  assert.equal(require('node:crypto').createHash('sha256').update(legacy).digest('hex'), 'a5c1d5ee56224e5bb1a54deece0b39ca06660ee31ae2dba765930d18993e3c2f');
   const ctx = context({});
   const filesBefore = ctx.__archonAuthorContext.files.size;
   assert.equal(await ctx.requireDispatchable({}, 'normal', prompt), prompt);

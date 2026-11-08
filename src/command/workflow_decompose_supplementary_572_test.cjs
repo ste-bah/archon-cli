@@ -99,13 +99,9 @@ test('caller capability is retained across sibling results', () => {
   assert.equal(ctx.owedSupplementary().has(f.subject), false);
 });
 test('coverable catalogue includes minted ids and exact texts with bounded file fallback', () => {
+  const { authorContext } = require('./workflow_decompose_context_stub.cjs');
   const ctx = context(), files = new Map();
-  ctx.__archonAuthorContext = (_, text) => {
-    const sha256 = require('node:crypto').createHash('sha256').update(text).digest('hex');
-    const path = `/context/${sha256}.json`;
-    files.set(path, text);
-    return JSON.stringify({path, sha256});
-  };
+  ctx.__archonAuthorContext = authorContext(files);
   const head = 'Coverable IDs and exact texts:';
   const small = ctx.catalogueText(ctx.args.prdRequirementTexts, 'DONE-1', [], head, 5120, "ids");
   assert(small.includes('DONE-1'));
@@ -114,10 +110,47 @@ test('coverable catalogue includes minted ids and exact texts with bounded file 
   const bounded = ctx.catalogueText(large, 'DONE-1', [], head, 5120, "ids");
   assert(Buffer.byteLength(bounded) < 5600);
   assert(bounded.includes("100 ids;"));
-  assert(source.includes('"All criterion IDs and text (for consistency):", CATALOGUE_SHARE)'));
   const file = bounded.match(/the exact catalogue is (\S+) \(sha256/)[1];
   assert.equal(files.get(file), JSON.stringify(large));
-  assert(source.includes('catalogueText(args.prdRequirementTexts || {}, id, state.order, "Coverable IDs and exact texts:", COVERABLE_SHARE, "ids")'));
+});
+
+test('coverable catalogue reaches the author inline, by bounded fallback and after overflow', async () => {
+  const { context: authorContext, criteria, entry } = require('./workflow_decompose_prompt_size_test.cjs');
+  const { authorContext: binding } = require('./workflow_decompose_context_stub.cjs');
+  const small = context().args.prdRequirementTexts;
+  const large = Object.fromEntries(Array.from({length:100}, (_, i) => [`DONE-${i}`, '界'.repeat(200)]));
+  for (const [texts, phaseBytes] of [[small, 0], [large, 0], [large, 252000]]) {
+    const files = new Map(), all = criteria(30);
+    const ctx = authorContext({acceptanceCriteria:all, prdRequirementTexts:texts}, binding(files));
+    let task;
+    await ctx.authorOne({agent:async (_, options) => { task = options.task; return {status:'failed'}; }},
+      'p'.repeat(phaseBytes), 1, 'AC-001', all['AC-001'], [entry('AC-002', 2)], all,
+      {entries:new Map(), order:Object.keys(all)});
+    assert(Buffer.byteLength(task) <= 262144);
+    assert(task.endsWith(ctx.acceptanceReplyFormat()));
+    const head = 'Coverable IDs and exact texts:';
+    if (!phaseBytes) {
+      assert(task.includes(ctx.catalogueText(all, 'AC-001', Object.keys(all))));
+      assert(task.includes(ctx.priorText([entry('AC-002', 2)], 'AC-001', Object.keys(all))),
+        'the coverable share leaves sibling records unchanged');
+    }
+    if (texts === small) {
+      assert(task.includes(`${head} ${JSON.stringify(texts)}`));
+    } else {
+      let catalogue = task.slice(task.indexOf(head)).split('\nPreviously completed entries:')[0];
+      if (phaseBytes) {
+        assert(task.includes(`${head} [moved to context file]`));
+        const path = task.match(/Moved optional blocks: .* Read (\S+) /)[1];
+        const moved = JSON.parse(files.get(path));
+        catalogue = moved.find(block => block.name === 'coverable ids').text;
+      }
+      assert(catalogue.startsWith(`${head} 100 ids;`));
+      assert(Buffer.byteLength(catalogue) < 11000, 'catalogue has its own bounded share');
+      const [, path, sha] = catalogue.match(/the exact catalogue is (\S+) \(sha256 ([0-9a-f]{64})\)/);
+      assert.equal(files.get(path), JSON.stringify(texts));
+      assert.equal(require('node:crypto').createHash('sha256').update(files.get(path)).digest('hex'), sha);
+    }
+  }
 });
 
 test('a stale publication result keeps the caller capability on new debt', () => {

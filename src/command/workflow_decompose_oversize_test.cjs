@@ -272,7 +272,7 @@ async function normalAcceptanceVariantsKeepExactBytes() {
     }
     own += ctx.currentCoversText(state.entries.get(id));
     const prompt = variant >= 3 ? ctx.authorPrompt('author', 3, [], []) : 'author';
-    const expected = ctx.namedFilesContext(`${prompt}\nAuthor ONLY entry ${id}: ${all[id]}${own}\n${ctx.catalogueText(all, id, state.order)}\n${ctx.priorText(prior, id, state.order)}`,
+    const expected = ctx.namedFilesContext(`${prompt}\nAuthor ONLY entry ${id}: ${all[id]}${own}\n${ctx.catalogueText(all, id, state.order)}\nCoverable IDs and exact texts: {}\n${ctx.priorText(prior, id, state.order)}`,
       state.entries.get(id), [all[id], own, ...ctx.currentAuthorFindings(prompt)], `\n${ctx.acceptanceReplyFormat()}`);
     let actual;
     await ctx.authorOne({ agent: async (_id, options) => { actual = options.task; return { status: 'failed' }; } }, prompt, 1, id, all[id], prior, all, state);
