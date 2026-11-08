@@ -1,0 +1,18 @@
+{
+  "divergence": "D-S7-10: strict typed identities, integer counts, non-empty values and valid JSON; see floor_native_changes.md",
+  "native": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "native_before": {
+    "findings": [
+      "declared deliverable is not valid JSON"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 0,
+    "stdout": "{\"status\": \"declared_deliverable_present\", \"artifact\": \"/Volumes/Externalwork/archon-cli/archon-cli/.claude/worktrees/fix-572-s7/crates/archon-workflow/tests/fixtures/floors/json_negative_infinity/roots/0/artifact.json\"}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

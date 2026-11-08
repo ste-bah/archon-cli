@@ -1,0 +1,12 @@
+{
+  "kind": "matrix",
+  "artifact_path": "out.json",
+  "required_universe": true,
+  "universe_fields": [
+    "axis"
+  ],
+  "cells_field": "cells",
+  "cell_identity_fields": [
+    "id"
+  ]
+}

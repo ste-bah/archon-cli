@@ -1,0 +1,177 @@
+{
+  "moves": [
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_contract_tests.rs::the_generated_verifier_accepts_a_directory_holding_a_non_empty_file",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_contract_tests.rs::the_generated_verifier_still_refuses_a_directory_with_nothing_in_it",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_contract_tests.rs::the_shell_verifier_finds_a_deliverable_that_exists_only_in_the_repository",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_contract_tests.rs::the_shell_verifier_names_every_root_when_a_deliverable_is_under_none",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_contract_tests.rs::the_shell_verifier_keeps_the_single_root_failure_text",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form",
+      "fixture_change": "kind metadata is now explicit at the source; evidence bytes and predicate assertions are unchanged; a separate test preserves the missing-kind parse failure"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_contract_tests.rs::the_shell_verifier_reads_a_repository_json_deliverable_and_its_registry_from_there",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form",
+      "fixture_change": "kind metadata is now explicit at the source; evidence bytes and predicate assertions are unchanged; a separate test preserves the missing-kind parse failure"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_contract_tests.rs::the_shell_verifier_globs_instances_under_the_repository_root",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form",
+      "fixture_change": "kind metadata is now explicit at the source; evidence bytes and predicate assertions are unchanged; a separate test preserves the missing-kind parse failure"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/deliverable_command_template_tests.rs::shell_template_domain_table",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_a.rs::parameterized_source_contract_covers_empty_valid_missing_and_inconsistent_instances",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_a.rs::parameterized_contract_honors_min_instances",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_a.rs::a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_b.rs::neutral_declared_verifier_executes_for_clean_contract_driven_series",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_b.rs::declared_gap_rows_do_not_require_healthy_dataset_references",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_b.rs::wf9_contaminated_fixture_replay_fails_substantive_contract",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_b.rs::a_series_with_only_two_distinct_step_values_is_rejected_as_synthetic",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_b.rs::an_irregular_series_of_the_same_length_is_accepted",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_b.rs::records_dated_to_a_closed_session_are_rejected",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::a_venue_with_no_declared_calendar_keeps_every_session",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::a_textual_deliverable_is_checked_for_presence_not_parsed_as_json",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::a_missing_textual_deliverable_still_fails",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::an_undeclared_json_extension_is_still_strictly_parsed",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::a_parameterized_markdown_instance_is_not_parsed_as_json",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::an_unbound_templated_contract_fails_closed_naming_the_token",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::a_bound_template_resolves_to_its_instances",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::a_bound_template_below_its_declared_floor_fails",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/lifecycle_policy/verify_options_tests_c.rs::a_missing_parameterized_instance_still_fails",
+      "before": "rendered verifier executed by the shell",
+      "after": "native adapter checks the emitted command, parses the emitted contract without inserting metadata, evaluates the collected facts, then runs its typed command only after passing predicates; contract defects retain their fail-closed shell form"
+    },
+    {
+      "test": "crates/archon-workflow/tests/declarative_floor_observer.rs::shared_floor_matches_existing_verifier_for_present_and_missing_text",
+      "before": "rendered verifier executed by the shell",
+      "after": "collector and evaluate_floor_predicates with the same fixture and pass/fail assertions"
+    },
+    {
+      "test": "crates/archon-workflow/tests/declarative_floor_observer.rs::shared_floor_matches_existing_verifier_for_json_and_registry_predicates",
+      "before": "rendered verifier executed by the shell",
+      "after": "collector and evaluate_floor_predicates with the same fixture and pass/fail assertions"
+    },
+    {
+      "test": "crates/archon-workflow/tests/declarative_floor_observer.rs::malformed_json_has_the_same_failed_floor_in_both_paths",
+      "before": "rendered verifier executed by the shell",
+      "after": "collector and evaluate_floor_predicates with the same fixture and pass/fail assertions"
+    },
+    {
+      "test": "crates/archon-workflow/tests/acceptance_scratch_completion.rs::advanced_floor_runs_shared_verifier_before_exact_nested_command",
+      "before": "deferred prerequisites executed the rendered verifier",
+      "after": "prerequisites evaluated natively before the same nested command"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/verification/contracts_env_tests.rs::only_the_branch_whose_verifier_changed_an_input_is_failed_and_as_operational",
+      "before": "host rendered-verifier fallback for an untyped declaration",
+      "after": "host native floor then typed command; kind metadata now explicit for strict parsing"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/verification/contracts_env_tests.rs::a_verifier_that_changed_an_input_once_is_re_run_and_its_verdict_stands",
+      "before": "host rendered-verifier fallback for an untyped declaration",
+      "after": "host native floor then typed command; kind metadata now explicit for strict parsing"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/verification/signals.rs::enforcement_records_a_pass_and_a_failure_differently",
+      "before": "host rendered-verifier fallback for an untyped declaration",
+      "after": "host native floor then typed command; kind metadata now explicit for strict parsing"
+    },
+    {
+      "test": "crates/archon-workflow/src/v2/verification/contracts_env_tests.rs::a_contract_verifier_cannot_write_the_project",
+      "before": "host rendered-verifier fallback for a declaration without kind metadata",
+      "after": "host native floor then typed command; kind metadata now explicit for strict parsing"
+    }
+  ]
+}

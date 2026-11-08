@@ -1,5 +1,7 @@
 //! Race-resistant host-side movement of mutation inputs.
-use std::path::{Component, Path, PathBuf};
+#[cfg(unix)]
+use std::path::Component;
+use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 #[path = "acceptance_scratch_mutation_fd_windows.rs"]
@@ -70,7 +72,7 @@ pub(crate) fn site_entry_exists(root: &SiteRoot, rel: &Path) -> std::io::Result<
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error),
         };
-        return entry_exists(parent.as_raw_fd(), &c_name(&leaf)?);
+        entry_exists(parent.as_raw_fd(), &c_name(&leaf)?)
     }
     #[cfg(windows)]
     {

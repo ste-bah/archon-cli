@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "declared deliverable missing or empty: artifact.json (looked under <root-0>, <root-1>)"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "declared deliverable missing or empty: artifact.json (looked under <root-0>, <root-1>)"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"failures\": [\n    \"declared deliverable missing or empty: artifact.json (looked under /Volumes/Externalwork/archon-cli/archon-cli/.claude/worktrees/fix-572-s7/crates/archon-workflow/tests/fixtures/floors/roots_neither/roots/0, /Volumes/Externalwork/archon-cli/archon-cli/.claude/worktrees/fix-572-s7/crates/archon-workflow/tests/fixtures/floors/roots_neither/roots/1)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

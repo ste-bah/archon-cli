@@ -80,7 +80,7 @@ mod shell_setup;
 mod subcommand;
 #[path = "workflow_acceptance_executability_verdict_which.rs"]
 mod which;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use subcommand::HOST_PATH;
 pub(crate) use subcommand::unresolved_on_path;
 
@@ -126,6 +126,7 @@ pub(crate) struct Context {
 
 #[path = "workflow_acceptance_executability_verdict_requirements.rs"]
 mod requirements;
+pub(crate) use requirements::missing_site_program;
 
 impl Context {
     /// The site environment `environment`, from the site's own context

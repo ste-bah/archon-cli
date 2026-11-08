@@ -470,3 +470,5 @@ pub(crate) mod workflow_host_command_committed;
 pub(crate) mod workflow_host_fault;
 
 mod workflow_host_probe_fault;
+
+pub(crate) mod workflow_verify_deliverable;

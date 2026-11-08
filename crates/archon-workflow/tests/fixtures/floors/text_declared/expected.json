@@ -1,0 +1,15 @@
+{
+  "native": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "native_before": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "python": {
+    "exit": 0,
+    "stdout": "{\"status\": \"declared_text_deliverable_present\", \"artifact\": \"/Volumes/Externalwork/archon-cli/archon-cli/.claude/worktrees/fix-572-s7/crates/archon-workflow/tests/fixtures/floors/text_declared/roots/0/artifact.json\", \"bytes\": 1}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

@@ -1,0 +1,21 @@
+{
+  "native": {
+    "findings": [
+      "a positive count field failed: v",
+      "a count below declared minimum: v=0 < 1"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "a positive count field failed: v",
+      "a count below declared minimum: v=0 < 1"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 2,\n  \"failures\": [\n    \"a positive count field failed: v\",\n    \"a count below declared minimum: v=0 < 1\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

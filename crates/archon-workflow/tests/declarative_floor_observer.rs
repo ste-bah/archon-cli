@@ -39,6 +39,7 @@ fn commandless_floor_passes_from_typed_facts() {
             registry_json: None,
             instance_count: 1,
             searched_roots: Vec::new(),
+            ..Default::default()
         },
     );
     assert_eq!(evaluation, DeclarativeFloorEvaluation::Passed);
@@ -58,6 +59,7 @@ fn commandless_floor_reports_exact_declared_predicate_failures() {
             registry_json: None,
             instance_count: 1,
             searched_roots: Vec::new(),
+            ..Default::default()
         },
     );
     let DeclarativeFloorEvaluation::Failed { findings } = evaluation else {
@@ -93,42 +95,29 @@ fn typed_command_is_deferred_without_exposing_executable_text() {
             registry_json: None,
             instance_count: 1,
             searched_roots: Vec::new(),
+            ..Default::default()
         },
     );
     let DeclarativeFloorEvaluation::Deferred { reason } = evaluation else {
         panic!("expected deferred floor")
     };
-    assert!(reason.contains("deferred in R2a"));
+    assert_eq!(
+        reason,
+        "typed_verifier_command runs a command; the floor's predicates are evaluated natively and the command runs separately"
+    );
     assert!(!reason.contains("secret-tool"));
     assert!(!reason.contains("never-run"));
 }
 
 fn shell_verifier_passes(root: &std::path::Path, contract: &WorkflowV2DeliverableContract) -> bool {
-    let value = serde_json::to_value(contract).expect("contract json");
-    let script = archon_workflow::v2::deliverable_contract::verification_command(
-        &archon_workflow::v2::deliverable_contract::ContractRoots::project_only(
-            root.to_str().expect("root"),
-        ),
-        &value,
+    let roots = archon_workflow::v2::deliverable_contract::ContractRoots::project_only(
+        root.to_string_lossy(),
     );
-    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn verifier");
-    use std::io::Write as _;
-    child
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(script.as_bytes())
-        .expect("write verifier");
-    child
-        .wait_with_output()
-        .expect("verifier output")
-        .status
-        .success()
+    let facts = collect_declarative_floor_facts(&roots, contract).unwrap();
+    matches!(
+        archon_workflow::evaluate_floor_predicates(contract, &facts),
+        archon_workflow::FloorVerdict::Passed
+    )
 }
 
 fn rust_floor_passes(root: &std::path::Path, contract: &WorkflowV2DeliverableContract) -> bool {

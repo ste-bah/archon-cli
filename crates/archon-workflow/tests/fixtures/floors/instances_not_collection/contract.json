@@ -1,0 +1,7 @@
+{
+  "kind": "evidence",
+  "artifact_path": "out/<id>.json",
+  "instance_source_path": "source.json",
+  "instance_source_records_field": "entries",
+  "instance_artifact_field": "ref"
+}

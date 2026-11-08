@@ -102,3 +102,40 @@ fn a_dot_archon_artifact_is_still_resolved_against_the_project_root() {
         "{resolved:?}"
     );
 }
+
+#[test]
+fn stored_destination_keeps_the_roots_original_separators() {
+    let root = r"C:\parent with space\child";
+    let mut object = serde_json::json!({"artifact_requirements":[".archon/out.json"]})
+        .as_object()
+        .unwrap()
+        .clone();
+    let receipts = stamp_project_artifact_paths(&mut object, root);
+    let expected = format!("{root}/.archon/out.json");
+    assert_eq!(receipts[0]["absolute_path"], expected);
+    assert_eq!(object["artifact_requirements"][0], expected);
+    assert_eq!(
+        project_artifact_destination(root, ".archon/out.json"),
+        Some(expected)
+    );
+}
+
+#[test]
+fn fallback_command_stamping_uses_portable_quoted_root_text() {
+    let mut object = serde_json::json!({
+        "artifact_requirements":[".archon/out.json"],
+        "focused_verification":"inspect '.archon/out.json'"
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+    stamp_project_artifact_paths(&mut object, r"C:\parent's root\child");
+    assert_eq!(
+        object["focused_verification"],
+        "inspect 'C:/parent'\"'\"'s root/child/.archon/out.json'"
+    );
+    assert_eq!(
+        object["artifact_requirements"][0],
+        r"C:\parent's root\child/.archon/out.json"
+    );
+}

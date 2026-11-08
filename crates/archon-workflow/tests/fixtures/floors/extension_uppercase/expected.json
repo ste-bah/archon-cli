@@ -1,0 +1,17 @@
+{
+  "native": {
+    "findings": [
+      "declared deliverable is not valid JSON"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"failures\": [\n    \"declared deliverable is not valid JSON: /Volumes/Externalwork/archon-cli/archon-cli/.claude/worktrees/fix-572-s7/crates/archon-workflow/tests/fixtures/floors/extension_uppercase/roots/0/a.JSON: Expecting value: line 1 column 1 (char 0)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

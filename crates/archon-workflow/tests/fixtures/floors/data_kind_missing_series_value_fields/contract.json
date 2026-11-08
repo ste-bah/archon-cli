@@ -1,0 +1,12 @@
+{
+  "kind": "evidence",
+  "artifact_path": "artifact.json",
+  "data_kind": "record_series",
+  "payload_path_field": "p",
+  "required_fields": [
+    "x"
+  ],
+  "non_constant_fields": [
+    "x"
+  ]
+}

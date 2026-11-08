@@ -1,0 +1,21 @@
+{
+  "divergence": "D-S7-6: compact dates are outside the declared timestamp set",
+  "native": {
+    "findings": [
+      "a payload row 0 t is not a parseable timestamp: 20000101",
+      "a payload row 1 t is not a parseable timestamp: 20000101"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 0,
+    "stdout": "{\n  \"status\": \"substantive_deliverable_verified\",\n  \"required_cells\": 1,\n  \"verified_cells\": 1,\n  \"series_checked\": 1\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

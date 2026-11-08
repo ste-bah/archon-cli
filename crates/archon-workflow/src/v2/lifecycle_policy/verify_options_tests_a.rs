@@ -94,32 +94,7 @@ fn parameterized_verifier(project: &std::path::Path) -> String {
 }
 
 pub fn run_verifier(command: &str) -> std::process::Output {
-    // `sh`, not `/bin/zsh`: production runs focused verifiers through
-    // `Command::new(archon_shell::resolve_posix_shell())` (workflow_live_v2_verification.rs:287), as does every
-    // other verifier path in the workspace. Executing them under a different
-    // shell here meant the tests were not exercising what ships, and an
-    // absolute /bin/zsh made them fail outright on any host without zsh —
-    // passing in CI only because the ubuntu runner image happens to include it.
-    // The generated commands are plain POSIX.
-    // Fed on stdin, matching `run_contract_verifier`. The generated verifier
-    // embeds a ~29 KB Python program and Windows truncates any command line
-    // past 32,767 characters, which severed the heredoc mid-script.
-    use std::io::Write as _;
-    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn generated verifier");
-    child
-        .stdin
-        .take()
-        .expect("verifier stdin")
-        .write_all(command.as_bytes())
-        .expect("write verifier script");
-    child
-        .wait_with_output()
-        .expect("execute generated verifier")
+    crate::v2::deliverable_native_tests::run(command)
 }
 
 #[test]
@@ -215,7 +190,7 @@ fn parameterized_contract_honors_min_instances() {
     );
     let mut contract = parameterized_source_contract();
     contract["min_instances"] = serde_json::json!(1);
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -252,7 +227,7 @@ fn a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused() {
         "validation_failed_values": ["failed"],
         "validation_passed_values": ["passed"]
     });
-    let unbound = deliverable_contract::verification_command(
+    let unbound = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -270,7 +245,7 @@ fn a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused() {
     );
 
     contract["min_instances"] = serde_json::json!(1);
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -384,13 +359,23 @@ fn declared_required_universe_gets_substantive_registry_backed_verification() {
         substantive["focused_verification"]
             .as_str()
             .expect("command")
-            .contains("payload field is constant or absent")
+            .contains("non_constant_fields")
     );
     assert!(
         substantive["focused_verification"]
             .as_str()
             .expect("command")
-            .contains("internally inconsistent")
+            .contains("validation_checks_field")
+    );
+    assert_eq!(
+        substantive["deliverable_contract"],
+        record_series_contract()
+    );
+    assert!(
+        substantive["focused_verification"]
+            .as_str()
+            .unwrap()
+            .contains("verify-deliverable")
     );
     assert_eq!(
         substantive["provider_env_requirements"],

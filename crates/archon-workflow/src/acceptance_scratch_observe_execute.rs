@@ -1,9 +1,8 @@
-//! Execute one authorized check and any deferred declarative prerequisites.
+//! Evaluate declarative prerequisites before executing an authorized check.
 use super::*;
 
 /// One authorized check at a site: a nested verifier's declarative
-/// prerequisites first (evaluated in-process, or as the generated predicate
-/// command when they defer), then the pinned command itself.
+/// prerequisites first in-process, then the pinned command itself.
 pub async fn execute_check_at(
     site: &super::super::process::CommandSite<'_>,
     contract: &AcceptanceContract,
@@ -30,9 +29,9 @@ pub async fn execute_check_at(
                         &prerequisites,
                     )
                 })?;
-            match crate::evaluate_declarative_floor(&prerequisites, &facts) {
-                crate::DeclarativeFloorEvaluation::Passed => {}
-                crate::DeclarativeFloorEvaluation::Failed { findings } => {
+            match crate::evaluate_floor_predicates(&prerequisites, &facts) {
+                crate::FloorVerdict::Passed => {}
+                crate::FloorVerdict::Failed { findings } => {
                     return Ok(CheckResult {
                         verdict_streams: Default::default(),
                         fault: None,
@@ -45,23 +44,6 @@ pub async fn execute_check_at(
                         operational_error: None,
                         environment_note: None,
                     });
-                }
-                crate::DeclarativeFloorEvaluation::Deferred { .. } => {
-                    let generated =
-                        crate::acceptance_world::AuthorizedCommand::floor_prerequisites(
-                            site.project,
-                            floor,
-                        )?;
-                    let checked = super::super::process::run_at(
-                        site,
-                        &reference.acceptance_id,
-                        &generated,
-                        cancel.clone(),
-                    )
-                    .await?;
-                    if !checked.passed() {
-                        return Ok(checked);
-                    }
                 }
             }
         }

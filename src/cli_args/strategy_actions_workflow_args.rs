@@ -309,6 +309,16 @@ pub struct WorkflowImportChainHistoryArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct WorkflowVerifyDeliverableArgs {
+    /// Resolution roots in order (repeatable).
+    #[arg(long, required = true, value_name = "DIR")]
+    pub root: Vec<std::path::PathBuf>,
+    /// Contract value, or - to read it from stdin.
+    #[arg(long, value_name = "JSON")]
+    pub contract_json: String,
+}
+
+#[derive(Args, Debug)]
 pub struct WorkflowObserveRunEndArgs {
     /// Workflow run ID
     pub run_id: String,

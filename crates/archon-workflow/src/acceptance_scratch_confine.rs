@@ -13,6 +13,7 @@
 //!
 //! On Windows an owned Job Object confirms accounting reaches zero, bounding
 //! only inactivity; an active job without progress is an operational stall.
+#[cfg(unix)]
 use super::*;
 use std::time::Duration;
 

@@ -227,6 +227,9 @@ pub(crate) async fn handle_cli(action: &WorkflowAction, cwd: &Path) -> Result<bo
             );
             Ok(true)
         }
+        WorkflowAction::VerifyDeliverable(args) => {
+            std::process::exit(crate::command::workflow_verify_deliverable::run(args));
+        }
         _ => Ok(false),
     }
 }

@@ -1,10 +1,8 @@
 //! Pure commandless deliverable-floor evaluation.
 //!
 //! Filesystem and JSON collection happen in the host. This module receives
-//! typed facts only and never renders or executes command text. The existing
-//! verifier and the run-end observer share its eligibility and deterministic
-//! predicates; command-bearing or unsupported advanced checks are explicit
-//! deferrals rather than host fallbacks.
+//! typed facts only and never renders or executes command text. Callers run
+//! authored commands separately after evaluating these predicates.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,20 +11,19 @@ use serde_json::Value;
 
 use crate::task_universe::WorkflowV2DeliverableContract;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DeclarativeFloorFacts {
-    pub artifact_present: bool,
-    pub artifact_byte_len: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_json: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub registry_json: Option<Value>,
-    #[serde(default)]
-    pub instance_count: usize,
-    /// The roots the collector tried, in order (Issue-22). Empty when the facts
-    /// were not collected from disk; a single entry reports as it always did.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub searched_roots: Vec<String>,
+use super::declarative_floor_consistency::{declarations, internal_consistency};
+pub use super::declarative_floor_facts::DeclarativeFloorFacts;
+use super::declarative_floor_records::evaluate_records;
+use super::declarative_floor_series::Series;
+use super::declarative_floor_values::{
+    artifact_format, identity_equal, identity_key, identity_text, scalar_text,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum FloorVerdict {
+    Passed,
+    Failed { findings: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,25 +38,63 @@ pub fn evaluate_declarative_floor(
     contract: &WorkflowV2DeliverableContract,
     facts: &DeclarativeFloorFacts,
 ) -> DeclarativeFloorEvaluation {
+    if let Some(defect) = super::deliverable_contract::contract_defect(
+        &serde_json::to_value(contract).expect("contract value"),
+    ) {
+        return DeclarativeFloorEvaluation::Failed {
+            findings: vec![defect],
+        };
+    }
     if let Some(reason) = declarative_floor_deferral_reason(contract) {
         return DeclarativeFloorEvaluation::Deferred { reason };
     }
-    let mut findings = Vec::new();
-    if !facts.artifact_present || facts.artifact_byte_len == 0 {
-        findings.push(format!(
-            "declared deliverable missing or empty: {}{}",
-            contract.artifact_path,
-            searched_roots_suffix(&contract.artifact_path, &facts.searched_roots)
-        ));
-        return DeclarativeFloorEvaluation::Failed { findings };
+    match evaluate_floor_predicates(contract, facts) {
+        FloorVerdict::Passed => DeclarativeFloorEvaluation::Passed,
+        FloorVerdict::Failed { findings } => DeclarativeFloorEvaluation::Failed { findings },
     }
-    let format = contract.normalized_artifact_format().unwrap_or_else(|| {
-        if contract.artifact_path.ends_with(".json") || contract.artifact_path.ends_with(".jsonl") {
-            "json".to_string()
-        } else {
-            "text".to_string()
-        }
-    });
+}
+
+pub fn evaluate_floor_predicates(
+    contract: &WorkflowV2DeliverableContract,
+    facts: &DeclarativeFloorFacts,
+) -> FloorVerdict {
+    let mut findings = facts.collection_findings.clone();
+    let raw = serde_json::to_value(contract).expect("contract value");
+    if let Some(defect) = super::deliverable_contract::contract_defect(&raw) {
+        return FloorVerdict::Failed {
+            findings: vec![defect],
+        };
+    }
+    if contract.artifact_path.contains('<') && contract.artifact_path.contains('>') {
+        super::declarative_floor_instances::instances(contract, facts, &mut findings);
+        return finish(findings);
+    }
+    if let Some(fact) = facts.files.get(&contract.artifact_path)
+        && let super::declarative_floor_facts::FileState::Unreadable(error) = &fact.state
+    {
+        return FloorVerdict::Failed {
+            findings: vec![format!(
+                "declared deliverable cannot be read: {}: {error}",
+                fact.shown
+            )],
+        };
+    }
+    if !facts.artifact_present || facts.artifact_byte_len == 0 {
+        let shown = facts
+            .files
+            .get(&contract.artifact_path)
+            .map(|fact| fact.shown.clone())
+            .unwrap_or_else(|| {
+                format!(
+                    "{}{}",
+                    contract.artifact_path,
+                    searched_roots_suffix(&contract.artifact_path, &facts.searched_roots)
+                )
+            });
+        findings.push(format!("declared deliverable missing or empty: {shown}"));
+        return finish(findings);
+    }
+    let format = artifact_format(contract, &contract.artifact_path);
     if format == "text" {
         return finish(findings);
     }
@@ -71,18 +106,35 @@ pub fn evaluate_declarative_floor(
         findings.push("declared deliverable is not valid JSON".to_string());
         return finish(findings);
     };
+    if artifact.is_null() {
+        return FloorVerdict::Failed {
+            findings: vec!["declared deliverable contains a null value".into()],
+        };
+    }
+    internal_consistency(contract, artifact, "declared deliverable", &mut findings);
+    declarations(contract, &mut findings);
     if contract.registry_path.is_some() && facts.registry_json.is_none() {
-        findings.push("declared registry is missing, empty, or not valid JSON".to_string());
+        if let Some(fact) = contract
+            .registry_path
+            .as_ref()
+            .and_then(|path| facts.files.get(path))
+        {
+            super::declarative_floor_values::json_file(
+                Some(fact),
+                "declared registry",
+                &mut findings,
+            );
+        } else {
+            findings.push("declared registry is missing, empty, or not valid JSON".to_string());
+        }
+    }
+    if facts.registry_json.as_ref().is_some_and(Value::is_null) {
+        findings.push("declared registry contains a null value".into());
     }
     if !contract.required_universe {
         return finish(findings);
     }
-    evaluate_required_universe(
-        contract,
-        artifact,
-        facts.registry_json.as_ref(),
-        &mut findings,
-    );
+    evaluate_required_universe(contract, artifact, facts, &mut findings);
     finish(findings)
 }
 
@@ -100,7 +152,7 @@ fn searched_roots_suffix(artifact_path: &str, searched_roots: &[String]) -> Stri
 fn evaluate_required_universe(
     contract: &WorkflowV2DeliverableContract,
     artifact: &Value,
-    registry: Option<&Value>,
+    facts: &DeclarativeFloorFacts,
     findings: &mut Vec<String>,
 ) {
     let cells = field(artifact, contract.cells_field.as_deref()).and_then(Value::as_array);
@@ -120,12 +172,15 @@ fn evaluate_required_universe(
     for cell in cells {
         let identity = identity(cell, &contract.cell_identity_fields);
         if indexed.insert(identity.clone(), cell).is_some() {
-            findings.push(format!("duplicate cell identity: {identity:?}"));
+            findings.push(format!(
+                "duplicate cell identity: {}",
+                identity_text(&identity)
+            ));
         }
     }
     if !required.is_empty() {
         for missing in required.difference(&indexed.keys().cloned().collect()) {
-            findings.push(format!("missing required cell: {missing:?}"));
+            findings.push(format!("missing required cell: {}", identity_text(missing)));
         }
         for extra in indexed
             .keys()
@@ -133,7 +188,7 @@ fn evaluate_required_universe(
             .collect::<BTreeSet<_>>()
             .difference(&required)
         {
-            findings.push(format!("extra undeclared cell: {extra:?}"));
+            findings.push(format!("extra undeclared cell: {}", identity_text(extra)));
         }
     }
     let gaps = contract
@@ -143,21 +198,88 @@ fn evaluate_required_universe(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if !gaps.is_empty() {
+    let gap_count = contract
+        .gaps_field
+        .as_deref()
+        .and_then(|path| field(artifact, Some(path)))
+        .map(|value| match value {
+            Value::Array(values) => values.len(),
+            Value::Object(values) => values.len(),
+            Value::String(value) => value.chars().count(),
+            Value::Null | Value::Bool(false) => 0,
+            _ => 1,
+        })
+        .unwrap_or_default();
+    if gap_count > 0 {
         findings.push(format!(
-            "declared deliverable contains {} gap record(s)",
-            gaps.len()
+            "declared deliverable contains {gap_count} gap record(s)"
         ));
     }
-    let records = registry_records(contract, registry, findings);
+    let records = registry_records(contract, facts.registry_json.as_ref(), findings);
+    let mut series = Series::default();
     for (cell_identity, cell) in indexed {
-        let label = cell_identity.join(":");
+        let label = cell_identity
+            .iter()
+            .map(|key| {
+                serde_json::from_str::<Value>(key)
+                    .map(|value| scalar_text(&value))
+                    .unwrap_or_else(|_| key.clone())
+            })
+            .collect::<Vec<_>>()
+            .join(":");
+        for path in &contract.required_true_fields {
+            if field(cell, Some(path)) != Some(&Value::Bool(true)) {
+                findings.push(format!("{label} required true field failed: {path}"));
+            }
+        }
+        if gaps
+            .iter()
+            .any(|gap| identity(gap, &contract.cell_identity_fields) == cell_identity)
+        {
+            continue;
+        }
         evaluate_cell_fields(contract, cell, &label, findings);
-        evaluate_registry_fields(contract, cell, records, &label, findings);
+        if contract
+            .registry_key_fields
+            .iter()
+            .any(|path| field(cell, Some(path)).is_none_or(Value::is_null))
+        {
+            findings.push(format!(
+                "{label} registry key contains a null or missing value"
+            ));
+            continue;
+        }
+        let registry_available = facts
+            .registry_json
+            .as_ref()
+            .is_some_and(|value| !value.is_null());
+        evaluate_registry_fields(
+            contract,
+            cell,
+            records,
+            registry_available,
+            &label,
+            findings,
+        );
+        let key = registry_key(contract, cell);
+        let record = records.and_then(|records| records.get(&key));
+        if registry_available && record.is_none_or(|record| !record.is_object()) {
+            continue;
+        }
+        let rows = evaluate_records(
+            contract,
+            facts,
+            cell,
+            record.unwrap_or(&Value::Null),
+            &label,
+            findings,
+        );
+        series.cell(contract, &rows, &label, findings);
     }
+    series.finish(contract, findings);
 }
 
-fn required_identities(
+pub(super) fn required_identities(
     contract: &WorkflowV2DeliverableContract,
     artifact: &Value,
     findings: &mut Vec<String>,
@@ -169,7 +291,7 @@ fn required_identities(
             findings.push("declared required universe has an empty or non-array axis".to_string());
             return BTreeSet::new();
         };
-        axes.push(values.iter().map(identity_value).collect::<Vec<_>>());
+        axes.push(values.iter().map(identity_key).collect::<Vec<_>>());
     }
     cartesian(&axes)
 }
@@ -196,11 +318,6 @@ fn evaluate_cell_fields(
     label: &str,
     findings: &mut Vec<String>,
 ) {
-    for path in &contract.required_true_fields {
-        if field(cell, Some(path)) != Some(&Value::Bool(true)) {
-            findings.push(format!("{label} required true field failed: {path}"));
-        }
-    }
     for path in &contract.required_nonempty_fields {
         if field(cell, Some(path)).is_none_or(empty) {
             findings.push(format!("{label} required non-empty field failed: {path}"));
@@ -228,25 +345,21 @@ fn evaluate_registry_fields(
     contract: &WorkflowV2DeliverableContract,
     cell: &Value,
     records: Option<&serde_json::Map<String, Value>>,
+    registry_available: bool,
     label: &str,
     findings: &mut Vec<String>,
 ) {
-    if contract.registry_path.is_none() {
-        return;
-    }
-    let key = contract
-        .registry_key_fields
-        .iter()
-        .map(|path| identity_value(field(cell, Some(path)).unwrap_or(&Value::Null)))
-        .collect::<Vec<_>>()
-        .join(":");
-    let record = records.and_then(|records| records.get(&key));
-    let Some(record) = record else {
+    let key = registry_key(contract, cell);
+    let record = records
+        .and_then(|records| records.get(&key))
+        .filter(|record| record.is_object());
+    if registry_available && record.is_none() {
         findings.push(format!(
             "{label} has no declared registry record for key {key}"
         ));
         return;
-    };
+    }
+    let record = record.unwrap_or(&Value::Null);
     for path in &contract.registry_required_true_fields {
         if field(record, Some(path)) != Some(&Value::Bool(true)) {
             findings.push(format!(
@@ -282,9 +395,10 @@ fn evaluate_registry_fields(
         }
     }
     for (cell_path, record_path) in &contract.registry_identity_fields {
-        if field(cell, Some(cell_path)).map(normalized)
-            != field(record, Some(record_path)).map(normalized)
-        {
+        if !identity_equal(
+            field(cell, Some(cell_path)),
+            field(record, Some(record_path)),
+        ) {
             findings.push(format!(
                 "{label} registry identity mismatch: {cell_path}!={record_path}"
             ));
@@ -298,6 +412,9 @@ fn registry_records<'a>(
     findings: &mut Vec<String>,
 ) -> Option<&'a serde_json::Map<String, Value>> {
     let registry = registry?;
+    if registry.is_null() {
+        return None;
+    }
     let records = contract
         .registry_records_field
         .as_deref()
@@ -309,53 +426,20 @@ fn registry_records<'a>(
     records
 }
 
-/// Why this contract must stay on the existing command-capable verifier path.
-///
-/// The observer never executes deferred text. The implementation verifier uses
-/// this same boundary and retains its established generated verifier for these
-/// cases, so extracting the pure floor does not narrow existing enforcement.
+/// Only the authored command needs a separate execution boundary.
 pub fn declarative_floor_deferral_reason(
     contract: &WorkflowV2DeliverableContract,
 ) -> Option<String> {
-    if contract
-        .typed_verifier_command
-        .as_deref()
-        .is_some_and(|command| !command.trim().is_empty())
-    {
-        return Some(
-            "typed_verifier_command requires isolated command execution, deferred in R2a"
-                .to_string(),
-        );
-    }
-    if contract.artifact_path.contains('<')
-        || contract.instance_source_path.is_some()
-        || contract.instance_source_records_field.is_some()
-        || contract.instance_artifact_field.is_some()
-    {
-        return Some(
-            "parameterized deliverable collection is deferred in the R2a run-end observer"
-                .to_string(),
-        );
-    }
-    if advanced_checks_declared(contract) {
-        return Some(
-            "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
-                .to_string(),
-        );
-    }
-    None
+    contract.typed_verifier_command.as_deref().filter(|text| !text.trim().is_empty()).map(|_| "typed_verifier_command runs a command; the floor's predicates are evaluated natively and the command runs separately".to_owned())
 }
 
-fn advanced_checks_declared(contract: &WorkflowV2DeliverableContract) -> bool {
-    contract.data_kind.is_some()
-        || contract.payload_path_field.is_some()
-        || contract.observed_time_field.is_some()
-        || contract.validation_path_field.is_some()
-        || contract.request_path_field.is_some()
-        || contract.response_path_field.is_some()
-        || !contract.series_value_fields.is_empty()
-        || !contract.required_fields.is_empty()
-        || !contract.non_constant_fields.is_empty()
+pub(super) fn registry_key(contract: &WorkflowV2DeliverableContract, cell: &Value) -> String {
+    contract
+        .registry_key_fields
+        .iter()
+        .map(|path| scalar_text(field(cell, Some(path)).unwrap_or(&Value::Null)))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 fn identity(value: &Value, fields: &[String]) -> Vec<String> {
@@ -363,13 +447,13 @@ fn identity(value: &Value, fields: &[String]) -> Vec<String> {
         .iter()
         .map(|path| {
             field(value, Some(path))
-                .map(identity_value)
-                .unwrap_or_default()
+                .map(identity_key)
+                .unwrap_or_else(|| "null".into())
         })
         .collect()
 }
 
-fn field<'a>(value: &'a Value, path: Option<&str>) -> Option<&'a Value> {
+pub(super) fn field<'a>(value: &'a Value, path: Option<&str>) -> Option<&'a Value> {
     let mut current = value;
     for part in path?.split('.') {
         current = current.as_object()?.get(part)?;
@@ -377,27 +461,16 @@ fn field<'a>(value: &'a Value, path: Option<&str>) -> Option<&'a Value> {
     Some(current)
 }
 
-fn identity_value(value: &Value) -> String {
-    match value {
-        Value::String(value) => value.clone(),
-        Value::Null => String::new(),
-        value => value.to_string(),
+pub(super) fn normalized(value: &Value) -> String {
+    if value.is_null() {
+        String::new()
+    } else {
+        scalar_text(value).trim().to_lowercase()
     }
-}
-
-fn normalized(value: &Value) -> String {
-    identity_value(value).trim().to_ascii_lowercase()
 }
 
 fn numeric(value: Option<&Value>) -> Option<i128> {
-    match value? {
-        Value::Number(number) => number
-            .as_i64()
-            .map(i128::from)
-            .or_else(|| number.as_u64().map(i128::from)),
-        Value::String(value) => value.trim().parse().ok(),
-        _ => None,
-    }
+    super::declarative_floor_values::integer(value)
 }
 
 fn empty(value: &Value) -> bool {
@@ -407,10 +480,10 @@ fn empty(value: &Value) -> bool {
         || value.as_object().is_some_and(serde_json::Map::is_empty)
 }
 
-fn finish(findings: Vec<String>) -> DeclarativeFloorEvaluation {
+fn finish(findings: Vec<String>) -> FloorVerdict {
     if findings.is_empty() {
-        DeclarativeFloorEvaluation::Passed
+        FloorVerdict::Passed
     } else {
-        DeclarativeFloorEvaluation::Failed { findings }
+        FloorVerdict::Failed { findings }
     }
 }

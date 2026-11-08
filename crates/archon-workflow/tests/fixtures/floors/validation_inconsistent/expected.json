@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "a validation is internally inconsistent: overall=passed with 1 failed check(s)"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 1,\n  \"failures\": [\n    \"a validation is internally inconsistent: overall=passed with 1 failed check(s)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

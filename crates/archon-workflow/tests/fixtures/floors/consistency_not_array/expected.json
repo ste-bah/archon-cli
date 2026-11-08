@@ -1,0 +1,17 @@
+{
+  "native": {
+    "findings": [
+      "declared deliverable checks field is not an array"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"failures\": [\n    \"declared deliverable checks field is not an array\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

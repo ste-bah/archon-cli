@@ -258,6 +258,7 @@ fn populated_deliverable_claims_remain_valid_for_audit_and_floor() {
         registry_json: None,
         instance_count: 1,
         searched_roots: Vec::new(),
+        ..Default::default()
     };
     let mut without = deliverable.clone();
     without.implements.clear();
@@ -302,6 +303,7 @@ fn requirement_classes_and_floor_share_declared_format_normalization() {
         registry_json: None,
         instance_count: 1,
         searched_roots: Vec::new(),
+        ..Default::default()
     };
     for format in ["text", "Text", " TEXT ", "\tTeXt\n", "json", "", "  "] {
         let mut skeleton = skeleton();

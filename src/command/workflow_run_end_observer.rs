@@ -14,10 +14,10 @@ use archon_workflow::task_set_contract::{
     RESIDUAL_GAPS_FILE, ResidualGapRecord, validate_residual_gaps,
 };
 use archon_workflow::{
-    DeclarativeFloorEvaluation, ObserverAuthority, RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS,
+    FloorVerdict, ObserverAuthority, RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS,
     RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION, RunEndObserverOutcomeV1, WorkflowError,
     WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
-    collect_declarative_floor_facts, evaluate_declarative_floor,
+    collect_declarative_floor_facts, evaluate_floor_predicates,
 };
 use serde::Serialize;
 
@@ -221,7 +221,7 @@ impl FixedRunEndAcceptanceObserver {
                     deferrals += 1;
                     pending_records.push(OwnedObserverRecord::deferral(
                         &criterion.id,
-                        "command-bearing or advanced floor deferred in R2a",
+                        "floor with a typed verifier command deferred: the run-end observer never runs commands",
                     ));
                 }
                 AcceptanceCheck::Floor { contract } => {
@@ -232,11 +232,11 @@ impl FixedRunEndAcceptanceObserver {
                         ),
                         contract,
                     )?;
-                    match evaluate_declarative_floor(contract, &facts) {
-                        DeclarativeFloorEvaluation::Passed => {
+                    match evaluate_floor_predicates(contract, &facts) {
+                        FloorVerdict::Passed => {
                             passed_floor_ids.insert(criterion.id.clone());
                         }
-                        DeclarativeFloorEvaluation::Failed {
+                        FloorVerdict::Failed {
                             findings: floor_findings,
                         } => {
                             for detail in &floor_findings {
@@ -245,12 +245,6 @@ impl FixedRunEndAcceptanceObserver {
                                     .push(OwnedObserverRecord::shadow(&criterion.id, detail));
                                 pending_shadow_events.insert(criterion.id.clone());
                             }
-                        }
-                        DeclarativeFloorEvaluation::Deferred { .. } => {
-                            return Err(WorkflowError::StateCorrupt(
-                                "declarative-floor eligibility changed during observation"
-                                    .to_string(),
-                            ));
                         }
                     }
                 }
