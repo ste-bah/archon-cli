@@ -173,3 +173,160 @@ fn a_sourced_file_is_never_read_by_the_preflight_554() {
         "{verify}"
     );
 }
+
+#[test]
+fn parse_cache_shares_exact_shell_and_text_results_567() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let cache = ParseCache::default();
+    let calls = AtomicUsize::new(0);
+    let shell = archon_shell::resolve_posix_shell();
+    for text in ["true\n", "if then\n"] {
+        let expected = parse_with(shell.as_os_str(), text).unwrap();
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let (cache, calls, shell, expected) = (&cache, &calls, &shell, &expected);
+                scope.spawn(move || {
+                    assert_eq!(
+                        &cached_parse(cache, shell.as_os_str(), text, || {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            parse_with(shell.as_os_str(), text)
+                        }),
+                        expected
+                    );
+                });
+            }
+        });
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    for (shell, text) in [
+        (OsStr::new("other-shell"), "true\n"),
+        (shell.as_os_str(), "true"),
+    ] {
+        assert_eq!(
+            cached_parse(&cache, shell, text, || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Some("distinct key".into()))
+            }),
+            Some("distinct key".into())
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn parse_cache_retries_spawn_wait_and_signal_failures_567() {
+    use std::os::unix::process::ExitStatusExt;
+    let missing = tempfile::tempdir().unwrap().path().join("missing-shell");
+    for failure in [
+        parse_with(missing.as_os_str(), "if then"),
+        parse_output(Err(std::io::Error::other("wait failed"))),
+        parse_output(Ok(std::process::Output {
+            status: std::process::ExitStatus::from_raw(9),
+            stdout: Vec::new(),
+            stderr: b"interrupted, not a syntax diagnostic".to_vec(),
+        })),
+    ] {
+        assert_eq!(failure, Err(()));
+        let cache = ParseCache::default();
+        let shell = OsStr::new("shell");
+        assert_eq!(cached_parse(&cache, shell, "if then", || failure), None);
+        assert!(cache.lock().unwrap().is_empty());
+        let expected = shell_parse_error("if then").expect("syntax rejection on retry");
+        assert_eq!(
+            cached_parse(&cache, shell, "if then", || Ok(Some(expected.clone()))),
+            Some(expected)
+        );
+        assert_eq!(cache.lock().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn parse_cache_is_bounded_and_unlocked_during_parsing_567() {
+    let cache = ParseCache::default();
+    for index in 0..=MAX_PARSE_CACHE_ENTRIES {
+        assert_eq!(
+            cached_parse(&cache, OsStr::new("shell"), &index.to_string(), || {
+                assert!(cache.try_lock().is_ok(), "parser holds the cache lock");
+                Ok(None)
+            }),
+            None
+        );
+        assert!(cache.lock().unwrap().len() <= MAX_PARSE_CACHE_ENTRIES);
+        if index == MAX_PARSE_CACHE_ENTRIES {
+            assert_eq!(
+                cache.lock().unwrap().len(),
+                1,
+                "the cap clears the whole map"
+            );
+        }
+    }
+    assert!(
+        !cache
+            .lock()
+            .unwrap()
+            .contains_key(&(OsString::from("shell"), "0".into()))
+    );
+}
+
+#[test]
+fn waiting_caller_retries_its_own_probe_after_another_callers_failure_567() {
+    let cache = ParseCache::default();
+    let (started, ready) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        let owner = scope.spawn(|| {
+            cached_parse(&cache, OsStr::new("shell"), "text", || {
+                started.send(()).unwrap();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                loop {
+                    let joined = cache
+                        .lock()
+                        .unwrap()
+                        .values()
+                        .any(|pending| Arc::strong_count(pending) >= 3);
+                    if joined {
+                        break;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "waiter never joined probe"
+                    );
+                    std::thread::yield_now();
+                }
+                Err(())
+            })
+        });
+        ready.recv().unwrap();
+        let waiter = scope.spawn(|| {
+            cached_parse(&cache, OsStr::new("shell"), "text", || {
+                Ok(Some("own syntax rejection".into()))
+            })
+        });
+        assert_eq!(owner.join().unwrap(), None);
+        assert_eq!(waiter.join().unwrap(), Some("own syntax rejection".into()));
+    });
+}
+
+#[test]
+fn cannot_execute_status_is_operational_and_not_cached_567() {
+    use std::os::unix::process::ExitStatusExt;
+    for code in [126, 127] {
+        let cache = ParseCache::default();
+        assert_eq!(
+            cached_parse(&cache, OsStr::new("shell"), "text", || {
+                parse_output(Ok(std::process::Output {
+                    status: std::process::ExitStatus::from_raw(code << 8),
+                    stdout: Vec::new(),
+                    stderr: b"cannot execute".to_vec(),
+                }))
+            }),
+            None
+        );
+        assert!(cache.lock().unwrap().is_empty());
+        assert_eq!(
+            cached_parse(&cache, OsStr::new("shell"), "text", || {
+                Ok(Some("retried syntax rejection".into()))
+            }),
+            Some("retried syntax rejection".into())
+        );
+    }
+}

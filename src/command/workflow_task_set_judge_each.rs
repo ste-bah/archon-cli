@@ -107,7 +107,8 @@ fn mark_undecided(entry: &mut AcceptanceCriterion, message: &str) {
 /// The author note of `entry`, when the host did not judge it.
 pub(crate) fn not_judged(entry: &AcceptanceCriterion) -> Option<&str> {
     (entry.judgment.verdict == JudgeDecision::Refuted
-        && entry.judgment.host_call_id == format!("{NOT_JUDGED_CALL}{}", entry.id))
+        && (entry.judgment.host_call_id == format!("{NOT_JUDGED_CALL}{}", entry.id)
+            || super::super::preflight::parse_refusal(entry)))
     .then_some(entry.judgment.reason.as_str())
 }
 
@@ -144,13 +145,18 @@ pub(crate) fn not_judged_findings_of<'a>(
 ) -> Vec<GateFinding> {
     (entries.into_iter())
         .filter_map(|entry| {
-            Some(GateFinding::new(
+            let finding = GateFinding::new(
                 GateId::FreezeAcceptance,
                 not_judged(entry)?.to_string(),
                 entry.id.clone(),
                 Some(contract_path.to_path_buf()),
                 archon_workflow::RemediationScope::CandidateArtifact,
-            ))
+            );
+            Some(if super::super::preflight::parse_refusal(entry) {
+                finding.with_defect(super::super::preflight::parse_defect(entry).identity)
+            } else {
+                finding
+            })
         })
         .collect()
 }
@@ -184,6 +190,10 @@ where
 {
     let resolved_roots = with_commit(roots);
     let mut judged = contract.clone();
+    let rejected: BTreeSet<_> = super::super::preflight::parse_checks(&mut judged)
+        .into_iter()
+        .map(|defect| defect.identity.subject)
+        .collect();
     let mut decided = Vec::new();
     let mut calls = Vec::new();
     for entry in judged
@@ -191,7 +201,9 @@ where
         .iter_mut()
         .chain(&mut judged.supplementary)
     {
-        if withheld_files(entry, &resolved_roots).is_empty() {
+        if rejected.contains(&entry.id) {
+            decided.push(entry.clone());
+        } else if withheld_files(entry, &resolved_roots).is_empty() {
             calls.push((entry.id.clone(), single(&contract, &entry.id)));
         } else {
             mark_not_judged(entry, &resolved_roots);
