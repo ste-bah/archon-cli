@@ -55,6 +55,9 @@ pub(super) fn diagnostic_path_tokens(text: &str) -> Vec<String> {
         !(archon_workflow::acceptance_sibling_paths::is_path_character(c)
             || matches!(c, ':' | '\\'))
     })
+    // Backslashes inside a larger word can be escapes in an expression.
+    // Only a complete operand supplies evidence for a rooted backslash path.
+    .filter(|token| !token.contains('\\') || token.len() == text.len())
     .filter(|token| token.len() <= 4096 && Path::new(token).has_root())
     .map(str::to_owned)
     .collect()

@@ -105,10 +105,10 @@ fn r18_plan_bench_greenfield() {
     let d = discover(&s, &c, root, Some(root), root);
     assert!(d.base_unavailable.is_none(), "{d:?}");
     let mut unowned = d.unowned.clone();
-    unowned.sort();
+    read_sets::sort(&mut unowned);
     assert_eq!(unowned, read_sets::expected(root, false));
     let mut unconfirmed = d.unconfirmed.clone();
-    unconfirmed.sort();
+    read_sets::sort(&mut unconfirmed);
     assert_eq!(unconfirmed, read_sets::expected(root, true));
     println!(
         "R18 greenfield read sets: {} unowned, {} unconfirmed",
@@ -139,8 +139,8 @@ fn r18_plan_bench_greenfield() {
             .iter()
             .map(|path| absolute(root, path))
             .collect::<Vec<_>>();
-        actual.sort();
-        expected.sort();
+        actual.sort_by(|left, right| left.components().cmp(right.components()));
+        expected.sort_by(|left, right| left.components().cmp(right.components()));
         assert_eq!(actual, expected, "{}", check.id);
         quote_assertions::assert_no_quote_only_unowned(check, &d, root);
     }
@@ -200,7 +200,7 @@ fn r18_plan_bench_real_base() {
     assert!(d.base_unavailable.is_none(), "{d:?}");
     assert!(d.outside.is_empty(), "{d:?}");
     let mut unowned = d.unowned.clone();
-    unowned.sort();
+    read_sets::sort(&mut unowned);
     // One dead file operand and three occurrences of a test-target operand.
     let expected = [
         ("AC-DL-006", "validation_report/emit_revalidate"),
@@ -211,7 +211,7 @@ fn r18_plan_bench_real_base() {
     .map(|(check, path)| (check.to_string(), absolute(root, path)));
     assert_eq!(unowned, expected);
     let mut unconfirmed = d.unconfirmed.clone();
-    unconfirmed.sort();
+    read_sets::sort(&mut unconfirmed);
     assert_eq!(unconfirmed, read_sets::expected(root, true));
     for check in c.acceptance.iter().chain(&c.supplementary) {
         quote_assertions::assert_no_quote_only_unowned(check, &d, root);

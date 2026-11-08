@@ -299,6 +299,9 @@ fn repository_with(files: &[(&str, &str)]) -> tempfile::TempDir {
     }
     for args in [
         vec!["init"],
+        // Keep background maintenance from changing the byte snapshot.
+        vec!["config", "maintenance.auto", "false"],
+        vec!["config", "gc.auto", "0"],
         vec!["add", "."],
         vec![
             "-c",
