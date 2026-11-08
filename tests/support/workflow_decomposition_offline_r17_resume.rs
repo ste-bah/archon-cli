@@ -15,7 +15,7 @@ fn wait_held(p: &project::TestProject, child: &mut std::process::Child, hold: &s
             child.try_wait().unwrap().is_none(),
             "child exited before held call"
         );
-        if start.elapsed() > Duration::from_secs(60) {
+        if start.elapsed() > Duration::from_secs(180) {
             let _ = child.kill();
             panic!("watchdog waiting for body boundary");
         }

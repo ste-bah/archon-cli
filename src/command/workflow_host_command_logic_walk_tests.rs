@@ -238,3 +238,38 @@ fn logic_361_an_unrelated_local_macro_does_not_expand_the_closure() {
         walk_problems(&hashed)
     );
 }
+
+#[test]
+fn logic_361_follows_reexported_modules_across_crate_boundaries() {
+    let tree = Tree::new();
+    tree.write("src/command/mod.rs", "mod root;");
+    tree.write(
+        "src/command/root.rs",
+        "pub fn verdict() -> bool { rules_crate::bridge::decision() }",
+    );
+    tree.write(
+        "crates/rules/src/lib.rs",
+        "pub use sibling::inner as bridge;",
+    );
+    tree.write(
+        "crates/sibling/Cargo.toml",
+        "[package]\nname = \"sibling\"\n",
+    );
+    tree.write("crates/sibling/src/lib.rs", "pub mod inner;");
+    tree.write(
+        "crates/sibling/src/inner.rs",
+        "pub fn decision() -> bool { true }",
+    );
+    let hashed = tree.hash(&[]);
+    assert!(
+        walk_problems(&hashed).is_empty(),
+        "{:?}",
+        walk_problems(&hashed)
+    );
+    assert!(
+        hashed
+            .closure
+            .files
+            .contains(Path::new("crates/sibling/src/inner.rs"))
+    );
+}

@@ -37,7 +37,7 @@ pub(super) fn write_archive(path: &Path, bytes: &[u8]) -> bool {
 }
 
 /// Write `bytes` to `path`, readable by its owner only.
-pub(super) fn write_owner_only(path: &Path, bytes: &[u8]) -> bool {
+pub(crate) fn write_owner_only(path: &Path, bytes: &[u8]) -> bool {
     use std::io::Write;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);

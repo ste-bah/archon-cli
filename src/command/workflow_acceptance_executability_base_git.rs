@@ -25,6 +25,18 @@ impl IsolatedGit {
         &self.template
     }
     pub(super) fn run(&self, args: &[&std::ffi::OsStr]) -> Result<(), Unrun> {
+        let output = self.output(args)?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let cause = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(Unrun::unknown(if cause.is_empty() {
+            format!("isolated operation exited with {}", output.status)
+        } else {
+            cause
+        }))
+    }
+    pub(super) fn output(&self, args: &[&std::ffi::OsStr]) -> Result<std::process::Output, Unrun> {
         let mut command = archon_shell::spawn::command("git");
         for (name, _) in std::env::vars_os() {
             if name
@@ -45,14 +57,6 @@ impl IsolatedGit {
             .map_err(|error| {
                 Unrun::error(error.into(), "running isolated copy operation".into())
             })?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let cause = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(Unrun::unknown(if cause.is_empty() {
-            format!("isolated operation exited with {}", output.status)
-        } else {
-            cause
-        }))
+        Ok(output)
     }
 }

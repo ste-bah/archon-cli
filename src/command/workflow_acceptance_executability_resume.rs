@@ -20,7 +20,8 @@ const SCHEMA: u32 = 7;
 
 #[path = "workflow_acceptance_executability_resume_files.rs"]
 mod result_files;
-use result_files::{write_archive, write_owner_only};
+use result_files::write_archive;
+pub(super) use result_files::write_owner_only;
 
 pub(super) type SavePredicate = Arc<dyn Fn(&CheckResult) -> bool + Send + Sync>;
 
@@ -240,12 +241,11 @@ impl HostProbe {
             return;
         };
         for key in written.drain(..) {
-            if let Some(path) = store.path(&key) {
-                if store.preserve_replaced(&path)
-                    && std::fs::rename(path.with_extension("provisional"), &path).is_ok()
-                {
-                    self.resume.progress.saved(false);
-                }
+            if let Some(path) = store.path(&key)
+                && store.preserve_replaced(&path)
+                && std::fs::rename(path.with_extension("provisional"), &path).is_ok()
+            {
+                self.resume.progress.saved(false);
             }
         }
     }

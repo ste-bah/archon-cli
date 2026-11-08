@@ -1,0 +1,283 @@
+{
+  "rows": [
+    {
+      "language": "rust",
+      "kind": "compile",
+      "version": {
+        "command": [
+          "/opt/homebrew/bin/rustc",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew)\n",
+        "stderr": ""
+      },
+      "command": [
+        "/opt/homebrew/bin/rustc",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/rust/sample.rs",
+        "-o",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/rust/sample"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "error[E0425]: cannot find function `missing` in this scope\n --> /var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/rust/sample.rs:1:13\n  |\n1 | fn main() { missing(); }\n  |             ^^^^^^^ not found in this scope\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`.\n"
+    },
+    {
+      "language": "rust",
+      "kind": "runtime",
+      "version": {
+        "command": [
+          "/opt/homebrew/bin/rustc",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew)\n",
+        "stderr": ""
+      },
+      "command": [
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/rust/sample"
+      ],
+      "exit_code": 101,
+      "stdout": "",
+      "stderr": "\nthread 'main' (429752101) panicked at /var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/rust/sample.rs:1:46:\nindex out of bounds: the len is 1 but the index is 3\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n"
+    },
+    {
+      "language": "rust",
+      "kind": "assertion",
+      "version": {
+        "command": [
+          "/opt/homebrew/bin/rustc",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew)\n",
+        "stderr": ""
+      },
+      "command": [
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/rust/sample"
+      ],
+      "exit_code": 101,
+      "stdout": "\nrunning 1 test\ntest fails ... FAILED\n\nfailures:\n\n---- fails stdout ----\n\nthread 'fails' (429752194) panicked at /var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/rust/sample.rs:1:22:\nassertion `left == right` failed\n  left: 1\n right: 2\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    fails\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+      "stderr": ""
+    },
+    {
+      "language": "go",
+      "kind": "compile",
+      "version": {
+        "command": [
+          "/opt/homebrew/bin/go",
+          "version"
+        ],
+        "exit_code": 0,
+        "stdout": "go version go1.26.5 darwin/arm64\n",
+        "stderr": ""
+      },
+      "command": [
+        "/opt/homebrew/bin/go",
+        "run",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/go/sample.go"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "# command-line-arguments\n/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/go/sample.go:2:15: undefined: missing\n"
+    },
+    {
+      "language": "go",
+      "kind": "runtime",
+      "version": {
+        "command": [
+          "/opt/homebrew/bin/go",
+          "version"
+        ],
+        "exit_code": 0,
+        "stdout": "go version go1.26.5 darwin/arm64\n",
+        "stderr": ""
+      },
+      "command": [
+        "/opt/homebrew/bin/go",
+        "run",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/go/sample.go"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "panic: broken\n\ngoroutine 1 [running]:\nmain.main()\n\t/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/go/sample.go:2 +0x2c\nexit status 2\n"
+    },
+    {
+      "language": "go",
+      "kind": "assertion",
+      "version": {
+        "command": [
+          "/opt/homebrew/bin/go",
+          "version"
+        ],
+        "exit_code": 0,
+        "stdout": "go version go1.26.5 darwin/arm64\n",
+        "stderr": ""
+      },
+      "command": [
+        "/opt/homebrew/bin/go",
+        "test",
+        "-v",
+        "."
+      ],
+      "exit_code": 1,
+      "stdout": "=== RUN   TestFails\n    sample_test.go:3: expected true\n--- FAIL: TestFails (0.00s)\nFAIL\nFAIL\tlocal.test/sample\t0.350s\nFAIL\n",
+      "stderr": ""
+    },
+    {
+      "language": "python",
+      "kind": "compile",
+      "version": {
+        "command": [
+          "/Users/stevenbahia/.venv/bin/python3",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "Python 3.11.17\n",
+        "stderr": ""
+      },
+      "command": [
+        "/Users/stevenbahia/.venv/bin/python3",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/python/sample.py"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "  File \"/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/python/sample.py\", line 1\n    def invalid(:\n                ^\nSyntaxError: invalid syntax\n"
+    },
+    {
+      "language": "python",
+      "kind": "runtime",
+      "version": {
+        "command": [
+          "/Users/stevenbahia/.venv/bin/python3",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "Python 3.11.17\n",
+        "stderr": ""
+      },
+      "command": [
+        "/Users/stevenbahia/.venv/bin/python3",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/python/sample.py"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/python/sample.py\", line 1, in <module>\n    raise ValueError(\"broken\")\nValueError: broken\n"
+    },
+    {
+      "language": "python",
+      "kind": "assertion",
+      "version": {
+        "command": [
+          "/Users/stevenbahia/.venv/bin/python3",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "Python 3.11.17\n",
+        "stderr": "",
+        "runner": {
+          "command": [
+            "/Users/stevenbahia/.venv/bin/python3",
+            "-m",
+            "pytest",
+            "--version"
+          ],
+          "exit_code": 0,
+          "stdout": "pytest 9.0.2\n",
+          "stderr": ""
+        }
+      },
+      "command": [
+        "/Users/stevenbahia/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "--color=no",
+        "-q",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/python/sample.py"
+      ],
+      "exit_code": 1,
+      "stdout": "F                                                                        [100%]\n=================================== FAILURES ===================================\n__________________________________ test_false __________________________________\n\n    def test_false():\n>       assert 1 == 2\nE       assert 1 == 2\n\n/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/python/sample.py:2: AssertionError\n=========================== short test summary info ============================\nFAILED ../../../../../../../var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/python/sample.py::test_false\n1 failed in 0.02s\n",
+      "stderr": ""
+    },
+    {
+      "language": "python",
+      "kind": "compile",
+      "version": {
+        "command": [
+          "/Users/stevenbahia/.venv/bin/python3",
+          "-m",
+          "pytest",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "pytest 9.0.2\n",
+        "stderr": ""
+      },
+      "command": [
+        "/Users/stevenbahia/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "--color=no",
+        "-q",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/pytest_syntax.py"
+      ],
+      "exit_code": 2,
+      "stdout": "\n==================================== ERRORS ====================================\n______________________ ERROR collecting pytest_syntax.py _______________________\n/Users/stevenbahia/.venv/lib/python3.11/site-packages/_pytest/python.py:507: in importtestmodule\n    mod = import_path(\n/Users/stevenbahia/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:587: in import_path\n    importlib.import_module(module_name)\n/opt/homebrew/Cellar/python@3.11/3.11.17_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n<frozen importlib._bootstrap>:1204: in _gcd_import\n    ???\n<frozen importlib._bootstrap>:1176: in _find_and_load\n    ???\n<frozen importlib._bootstrap>:1147: in _find_and_load_unlocked\n    ???\n<frozen importlib._bootstrap>:690: in _load_unlocked\n    ???\n/Users/stevenbahia/.venv/lib/python3.11/site-packages/_pytest/assertion/rewrite.py:188: in exec_module\n    source_stat, co = _rewrite_test(fn, self.config)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/Users/stevenbahia/.venv/lib/python3.11/site-packages/_pytest/assertion/rewrite.py:357: in _rewrite_test\n    tree = ast.parse(source, filename=strfn)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/homebrew/Cellar/python@3.11/3.11.17_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/ast.py:50: in parse\n    return compile(source, filename, mode, flags,\nE     File \"/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/pytest_syntax.py\", line 1\nE       def invalid(:\nE                   ^\nE   SyntaxError: invalid syntax\n=========================== short test summary info ============================\nERROR ../../../../../../../var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-capture-qi_cvyjc/pytest_syntax.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n1 error in 0.09s\n",
+      "stderr": ""
+    },
+    {
+      "language": "go",
+      "kind": "assertion",
+      "variant": "located_assertion",
+      "version": {
+        "command": [
+          "/opt/homebrew/bin/go",
+          "version"
+        ],
+        "exit_code": 0,
+        "stdout": "go version go1.26.5 darwin/arm64\n",
+        "stderr": ""
+      },
+      "command": [
+        "/opt/homebrew/bin/go",
+        "test",
+        "-v",
+        "."
+      ],
+      "exit_code": 1,
+      "stdout": "=== RUN   TestLocatedAssertion\n    sample_test.go:14: assertion from /private/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-located-2tkim3vt/go/sample_test.go:14:13\n--- FAIL: TestLocatedAssertion (0.00s)\nFAIL\nFAIL\tlocated.test/example\t0.416s\nFAIL\n",
+      "stderr": ""
+    },
+    {
+      "language": "python",
+      "kind": "assertion",
+      "variant": "located_assertion",
+      "version": {
+        "command": [
+          "/Users/stevenbahia/.venv/bin/python3",
+          "-m",
+          "pytest",
+          "--version"
+        ],
+        "exit_code": 0,
+        "stdout": "pytest 9.0.2\n",
+        "stderr": ""
+      },
+      "command": [
+        "/Users/stevenbahia/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "--color=no",
+        "-q",
+        "/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-located-2tkim3vt/located_test.py"
+      ],
+      "exit_code": 1,
+      "stdout": "F                                                                        [100%]\n=================================== FAILURES ===================================\n____________________________ test_located_assertion ____________________________\n\n    def test_located_assertion():\n        statement = next(node for node in ast.walk(ast.parse(Path(__file__).read_text())) if isinstance(node, ast.Assert))\n>       assert False, f\"assertion from {__file__}:{statement.lineno}:{statement.col_offset + 1}\"\nE       AssertionError: assertion from /var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-located-2tkim3vt/located_test.py:5:5\nE       assert False\n\n/var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-located-2tkim3vt/located_test.py:5: AssertionError\n=========================== short test summary info ============================\nFAILED ../../../../../../../var/folders/v5/8x_1kf1j08j7jk0brnj0tprm0000gn/T/breakage-located-2tkim3vt/located_test.py::test_located_assertion\n1 failed in 0.01s\n",
+      "stderr": ""
+    }
+  ],
+  "skips": [
+    "java: The operation couldn\u2019t be completed. Unable to locate a Java Runtime.\nPlease visit http://www.java.com for information on installing Java.",
+    "typescript: tsc unavailable; no network installation attempted"
+  ]
+}

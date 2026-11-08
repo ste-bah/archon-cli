@@ -51,6 +51,9 @@ pub(crate) struct HermeticCopy {
     pub(super) project: PathBuf,
     removed: bool,
     base_guard: Option<base_copy::BaseGuard>,
+    isolated_git: Option<base_git::IsolatedGit>,
+    prefix: PathBuf,
+    modified: Mutex<BTreeMap<String, std::time::SystemTime>>,
 }
 
 impl HermeticCopy {
@@ -70,15 +73,14 @@ impl HermeticCopy {
 impl HermeticCopy {
     pub(super) fn remove(mut self) -> Result<(), String> {
         self.removed = true;
-        std::fs::remove_dir_all(&self.root)
-            .map_err(|error| format!("{}: {error}", self.root.display()))
+        owner::remove(&self.root)
     }
 }
 
 impl Drop for HermeticCopy {
     fn drop(&mut self) {
         if !self.removed {
-            let _ = std::fs::remove_dir_all(&self.root);
+            let _ = owner::remove_now(&self.root);
         }
     }
 }
@@ -108,25 +110,7 @@ fn git(args: &[&std::ffi::OsStr]) -> Result<(), Unrun> {
 /// Remove copies a killed probe left under `parent`; what cannot be removed
 /// is returned for the caller to report.
 pub(super) fn sweep(parent: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return Vec::new();
-    };
-    let mut failures = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let stale = (entry.metadata().ok())
-            .and_then(|meta| meta.modified().ok())
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age.as_secs() > STALE_COPY_SECS);
-        if name.to_string_lossy().starts_with(COPY_PREFIX)
-            && name != WARM_TARGETS
-            && stale
-            && let Err(error) = std::fs::remove_dir_all(entry.path())
-        {
-            failures.push(format!("{}: {error}", entry.path().display()));
-        }
-    }
-    failures
+    owner::sweep(parent)
 }
 
 /// A content digest of the project data a copy takes.
@@ -226,6 +210,13 @@ fn task_root_relative_paths(project: &Path, task_root: &Path) -> Result<PathBuf,
         .map_err(|_| ())
 }
 
+#[allow(dead_code)]
+#[path = "workflow_acceptance_executability_breakage.rs"]
+mod breakage;
+#[path = "workflow_acceptance_executability_breakage_owner.rs"]
+mod owner;
+#[allow(unused_imports)]
+pub(crate) use breakage::{BreakageReport, BreakageRequest, MIN_DEADLINE_SECS, prove_breakage};
 #[path = "workflow_acceptance_executability_base_git.rs"]
 mod base_git;
 
@@ -292,6 +283,7 @@ pub(super) async fn run_in_copy(
         refs,
         hooks,
         observed_layout,
+        Arc::new(AtomicBool::new(false)),
     )
     .await;
     let removal = tokio::task::spawn_blocking(move || copy.remove()).await;

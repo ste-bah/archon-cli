@@ -9,6 +9,7 @@ pub(crate) async fn run_refs_in_copy(
     refs: &[FrozenCommandRef],
     hooks: &archon_workflow::acceptance_scratch::ObserveHooks,
     observed_layout: &std::sync::Mutex<Option<CopyLayout>>,
+    cancel: Arc<AtomicBool>,
 ) -> Result<CopyRun, Unrun> {
     if let Some(guard) = &copy.base_guard {
         guard.before_layout(contract)?;
@@ -26,7 +27,11 @@ pub(crate) async fn run_refs_in_copy(
         guard.tripwire(copy)?;
     }
     *observed_layout.lock().expect("observation layout lock") = Some(layout.clone());
-    let target = warm_target(&probe.copy_parent, repository);
+    let target = copy
+        .base_guard
+        .as_ref()
+        .map(|g| g.build_output.clone())
+        .unwrap_or_else(|| warm_target(&probe.copy_parent, repository));
     let mut site = DirectSite {
         repository: copy.repository.clone(),
         project: copy.project.clone(),
@@ -38,7 +43,6 @@ pub(crate) async fn run_refs_in_copy(
         timeout_secs: probe.check_bound_secs(),
         output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
     };
-    let cancel = Arc::new(AtomicBool::new(false));
     let mut results = Vec::new();
     let mut failure = None;
     for (index, reference) in refs.iter().enumerate() {

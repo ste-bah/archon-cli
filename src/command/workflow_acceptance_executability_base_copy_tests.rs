@@ -469,3 +469,23 @@ fn base_copy_preserves_the_repository_object_format() {
         b"base"
     );
 }
+
+pub(super) fn materialise_base_copy(
+    parent: &Path,
+    repository: &Path,
+    project: &Path,
+    task_root: Option<&Path>,
+    snapshot: &BaseSnapshot,
+    commit: &str,
+) -> Result<BaseCopy, Unrun> {
+    super::materialise_base_copy(
+        parent,
+        repository,
+        project,
+        task_root,
+        snapshot,
+        commit,
+        &parent.join("build-output"),
+        None,
+    )
+}

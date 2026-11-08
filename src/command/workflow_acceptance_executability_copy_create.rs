@@ -20,7 +20,7 @@ impl HermeticCopy {
         excludes: &[PathBuf],
     ) -> Result<Self, Unrun> {
         Self::create(
-            parent, repository, project, task_root, commit, excludes, false,
+            parent, repository, project, task_root, commit, excludes, false, None,
         )
     }
     pub(super) fn create(
@@ -31,6 +31,7 @@ impl HermeticCopy {
         commit: &str,
         excludes: &[PathBuf],
         isolated: bool,
+        transport: Option<&Path>,
     ) -> Result<Self, Unrun> {
         let canonical = |path: &Path| {
             archon_shell::paths::canonicalize(path).map_err(|error| {
@@ -53,19 +54,24 @@ impl HermeticCopy {
                 )));
             }
         }
+        owner::write(&root)?;
         let mut copy = Self {
             repository: root.join("repo"),
             project: root.join("project"),
             root,
             removed: false,
             base_guard: None,
+            isolated_git: None,
+            prefix: PathBuf::new(),
+            modified: Mutex::new(BTreeMap::new()),
         };
         let mut source_prefix = PathBuf::new();
         if isolated {
             let top = base_copy::output(&source, &["rev-parse", "--show-toplevel"])?;
-            let transport = canonical(Path::new(top.trim()))?;
+            let live_top = canonical(Path::new(top.trim()))?;
+            let transport = transport.unwrap_or(&live_top);
             source_prefix = source
-                .strip_prefix(&transport)
+                .strip_prefix(&live_top)
                 .map_err(|error| Unrun::unknown(error.to_string()))?
                 .to_path_buf();
             let object_format = base_copy::output(&source, &["rev-parse", "--show-object-format"])?;
@@ -79,27 +85,26 @@ impl HermeticCopy {
                 template_option.as_ref(),
                 copy.repository.as_os_str(),
             ])?;
-            isolated
-                .run(&[
-                    "-C".as_ref(),
-                    copy.repository.as_os_str(),
-                    "-c".as_ref(),
-                    "core.longpaths=true".as_ref(),
-                    "fetch".as_ref(),
-                    "--no-tags".as_ref(),
-                    "--depth=1".as_ref(),
-                    transport.as_os_str(),
-                    commit.as_ref(),
-                ])
-                .map_err(|error| {
-                    match base_copy::baseline_available(&source, commit) {
+            let fetched = isolated.output(&[
+                "-C".as_ref(),
+                copy.repository.as_os_str(),
+                "-c".as_ref(),
+                "core.longpaths=true".as_ref(),
+                "fetch".as_ref(),
+                "--no-tags".as_ref(),
+                "--depth=1".as_ref(),
+                transport.as_os_str(),
+                commit.as_ref(),
+            ])?;
+            if !fetched.status.success() {
+                return Err(match base_copy::baseline_available(&source, commit) {
                         Err(unavailable) if unavailable.2 == Some(crate::command::workflow_host_probe_fault::UnrunCause::BaselineUnavailable) => unavailable,
                         _ => Unrun::refused(
                             crate::command::workflow_host_probe_fault::UnrunCause::BaselineFetchFailed,
-                            error.0,
+                            String::from_utf8_lossy(&fetched.stderr).trim().into(),
                         ),
-                    }
-                })?;
+                    });
+            }
             isolated.run(&[
                 "-C".as_ref(),
                 copy.repository.as_os_str(),
@@ -108,6 +113,8 @@ impl HermeticCopy {
                 "--detach".as_ref(),
                 "FETCH_HEAD".as_ref(),
             ])?;
+            copy.isolated_git = Some(isolated);
+            copy.prefix = source_prefix.clone();
         } else {
             git(&[
                 "clone".as_ref(),

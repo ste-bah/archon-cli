@@ -69,24 +69,7 @@ fn lines(record: &RequirementClassification, acceptance: &AcceptanceLock) -> Str
         !s.valid_digest() || Some(&s.commit) != acceptance.baseline_commit.as_ref()
     }) || record.acceptance_digest != acceptance.digest
         || record.baseline_results_digest != results_digest(&acceptance.baseline_results);
-    let runs: usize = record
-        .entries
-        .iter()
-        .filter(|entry| entry.class == RequirementClass::CandidateDone)
-        .map(|entry| {
-            entry
-                .checks
-                .values()
-                .filter(|result| {
-                    **result == Some(archon_workflow::baseline_results::BaselineOutcome::Passed)
-                })
-                .count()
-        })
-        .sum();
-    let mut out = format!(
-        "classification: {counts} stale={stale} proof_runs_upper_bound={} outcomes=unauthenticated\n",
-        6 * runs
-    );
+    let mut out = format!("classification: {counts} stale={stale} outcomes=unauthenticated\n");
     if let Some(snapshot) = &record.base_snapshot {
         use archon_workflow::base_snapshot::SnapshotEntry;
         let tracked = snapshot
@@ -304,7 +287,7 @@ mod tests {
         let text = lines(&record, &acceptance);
         assert!(
             text.contains("candidate_done=1")
-                && text.contains("stale=false proof_runs_upper_bound=6 outcomes=unauthenticated\n"),
+                && text.contains("stale=false outcomes=unauthenticated\n"),
             "{text}"
         );
         assert!(

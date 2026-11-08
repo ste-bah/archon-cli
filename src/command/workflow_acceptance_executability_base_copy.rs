@@ -37,9 +37,10 @@ pub(crate) fn materialise_base_copy(
     task_root: Option<&Path>,
     snapshot: &BaseSnapshot,
     lock_commit: &str,
+    build_output: &Path,
+    transport: Option<&Path>,
 ) -> Result<BaseCopy, Unrun> {
-    // The shared warm build-output directory can contain later outputs; the proof
-    // runner must isolate it before using this copy as execution evidence.
+    // Every anchored proof uses its own build-output directory.
     let keys = snapshot
         .entries
         .keys()
@@ -74,6 +75,7 @@ pub(crate) fn materialise_base_copy(
         lock_commit,
         &excludes,
         true,
+        transport,
     )?;
     for (key, entry) in &snapshot.entries {
         if matches!(
@@ -98,6 +100,7 @@ pub(crate) fn materialise_base_copy(
         }
     }
     let guard = BaseGuard {
+        build_output: build_output.to_path_buf(),
         ignore_case: ignore_case(&repository)?,
         snapshot: snapshot.clone(),
         live_head: Some(
@@ -117,6 +120,7 @@ pub(crate) fn materialise_base_copy(
 }
 
 pub(super) struct BaseGuard {
+    pub(super) build_output: PathBuf,
     ignore_case: bool,
     snapshot: BaseSnapshot,
     live_head: Option<String>,
@@ -152,7 +156,7 @@ pub(super) fn baseline_available(repository: &Path, commit: &str) -> Result<(), 
             &format!("{commit}^{{commit}}"),
         ])
         .output()
-        .map_err(|error| Unrun::refused(UnrunCause::BaselineFetchFailed, error.to_string()))?;
+        .map_err(|error| Unrun::error(error.into(), "reading anchored revision".into()))?;
     if output.status.success() {
         return Ok(());
     }

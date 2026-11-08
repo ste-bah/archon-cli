@@ -72,7 +72,7 @@ pub(crate) fn repository_tree_contains(repository: &Path, commit: &str, path: &s
 /// The memo key of `reference` on `tree` with project data in `data`: the
 /// project data is part of the tree a verdict is evidence of, so data that
 /// changed since makes an observed verdict no evidence at all.
-pub(super) fn memo_key(
+pub(crate) fn memo_key(
     probe: &HostProbe,
     tree: &Baseline,
     data: &[String],

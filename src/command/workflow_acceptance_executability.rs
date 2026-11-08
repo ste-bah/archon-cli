@@ -295,8 +295,8 @@ pub(crate) use baseline::{
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
 mod hermetic;
-#[allow(unused_imports)]
-pub(crate) use hermetic::{BaseCopy, CheckEvidence, materialise_base_copy, run_refs_in_copy};
+#[allow(unused_imports)] #[rustfmt::skip]
+pub(crate) use hermetic::{BaseCopy, CheckEvidence, materialise_base_copy, run_refs_in_copy, prove_breakage, BreakageRequest, BreakageReport, MIN_DEADLINE_SECS};
 #[path = "workflow_acceptance_executability_mutation.rs"]
 pub(crate) mod mutation;
 pub(crate) fn named_inputs(

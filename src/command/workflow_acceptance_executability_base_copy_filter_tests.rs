@@ -1,4 +1,4 @@
-use super::tests::{fixture, git, snapshot, write};
+use super::tests::{fixture, git, materialise_base_copy, snapshot, write};
 use super::*;
 
 #[test]
@@ -169,6 +169,12 @@ fn fetch_corrupt_objects_is_typed_separately_and_keeps_stderr() {
             .join(&object[2..]);
         // The commit still exists, but a real local transfer cannot read its content.
         let mut permissions = std::fs::metadata(&object_path).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(permissions.mode() | 0o200);
+        }
+        #[cfg(not(unix))]
         permissions.set_readonly(false);
         std::fs::set_permissions(&object_path, permissions).unwrap();
         std::fs::write(object_path, b"broken compressed object").unwrap();

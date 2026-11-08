@@ -1,6 +1,8 @@
 //! Status detail extension for fixed decomposition runs.
 
 use super::workflow_decompose_status_classes as classes;
+#[path = "workflow_decompose_status_breakage.rs"]
+mod breakage;
 
 use anyhow::{Context, Result};
 use archon_workflow::{
@@ -52,6 +54,10 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     out.push_str(&classes::render(std::path::Path::new(
         &state.identity.task_root_identity,
     )));
+    out.push_str(&breakage::render(
+        std::path::Path::new(&state.identity.project_root_identity),
+        std::path::Path::new(&state.identity.task_root_identity),
+    ));
     let observer_records = store
         .run_dir(run_id)
         .join("observer/run-end-acceptance.jsonl");

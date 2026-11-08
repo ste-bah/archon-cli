@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "base_commit": "fixture",
+  "mutants": [
+    {"task_id":"task","requirement_id":"item","kind":"behaviour","patch":"diff --git a/value b/value\n--- a/value\n+++ b/value\n@@ -1 +1 @@\n-good\n+evil\n"},
+    {"task_id":"task","requirement_id":"item","kind":"body_gut","patch":"diff --git a/value b/value\n--- a/value\n+++ b/value\n@@ -1 +1 @@\n-good\n+\n"}
+  ]
+}
