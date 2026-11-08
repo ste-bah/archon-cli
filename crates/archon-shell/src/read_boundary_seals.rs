@@ -6,14 +6,11 @@ pub fn install_operator_seals(command: &mut Command, active: bool) -> super::Lau
     let prepared = LandlockSandbox::probe_seals().and_then(|()| super::config::prepare());
     match prepared {
         Ok((paths, mut notes)) => {
-            let result = LandlockSandbox::build_sealed(&paths);
-            if result.is_err() {
-                notes.extend(
-                    paths
-                        .iter()
-                        .map(|path| format!("{} not sealed", path.display())),
-                );
-            }
+            let result =
+                LandlockSandbox::build_available_seals(&paths).map(|(boundary, rejected)| {
+                    notes.extend(rejected);
+                    boundary
+                });
             install_prepared_seals(command, result, active, &notes)
         }
         Err(reason) => {
@@ -125,4 +122,5 @@ fn installed_seals_without_rules_report_the_host_process_bypass() {
     assert!(command.status().unwrap().success());
     assert!(report.contains(super::INACTIVE_MOUNT_WRITES), "{report}");
     assert!(report.contains("applied seals:"), "{report}");
+    assert!(!report.contains("inherited working directory"), "{report}");
 }

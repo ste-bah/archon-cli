@@ -213,7 +213,7 @@ fn exact_environment_preserves_site_bindings_without_ambient_defaults() {
         ("HOME".into(), "/site/home".into()),
         ("CARGO_HOME".into(), "/site/cargo".into()),
     ]);
-    let command = command_with_mode("site-check", Mode::Exact(&site));
+    let command = command_with_mode("site-check", Mode::Exact(&site)).0;
     let actual = command
         .get_envs()
         .map(|(key, value)| {

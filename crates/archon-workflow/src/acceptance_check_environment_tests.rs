@@ -74,7 +74,7 @@ fn configured_cargo_limits_are_archon_defaults_and_shell_overrides_remain_possib
     let environment = CommandEnvironment::from_host(&host, None)
         .unwrap()
         .with_workflow_resource_limits(&limits, "cargo test", Path::new("."));
-    let child = environment.command("check");
+    let child = environment.command("check").0;
     let child: BTreeMap<_, _> = child
         .get_envs()
         .filter_map(|(name, value)| {
@@ -376,6 +376,7 @@ fn non_unicode_note_case(case: &str, text: &str) {
     let environment = CommandEnvironment::capture(None).unwrap();
     let output = environment
         .command("/bin/sh")
+        .0
         .args([
             "-c",
             "test -z \"${FIXTURE_API_KEY-}\" || exit 4; printf '%s' \"$1\"; exit 3",

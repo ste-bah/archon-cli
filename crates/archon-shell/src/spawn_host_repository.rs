@@ -9,6 +9,7 @@ struct Repository {
     work: PathBuf,
     common: PathBuf,
     config_sources: Vec<PathBuf>,
+    absent_sources: Vec<PathBuf>,
 }
 static REPOSITORIES: OnceLock<Mutex<BTreeMap<PathBuf, Repository>>> = OnceLock::new();
 fn repositories() -> &'static Mutex<BTreeMap<PathBuf, Repository>> {
@@ -19,7 +20,22 @@ static FAILURE: Mutex<Option<String>> = Mutex::new(None);
 pub(super) fn boundary_status() -> Result<(), String> {
     match FAILURE.lock().map_err(|e| e.to_string())?.as_ref() {
         Some(reason) => Err(reason.clone()),
-        None => Ok(()),
+        None => {
+            let entries = repositories().lock().map_err(|e| e.to_string())?;
+            let absent: Vec<_> = entries
+                .values()
+                .flat_map(|entry| &entry.absent_sources)
+                .map(|path| path.display().to_string())
+                .collect();
+            if absent.is_empty() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "repository includes were absent at capture and remain unsealed; host commands may read child-created configuration: {}",
+                    absent.join("; ")
+                ))
+            }
+        }
     }
 }
 pub(super) fn register(root: &Path) -> Result<(), String> {
@@ -65,11 +81,17 @@ fn capture(root: &Path) -> Result<(), String> {
         .ok_or("missing host common Git directory")?
         .into();
     let config_sources = config_sources(&work, &git)?;
+    let absent_sources = config_sources
+        .iter()
+        .filter(|path| !path.exists())
+        .cloned()
+        .collect();
     let repository = Repository {
         git,
         work,
         common,
         config_sources,
+        absent_sources,
     };
     if repositories.len() >= 256 {
         return Err("repository registration limit reached for this run".into());
@@ -86,6 +108,9 @@ pub(super) fn command(root: &Path) -> std::process::Command {
         .and_then(|root| repositories().lock().ok()?.get(&root).cloned());
     let mut command = super::command("git");
     if let Some(repository) = captured {
+        if !repository.absent_sources.is_empty() {
+            tracing::warn!(paths = ?repository.absent_sources, "host launch reads repository includes absent at capture; child-created configuration is not sealed");
+        }
         command
             .env("GIT_DIR", repository.git)
             .env("GIT_WORK_TREE", repository.work)

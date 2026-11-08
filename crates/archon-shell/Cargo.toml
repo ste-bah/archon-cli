@@ -18,6 +18,7 @@ dirs.workspace = true
 # leaves.
 libc.workspace = true
 tracing.workspace = true
+tempfile.workspace = true
 # Issue 340: `spawn::tokio_command`, so async callers build their children
 # with the same stdio-only rule as `spawn::command`.
 tokio.workspace = true
@@ -36,9 +37,6 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-# Builds fake Git-for-Windows install trees so shell discovery precedence is
-# testable on any platform, including from a Linux CI runner.
-tempfile.workspace = true
 # Issue 342: `LiveChild`, a real process the liveness tests start and end.
 # archon-test-support has no path back to this crate, so no cycle forms.
 archon-test-support = { path = "../archon-test-support" }

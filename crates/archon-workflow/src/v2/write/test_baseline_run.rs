@@ -101,7 +101,8 @@ async fn run_unwatched(
                 };
             }
         };
-    let mut process = environment.tokio_command(archon_shell::resolve_posix_shell());
+    let (mut process, report) =
+        environment.tokio_command_with_report(archon_shell::resolve_posix_shell());
     process
         .arg("-c")
         .arg(command)
@@ -124,6 +125,7 @@ async fn run_unwatched(
             };
         }
     };
+    tracing::warn!("child seal outcome: {report}");
     let pid = child.id();
     // Issue-134: this future dropped mid-run (a pause, a timeout above it)
     // takes the whole group with it, not only the shell kill-on-drop reaches.

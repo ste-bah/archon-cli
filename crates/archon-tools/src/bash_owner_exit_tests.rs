@@ -64,7 +64,7 @@ fn fixture() {
     let bash = std::env::var_os("BASH_OWNER_EXIT_SHELL")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| super::BASH_PROGRAM.to_path_buf());
-    let mut command = archon_shell::execution_environment::command(&bash);
+    let mut command = archon_shell::execution_environment::command(&bash).0;
     command
         .args([
             "--noprofile",

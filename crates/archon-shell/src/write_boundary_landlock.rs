@@ -291,6 +291,21 @@ impl LandlockSandbox {
         })
     }
 
+    /// Retain every independently prepared path and diagnose only rejected paths.
+    #[cfg(target_os = "linux")]
+    pub fn build_available_seals(protected: &[PathBuf]) -> Result<(Self, Vec<String>), String> {
+        let (mounts, notes) = mounts::MountSeals::build_available(protected)?;
+        Ok((
+            Self {
+                ruleset: None,
+                mounts: Some(std::sync::Arc::new(mounts)),
+                private_temp: None,
+                grants: 0,
+            },
+            notes,
+        ))
+    }
+
     /// A read ruleset, separate from the existing write ruleset. Landlock
     /// combines restrictions when both are installed on the same child.
     pub fn build_read(denied: &[PathBuf]) -> Result<Self, String> {

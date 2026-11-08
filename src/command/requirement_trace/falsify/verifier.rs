@@ -150,7 +150,7 @@ pub(super) fn run_in_environment(
     timeout: Duration,
     environment: &archon_workflow::acceptance_check_environment::CommandEnvironment,
 ) -> Ran {
-    let mut process = environment.command(&argv[0]);
+    let (mut process, report) = environment.command_with_report(&argv[0]);
     process
         .args(&argv[1..])
         .current_dir(cwd)
@@ -168,6 +168,7 @@ pub(super) fn run_in_environment(
         }
     };
 
+    tracing::warn!("child seal outcome: {report}");
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let out_reader = std::thread::spawn(move || drain(stdout));

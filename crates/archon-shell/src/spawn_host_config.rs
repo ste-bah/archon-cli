@@ -129,15 +129,11 @@ fn capture() -> Result<Host, String> {
     let directory = std::env::var_os("ARCHON_HOST_RUN_ROOT")
         .map(PathBuf::from)
         .filter(|root| root.is_absolute())
-        .unwrap_or_else(|| crate::credential_paths::host_config_dir().join("runs"))
-        .join(format!(
-            "{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| e.to_string())?
-                .as_nanos()
-        ));
+        .unwrap_or_else(|| crate::credential_paths::host_config_dir().join("runs"));
+    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let directory = tempfile::tempdir_in(directory)
+        .map_err(|e| e.to_string())?
+        .keep();
     let snapshot = directory.join("global.config");
     protected.push(directory);
     let host = Host {
@@ -171,7 +167,18 @@ fn write_snapshot(host: &Host) -> Result<(), String> {
     use std::io::Write;
     let _lock = SNAPSHOT_LOCK.lock().map_err(|e| e.to_string())?;
     let directory = host.snapshot.parent().ok_or("snapshot parent missing")?;
-    std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    match builder.create(directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    let metadata = std::fs::symlink_metadata(directory).map_err(|e| e.to_string())?;
+    if !metadata.is_dir() {
+        return Err("snapshot directory was replaced".into());
+    }
     #[cfg(unix)]
     std::fs::set_permissions(
         directory,
@@ -316,9 +323,13 @@ pub(super) fn isolate(command: &mut Command) {
         if command.get_program() != host.git.as_os_str() {
             return;
         }
-        if let Err(reason) = write_snapshot(host) {
-            tracing::error!(%reason, "host configuration snapshot unavailable");
-        }
+        let snapshot = match write_snapshot(host) {
+            Ok(()) => host.snapshot.as_os_str(),
+            Err(reason) => {
+                tracing::error!(%reason, "host configuration snapshot unavailable; using null configuration");
+                OsStr::new(neutral())
+            }
+        };
         match &host.path {
             Some(path) => {
                 command.env("PATH", path);
@@ -331,7 +342,7 @@ pub(super) fn isolate(command: &mut Command) {
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_COMMON_DIR")
-            .env("GIT_CONFIG_GLOBAL", &host.snapshot)
+            .env("GIT_CONFIG_GLOBAL", snapshot)
             .env("GIT_CONFIG_SYSTEM", neutral())
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_COUNT", host.pinned.len().to_string())
@@ -348,6 +359,15 @@ pub(super) fn isolate(command: &mut Command) {
                 .env(format!("GIT_CONFIG_KEY_{index}"), key)
                 .env(format!("GIT_CONFIG_VALUE_{index}"), value);
         }
+    } else {
+        tracing::error!("host configuration unavailable; using null configuration");
+        command
+            .env("GIT_CONFIG_GLOBAL", neutral())
+            .env("GIT_CONFIG_SYSTEM", neutral())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_COUNT", "0")
+            .env_remove("GIT_CONFIG_PARAMETERS")
+            .env_remove("GIT_CONFIG");
     }
 }
 

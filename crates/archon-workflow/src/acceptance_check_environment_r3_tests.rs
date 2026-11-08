@@ -174,6 +174,7 @@ fn r3_configured_host_offline_cargo_dependency() {
             .expect("host cargo on policy PATH");
     let output = environment
         .command(cargo)
+        .0
         .args([
             "metadata",
             "--offline",

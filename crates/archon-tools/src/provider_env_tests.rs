@@ -371,6 +371,7 @@ async fn structured_operator_grant_reaches_command_and_undeclared_key_does_not()
     let mut env = Vec::new();
     resolved.apply_to_env(&mut env);
     let status = archon_shell::execution_environment::command("/bin/sh")
+        .0
         .envs(env)
         .args([
             "-c",

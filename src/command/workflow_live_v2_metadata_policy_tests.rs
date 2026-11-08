@@ -130,6 +130,7 @@ fn operator(case: &str, kind: u8) {
     let output = CommandEnvironment::capture(policy.as_ref())
         .unwrap()
         .command("/bin/sh")
+        .0
         .args([
             "-c",
             "test \"$FIXTURE_API_KEY\" = fixture-data && test -z \"${OPERATOR_SECRET-}\"",

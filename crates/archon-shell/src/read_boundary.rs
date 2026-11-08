@@ -255,8 +255,8 @@ pub fn macos_command(program: &OsStr, profile: &str) -> Command {
 
 /// Build a child under the supported read mechanism. Unsupported containment
 /// is explicit in a launch event; environment isolation remains in force.
-pub fn command(program: &OsStr) -> Command {
-    command_with_report(program).0
+pub fn command(program: &OsStr) -> (Command, LaunchReport) {
+    command_with_report(program)
 }
 
 /// The report reads optional operation outcomes when queried after spawn.
@@ -360,8 +360,11 @@ pub fn observation_note(report: impl ToString) -> Option<String> {
         || report.contains("writes: not-contained")
         || report.contains("mount-sealed; bypassable")
         || report.contains("preparation:")
-        || report.contains("applied seals:")
-        || report.contains("seal outcome"))
+        || report.contains("failed step")
+        || report.contains("bypassable")
+        || report.contains("all optional seals absent")
+        || report.contains("seal outcome unknown")
+        || report.contains("seal outcome pending"))
     .then_some(report)
 }
 

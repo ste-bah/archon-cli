@@ -381,19 +381,24 @@ pub fn apply_mode(command: &mut Command, mode: Mode<'_>) {
 }
 
 /// An agent command with the environment and available read boundary applied.
-pub fn command(program: impl AsRef<OsStr>) -> Command {
+pub fn command(program: impl AsRef<OsStr>) -> (Command, crate::read_boundary::LaunchReport) {
     command_with_mode(program, Mode::Inherited)
 }
 
-pub fn command_with_mode(program: impl AsRef<OsStr>, mode: Mode<'_>) -> Command {
-    let mut command = crate::read_boundary::command(program.as_ref());
+pub fn command_with_mode(
+    program: impl AsRef<OsStr>,
+    mode: Mode<'_>,
+) -> (Command, crate::read_boundary::LaunchReport) {
+    let (mut command, report) = crate::read_boundary::command(program.as_ref());
     apply_mode(&mut command, mode);
-    command
+    (command, report)
 }
 
 /// Async counterpart, with identical policy.
-pub fn tokio_command(program: impl AsRef<OsStr>) -> tokio::process::Command {
-    tokio::process::Command::from(command(program))
+pub fn tokio_command(
+    program: impl AsRef<OsStr>,
+) -> (tokio::process::Command, crate::read_boundary::LaunchReport) {
+    tokio_command_with_report(program)
 }
 
 /// Retain the launch outcome for inspection after spawning.

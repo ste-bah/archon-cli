@@ -175,6 +175,7 @@ async fn case(id: &str, mode: u8) {
         archon_workflow::acceptance_check_environment::CommandEnvironment::capture(Some(&policy))
             .unwrap()
             .command("/bin/sh")
+            .0
             .args(["-c", "test -n \"${FIXTURE_API_KEY-}\""])
             .output()
             .unwrap();

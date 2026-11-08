@@ -83,7 +83,7 @@ impl MountSeals {
                     )
                 }
             ),
-            if packet[3] == 0 {
+            if packet[3] == 0 && !applied.is_empty() {
                 "; applied seals bypassable through the inherited working directory"
             } else {
                 ""

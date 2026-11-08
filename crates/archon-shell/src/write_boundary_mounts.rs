@@ -113,6 +113,39 @@ impl MountSeals {
         Ok(mounts)
     }
 
+    pub(super) fn build_available(protected: &[PathBuf]) -> Result<(Self, Vec<String>), String> {
+        let writable = [PathBuf::from(std::path::MAIN_SEPARATOR_STR)];
+        let mut combined = Self::build(&[], &writable)?;
+        let mut notes = Vec::new();
+        for path in protected {
+            match Self::build(std::slice::from_ref(path), &writable) {
+                Ok(prepared) => {
+                    for seal in prepared.seals {
+                        if let Some(existing) =
+                            combined.seals.iter_mut().find(|s| s.path == seal.path)
+                        {
+                            existing.readonly |= seal.readonly;
+                        } else {
+                            combined.seals.push(seal);
+                        }
+                    }
+                }
+                Err(reason) => notes.push(format!("{} not sealed: {reason}", path.display())),
+            }
+        }
+        // Merging independently prepared paths can introduce nested mounts.
+        let planned: Vec<_> = combined
+            .seals
+            .iter()
+            .map(|seal| PathBuf::from(std::ffi::OsStr::from_bytes(seal.path.as_bytes())))
+            .collect();
+        for seal in &mut combined.seals {
+            let path = std::path::Path::new(std::ffi::OsStr::from_bytes(seal.path.as_bytes()));
+            seal.submounts |= topology::contains_mount(path, &planned);
+        }
+        Ok((combined, notes))
+    }
+
     pub(super) fn probe() -> Result<(), String> {
         let mounts = Self {
             seals: Vec::new(),

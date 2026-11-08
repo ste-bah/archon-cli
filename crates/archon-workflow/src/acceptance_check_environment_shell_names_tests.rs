@@ -43,6 +43,7 @@ fn shell_name_case(case: &str, text: &str, dispatch: bool) {
     };
     let output = environment
         .command("/bin/sh")
+        .0
         .args(["-c", "printf '%s' \"$1\"; exit 3", "fixture", text])
         .output()
         .unwrap();

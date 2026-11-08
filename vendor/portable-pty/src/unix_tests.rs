@@ -48,20 +48,19 @@ fn persistent_terminal_seals_relative_configuration_writes() {
         std::fs::write(root.join(".gitconfig"), "[user]\nname = Operator\n").unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
-        assert!(
-            archon_shell::spawn::git_command(&repo)
-                .args(["init", "-q"])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(archon_shell::spawn::git_command(&repo)
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
         archon_shell::spawn::register_repository(&repo).unwrap();
         if let Err(error) = archon_shell::read_boundary::prepared_write_paths().and_then(|paths| {
             archon_shell::write_boundary::landlock::LandlockSandbox::build_sealed(&paths)
         }) {
             assert!(
                 std::env::var_os("CI").is_none(),
-                "CI requires mount seals: {error}"
+                "CI requires mount seals: {}",
+                error
             );
             eprintln!("PTY kernel test unavailable: {error}");
             return;
@@ -76,7 +75,7 @@ fn persistent_terminal_seals_relative_configuration_writes() {
         builder.protect_operator_reads();
         let mut child = pair.slave.spawn_command(builder).unwrap();
         let status = child.wait().unwrap();
-        assert!(status.success(), "{status:?}");
+        assert!(status.success(), "{:?}", status);
         assert!(repo.join("ordinary").exists());
         return;
     }
@@ -101,7 +100,7 @@ fn persistent_terminal_seals_relative_configuration_writes() {
         .output()
         .unwrap();
     std::fs::remove_dir_all(root).unwrap();
-    assert!(output.status.success(), "{output:?}");
+    assert!(output.status.success(), "{:?}", output);
 }
 
 #[test]
@@ -138,7 +137,7 @@ fn spawn_command_continues_after_seal_preparation_failure() {
             .output()
             .unwrap();
         std::fs::remove_dir_all(root).unwrap();
-        assert!(output.status.success(), "{output:?}");
+        assert!(output.status.success(), "{:?}", output);
         return;
     }
     let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
@@ -152,7 +151,8 @@ fn spawn_command_continues_after_seal_preparation_failure() {
     .unwrap_err();
     assert!(
         error.contains("directory entry could be replaced"),
-        "{error}"
+        "{}",
+        error
     );
     let pair = crate::native_pty_system()
         .openpty(crate::PtySize::default())

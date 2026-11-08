@@ -211,6 +211,12 @@ fn missing_git_is_reported_without_refusing_an_available_program() {
     }
     let error = initialize().unwrap_err();
     assert!(error.contains("Git is missing"), "{error}");
+    let command = crate::spawn::command("git");
+    let env: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+    assert_eq!(
+        env[OsStr::new("GIT_CONFIG_GLOBAL")],
+        Some(OsStr::new(neutral()))
+    );
     let executable = std::env::current_exe().unwrap();
     let (mut command, report) = crate::read_boundary::command_with_report(executable.as_os_str());
     assert!(report.contains(&error), "{report}");
@@ -320,4 +326,77 @@ fn registration_failure_is_reported_without_disabling_commands() {
             .status
             .success()
     );
+}
+
+#[test]
+fn changed_snapshot_uses_null_configuration() {
+    if !is_child() {
+        passed(child("changed_snapshot_uses_null_configuration", &[]));
+        return;
+    }
+    initialize().unwrap();
+    let snapshot = &host().unwrap().snapshot;
+    std::fs::write(snapshot, "[custom]\ninjected = yes\n").unwrap();
+    assert!(initialize().is_err());
+    let mut command = crate::spawn::command("git");
+    let env: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+    assert_eq!(
+        env[OsStr::new("GIT_CONFIG_GLOBAL")],
+        Some(OsStr::new(neutral()))
+    );
+    let output = command
+        .args(["config", "--global", "--get", "custom.injected"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    std::fs::remove_file(snapshot).unwrap();
+    std::fs::create_dir(snapshot).unwrap();
+    let command = crate::spawn::command("git");
+    let env: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+    assert_eq!(
+        env[OsStr::new("GIT_CONFIG_GLOBAL")],
+        Some(OsStr::new(neutral()))
+    );
+}
+
+#[test]
+fn absent_repository_include_flags_launch_even_after_planting() {
+    if !is_child() {
+        passed(child(
+            "absent_repository_include_flags_launch_even_after_planting",
+            &[],
+        ));
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    assert!(
+        crate::spawn::git_command(root.path())
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        crate::spawn::git_command(root.path())
+            .args(["config", "include.path", "../absent"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    crate::spawn::register_repository(root.path()).unwrap();
+    for planted in [false, true] {
+        if planted {
+            std::fs::write(
+                root.path().join("absent"),
+                "[filter \"injected\"]\nclean = false\n",
+            )
+            .unwrap();
+        }
+        let (_, report) = crate::read_boundary::command_with_report(OsStr::new("git"));
+        assert!(
+            report.contains("includes were absent at capture and remain unsealed"),
+            "{report}"
+        );
+        assert!(crate::read_boundary::observation_note(report).is_some());
+    }
 }

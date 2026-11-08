@@ -83,3 +83,59 @@ fn failed_reentry_preserves_first_failure_and_reports_inherited_cwd() {
             .contains("inherited working directory")
     );
 }
+
+#[test]
+fn empty_or_unstarted_seals_never_claim_inherited_cwd_bypass() {
+    let mut empty = mounts();
+    empty.seals.clear();
+    for report in [
+        empty.outcome([0, 0, 0, 0]),
+        mounts().outcome([step_index("unshare"), 1, 0, 0]),
+    ] {
+        assert!(report.contains("applied seals: []"), "{report}");
+        assert!(!report.contains("inherited working directory"), "{report}");
+    }
+}
+
+#[test]
+fn successful_real_outcome_omits_observation_note() {
+    let outcome = mounts().outcome([0, 0, 0, 1]);
+    assert!(outcome.contains("applied seals:"));
+    assert!(
+        crate::read_boundary::observation_note(format!(
+            "Filesystem read boundary: named-paths-denied; writes: {outcome}"
+        ))
+        .is_none()
+    );
+}
+
+#[test]
+fn rejected_path_preserves_valid_seals() {
+    if let Err(reason) = MountSeals::probe() {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI requires mount seals: {reason}"
+        );
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let valid = root.path().join("valid");
+    let link = root.path().join("link");
+    std::fs::write(&valid, "protected").unwrap();
+    std::os::unix::fs::symlink(&valid, &link).unwrap();
+    for paths in [
+        vec![link.clone(), valid.clone()],
+        vec![valid.clone(), link.clone()],
+    ] {
+        let (prepared, notes) = MountSeals::build_available(&paths).unwrap();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("link"), "{notes:?}");
+        let real = valid.canonicalize().unwrap();
+        assert!(
+            prepared
+                .seals
+                .iter()
+                .any(|seal| seal.readonly && seal.path.as_bytes() == real.as_os_str().as_bytes())
+        );
+    }
+}

@@ -87,7 +87,13 @@ impl CommandEnvironment {
     /// would replace those bindings or introduce variables outside that recorded
     /// policy. The shared read/spawn boundary still applies to this exact map.
     /// Every child still passes through the process-wide spawn boundary.
-    pub fn command(&self, program: impl AsRef<OsStr>) -> std::process::Command {
+    pub fn command(
+        &self,
+        program: impl AsRef<OsStr>,
+    ) -> (
+        std::process::Command,
+        archon_shell::read_boundary::LaunchReport,
+    ) {
         archon_shell::execution_environment::command_with_mode(
             program,
             archon_shell::execution_environment::Mode::Exact(&self.variables),
@@ -121,8 +127,25 @@ impl CommandEnvironment {
         command
     }
 
-    pub fn tokio_command(&self, program: impl AsRef<OsStr>) -> tokio::process::Command {
-        tokio::process::Command::from(self.command(program))
+    pub fn tokio_command(
+        &self,
+        program: impl AsRef<OsStr>,
+    ) -> (
+        tokio::process::Command,
+        archon_shell::read_boundary::LaunchReport,
+    ) {
+        self.tokio_command_with_report(program)
+    }
+
+    pub fn tokio_command_with_report(
+        &self,
+        program: impl AsRef<OsStr>,
+    ) -> (
+        tokio::process::Command,
+        archon_shell::read_boundary::LaunchReport,
+    ) {
+        let (command, report) = self.command_with_report(program);
+        (command.into(), report)
     }
 
     /// Call only for a failed verifier. Persist this separate diagnostic with
