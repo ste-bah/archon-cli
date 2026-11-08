@@ -81,6 +81,8 @@ pub struct TaskSkeletonLock {
     pub digest: String,
     pub acceptance_digest: String,
     pub gate: FreezeGateStamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<crate::v2::requirement_classes::RequirementClassification>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +157,7 @@ pub fn validate_skeleton_set(
     }
 
     findings.extend(graph::graph_shape_findings(skeleton));
+    findings.extend(ownership::deliverable_claim_findings(skeleton));
 
     let mut owners: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
     for (slot, task) in skeleton.tasks.iter().enumerate() {

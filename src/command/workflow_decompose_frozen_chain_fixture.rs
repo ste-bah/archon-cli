@@ -98,6 +98,7 @@ pub(crate) fn freeze_acceptance(project: &Path, prd: &Path, tasks: &Path) -> Str
     std::fs::write(
         tasks.join(ACCEPTANCE_LOCK_FILE),
         serde_json::to_vec_pretty(&AcceptanceLock {
+            baseline_results: Default::default(),
             algorithm: "blake3".into(),
             digest: acceptance_digest.clone(),
             gate: stamp(),
@@ -136,6 +137,7 @@ pub(crate) fn freeze_skeleton(project: &Path, tasks: &Path, acceptance_digest: &
     std::fs::write(
         tasks.join(TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: digest.clone(),
             acceptance_digest: acceptance_digest.into(),

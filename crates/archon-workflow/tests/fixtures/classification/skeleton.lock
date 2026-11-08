@@ -1,0 +1,12 @@
+{
+  "algorithm": "blake3",
+  "digest": "skeleton",
+  "acceptance_digest": "acceptance",
+  "gate": {
+    "mode": "observe",
+    "finding_count": 0,
+    "findings_digest": "findings",
+    "binary_commit": "revision",
+    "evaluated_at": "now"
+  }
+}

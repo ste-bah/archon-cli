@@ -226,6 +226,17 @@ impl HostProbe {
         std::mem::take(&mut *self.reuse_audit.lock().expect("reuse audit lock"))
     }
 
+    fn passed_on_baseline(&self, id: &str) {
+        self.baseline_passes
+            .lock()
+            .expect("baseline passes lock")
+            .insert(id.to_string());
+    }
+
+    pub(crate) fn take_baseline_passes(&self) -> BTreeSet<String> {
+        std::mem::take(&mut *self.baseline_passes.lock().expect("baseline passes lock"))
+    }
+
     fn failed_on_baseline(&self, result: &super::hermetic::CheckEvidence) {
         (self
             .baseline_failures

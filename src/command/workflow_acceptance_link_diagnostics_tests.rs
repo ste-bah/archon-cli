@@ -161,8 +161,13 @@ fn freeze_findings_stamp_lock_and_all_staged_bytes_are_unchanged() {
     let mut c = contract("inspect data/missing.json");
     c.prd.digest = content_digest(text.as_bytes());
     let bytes = serde_json::to_vec_pretty(&c).unwrap();
-    let (lock, pin) =
-        findings::acceptance_lock_and_pin(&tasks, FreezeGateMode::Observe, &[], &bytes, None);
+    let (lock, pin) = findings::acceptance_lock_and_pin(
+        &tasks,
+        FreezeGateMode::Observe,
+        &[],
+        &bytes,
+        None.into(),
+    );
     std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), bytes).unwrap();
     std::fs::write(
         tasks.join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE),

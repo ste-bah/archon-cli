@@ -386,6 +386,7 @@ fn candidate_entry_with_markers_inner(
             )
         })?;
     if let AcceptanceCheck::Floor { contract } = &mut check {
+        // D(i) comes from skeleton deliverables only.
         contract.implements.clear();
     }
     let covers: Vec<String> = match value.get("covers") {

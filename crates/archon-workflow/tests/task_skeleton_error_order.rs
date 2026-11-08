@@ -53,6 +53,7 @@ fn skeleton(acceptance_digest: &str) -> TaskSkeleton {
 
 fn write_acceptance_lock(root: &Path, digest: &str, gate: FreezeGateStamp) {
     let lock = AcceptanceLock {
+        baseline_results: Default::default(),
         algorithm: "blake3".into(),
         digest: digest.into(),
         gate,
@@ -71,6 +72,7 @@ fn write_skeleton(root: &Path, skeleton: &TaskSkeleton, lock_acceptance: &str) -
     fs::write(root.join(TASK_SKELETON_FILE), &bytes).unwrap();
     let digest = content_digest(&bytes);
     let lock = TaskSkeletonLock {
+        classification: None,
         algorithm: "blake3".into(),
         digest: digest.clone(),
         acceptance_digest: lock_acceptance.into(),

@@ -1,5 +1,7 @@
 //! Status detail extension for fixed decomposition runs.
 
+use super::workflow_decompose_status_classes as classes;
+
 use anyhow::{Context, Result};
 use archon_workflow::{
     DecompositionPhase, FixedDecompositionStateV1, SubjectDisposition, WorkflowStore,
@@ -47,6 +49,9 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         state.log_path,
         checkpoint.completed_call_ids.len(),
     ));
+    out.push_str(&classes::render(std::path::Path::new(
+        &state.identity.task_root_identity,
+    )));
     let observer_records = store
         .run_dir(run_id)
         .join("observer/run-end-acceptance.jsonl");

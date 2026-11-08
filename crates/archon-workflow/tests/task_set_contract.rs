@@ -109,6 +109,7 @@ fn portable_lock_hashes_exact_file_bytes_and_pin_detects_reminting() {
     fs::write(root.join(ACCEPTANCE_CONTRACT_FILE), &bytes).unwrap();
     let digest = blake3::hash(&bytes).to_hex().to_string();
     let lock = AcceptanceLock {
+        baseline_results: Default::default(),
         algorithm: "blake3".into(),
         digest: digest.clone(),
         gate: clean_stamp(),
@@ -143,6 +144,7 @@ fn portable_lock_hashes_exact_file_bytes_and_pin_detects_reminting() {
     fs::write(root.join(ACCEPTANCE_CONTRACT_FILE), &replacement).unwrap();
     let replacement_digest = blake3::hash(&replacement).to_hex().to_string();
     let replacement_lock = AcceptanceLock {
+        baseline_results: Default::default(),
         algorithm: "blake3".into(),
         digest: replacement_digest,
         gate: clean_stamp(),
@@ -244,6 +246,7 @@ fn pin_binds_the_canonical_task_directory() {
     fs::write(
         root.join(ACCEPTANCE_LOCK_FILE),
         serde_json::to_vec_pretty(&AcceptanceLock {
+            baseline_results: Default::default(),
             algorithm: "blake3".into(),
             digest: digest.clone(),
             gate: clean_stamp(),

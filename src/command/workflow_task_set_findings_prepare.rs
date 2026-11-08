@@ -11,10 +11,34 @@ pub(crate) fn prepare_from_judged(
     baseline_commit: Option<String>,
     live_contract_digest: Option<String>,
 ) -> Result<PreparedAcceptanceFreeze> {
+    prepare_from_judged_with_results(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        contract,
+        None,
+        baseline_commit,
+        live_contract_digest,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_from_judged_with_results(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    contract: &AcceptanceContract,
+    carried: Option<archon_workflow::baseline_results::BaselineResults>,
+    baseline_commit: Option<String>,
+    live_contract_digest: Option<String>,
+) -> Result<PreparedAcceptanceFreeze> {
     let (prd, _, _) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd).context("PRD is not UTF-8")?;
     // Floor `implements` ids are not validated until S4: never freeze them.
     let mut contract = contract.clone();
+    // D(i) comes from skeleton deliverables only.
     super::super::preflight::clear_unvalidated_floor_implements(&mut contract);
     let contract = &contract;
     let candidate_bytes = serde_json::to_vec_pretty(contract)?;
@@ -27,7 +51,10 @@ pub(crate) fn prepare_from_judged(
         freeze_mode(mode)?,
         contract,
         Vec::new(),
-        baseline_commit,
+        match carried {
+            Some(baseline) => baseline,
+            None => carry_baseline_results(tasks_root, baseline_commit, contract)?,
+        },
         candidate_digest.clone(),
     )?;
     prepared.live_contract_digest = live_contract_digest.clone();

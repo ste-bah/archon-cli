@@ -53,21 +53,13 @@ pub fn evaluate_declarative_floor(
         ));
         return DeclarativeFloorEvaluation::Failed { findings };
     }
-    let format = contract
-        .artifact_format
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_ascii_lowercase)
-        .unwrap_or_else(|| {
-            if contract.artifact_path.ends_with(".json")
-                || contract.artifact_path.ends_with(".jsonl")
-            {
-                "json".to_string()
-            } else {
-                "text".to_string()
-            }
-        });
+    let format = contract.normalized_artifact_format().unwrap_or_else(|| {
+        if contract.artifact_path.ends_with(".json") || contract.artifact_path.ends_with(".jsonl") {
+            "json".to_string()
+        } else {
+            "text".to_string()
+        }
+    });
     if format == "text" {
         return finish(findings);
     }

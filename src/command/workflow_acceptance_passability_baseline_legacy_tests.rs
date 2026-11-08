@@ -16,6 +16,7 @@ async fn an_author_probe_finding_does_not_withhold_another_checks_parser_refutat
         &client,
         &mut contract,
         PreImplementation {
+            baseline_outcomes: Default::default(),
             findings: vec![original],
             baseline: Some(runs),
             host_unproven_reason: None,
@@ -99,6 +100,7 @@ async fn a_check_with_its_own_probe_finding_gets_no_second_cannot_pass_finding()
         &client,
         &mut contract,
         PreImplementation {
+            baseline_outcomes: Default::default(),
             findings: vec![own],
             baseline: Some(runs),
             host_unproven_reason: None,

@@ -250,6 +250,7 @@ pub(crate) struct HostProbe {
     baseline: Option<baseline::Baseline>,
     /// How each check that failed there failed (Issue 275).
     test_inventories: Mutex<BTreeMap<String, Option<Vec<String>>>>,
+    baseline_passes: Mutex<BTreeSet<String>>,
     baseline_failures: Mutex<BTreeMap<String, hermetic::CheckEvidence>>,
     reuse_audit: Mutex<BTreeMap<String, ReuseAudit>>,
     /// The tree the checks being repaired ran on, and how each fared there.
@@ -491,3 +492,7 @@ pub(super) fn diagnostic_repository(project: &Path, tasks: &Path) -> Result<Path
         _ => Ok(root),
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_baseline_outcome_tests.rs"]
+mod baseline_outcome_tests;

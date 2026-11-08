@@ -445,6 +445,7 @@ pub(super) async fn reverify_checks(
             client.as_ref(),
             &mut judged,
             crate::command::workflow_task_set::coverage_gate::PreImplementation {
+                baseline_outcomes: Default::default(),
                 findings: Vec::new(),
                 baseline: Some(runs),
                 host_unproven_reason: None,

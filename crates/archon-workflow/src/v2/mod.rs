@@ -69,6 +69,7 @@ pub mod project_artifacts;
 pub mod publication;
 pub mod repair_session;
 pub mod report;
+pub mod requirement_classes;
 pub mod restart;
 pub mod result;
 pub mod result_store;

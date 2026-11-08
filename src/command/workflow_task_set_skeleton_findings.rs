@@ -45,9 +45,16 @@ pub(crate) fn skeleton_findings(
                     && constraints.contains(&finding.identity.subject))
             })
             .map(|finding| {
+                // This rule's message is shared verbatim with body and set gates;
+                // its structured field still identifies the offending claim.
+                let text = if finding.identity.code == "deliverable_implements_unclaimed" {
+                    finding.message
+                } else {
+                    format!("{}: {}", finding.field, finding.message)
+                };
                 GateFinding::new(
                     GateId::FreezeSkeleton,
-                    format!("{}: {}", finding.field, finding.message),
+                    text,
                     finding.field,
                     Some(skeleton_path.clone()),
                     archon_workflow::RemediationScope::Skeleton,

@@ -77,6 +77,7 @@ const SKELETON_SHAPE = JSON.stringify({
       deliverable_contracts: [{
           kind: "<short stable name for what this task produces>",
           artifact_path: "<path this task produces, exactly as its dependents consume it>",
+          implements: ["<id from this task's implements this artifact carries>"],
           min_instances: 1
         }]
     }]

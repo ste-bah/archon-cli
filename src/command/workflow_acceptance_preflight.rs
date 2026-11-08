@@ -191,6 +191,7 @@ pub(super) fn parse_refusal(entry: &AcceptanceCriterion) -> bool {
         && entry.judgment.host_call_id == PARSE_LINT_CALL
 }
 
+// D(i) comes from skeleton deliverables only.
 pub(super) fn clear_unvalidated_floor_implements(contract: &mut AcceptanceContract) {
     // Authored ownership claims await host validation before being frozen.
     for entry in contract

@@ -305,6 +305,15 @@ impl RepositoryTree {
     }
 }
 
+/// Equality or containment in either direction, on normalized repository paths.
+pub fn related_paths(left: &str, right: &str) -> bool {
+    let left = normalize_relative(left);
+    let right = normalize_relative(right);
+    left == right
+        || left.starts_with(&format!("{right}/"))
+        || right.starts_with(&format!("{left}/"))
+}
+
 /// `./a//b/` → `a/b`; backslashes become forward slashes.
 pub fn normalize_relative(path: &str) -> String {
     let forward = path.replace('\\', "/");

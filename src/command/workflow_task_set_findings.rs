@@ -2,6 +2,9 @@
 //! the whole-set freeze, the per-check re-author, and the in-run repair.
 
 use super::*;
+pub(super) use crate::command::workflow_task_set_classification::{
+    baseline_results, carry_baseline_results, classification, classification_from_lock,
+};
 use archon_workflow::task_set_contract::JudgeDecision;
 use std::collections::BTreeMap;
 
@@ -66,7 +69,7 @@ pub(super) fn finish_acceptance(
     freeze_mode: FreezeGateMode,
     contract: &AcceptanceContract,
     probed: Vec<GateFinding>,
-    baseline_commit: Option<String>,
+    mut baseline: archon_workflow::baseline_results::BaselineResults,
     candidate_digest: String,
 ) -> Result<PreparedAcceptanceFreeze> {
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
@@ -92,6 +95,11 @@ pub(super) fn finish_acceptance(
         !(cannot_pass.contains(finding.subject.as_str())
             && (finding.text).starts_with(&format!("check '{}' was refuted", finding.subject)))
     });
+    // Setup and passability refusals are not product verdicts.
+    baseline.outcomes.retain(|id, result| {
+        !(cannot_pass.contains(id.as_str())
+            && result.outcome == archon_workflow::baseline_results::BaselineOutcome::Failed)
+    });
     // What the executability probe found on the pre-implementation tree.
     findings.extend(probed);
     // H4: a whole-set freeze is not finished while a requirement is covered
@@ -107,7 +115,7 @@ pub(super) fn finish_acceptance(
         freeze_mode,
         &findings,
         &contract_bytes,
-        baseline_commit,
+        baseline,
     );
     Ok(PreparedAcceptanceFreeze {
         tasks_root: tasks_root.to_path_buf(),
@@ -168,16 +176,27 @@ pub(super) fn acceptance_lock_and_pin(
     freeze_mode: FreezeGateMode,
     findings: &[GateFinding],
     contract_bytes: &[u8],
-    baseline_commit: Option<String>,
+    baseline: archon_workflow::baseline_results::BaselineResults,
 ) -> (AcceptanceLock, AcceptancePin) {
     let stamp = gate_stamp(freeze_mode, findings);
     let digest = content_digest(contract_bytes);
+    let commit = baseline
+        .commit
+        .clone()
+        .or_else(|| super::executability::recorded_commit(tasks_root));
+    let baseline_results = if commit.is_some() && baseline.commit == commit {
+        serde_json::from_slice::<AcceptanceContract>(contract_bytes)
+            .map(|contract| baseline.current(&contract))
+            .expect("serialized acceptance contract is valid")
+    } else {
+        BTreeMap::new()
+    };
     let lock = AcceptanceLock {
+        baseline_results,
         algorithm: "blake3".into(),
         digest: digest.clone(),
         gate: stamp.clone(),
-        baseline_commit: baseline_commit
-            .or_else(|| super::executability::recorded_commit(tasks_root)),
+        baseline_commit: commit,
     };
     let pin = AcceptancePin {
         check_sources_digest: None,
@@ -386,15 +405,24 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
     if !unproven.is_empty() {
         return host_unproven(unproven);
     }
-    let baseline = prepared.lock.baseline_commit.clone();
+    let baseline = archon_workflow::baseline_results::BaselineResults {
+        commit: prepared.lock.baseline_commit.clone(),
+        outcomes: prepared
+            .lock
+            .baseline_results
+            .into_iter()
+            .filter(|(id, _)| !named.contains(id))
+            .collect(),
+    };
     let live_contract_digest = prepared.live_contract_digest.clone();
-    let prepared = prepare_from_judged(
+    let prepared = prepare::prepare_from_judged_with_results(
         project_root,
         tasks_root,
         prd_path,
         mode,
         &repaired,
-        baseline,
+        Some(baseline),
+        None,
         live_contract_digest,
     )?;
     // Every saved repair is in the prepared contract now.

@@ -9,7 +9,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Integration 2026-11-07 re-pin only (#611 #613 #623-#625 #627 #630 #634): closure files changed for acceptance author scheduling, macOS process identity, skeleton landing/seed reply rules (read only by skeleton reply validation before the gate) and tests; no verdict rule here changed.
         // #615, same version 85: a multi-filter cargo invocation matches each filter; inventory probe findings change.
         // Earlier bump and re-pin notes: workflow_host_command_logic_catalog_history.rs.
-        version: 86, // integ-1108: #572 S1 judge sees covered requirement text, every PRD id coverable with new classes diagnostic only, refuted covers drop only with a route; #567 parse refusal before the judge; #572 S3 floor implements cleared (was 85: #618: screen host file move/rename probes before forwarding refutations.)
+        version: 87, // #572 S4a: acceptance lock records per-check base results (A4 pass/fail) (was 86: integ-1108: #572 S1 judge sees covered requirement text, every PRD id coverable with new classes diagnostic only, refuted covers drop only with a route; #567 parse refusal before the judge; #572 S3 floor implements cleared (was 85: #618: screen host file move/rename probes before forwarding refutations.))
         // #584 P5 bump: republish now refuses legacy skeleton entry and constraint defects; operator re-pins digest.
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
@@ -67,7 +67,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #599 re-pin: version 83 covers retained skeleton contract validation and shared contract refusals; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 (#572 S0-S3, #567, #497, #460): version 86, see the version line.
         // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
-        sources_digest: "318024f347de632706341f92fef2adf53597a291c22c7856bbfed95b155ce7f6",
+        sources_digest: "fb2db5fd937b1db3e08ad95b258d85a6f76b3827a529461e62bb56b39640cba0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -78,7 +78,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
         // 5: review of #491: an attempt with open findings stays open when its logic is stale, and a recorded skeleton without its lock stays acceptance-only. 7: Issue 569 the unknown obligation finding names a non-obligation id and the host-listed id sources; freeze reuses by version only, so a replayed outcome would keep the old text. 8: Issue 572 skeleton freeze accepts host-listed PRD constraint ids in implements and raises no unowned_obligation for them; Issue 573 tab-indented REQ- bullets become obligations a task must claim. 9: Issue 574/575 frozen skeleton tasks carry source_sections, skeleton freeze raises uncited_section/unknown_section, and id-keyed table rows under a header with no obligation word become host-listed PRD constraints.
-        version: 12, // integ-1108: #572 S3 freeze-skeleton may run checks (FreezeProvider), InheritedPredecessor blocks publication, authored implements/status cleared (was 11: #599: shared contract refusal and frozen-field repair ownership.)
+        version: 13, // #572 S4a: deliverable implements validated (deliverable_implements_unclaimed), requirement classification in task-skeleton.lock (was 12: integ-1108: #572 S3 freeze-skeleton may run checks (FreezeProvider), InheritedPredecessor blocks publication, authored implements/status cleared (was 11: #599: shared contract refusal and frozen-field repair ownership.))
         sources: &[GATE, CONTRACT, FREEZE],
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
@@ -120,7 +120,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #599 re-pin: version 11 covers shared contract refusals and repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 (#572 S0-S3, #567, #497, #460): version 12, see the version line.
         // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
-        sources_digest: "318024f347de632706341f92fef2adf53597a291c22c7856bbfed95b155ce7f6",
+        sources_digest: "fb2db5fd937b1db3e08ad95b258d85a6f76b3827a529461e62bb56b39640cba0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -163,7 +163,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // body gating; bumped so no body verdict is reused across it.
         // 29: batch 26 (#490 landing reconcile, #521 per-agent cutoffs) shares sources with
         // body gating; bumped so no body verdict is reused across it. 30: Issue 572 body lint of a draft or pending skeleton accepts PRD constraint ids and raises no unowned_obligation for them; Issue 573 tab-indented REQ- bullets become obligations. 31: Issue 574/575 body lint of a draft or pending skeleton raises uncited_section/unknown_section, the frozen source_sections are stamped into bodies and compared, and id-keyed table rows become PRD constraints.
-        version: 34, // integ-1108: #572 S3 authored completion status is refused; frozen status stamped (was 33: #599: shared contract refusal and frozen-field repair ownership.)
+        version: 35, // #572 S4a: deliverable_implements_unclaimed refused in bodies; stamped bodies carry deliverable implements (was 34: integ-1108: #572 S3 authored completion status is refused; frozen status stamped (was 33: #599: shared contract refusal and frozen-field repair ownership.))
         // #601, same unreleased version: declared paths come from the ownership reader; missing observations are no finding; explicit contradictions and path-form errors stay findings.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
@@ -201,7 +201,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #599 re-pin: version 33 covers shared contract refusals and frozen-field repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 (#572 S0-S3, #567, #497, #460): version 34, see the version line.
         // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
-        sources_digest: "c6aac4d44ec477274e5a842639cf61b413fa5933cbcf8422ba06dce91cb3bcf9",
+        sources_digest: "6f860001d6c3f8832ae60d0b7c04500baea0acfc23d97aed8708b91b812059a0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -233,7 +233,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // with set gating; bumped so no set verdict is reused across it.
         // 23: batch 25 (#494) shares sources with set gating; bumped likewise.
         // 24: batch 26 (#520 #521) shares sources with set gating; bumped likewise. 25: Issue 572 set coverage defines PRD constraint ids and raises one unowned_constraint finding per constraint no task names; Issue 573 tab-indented REQ- bullets become obligations. 26: Issue 574/575 set coverage raises one uncited_section per uncited PRD section and one unknown_section per bad citation, and id-keyed table rows become PRD constraints.
-        version: 29, // #599: shared contract refusal and frozen-field repair ownership.
+        version: 30, // #572 S4a: deliverable_implements_unclaimed finding (was 29: #599: shared contract refusal and frozen-field repair ownership.)
         // #601, same unreleased version: declared paths come from the ownership reader; missing observations are no finding; explicit contradictions and path-form errors stay findings.
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
@@ -268,7 +268,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #599 re-pin: version 29 covers shared contract refusals and frozen-field repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 re-pin only (#572 S3): a body deliverable `implements` is now parsed; no host-landed body can carry it because land-task-body stamps the frozen contracts; set-lint still refuses it as frozen_field_changed; #567/#497/#460/#572 S1 prompt and script changes are read by no verdict here.
         // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
-        sources_digest: "c6aac4d44ec477274e5a842639cf61b413fa5933cbcf8422ba06dce91cb3bcf9",
+        sources_digest: "6f860001d6c3f8832ae60d0b7c04500baea0acfc23d97aed8708b91b812059a0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -297,7 +297,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // File-size split re-pin only: items moved unchanged into child modules; the closure follows the moved items; no verdict rule changed. #562 re-pin only: a gate finding carries an optional gate_stage and judged_item, written into the envelope only when set; the findings, their text and every pass or fail are unchanged, and only the decomposition script's progress window (workflow_decompose_v1_failing_set.js) reads the new fields; no verdict reads them. Issue 569 re-pin only: the unknown obligation message text in task_skeleton.rs; requirements-trace does not produce it. #355 bump to 9 (see the version note): the falsify verifier launch passes the sandbox-exec spawn preflight. #355 forgery fix, same unreleased version 9: the host creates missing ancestors and every ancestor gets a full write denial; no verdict changes beyond the version 9 note. Issue 355 merge with Issue 566/568/569 and 571/572/573 re-pin only, same version 9.
         // #599 re-pin: version 15 covers shared deliverable-contract validation of trace inputs; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 re-pin only (#572 S3): a body deliverable `implements` is now parsed; trace ignores it; #572 S1 coverable ids reach no trace verdict.
-        sources_digest: "80f523b05fb72b2f3f9ca48c27dbae4def20c341d9119740c9a1188412caedb9",
+        // #572 S4a re-pin only: shared lock and deliverable types gain optional fields (byte-identical when empty); a verdict-invariance test proves no verification or trace verdict changes.
+        sources_digest: "8e453796b4458b49f597ae608d4801853bf7123a0cc82319b568d96ece2bdeac",
         build_bound: true,
     },
     CapabilityLogic {
@@ -362,7 +363,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #599 re-pin: version 22 covers shared deliverable-contract validation of frozen inputs; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108: version 23, see the version line.
         // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
-        sources_digest: "3a60ea83dbd050ba0529028d91f793fc0e637c7c621b11a75589d6c1d6cce77f",
+        // #572 S4a re-pin only: shared lock and deliverable types gain optional fields (byte-identical when empty); a verdict-invariance test proves no verification or trace verdict changes.
+        sources_digest: "3db247e3c34ba1ab4634c1ae003dc9712aeac5a24be79f174851e20ffba2853d",
         build_bound: true,
     },
     CapabilityLogic {
@@ -410,7 +412,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #599 re-pin: version 10 covers shared contract refusals and frozen-field repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 re-pin only (#572 S3): shared schema closure (FrozenTask.status, deliverable implements) round-trips byte-identical; no verdict rule changed.
         // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
-        sources_digest: "3a60ea83dbd050ba0529028d91f793fc0e637c7c621b11a75589d6c1d6cce77f",
+        // #572 S4a re-pin only: shared lock and deliverable types gain optional fields (byte-identical when empty); a verdict-invariance test proves no verification or trace verdict changes.
+        sources_digest: "3db247e3c34ba1ab4634c1ae003dc9712aeac5a24be79f174851e20ffba2853d",
         build_bound: true,
     },
 ];

@@ -39,6 +39,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
     std::fs::write(
         tasks.join(ACCEPTANCE_LOCK_FILE),
         serde_json::to_vec_pretty(&AcceptanceLock {
+            baseline_results: Default::default(),
             algorithm: "blake3".into(),
             digest: acceptance_digest.clone(),
             gate: clean_stamp(),
@@ -73,6 +74,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
     std::fs::write(
         tasks.join(TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: skeleton_digest.clone(),
             acceptance_digest: acceptance_digest.clone(),
@@ -382,6 +384,7 @@ fn task_file_lint_blocks_the_same_weak_verifier_as_the_runtime_gate() {
     std::fs::write(
         tasks.join(archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&archon_workflow::task_skeleton::TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: digest.clone(),
             acceptance_digest,
@@ -489,3 +492,6 @@ fn stamped_blocked_without_dependency_keeps_invalid_declared_status_finding() {
         evaluation.findings
     );
 }
+
+#[path = "deliverable_claims.rs"]
+mod deliverable_claims;

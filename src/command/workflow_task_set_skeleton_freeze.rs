@@ -126,12 +126,9 @@ pub(super) fn prepare_with_diagnostics(
         serde_json::from_slice(&candidate)
             .with_context(|| format!("parsing {}", skeleton_path.display())),
     )?;
-    // Authored completion is discarded until host proof classification is enabled.
+    // Discard authored completion; diagnostic classification grants no completion credit.
     for task in &mut skeleton.tasks {
         task.status = None;
-        for deliverable in &mut task.deliverable_contracts {
-            deliverable.implements.clear();
-        }
     }
     skeleton
         .acceptance_digest
@@ -184,10 +181,14 @@ pub(super) fn prepare_with_diagnostics(
             crate::command::workflow_task_set_candidate::CandidateDefects(defects).into(),
         ));
     }
+    let classification = Some(findings::classification_from_lock(
+        tasks_root, &skeleton, &contract,
+    ));
     let stamp = stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
     let digest = content_digest(&skeleton_bytes);
     let lock = TaskSkeletonLock {
+        classification,
         algorithm: "blake3".into(),
         digest: digest.clone(),
         acceptance_digest: pin.acceptance_digest.clone(),

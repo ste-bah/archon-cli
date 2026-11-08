@@ -110,11 +110,9 @@ fn path_like(token: &str) -> Option<String> {
 
 /// Does some owned path cover `prd_path`: equal to it, under it, or above it.
 fn owned(prd_path: &str, owned_paths: &BTreeSet<String>) -> bool {
-    owned_paths.iter().any(|owner| {
-        owner == prd_path
-            || owner.starts_with(&format!("{prd_path}/"))
-            || prd_path.starts_with(&format!("{owner}/"))
-    })
+    owned_paths
+        .iter()
+        .any(|owner| archon_workflow::repository_record::related_paths(owner, prd_path))
 }
 
 fn normalized_owned<'a>(

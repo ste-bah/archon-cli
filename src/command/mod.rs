@@ -357,6 +357,7 @@ mod workflow_decompose_state_interrupt_tests;
 #[cfg(test)]
 mod workflow_decompose_state_tests;
 pub(crate) mod workflow_decompose_status;
+mod workflow_decompose_status_classes;
 #[cfg(test)]
 mod workflow_decompose_tests;
 pub(crate) mod workflow_decompose_transitions;
@@ -424,6 +425,7 @@ pub(crate) mod workflow_skeleton_pending;
 pub(crate) mod workflow_task_root_reclaim;
 pub(crate) mod workflow_task_set;
 pub(crate) mod workflow_task_set_candidate;
+mod workflow_task_set_classification;
 pub(crate) mod world_model;
 pub(crate) mod world_view;
 

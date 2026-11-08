@@ -21,6 +21,7 @@ impl HostProbe {
             regression_guards: Mutex::new(BTreeMap::new()),
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
+            baseline_passes: Mutex::new(BTreeSet::new()),
             baseline_failures: Mutex::new(BTreeMap::new()),
             test_inventories: Mutex::new(BTreeMap::new()),
             reuse_audit: Mutex::new(BTreeMap::new()),

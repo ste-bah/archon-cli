@@ -34,6 +34,7 @@ fn write_acceptance(root: &std::path::Path) -> (String, AcceptancePin) {
     fs::write(
         root.join(ACCEPTANCE_LOCK_FILE),
         serde_json::to_vec_pretty(&AcceptanceLock {
+            baseline_results: Default::default(),
             algorithm: "blake3".into(),
             digest: digest.clone(),
             gate: clean_stamp(),
@@ -95,6 +96,7 @@ fn full_chain_binds_both_exact_files_to_the_host_pin() {
     fs::write(
         root.join(TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: digest.clone(),
             acceptance_digest,
@@ -114,6 +116,7 @@ fn full_chain_binds_both_exact_files_to_the_host_pin() {
     fs::write(
         root.join(TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: content_digest(&bytes),
             acceptance_digest: pin.acceptance_digest.clone(),

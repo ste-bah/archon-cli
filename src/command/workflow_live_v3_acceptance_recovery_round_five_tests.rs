@@ -127,6 +127,7 @@ async fn recovery_receipt_still_checks_launch_contract_and_skeleton() {
         pin.skeleton_digest = Some(archon_workflow::task_set_contract::content_digest(&bytes));
         std::fs::write(skeleton_path, bytes).unwrap();
         let lock = TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: pin.skeleton_digest.clone().unwrap(),
             acceptance_digest: pin.acceptance_digest.clone(),
