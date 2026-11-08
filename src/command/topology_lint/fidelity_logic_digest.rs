@@ -91,7 +91,8 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 // #584 P5 re-pin only: section citation remedy text changes no obligation question or stored verdict meaning; keep critic version 2. Digest recomputed with digest_of length-framed SHA-256.
 // #587 re-pin only: whole-set repair routing uses verified weakening evidence;
 // the critic question, reply validation and stored verdict meaning are unchanged.
-pub const SOURCES_DIGEST: &str = "e074ac5ccc345c62b300ac283e22bebcda29dc12a8e8c53da0595bc66f247777";
+// integ-1108 (#572 S1) re-pin only: obligation_requirement_rows.rs (a module of obligation_ids.rs) is listed; it names the requirement rows that own a repair route and adds an exact-id helper; the obligation ids and texts the critic is asked, and every stored verdict meaning, are unchanged.
+pub const SOURCES_DIGEST: &str = "147efa1ecbc5f360a6594a0f15cdff36277c01386607a85da02f3ac8c1629049";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.
@@ -105,6 +106,7 @@ pub const FILES: &[&str] = &[
     "crates/archon-workflow/src/obligation_constraints.rs",
     "crates/archon-workflow/src/obligation_continuations.rs",
     "crates/archon-workflow/src/obligation_ids.rs",
+    "crates/archon-workflow/src/obligation_requirement_rows.rs",
     "crates/archon-workflow/src/obligation_source_sections.rs",
     "crates/archon-workflow/src/prd_sections.rs",
     "src/command/topology_lint/fidelity_candidate_fallback.rs",
