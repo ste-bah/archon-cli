@@ -318,3 +318,37 @@ fn omitted_empty_covers_still_match_the_recorded_gate_round() {
 
 #[path = "workflow_decompose_seed_covers_tests.rs"]
 mod covers;
+
+#[test]
+fn acceptance_reply_seed_reads_only_the_criterion_after_prompt_reduction() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_oversize_test.cjs"
+        ))
+        .arg("seed")
+        .output()
+        .expect("node must be available for the reduced prompt seed regression");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let task = String::from_utf8(output.stdout).unwrap();
+    assert!(task.len() <= 262144);
+    assert!(task.contains("All criterion IDs and text (for consistency): [moved to context file]"));
+    let mut record = reply(
+        "acceptance-author-AC-001-4",
+        "01:00:00",
+        &entry("AC-001").to_string(),
+    );
+    record.call.options.task = Some(task);
+    let derived = super::super::derive(&[record], &[], &criteria(&["AC-001"])).unwrap();
+    let SubjectSeed::Entries { replies, .. } = &derived.subjects["acceptance"] else {
+        panic!("expected acceptance seed")
+    };
+    assert_eq!(
+        replies[0].criterion.as_deref(),
+        Some("criterion of AC-001\ncontinued criterion")
+    );
+}

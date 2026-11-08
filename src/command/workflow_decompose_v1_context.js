@@ -13,9 +13,9 @@
 // digest (`__archonAuthorContext`), and the prompt says where to Read them.
 // When the records do not fit their share, a deterministic subset is shown,
 // the rest is counted, and the complete list is one more file. The current
-// findings are never cut: they are what the author repairs. A prompt whose
-// own text still passes AUTHOR_PROMPT_LIMIT is not sent: the loop pauses and
-// says why (requireDispatchable).
+// findings stay whole in normal prompts. Oversized authored sections move
+// to context files with a bounded inline subset; only an oversized fixed
+// scaffold is refused (requireDispatchable).
 const HISTORY_SHARE = 8192;
 const PRIOR_SHARE = 14336;
 const CATALOGUE_SHARE = 10240;
@@ -180,9 +180,9 @@ function earlierFindings(history, feedback) {
     .sort((a, b) => b.last - a.last || b.count - a.count || a.first - b.first);
   return { seeded, others, repeats };
 }
-
-function authorPrompt(base, attempt, feedback, history) {
-  if (feedback.length === 0) return `${base}\nLogical attempt: ${attempt}.`;
+function authorPrompt(base, attempt, feedback, history, blocks) {
+  const logical = requiredAuthorContext("logical attempt", `\nLogical attempt: ${attempt}.`, blocks, base.length);
+  if (feedback.length === 0) return base + logical;
   const earlier = earlierFindings(history, feedback);
   const span = (found) => (found.first === found.last ? `attempt ${found.last}` : `attempts ${found.first}-${found.last}`);
   const repeat = (text) => {
@@ -195,6 +195,8 @@ function authorPrompt(base, attempt, feedback, history) {
   // alternates until its budget is spent -- a live acceptance phase did exactly
   // that for all six attempts. Showing what earlier attempts already triggered
   // is what lets it satisfy both at once instead of trading one for the other.
+  const required = prompt;
+  findingsAuthorContext("current authoritative findings", required.slice(base.length + logical.length), blocks, base.length + logical.length, feedback.map(text => `${text}${repeat(text)}`));
   const records = [...earlier.seeded, ...earlier.others];
   const full = records.map((found) => (found.first === 0 ? `the set gate, before this body was sent back: ${found.text}`
     : `${found.count === 1 ? `attempt ${found.last}` : `attempts ${found.first}-${found.last}, ${found.count} times`}: ${found.text}`));
@@ -211,25 +213,8 @@ function authorPrompt(base, attempt, feedback, history) {
     const file = contextFile("json", JSON.stringify(records.map(({ text, count, first, last }) => ({ text, count, first, last }))));
     prompt += `\nEvery earlier finding, in full with its count and attempts, is in ${file.path} (host-written context for this call: read it by its exact path).`;
   }
-  return prompt;
+  return required + optionalAuthorContext("prior history", prompt.slice(required.length), blocks, required.length);
 }
-
-// A prompt whose own text passes AUTHOR_PROMPT_LIMIT is never sent: its
-// base and current findings cannot be cut without hiding what the author
-// repairs, so the loop pauses with the measured size and the remedy, and a
-// resumed loop that still measures it pauses again.
-async function requireDispatchable(w, subject, task) {
-  for (;;) {
-    const bytes = utf8Bytes(task);
-    if (bytes <= AUTHOR_PROMPT_LIMIT) return task;
-    await pauseLoop(w, subject, {
-      reason: "author_prompt_oversized", prompt_bytes: bytes, limit_bytes: AUTHOR_PROMPT_LIMIT, context_budget_bytes: CONTEXT_BUDGET,
-      diagnosis: "the prompt's mandatory text (the phase instructions and the current findings) alone exceeds the dispatch limit; the earlier-work context is already bounded",
-      remedy: "resuming alone pauses again: reduce the current findings this call must repair (split the input that produces them), or raise AUTHOR_PROMPT_LIMIT in the fixed decomposition script (a code change), then resume"
-    });
-  }
-}
-
 function currentAuthorFindings(prompt) {
   const marker = "Repair these exact authoritative findings:\n- ";
   const start = prompt.indexOf(marker);
@@ -241,8 +226,9 @@ function currentAuthorFindings(prompt) {
 
 // The supplied files sit before `tail` (the reply format), which stays the
 // final task section; the room for them leaves the tail's bytes free.
+const NAMED_FILES_PREAMBLE = `\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: `;
 function namedFilesContext(task, entry, notes, tail = "") {
-  const base = `${task}\nAnswer once you have read the supplied named_files content for the deciding file, or inspected that file at its named path yourself.\nFiles already identified for this check are supplied here when available: `;
+  const base = task + NAMED_FILES_PREAMBLE;
   if (utf8Bytes(base) + utf8Bytes("[]") + utf8Bytes(tail) > AUTHOR_PROMPT_LIMIT) return `${task}${tail}`;
   const room = Math.max(0, AUTHOR_PROMPT_LIMIT - utf8Bytes(base) - utf8Bytes(tail));
   const supplied = typeof __archonNamedFiles === "function"
@@ -490,4 +476,25 @@ function observationRule() {
 function excludedDirs() {
   const list = Array.isArray(args.excludedDirs) ? args.excludedDirs : [];
   return list.length > 0 ? list.join(', ') : '.git, node_modules, target';
+}
+function acceptanceOwnContext(state, id, blocks, start) {
+  const refused = state.refusals && state.refusals.get(id);
+  const superseded = supersededDraftText(state, id);
+  const parts = [
+    (refused ? `\nThe host refused this entry's last answered reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : ""),
+    (state.gateFindings?.has(id) ? `\nRepair this entry's gate findings open in the latest gate result:\n- ${state.gateFindings.get(id).join("\n- ")}` : ""),
+    (state.judgeNotes?.has(id) ? `\nThe freeze judge could not use this entry's last check:\n- ${state.judgeNotes.get(id)}` : ""),
+    { name: "prior history", text: earlierFindingsText("Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:", state.earlierGateFindings?.get(id)) },
+    (state.phaseFindings?.length > 0 ? `\nPhase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- ${state.phaseFindings.join("\n- ")}` : ""),
+    { name: "prior history", text: earlierFindingsText("Earlier gate results raised these phase-level findings; the latest gate result no longer reports them. Do not regress them:", state.earlierPhaseFindings) },
+    { name: "superseded draft", text: superseded },
+    { name: "current coverage", text: currentCoversText(state.entries?.get(id)) }
+  ];
+  let own = "";
+  const names = ["entry reply refusals", "current entry gate findings", "freeze judge notes", "prior history", "current phase findings"];
+  const findings = [refused, state.gateFindings?.get(id), state.judgeNotes?.has(id) ? [state.judgeNotes.get(id)] : [], [], state.phaseFindings];
+  for (const [index, part] of parts.entries()) own += typeof part === "string"
+    ? findingsAuthorContext(names[index], part, blocks, start + own.length, findings[index] || [])
+    : optionalAuthorContext(part.name, part.text, blocks, start + own.length);
+  return own;
 }

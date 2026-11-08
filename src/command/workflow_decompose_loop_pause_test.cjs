@@ -14,7 +14,7 @@ if (!process.argv[2]) {
   const context = withAuthorContext({args: {gateMode: 'enforce', taskRoot: '/subjects'}});
   vm.createContext(context);
   const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-  vm.runInContext(['v1', 'v1_body', 'reply_blocks', 'v1_acceptance', 'v1_set_gate', 'v1_frozen', 'v1_progress', 'v1_failing_set', 'v1_seed', 'v1_context']
+  vm.runInContext(['v1', 'v1_body', 'reply_blocks', 'v1_acceptance', 'v1_set_gate', 'v1_frozen', 'v1_prompt', 'v1_progress', 'v1_failing_set', 'v1_seed', 'v1_context']
     .map(name => fs.readFileSync(`${root}/workflow_decompose_${name}.js`, 'utf8')).join('\n'), context);
   const subject = {taskId: 'TASK-X-001', fileName: 'TASK-X-001.md'};
   let calls = 0, authors = 0;

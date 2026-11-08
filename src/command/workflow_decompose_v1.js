@@ -1,6 +1,5 @@
 // Keep in sync with Rust acceptance_stage::coverage::REQUIREMENT_PREFIX.
 const REQUIREMENT_PREFIX = "REQ-";
-
 const COMMAND_EXAMPLES = 'Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.';
 
 const ACCEPTANCE_SHAPE = JSON.stringify({
@@ -138,23 +137,10 @@ async function workflow(w) {
   });
 }
 
-function requireFixedArgs() {
-  if (!args || typeof args !== "object") throw new Error("fixed decomposition args are absent");
-  for (const key of ["projectRoot", "repositoryRoot", "prdPath", "prdDigest", "taskRoot"]) {
-    if (typeof args[key] !== "string" || args[key].trim() === "") {
-      throw new Error(`fixed decomposition argument ${key} is missing`);
-    }
-  }
-  if (args.gateMode !== "observe" && args.gateMode !== "enforce") {
-    throw new Error("fixed decomposition requires observe or enforce gate mode");
-  }
-}
-
 // Author calls already made per phase. A body the set gate sends back keeps
 // its call-id family and continues the ordinal, so on resume its earlier
 // attempts replay as history and a repair never overwrites a recorded call.
 const AUTHOR_CALLS = new Map();
-
 // One subject's author loop, limited by progress (Issue 261): an attempt that
 // makes progress keeps it going; STALL_ATTEMPTS in a row without progress
 // advances the authored repair rung. Rung progress follows replayed calls.
@@ -248,12 +234,20 @@ async function authorCandidate(w, policy) {
       else {
         const operation = `\nRepair operation r${repairRung}, cycle ${repairCycle}, authored call ${nextCall}.`;
         const bodyRepair = bodyRepairContext(policy, repairRung, bodyCandidate);
-        const prompt = authorPrompt(`${policy.prompt(previousCandidate)}${bodyRepair ? bodyRepair.text : rungInstruction}${operation}${group}`, attempt + 1,
-          bodyRepair ? [...new Set([...bodyRepair.feedback, ...(policy.initialFeedback || [])])] : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history);
+        const blocks = [];
+        const base = policy.prompt(previousCandidate, blocks);
+        if (!blocks.some(block => block.required)) requiredAuthorContext("phase prompt", base, blocks);
+        blocks.push(...(bodyRepair?.blocks || []).map(block => ({ ...block, start: block.start + base.length })));
+        requiredAuthorContext("repair operation", operation, blocks, base.length + (bodyRepair ? bodyRepair.text : rungInstruction).length);
+        findingsAuthorContext("priority group", group, blocks, base.length + (bodyRepair ? bodyRepair.text : rungInstruction).length + operation.length, groupFeedback);
+        if (!bodyRepair) requiredAuthorContext("repair instructions", rungInstruction, blocks, base.length);
+        const prompt = authorPrompt(`${base}${bodyRepair ? bodyRepair.text : rungInstruction}${operation}${group}`, attempt + 1,
+          bodyRepair ? [...new Set([...bodyRepair.feedback, ...(policy.initialFeedback || [])])] : promptFeedback, bodyRepair ? bodyRepair.history : policy.author ? [] : history, blocks);
         // Context writes are not journaled. Reserve no ordinal until the
         // complete prompt is ready, so recovery and replay dispatch identically.
-        const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt);
+        const task = policy.author ? prompt : await requireDispatchable(w, `${policy.phase}-prompt`, prompt, blocks);
         if (policy.author) {
+          authorState.promptBlocks = blocks;
           authored = await policy.author(w, task, nextCall, authorState);
           if (authorState.roundCalls > 0 || authored.status !== "failed") {
             call = nextCall;
@@ -323,7 +317,6 @@ async function authorCandidate(w, policy) {
       recordAnswered(progress, call, "incomplete", false, !measuredReplies);
       continue;
     }
-
     const outcome = await w.hostCommand(policy.capability, {
       stdin: authored.content,
       ...(policy.target ? { target: policy.target } : {})

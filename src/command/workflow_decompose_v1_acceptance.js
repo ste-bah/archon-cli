@@ -57,13 +57,6 @@ function acceptanceReplyFormat() {
   ].join("\n");
 }
 
-// The live roots a check must not name, as the validator reads them: the
-// roots this prompt names, and the task root the host reads the freeze's own
-// roots from (its configured scratch repository), so both steps refuse a
-// check from one source.
-function liveRootsText() {
-  return JSON.stringify({repository: args.repositoryRoot, project: args.projectRoot, tasks: args.taskRoot});
-}
 
 // Completed entries survive a sibling's incomplete reply. The host validates
 // each authored entry with freeze's shape validator; freeze assembles and
@@ -130,18 +123,9 @@ function setHostOwnedFields(entry, criteria) {
 // retained work and failure; no inner retry window can hide malformed replies
 // or restart its count when a transport error interrupts them. Keep the call
 // id stride so replay of already-recorded rounds uses the same namespace.
-async function authorOne(w, prompt, round, id, text, prior, criteria, state, pendingIds) {
+async function authorOne(w, prompt, round, id, text, prior, criteria, state, pendingIds, promptBlocks = []) {
   // Each entry reads only its own shape refusal: a sibling's names another
   // entry and is not this entry's repair.
-  const refused = state.refusals && state.refusals.get(id);
-  const superseded = supersededDraftText(state, id);
-  const ownOf = () => (refused ? `\nThe host refused this entry's last answered reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "")
-    + (state.gateFindings?.has(id) ? `\nRepair this entry's gate findings open in the latest gate result:\n- ${state.gateFindings.get(id).join("\n- ")}` : "")
-    + (state.judgeNotes?.has(id) ? `\nThe freeze judge could not use this entry's last check:\n- ${state.judgeNotes.get(id)}` : "")
-    + earlierFindingsText("Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:", state.earlierGateFindings?.get(id))
-    + (state.phaseFindings?.length > 0 ? `\nPhase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- ${state.phaseFindings.join("\n- ")}` : "")
-    + earlierFindingsText("Earlier gate results raised these phase-level findings; the latest gate result no longer reports them. Do not regress them:", state.earlierPhaseFindings)
-    + superseded + currentCoversText(state.entries?.get(id));
   // Issue 288: the catalogue and the completed entries are bounded records
   // that name host-written files (workflow_decompose_v1_context.js). A file
   // the host could not write is an outage of this entry's call, made before
@@ -150,10 +134,22 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state, pen
   const preparation = newProgress();
   for (;;) {
     try {
-      const own = ownOf();
-      task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order, pendingIds)}`;
-      task = namedFilesContext(task, state.entries?.get(id) || {id, criterion:text}, [text, own, ...currentAuthorFindings(prompt)], `\n${acceptanceReplyFormat()}`);
-      task = await requireDispatchable(w, `acceptance-prompt-${id}`, task);
+      const blocks = (state.promptBlocks || promptBlocks).slice();
+      if (!blocks.some(block => block.required)) requiredAuthorContext("phase prompt", prompt, blocks);
+      task = prompt + requiredAuthorContext("entry subject", `\nAuthor ONLY entry ${id}: `, blocks, prompt.length);
+      task += optionalAuthorContext("entry criterion", text, blocks, task.length);
+      const own = acceptanceOwnContext(state, id, blocks, task.length);
+      task += own;
+      for (const [name, content] of [
+        ["criterion catalogue", catalogueText(criteria, id, state.order)],
+        ["sibling context", priorText(prior, id, state.order, pendingIds)]
+      ]) {
+        task += "\n";
+        task += optionalAuthorContext(name, content, blocks, task.length);
+      }
+      const tail = `\n${acceptanceReplyFormat()}`;
+      task = await requireDispatchable(w, `acceptance-prompt-${id}`, task, blocks, tail);
+      task = namedFilesContext(task, state.entries?.get(id) || {id, criterion:text}, [text, own, ...currentAuthorFindings(prompt)], tail);
       break;
     } catch (error) {
       if (!error || error.authorContext !== true) throw error;
