@@ -129,6 +129,30 @@ pub fn start_of(pid: u32) -> Option<u64> {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn missing_identity(error: io::Error) -> io::Result<Option<u64>> {
+    if error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(None)
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[test]
+fn missing_identity_classifies_exit_and_preserves_uncertainty() {
+    assert_eq!(
+        missing_identity(io::Error::from_raw_os_error(libc::ESRCH)).unwrap(),
+        None
+    );
+    assert_eq!(
+        missing_identity(io::Error::from(io::ErrorKind::NotFound)).unwrap(),
+        None
+    );
+    let error = missing_identity(io::Error::from_raw_os_error(libc::EACCES)).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::EACCES));
+}
+
 /// A live identity, a proven exit, or an unreadable identity. Unlike
 /// `start_of`, this preserves uncertainty for durable survivor records.
 pub fn identity_of(pid: u32) -> io::Result<Option<u64>> {
@@ -136,8 +160,7 @@ pub fn identity_of(pid: u32) -> io::Result<Option<u64>> {
     {
         let stat = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
             Ok(stat) => stat,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
+            Err(error) => return missing_identity(error),
         };
         let process = super::parse_proc_stat(pid, &stat)
             .ok_or_else(|| io::Error::other("unreadable process identity"))?;
@@ -332,12 +355,7 @@ fn identity_from_kinfo(pid: libc::pid_t) -> io::Result<Option<u64>> {
         )
     };
     if result != 0 {
-        let error = io::Error::last_os_error();
-        return if error.raw_os_error() == Some(libc::ESRCH) {
-            Ok(None)
-        } else {
-            Err(error)
-        };
+        return missing_identity(io::Error::last_os_error());
     }
     if size == 0 {
         return Ok(None);
