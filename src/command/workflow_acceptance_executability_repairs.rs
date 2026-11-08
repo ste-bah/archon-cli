@@ -244,7 +244,7 @@ pub(super) async fn tree_results_with_save_predicates(
     run
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn test_unproven_after_repairs(cause: &str, repairs: Vec<String>) -> String {
     let mut run = TreeRun::known(&[], cause);
     run.repairs = repairs;

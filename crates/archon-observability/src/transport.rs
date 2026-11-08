@@ -26,12 +26,14 @@ pub struct EvidenceScope {
     state: Arc<Mutex<State>>,
     call_id: String,
 }
+type FreeSpace = Arc<dyn Fn(&Path) -> io::Result<u64> + Send + Sync>;
+
 struct State {
     path: PathBuf,
     error: Option<String>,
     segment_bytes: u64,
     min_free_bytes: u64,
-    free_space: Arc<dyn Fn(&Path) -> io::Result<u64> + Send + Sync>,
+    free_space: FreeSpace,
 }
 
 impl EvidenceScope {
@@ -51,7 +53,7 @@ impl EvidenceScope {
         call_id: &str,
         segment_bytes: u64,
         min_free_bytes: u64,
-        free_space: Arc<dyn Fn(&Path) -> io::Result<u64> + Send + Sync>,
+        free_space: FreeSpace,
     ) -> io::Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -229,7 +231,7 @@ fn disk_low_cap_recorded(path: &Path) -> bool {
                         Some("evidence_resumed") => Some(false),
                         _ => None,
                     })
-                    .last()
+                    .next_back()
                     .unwrap_or(false);
             }
         }

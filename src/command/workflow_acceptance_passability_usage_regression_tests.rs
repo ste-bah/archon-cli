@@ -1,8 +1,12 @@
+#[cfg(unix)]
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
 use super::*;
 
+#[cfg(unix)]
 fn runs(stderr: &str) -> BaselineRuns {
     let result = archon_workflow::acceptance_scratch::CheckResult {
         verdict_streams: Default::default(),

@@ -312,7 +312,7 @@ mod probe;
 mod prove;
 #[path = "workflow_acceptance_executability_repairs.rs"]
 mod repairs;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use repairs::test_unproven_after_repairs;
 #[path = "workflow_acceptance_executability_resume.rs"]
 mod resume;
@@ -331,7 +331,7 @@ mod verdict_shell;
 pub(crate) mod test_inventory;
 pub(crate) use mutation::CANNOT_FAIL;
 pub(crate) use sites::repository_tree_contains;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use verdict::HOST_PATH;
 pub(crate) use verdict::{Context as CheckSite, unresolved_on_path};
 

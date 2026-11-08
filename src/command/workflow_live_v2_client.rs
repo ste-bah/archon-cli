@@ -85,7 +85,7 @@ impl LiveV2AgentClient {
         self
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn cargo_limits(
         &self,
     ) -> Option<&archon_tools::workflow_resource_env::CargoResourceLimits> {

@@ -228,7 +228,7 @@ pub(crate) struct PreImplementation {
     pub(crate) host_unproven_reason: Option<String>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) async fn pre_implementation_findings(
     project_root: &Path,
     tasks_root: &Path,

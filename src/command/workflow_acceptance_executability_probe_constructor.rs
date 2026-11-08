@@ -117,7 +117,7 @@ impl HostProbe {
         Self::for_task_set_with_limits(project, tasks_root, resource_limits).with_resume(resume)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn new(project: PathBuf, repository: PathBuf, site: Site) -> Self {
         Self::new_with_limits(
             project,
@@ -141,7 +141,7 @@ impl HostProbe {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn for_task_set(project: &std::path::Path, tasks_root: &std::path::Path) -> Self {
         Self::for_task_set_with_limits(
             project,

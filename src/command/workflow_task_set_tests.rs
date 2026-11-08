@@ -482,3 +482,6 @@ mod absent_contract_tests;
 
 #[path = "workflow_task_set_skeleton_no_check_tests.rs"]
 mod skeleton_no_check_tests;
+
+#[path = "workflow_task_set_prd_tools_tests.rs"]
+mod prd_tools_tests;

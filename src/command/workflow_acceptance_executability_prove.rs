@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 #[path = "workflow_acceptance_executability_prove_plan.rs"]
 mod plan;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) use plan::mutation_plan;
 
 #[path = "workflow_acceptance_executability_prove_diagnostics.rs"]
@@ -30,7 +30,7 @@ pub(super) use diagnostics::{
 #[path = "workflow_acceptance_executability_prove_helpers.rs"]
 mod helpers;
 pub(super) use helpers::author_recreated_finding;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) use helpers::operational_error_diagnostics;
 #[cfg(test)]
 pub(super) use helpers::unattributed_recreation_finding;

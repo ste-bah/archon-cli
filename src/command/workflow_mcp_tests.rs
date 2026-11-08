@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(unix)]
 use std::path::Path;
 
 const DEADLINE: Duration = Duration::from_secs(5);

@@ -106,7 +106,7 @@ impl CheckObserver for ScratchObserver<'_> {
 /// passes [`SearchBudget::default`]). `ControlPaused` when a probe met a
 /// task set no read can settle (Issue 338). The stage calls
 /// [`attribute_with`] (Issue 544); this form serves the replay tests.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) async fn attribute(
     context: &StageContext,
     criteria: &[&AcceptanceCriterion],

@@ -65,7 +65,7 @@ pub(in super::super) fn settle_as(
 }
 
 /// Settle a check timeout using a durable per-check stall strike.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(in super::super) fn settle_timed_out(
     probe: &HostProbe,
     commit: &str,

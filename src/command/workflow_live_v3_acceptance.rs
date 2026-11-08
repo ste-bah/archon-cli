@@ -19,7 +19,7 @@ use archon_workflow::v2::acceptance_stage::{
     ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION, AcceptanceRoundRecordV1, relative_record_path,
     round_dir,
 };
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use archon_workflow::v2::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceCheckStatus};
 use archon_workflow::{
     WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Result,
@@ -52,7 +52,7 @@ mod pending;
 mod regression;
 #[path = "workflow_live_v3_acceptance_repair.rs"]
 mod repair;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use repair::repair_author_scope;
 #[path = "workflow_live_v3_acceptance_result.rs"]
 mod result;
@@ -61,7 +61,7 @@ use check_rec::check_record;
 mod sources;
 #[path = "workflow_live_v3_acceptance_stalled.rs"]
 mod stalled;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use archon_workflow::v2::acceptance_stage::ACCEPTANCE_STAGE_TOOL;
 use output::{with_frozen_identity, write_output_files, write_repairs};
 use result::result_for;

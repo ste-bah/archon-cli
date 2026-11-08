@@ -2,8 +2,10 @@
 
 use super::*;
 
+#[cfg(unix)]
 struct CargoJobsEnvGuard(Option<String>);
 
+#[cfg(unix)]
 impl CargoJobsEnvGuard {
     fn clear() -> Self {
         let previous = std::env::var("CARGO_BUILD_JOBS").ok();
@@ -13,6 +15,7 @@ impl CargoJobsEnvGuard {
     }
 }
 
+#[cfg(unix)]
 impl Drop for CargoJobsEnvGuard {
     fn drop(&mut self) {
         // SAFETY: the guard is held until this restoration completes.

@@ -44,7 +44,7 @@ fn record_execution(digest: &str) {
         .or_default() += 1;
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn test_execution_count(digest: &str) -> usize {
     test_execution_counts()
         .lock()

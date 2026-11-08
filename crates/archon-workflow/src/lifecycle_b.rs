@@ -194,6 +194,7 @@ mod tests {
             max_parallelism: None,
             item_kind: None,
             filter: None,
+            required_tools: Vec::new(),
             extra: BTreeMap::new(),
         }
     }

@@ -28,6 +28,18 @@ pub fn approval_metadata_stage(task: &str, call: &WorkflowV2HostCall) -> StageSp
     // wired up, so it never branched. Leave whatever the plan authored in
     // `extra` so the approval metadata still shows it verbatim.
     strip_reserved_stage_extra(&mut extra);
+    let required_tools = match extra.get("required_tools") {
+        Some(serde_json::Value::String(value)) => Some(vec![value.clone()]),
+        Some(serde_json::Value::Array(values)) if !values.is_empty() => values
+            .iter()
+            .map(|value| value.as_str().map(str::to_owned))
+            .collect(),
+        _ => None,
+    };
+    if required_tools.is_some() {
+        extra.remove("required_tools");
+    }
+    let required_tools = required_tools.unwrap_or_default();
     StageSpec {
         id: call.id.clone(),
         kind: stage_kind_for_call(call.method),
@@ -59,6 +71,7 @@ pub fn approval_metadata_stage(task: &str, call: &WorkflowV2HostCall) -> StageSp
         max_parallelism: call.options.max_parallelism.map(|value| value as u32),
         item_kind: call.write_mode.map(|_| StageKind::Implementation),
         filter: None,
+        required_tools,
         extra,
     }
 }

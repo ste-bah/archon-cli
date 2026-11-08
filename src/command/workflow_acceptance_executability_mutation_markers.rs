@@ -47,7 +47,7 @@ impl Markers {
         format!("archon-mutation-recreated-{}: ", self.nonce)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn restored(&self) -> String {
         format!("archon-mutation-restored-{}", self.nonce)
     }
@@ -150,7 +150,7 @@ impl Markers {
         (signal != "none").then(|| signal.to_string())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn restored_all(&self, result: &CheckResult) -> bool {
         let restored = self.restored();
         String::from_utf8_lossy(result.verdict_stdout())

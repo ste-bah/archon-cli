@@ -3,7 +3,9 @@
 //! check never reads a tree the probe key does not bind.
 use std::collections::{BTreeMap, BTreeSet};
 
-use archon_workflow::acceptance_scratch::{ScratchPolicy, ScratchRoots};
+use archon_workflow::acceptance_scratch::ScratchPolicy;
+#[cfg(unix)]
+use archon_workflow::acceptance_scratch::ScratchRoots;
 
 use super::*;
 
@@ -63,8 +65,8 @@ struct Fixture {
     _temp: tempfile::TempDir,
     project: PathBuf,
     repository: PathBuf,
-    commit: String,
-    policy: ScratchPolicy,
+    _commit: String,
+    _policy: ScratchPolicy,
 }
 
 /// Project `project` with input `work`; the run's repository is
@@ -102,14 +104,15 @@ fn fixture() -> Fixture {
         _temp: temp,
         project,
         repository,
-        commit,
-        policy,
+        _commit: commit,
+        _policy: policy,
     }
 }
 
 #[path = "evidence_417_tests.rs"]
 mod evidence_417_tests;
 
+#[cfg(unix)]
 fn digest(f: &Fixture) -> String {
     data_digest_scoped(
         &f.project,
@@ -125,7 +128,7 @@ fn digest(f: &Fixture) -> String {
 #[test]
 fn scratch_copy_skips_the_nested_repository_the_digest_skips() {
     let f = fixture();
-    let mut roots = ScratchRoots::prepare(&f.policy, &f.commit).unwrap();
+    let mut roots = ScratchRoots::prepare(&f._policy, &f._commit).unwrap();
     let copied = files(&roots.project().join("work"));
     roots.cleanup().unwrap();
     // The run's repository comes from its commit (the scratch worktree),
@@ -203,7 +206,7 @@ fn a_repository_at_the_project_root_skips_only_the_whole_walk() {
 fn a_symlink_to_the_repository_is_never_followed() {
     let f = fixture();
     std::os::unix::fs::symlink(&f.repository, f.project.join("work/alias")).unwrap();
-    let mut roots = ScratchRoots::prepare(&f.policy, &f.commit).unwrap();
+    let mut roots = ScratchRoots::prepare(&f._policy, &f._commit).unwrap();
     let copied = files(&roots.project().join("work"));
     roots.cleanup().unwrap();
     assert!(

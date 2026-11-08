@@ -420,7 +420,7 @@ pub(super) fn scratch_environment(
 
 impl HostProbe {
     /// This probe with `host` as the host's environment.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn with_host_environment(mut self, host: BTreeMap<String, String>) -> Self {
         self.host = host;
         self

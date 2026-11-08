@@ -472,21 +472,21 @@ pub(crate) mod passability_tests_support;
 #[cfg(test)]
 #[path = "workflow_task_set_tests.rs"]
 mod tests;
-
 #[cfg(all(test, unix))]
 pub(crate) use findings::tests::outside_set;
+#[cfg(test)]
+pub(crate) use publish::crash_publish;
 #[cfg(test)]
 pub(crate) use publish::fail_after_rename;
 #[cfg(test)]
 pub(crate) use publish::reader_test_step;
+#[cfg(all(test, unix))]
+pub(crate) use publish::stick_next_commit;
 #[cfg(test)]
 pub(crate) use publish::take_synced_dirs;
 #[cfg(test)]
-pub(crate) use publish::{crash_publish, stick_next_commit};
-#[cfg(test)]
 #[path = "workflow_task_set_read_race_tests.rs"]
 mod read_race_tests;
-
 #[path = "workflow_task_set_site_paths.rs"]
 mod site_paths;
 use site_paths::project_relative;

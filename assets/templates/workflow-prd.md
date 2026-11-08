@@ -216,6 +216,27 @@ independently testable criterion per row; do not join multiple outcomes with
 state that can decide the criterion. These IDs are the acceptance contract's
 input, so a PRD with no rows cannot enter decomposition.
 
+### 4.6 A numbered Required Tools section
+
+When the project's `.mcp.json` permits any tool, include a numbered
+`Required Tools` section. Use one table:
+
+| Tool | Used by | Purpose |
+|------|---------|---------|
+
+Each row names one `mcp__<server>__<tool>` copied exactly from the project's
+`.mcp.json`, the PRD ids whose work calls it, and its purpose. Never invent a
+tool name. When the work calls none, write the section with the single line
+`None.` instead of a table.
+
+Decomposition requires the union of tasks' `required_tools` to hold every
+tool declared in this section or an id's text. A task declaring a tool must
+call it in the run. Every task that declares a listed tool cites this section
+in `source_sections`; with `None.` one task cites it. Examples outside the
+section and id text are diagnostic only. Older PRDs without this section
+keep their text: links are derived from ids naming configured servers, and
+the owning tasks declare one or more permitted tools of those servers.
+
 ## 5. Writing requirements the engine can verify
 
 ### 5.1 Name the artifact and the command
@@ -302,6 +323,10 @@ to a check that runs later, so a failure here is a failure there.
     decision owner and state what the system does until it is decided —
     including which way it fails.
 
+11. The numbered `Required Tools` section follows §4.6, using exact project
+    permissions and links to the ids whose work calls each tool; tasks cite
+    the section, including one citation when it says `None.`.
+
 ## 7. Worked fragment
 
 ```markdown
@@ -351,6 +376,14 @@ timeframes 1W, 1D, 240, 60, 15 — thirty cells.
 |------|--------|
 | TASK-TDL-080 Coverage matrix command | REQ-DL-040, REQ-DL-041, REQ-DL-042 |
 | TASK-TDL-041 Snapshot freshness | REQ-DL-043 |
+
+## 16. Required Tools
+
+| Tool | Used by | Purpose |
+|------|---------|---------|
+
+Copy actual tool names and existing ids here from the project inputs, or
+replace this table with `None.` if the work calls none.
 ```
 
 ## 8. After writing

@@ -459,3 +459,6 @@ async fn fresh_launch_runtime_and_metadata_include_requirement_texts() {
 
 #[path = "workflow_decomposition_upgrade_tests.rs"]
 mod workflow_decomposition_upgrade_tests;
+
+#[path = "workflow_decompose_prd_tools_tests.rs"]
+mod prd_tools_tests;

@@ -50,7 +50,7 @@ impl ResultStore {
     }
 
     /// Save `result` under `key`, atomically; false when it was not saved.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn save(&self, key: &str, result: &CheckResult) -> bool {
         self.save_evidence(key, result, None, None)
     }
