@@ -166,10 +166,9 @@ pub(crate) fn handle_diff_command<'a>(
     working_dir: &'a PathBuf,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
-        let result = archon_shell::spawn::tokio_command("git")
+        let result = tokio::process::Command::from(archon_shell::spawn::git_command(working_dir))
             .arg("diff")
             .arg("--stat")
-            .current_dir(working_dir)
             .output()
             .await;
 

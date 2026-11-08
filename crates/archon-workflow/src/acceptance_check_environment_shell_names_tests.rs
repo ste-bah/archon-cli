@@ -3,9 +3,12 @@
 //! child of this test binary with those names exported, so `capture()` and
 //! `capture_with_dispatch()` read them from the real OS environment.
 
+#[cfg(unix)]
 use super::*;
 
+#[cfg(unix)]
 const CASE: &str = "ISSUE_349_SHELL_NAME_CASE";
+#[cfg(unix)]
 const WITHHELD: &str = "ARCHON_349_WITHHELD_FIXTURE";
 
 #[cfg(unix)]

@@ -107,7 +107,7 @@ async fn run_bounded_stage(
         Launcher::OnPath(name) => std::path::PathBuf::from(name),
     };
 
-    let mut command = crate::bash::bash_write_sandbox::command(&program, boundary);
+    let (mut command, report) = crate::bash::bash_write_sandbox::command(&program, boundary);
     archon_shell::spawn::replace_environment(command.as_std_mut(), env);
     command
         .args(stage_args(project.build_system, stage))
@@ -129,6 +129,7 @@ async fn run_bounded_stage(
         }
     };
 
+    tracing::warn!("child seal outcome: {report}");
     // Drained concurrently with the wait. A build that fills its stdout pipe
     // while nothing reads it blocks forever, and would then be reported as a
     // timeout rather than as the deadlock it is.

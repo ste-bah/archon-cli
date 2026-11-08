@@ -65,9 +65,7 @@ fn short(state: &str) -> &str {
 }
 
 fn git(repository: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    let output = archon_shell::spawn::git_command(repository)
         .args(args)
         .output()
         .map_err(|e| format!("git {}: {e}", args.join(" ")))?;

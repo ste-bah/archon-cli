@@ -281,8 +281,7 @@ fn ignored_in_worktree(
         stdin_bytes.extend_from_slice(candidate.raw.as_bytes());
         stdin_bytes.push(0);
     }
-    let mut child = archon_shell::spawn::command("git")
-        .current_dir(isolated)
+    let mut child = archon_shell::spawn::git_command(isolated)
         .args(["check-ignore", "-z", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -101,9 +101,7 @@ pub fn write_repository_record(
 /// `git rev-parse --show-toplevel` from `path`, when `path` is inside a
 /// git working tree.
 pub fn git_toplevel(path: &Path) -> Option<PathBuf> {
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(path)
+    let output = archon_shell::spawn::git_command(path)
         .args(["rev-parse", "--show-toplevel"])
         .output()
         .ok()?;
@@ -124,9 +122,7 @@ pub fn is_git_checkout(path: &Path) -> bool {
 /// [`UNBORN_BASE_COMMIT`] when the repository has no commit yet. An error
 /// means the path is not a repository git can read.
 pub fn git_head(repository_root: &Path) -> WorkflowResult<String> {
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository_root)
+    let output = archon_shell::spawn::git_command(repository_root)
         .args(["rev-parse", "--verify", "-q", "HEAD"])
         .output()
         .map_err(|source| WorkflowError::io(repository_root, source))?;
@@ -196,9 +192,7 @@ impl RepositoryTree {
         }
         let mut at_base = BTreeSet::new();
         if record.base_commit != UNBORN_BASE_COMMIT {
-            let output = archon_shell::spawn::command("git")
-                .arg("-C")
-                .arg(&root)
+            let output = archon_shell::spawn::git_command(&root)
                 .args([
                     "ls-tree",
                     "-r",

@@ -66,7 +66,7 @@ impl Tool for PowerShellTool {
             Err(result) => return result,
         };
 
-        let mut cmd = bash_write_sandbox::command(shell, boundary.as_ref());
+        let (mut cmd, report) = bash_write_sandbox::command(shell, boundary.as_ref());
         // The host overlay copies raw jobserver flags; the helper sanitizes
         // them after the overlay, as for the Bash tool.
         archon_shell::spawn::replace_environment(cmd.as_std_mut(), env_vars);
@@ -85,6 +85,7 @@ impl Tool for PowerShellTool {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("PowerShell not available ({shell}): {e}")),
         };
+        tracing::warn!("child seal outcome: {report}");
         // Issue-134: the whole group ends with this call, however it ends.
         let _live = crate::bash::LiveGroup::arm(child.id(), &ctx.session_id);
 

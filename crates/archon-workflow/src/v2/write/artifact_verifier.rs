@@ -168,6 +168,7 @@ pub(crate) fn run_supervised(
         .map_err(|error| {
             VerifierFailure::Environment(format!("artifact verifier could not start: {error}"))
         })?;
+    boundary.report_outcome();
     let pid = child.id();
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());

@@ -7,7 +7,6 @@
 //! runs the declared contract's own verifier itself and judges the branch on
 //! what that subprocess printed. Different input, different trust model, no
 //! shared state; the two sides call nothing of each other's.
-
 use crate::task_universe::WorkflowV2DeliverableContract;
 use crate::v2::deliverable_contract::ContractRoots;
 use crate::v2::{
@@ -318,6 +317,7 @@ pub(super) async fn run_contract_verifier_for(
             ));
         }
     };
+    boundary.report_outcome();
     let pid = child.id();
     // Issue-134: dropped mid-run, the whole group goes with it.
     let _group = crate::v2::write::test_baseline_run::GroupKillOnDrop(pid);

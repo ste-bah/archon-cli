@@ -1,49 +1,42 @@
-//! Issue-227: the Linux write boundary, a Landlock ruleset applied to the
-//! child between `fork` and `exec`.
+//! Write boundaries applied to a child between fork and exec.
 //!
-//! # Mapping the macOS profile onto Landlock
+//! # Complement mapping
 //!
-//! The `sandbox-exec` profile allows every write, denies writes under the
-//! sealed roots and re-opens the writable entries inside them. Landlock
-//! cannot deny: a ruleset handles a set of access rights and refuses each of
-//! them everywhere except beneath a path a rule allows. So the same boundary
-//! is drawn as its complement ([`plan`]): for every ancestor of a sealed
-//! root, a rule on each entry beside the path down to the root (never the
-//! root, never another ancestor, never a symlink), plus a rule on each
-//! writable entry that does not contain a sealed root. Writes everywhere a
-//! toolchain writes stay allowed; under a sealed root only the re-opened
-//! entries are.
+//! A deny profile permits ordinary writes, seals protected roots and reopens
+//! declared writable entries. An allow-only ruleset represents that boundary
+//! with its complement: [`plan`] grants siblings beside each ancestor of a
+//! protected root, excluding roots, ancestors and symbolic links. Explicit
+//! writable entries are granted only when they contain no protected root.
+//! File roots and directory roots use the same complement planner.
 //!
-//! Only the write rights are handled (`WRITE_FILE`, `TRUNCATE`, the `MAKE_*`
-//! and `REMOVE_*` rights, `REFER`), so reading and executing are untouched.
-//! Resolution is the kernel's: a symlink, a hard link, `..` and a rename are
-//! all judged on the real hierarchy.
+//! Reads and execution are untouched by the write ruleset. Resolution follows
+//! the real hierarchy, including symbolic links, parent traversal and renames.
 //!
-//! # Where it is stricter than the macOS profile
+//! # Stricter ancestor handling
 //!
-//! Landlock grants a directory's rights to everything beneath it, so it
-//! cannot let a command create an entry DIRECTLY in an ancestor of a sealed
-//! root without also opening the root. On Linux the command therefore cannot
-//! create, remove or rename entries directly in such an ancestor (existing
-//! entries beside the root stay writable), and a declared artifact file
-//! inside a sealed root is writable in place only: it cannot be created, nor
-//! replaced through a sibling, which the profile's `regex` rule allows. A
-//! host temp directory that contains a sealed root (a project under `/tmp`)
-//! is replaced, for the command, by a private directory inside it
-//! ([`LandlockSandbox::private_temp`]), so `mktemp` keeps working.
+//! New entries directly in an ancestor cannot be granted without opening its
+//! protected descendants. Existing siblings remain writable. Explicit file
+//! exceptions permit in-place writes, but not creation or atomic replacement.
+//! A temporary root containing a protected directory receives a private
+//! temporary child so temporary creation remains possible.
+//!
+//! # Private mount seals
+//!
+//! [`LandlockSandbox::build_sealed`] uses private recursive binds for existing
+//! protected paths and rename guards for their ancestors. It re-enters the
+//! working directory after mounting. Without a usable ruleset, other processes
+//! can expose unsealed mounts; failed preparation retains the uncontained fallback.
 //!
 //! # What it does not cover
 //!
-//! Metadata changes Landlock does not mediate (`chmod`, `utimes`, extended
-//! attributes) and a second mount of a sealed tree reached through a granted
-//! path. `PR_SET_NO_NEW_PRIVS` is set on the child, which Landlock requires:
-//! a set-uid program does not gain privileges inside a bounded command.
-//!
-//! ABI 3 (Linux 6.2) is the floor: before it `truncate(2)` is not mediated
-//! and a sealed file could be emptied. The probe refuses an older kernel
-//! rather than applying a partial ruleset (no best-effort compatibility).
+//! Complement rules do not mediate metadata changes or alternate mounts of a
+//! sealed tree reached through a grant. Mount seals do not protect absent
+//! startup files or replace process isolation. No-new-privileges prevents
+//! privilege gain across execution. ABI 3 is required for rulesets because
+//! earlier interfaces do not mediate truncation. Read rulesets are separate.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::Component;
+use std::path::{Path, PathBuf};
 
 /// Every access right this boundary handles.
 pub const HANDLED_RIGHTS: u64 = WRITE_FILE
@@ -60,7 +53,7 @@ pub const HANDLED_RIGHTS: u64 = WRITE_FILE
     | TRUNCATE;
 /// The rights a rule on a non-directory may carry.
 pub const FILE_RIGHTS: u64 = WRITE_FILE | TRUNCATE;
-/// The ABI floor; see the module docs.
+/// Require mediated truncation before installing a write boundary.
 pub const MIN_ABI: u32 = 3;
 
 const WRITE_FILE: u64 = 1 << 1;
@@ -78,7 +71,7 @@ const TRUNCATE: u64 = 1 << 14;
 
 /// The paths a ruleset sealing `protected` allows writes beneath: the
 /// complement of the sealed roots plus the `writable` entries that do not
-/// contain one. See the module docs.
+/// contain one.
 pub fn plan(protected: &[PathBuf], writable: &[PathBuf]) -> Vec<PathBuf> {
     let mut sealed = Vec::new();
     for root in protected.iter().filter(|root| root.is_absolute()) {
@@ -213,18 +206,25 @@ impl Drop for PrivateTemp {
 #[derive(Debug)]
 pub struct LandlockSandbox {
     #[cfg(target_os = "linux")]
-    ruleset: std::sync::Arc<std::os::fd::OwnedFd>,
+    ruleset: Option<std::sync::Arc<std::os::fd::OwnedFd>>,
+    #[cfg(target_os = "linux")]
+    mounts: Option<std::sync::Arc<mounts::MountSeals>>,
     private_temp: Option<PrivateTemp>,
     grants: usize,
 }
 
 impl LandlockSandbox {
-    /// Build the ruleset sealing `protected` and re-opening `writable`.
-    /// `temp_dirs` are the temp directories the command will be pointed at;
-    /// when one contains a sealed root, a private directory is created in it
-    /// and granted (see [`Self::private_temp`]). `Err` when any rule cannot
-    /// be added: the caller then runs nothing.
+    /// Preserve writes outside sealed directories and reopen the supplied exceptions.
+    /// File and directory roots both use complement grants.
     pub fn build(
+        protected: &[PathBuf],
+        writable: &[PathBuf],
+        temp_dirs: &[PathBuf],
+    ) -> Result<Self, String> {
+        Self::build_inner(protected, writable, temp_dirs)
+    }
+
+    fn build_inner(
         protected: &[PathBuf],
         writable: &[PathBuf],
         temp_dirs: &[PathBuf],
@@ -235,7 +235,11 @@ impl LandlockSandbox {
                 std::env::consts::OS
             ));
         }
-        let sealed: Vec<PathBuf> = protected.iter().flat_map(|root| spellings(root)).collect();
+        let sealed: Vec<_> = protected
+            .iter()
+            .filter(|path| !path.is_file())
+            .flat_map(|root| spellings(root))
+            .collect();
         let crowded = temp_dirs.iter().find(|dir| {
             dir.is_absolute()
                 && spellings(dir)
@@ -250,9 +254,40 @@ impl LandlockSandbox {
         let grants = plan(protected, &writable);
         Ok(Self {
             #[cfg(target_os = "linux")]
-            ruleset: std::sync::Arc::new(sys::ruleset(&grants)?),
+            ruleset: Some(std::sync::Arc::new(sys::ruleset(&grants)?)),
+            #[cfg(target_os = "linux")]
+            mounts: None,
             private_temp,
             grants: grants.len(),
+        })
+    }
+
+    /// Build a second write layer. Mount operations cannot follow an earlier restriction.
+    pub fn build_layered(
+        protected: &[PathBuf],
+        writable: &[PathBuf],
+        temp_dirs: &[PathBuf],
+    ) -> Result<Self, String> {
+        Self::build_inner(protected, writable, temp_dirs)
+    }
+
+    /// Probe namespace setup before preparing persistent paths.
+    #[cfg(target_os = "linux")]
+    pub fn probe_seals() -> Result<(), String> {
+        mounts::MountSeals::probe()
+    }
+
+    /// Seal existing paths with private mounts while allowing ordinary writes elsewhere.
+    #[cfg(target_os = "linux")]
+    pub fn build_sealed(protected: &[PathBuf]) -> Result<Self, String> {
+        let grants = vec![PathBuf::from(std::path::MAIN_SEPARATOR_STR)];
+        Ok(Self {
+            ruleset: None,
+            mounts: Some(std::sync::Arc::new(mounts::MountSeals::build(
+                protected, &grants,
+            )?)),
+            private_temp: None,
+            grants: 0,
         })
     }
 
@@ -265,14 +300,15 @@ impl LandlockSandbox {
             const READ_DIR: u64 = 1 << 3;
             let grants = plan(denied, &[]);
             return Ok(Self {
-                ruleset: std::sync::Arc::new(sys::ruleset_rights(
+                ruleset: Some(std::sync::Arc::new(sys::ruleset_rights(
                     &grants,
                     // REFER is denied even when omitted from handled rights.
                     // Preserve renames/hard links within readable trees; the
                     // separate write ruleset still judges every write.
                     READ_FILE | READ_DIR | REFER,
                     READ_FILE,
-                )?),
+                )?)),
+                mounts: None,
                 private_temp: None,
                 grants: grants.len(),
             });
@@ -284,8 +320,7 @@ impl LandlockSandbox {
         }
     }
 
-    /// The directory to point `TMPDIR`, `TMP` and `TEMP` at, when the host's
-    /// own temp directory contains a sealed root.
+    /// A private temporary directory when a supplied temporary root contains a seal.
     pub fn private_temp(&self) -> Option<&Path> {
         self.private_temp.as_ref().map(|temp| temp.0.as_path())
     }
@@ -295,22 +330,54 @@ impl LandlockSandbox {
         self.grants
     }
 
-    /// The hook that restricts the child, for a `pre_exec` (std's or
-    /// tokio's): it makes two raw syscalls and allocates nothing, so it is
-    /// safe between `fork` and `exec` of a multi-threaded host.
+    /// Install mount seals before restricting the child. The hook uses raw
+    /// syscalls and prepared buffers, with no allocation or host-state locks.
     #[cfg(target_os = "linux")]
     pub fn restrict_hook(&self) -> impl FnMut() -> std::io::Result<()> + Send + Sync + 'static {
-        let ruleset = std::sync::Arc::clone(&self.ruleset);
-        move || sys::restrict(&ruleset)
+        let ruleset = self.ruleset.clone();
+        let status = self
+            .mounts
+            .as_ref()
+            .map(|mounts| SealStatus::new(mounts.clone()));
+        move || {
+            if let Some(status) = &status {
+                status.apply();
+            }
+            match &ruleset {
+                Some(ruleset) => sys::restrict(ruleset),
+                None => Ok(()),
+            }
+        }
     }
 
-    /// Apply the ruleset to the child `command` starts, before it execs.
+    /// Apply the prepared restriction and retain a parent-side outcome reader.
     #[cfg(target_os = "linux")]
     pub fn install_std(&self, command: &mut std::process::Command) {
-        // SAFETY: see `restrict_hook`.
+        let _ = self.install_with_report(command);
+    }
+
+    /// Retain optional operation outcomes for queries made after spawn.
+    #[cfg(target_os = "linux")]
+    pub fn install_with_report(&self, command: &mut std::process::Command) -> Option<SealStatus> {
+        let status = self
+            .mounts
+            .as_ref()
+            .map(|mounts| SealStatus::new(mounts.clone()));
+        let ruleset = self.ruleset.clone();
+        let child_status = status.clone();
+        // SAFETY: only prepared buffers and raw calls are used in the child.
         unsafe {
-            std::os::unix::process::CommandExt::pre_exec(command, self.restrict_hook());
+            std::os::unix::process::CommandExt::pre_exec(command, move || {
+                if let Some(status) = &child_status {
+                    status.apply();
+                }
+                match &ruleset {
+                    Some(ruleset) => sys::restrict(ruleset),
+                    None => Ok(()),
+                }
+            });
         }
+        status
     }
 }
 
@@ -325,23 +392,9 @@ pub fn probe() -> Result<u32, String> {
              truncate(2) is not restricted before it"
         ));
     }
-    let sandbox = LandlockSandbox::build(&[], &[], &[])?;
-    let mut trial = crate::spawn::command("/bin/sh");
-    trial
-        .args(["-c", ":"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    sandbox.install_std(&mut trial);
-    match trial.status() {
-        Ok(status) if status.success() => Ok(abi),
-        Ok(status) => Err(format!(
-            "a Landlock-restricted trial child failed: {status}"
-        )),
-        Err(error) => Err(format!(
-            "a Landlock ruleset cannot be applied to a child of this process: {error}"
-        )),
-    }
+    let ruleset = sys::ruleset(&[])?;
+    sys::probe_restriction(&ruleset)?;
+    Ok(abi)
 }
 
 #[cfg(target_os = "linux")]
@@ -351,3 +404,17 @@ mod sys;
 #[cfg(test)]
 #[path = "write_boundary_landlock_tests.rs"]
 mod tests;
+
+#[cfg(target_os = "linux")]
+#[path = "write_boundary_mounts.rs"]
+mod mounts;
+
+#[cfg(target_os = "linux")]
+#[path = "write_boundary_seal_status.rs"]
+mod seal_status;
+#[cfg(target_os = "linux")]
+pub use seal_status::SealStatus;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "write_boundary_seal_kernel_tests.rs"]
+mod seal_kernel_tests;

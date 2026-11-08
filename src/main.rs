@@ -51,6 +51,17 @@ fn main() -> Result<()> {
     unsafe {
         archon_shell::process_nofile::initialize();
     }
+    let _host_run = archon_shell::spawn::host_run();
+    if let Err(reason) = archon_shell::spawn::initialize_host_tools() {
+        tracing::warn!(%reason, "boundary launches unavailable");
+    }
+    if let Ok(root) = std::env::current_dir() {
+        if root.ancestors().any(|p| p.join(".git").exists()) {
+            if let Err(reason) = archon_shell::spawn::register_repository(&root) {
+                tracing::warn!(%reason, "repository boundary launches unavailable");
+            }
+        }
+    }
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?

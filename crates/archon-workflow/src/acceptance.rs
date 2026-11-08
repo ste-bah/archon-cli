@@ -114,6 +114,22 @@ pub(crate) fn run_verify_command_capture(
     command: Option<&str>,
     policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
 ) -> Result<Option<VerifyCommandReport>, String> {
+    run_verify_with_command(root, command, policy, |environment| {
+        environment.command_with_report(shell_program())
+    })
+}
+
+fn run_verify_with_command(
+    root: &Path,
+    command: Option<&str>,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
+    prepare: impl Fn(
+        &crate::acceptance_check_environment::CommandEnvironment,
+    ) -> (
+        std::process::Command,
+        archon_shell::read_boundary::LaunchReport,
+    ),
+) -> Result<Option<VerifyCommandReport>, String> {
     let Some(command) = command else {
         return Ok(None);
     };
@@ -121,19 +137,21 @@ pub(crate) fn run_verify_command_capture(
     if command.is_empty() {
         return Ok(None);
     }
+    let _host_run = archon_shell::spawn::host_run();
     let environment = crate::acceptance_check_environment::CommandEnvironment::capture(policy)?
         .with_remedy("Supply an operator-owned CheckPolicy (with the needed names in forwarded) to run_verify_command_with_policy or evaluate_with_policy; those APIs consume the explicit policy, not a project config file");
     // Issue 554: the shell that runs it parses it first (`-n`); under bash's
     // POSIX mode a parse error after `trap ... EXIT` exits with the trap's 0.
     // The rule is unconditional (`acceptance_check_shell::PARSE_RULE`), and
     // it reads only the command, never a file it sources.
-    let mut process = environment.command(shell_program());
+    let (mut process, boundary_report) = prepare(&environment);
     process.arg("-n").arg("-c").arg(command).current_dir(root);
     archon_shell::read_boundary::prepare_spawn(&process)
-        .map_err(|err| format!("verify_command failed to launch: {err}"))?;
-    if let Ok(parsed) = process.output()
-        && !parsed.status.success()
-    {
+        .map_err(|err| format!("verify_command failed to launch: {err}; {boundary_report}"))?;
+    let parsed = process.output().map_err(|err| {
+        format!("verify_command parse check failed to launch: {err}; {boundary_report}")
+    })?;
+    if !parsed.status.success() {
         let stderr = String::from_utf8_lossy(&parsed.stderr).trim().to_string();
         return Ok(Some(VerifyCommandReport {
             command: command.to_string(),
@@ -145,18 +163,17 @@ pub(crate) fn run_verify_command_capture(
                 stderr.clone()
             }),
             stderr,
-            environment_note: None,
+            environment_note: archon_shell::read_boundary::observation_note(boundary_report),
         }));
     }
-    let mut process = environment.command(shell_program());
+    let (mut process, boundary_report) = prepare(&environment);
     process.arg("-c").arg(command).current_dir(root);
     let output = archon_shell::read_boundary::prepare_spawn(&process)
         .and_then(|()| process.output())
-        .map_err(|err| format!("verify_command failed to launch: {err}"))?;
+        .map_err(|err| format!("verify_command failed to launch: {err}; {boundary_report}"))?;
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let environment_note = (!output.status.success())
-        .then(|| environment.note(&[&output.stdout, &output.stderr]))
-        .flatten();
+    let environment_note =
+        verify_environment_note(&environment, &output, boundary_report.to_string());
     Ok(Some(VerifyCommandReport {
         command: command.to_string(),
         exit_code: output.status.code(),
@@ -165,6 +182,23 @@ pub(crate) fn run_verify_command_capture(
         environment_note,
         parse_error: None,
     }))
+}
+
+pub(crate) fn verify_environment_note(
+    environment: &crate::acceptance_check_environment::CommandEnvironment,
+    output: &std::process::Output,
+    boundary_report: String,
+) -> Option<String> {
+    let mut note = archon_shell::read_boundary::observation_note(boundary_report);
+    if !output.status.success()
+        && let Some(reason) = environment.note(&[&output.stdout, &output.stderr])
+    {
+        note = Some(match note {
+            Some(boundary) => format!("{reason} {boundary}"),
+            None => reason,
+        });
+    }
+    note
 }
 
 /// The shell used to run `verify_command`.
@@ -449,3 +483,7 @@ pub fn test_work_counts(text: &str) -> Vec<u64> {
         .filter_map(|caps| caps.get(1)?.as_str().parse().ok())
         .collect()
 }
+
+#[cfg(test)]
+#[path = "acceptance_report_tests.rs"]
+mod report_tests;

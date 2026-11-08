@@ -56,12 +56,15 @@ pub(crate) fn prepare_parent(run_dir: &Path, relative: &Path) -> WorkflowResult<
 }
 
 fn private_directory(path: &Path) -> WorkflowResult<()> {
-    let mut builder = DirBuilder::new();
     #[cfg(unix)]
-    {
+    let builder = {
         use std::os::unix::fs::DirBuilderExt;
+        let mut builder = DirBuilder::new();
         builder.mode(0o700);
-    }
+        builder
+    };
+    #[cfg(not(unix))]
+    let builder = DirBuilder::new();
     if let Err(error) = builder.create(path)
         && error.kind() != std::io::ErrorKind::AlreadyExists
     {

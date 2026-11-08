@@ -222,9 +222,7 @@ impl EvidenceIndex {
     /// `git grep` for whole word `word` at `revision` (the checkout when
     /// `None`), under `dir` when given.
     fn grep(&self, word: &str, revision: Option<&str>, dir: Option<&str>) -> bool {
-        archon_shell::spawn::command("git")
-            .arg("-C")
-            .arg(self.tree.root())
+        archon_shell::spawn::git_command(self.tree.root())
             .args(["grep", "-q", "-I", "-w", "-F", "-e", word])
             .args(revision)
             .arg("--")
@@ -237,9 +235,7 @@ impl EvidenceIndex {
         if self.base() == UNBORN_BASE_COMMIT || !self.tree.exists_at_base(path) {
             return String::new();
         }
-        archon_shell::spawn::command("git")
-            .arg("-C")
-            .arg(self.tree.root())
+        archon_shell::spawn::git_command(self.tree.root())
             .args(["cat-file", "blob", &format!("{}:{path}", self.base())])
             .output()
             .ok()

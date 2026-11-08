@@ -26,6 +26,9 @@ fn operator(case: &str, path: bool, check: impl FnOnce(&Path)) {
             child.env(key, root.path().join("cold-default"));
         }
     }
+    if let Some(ci) = std::env::var_os("CI") {
+        child.env("CI", ci);
+    }
     let output = child.output().unwrap();
     assert!(
         output.status.success(),
@@ -295,5 +298,48 @@ fn r5_stage_actual_after_expectation_note_is_separate() {
     stage_note_case(
         "r5_stage_actual_after_expectation_note_is_separate",
         "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr\nFIXTURE_API_KEY environment variable is not set",
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn read_boundary_existing_user_configuration_allows_host_verifiers() {
+    operator(
+        "read_boundary_existing_user_configuration_allows_host_verifiers",
+        true,
+        |home| {
+            if !matches!(mechanism(), Ok(Mechanism::Landlock { .. })) {
+                assert!(std::env::var_os("CI").is_none(), "CI requires Landlock");
+                return;
+            }
+            let file = home.join(".archon/config.toml");
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "original").unwrap();
+            let project = home.join("project");
+            let run = project.join(".archon/workflows/run1");
+            let worktree = run.join("v2/worktrees/impl/impl-0");
+            std::fs::create_dir_all(&worktree).unwrap();
+            crate::write_coordinator::project_inputs::write_test_policy(&run, &project, &["data"]);
+            for (script, success) in [
+                ("printf allowed > own", true),
+                ("printf forged > \"$1\"", false),
+            ] {
+                let (mut child, boundary, _) = command(
+                    Path::new("/bin/sh"),
+                    Some(&run),
+                    std::slice::from_ref(&worktree),
+                )
+                .unwrap();
+                let output = child
+                    .args(["-c", script, "probe"])
+                    .arg(&file)
+                    .current_dir(&worktree)
+                    .output()
+                    .unwrap();
+                boundary.finish("test").unwrap();
+                assert_eq!(output.status.success(), success, "{output:?}");
+            }
+            assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+        },
     );
 }

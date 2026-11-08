@@ -459,9 +459,7 @@ pub(super) fn scratch_request(
 /// dirty. `None` when the root is not a git checkout.
 pub(super) fn git_head(repository: &Path) -> (Option<String>, bool) {
     let git = |args: &[&str]| {
-        archon_shell::spawn::command("git")
-            .arg("-C")
-            .arg(repository)
+        archon_shell::spawn::git_command(repository)
             .args(args)
             .output()
             .ok()

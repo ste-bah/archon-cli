@@ -75,14 +75,7 @@ pub(super) fn clone_head(source: &Path, destination: &Path) -> Result<String, Un
 }
 
 pub(super) fn git_head(path: &Path) -> Result<String, Unrun> {
-    let output = archon_shell::spawn::command("git")
-        .args(["-C"])
-        .arg(
-            archon_shell::paths::try_plain(path.to_path_buf()).map_err(|e| {
-                let text = format!("git rev-parse HEAD in {}: {e}", path.display());
-                Unrun::error(e.into(), text)
-            })?,
-        )
+    let output = archon_shell::spawn::git_command(path)
         .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|error| {

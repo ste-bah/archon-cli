@@ -52,6 +52,31 @@ pub(crate) fn run_wave_verify_prepared(
     stage_id: &str,
     environment: Option<crate::acceptance_check_environment::CommandEnvironment>,
 ) -> Result<VerifyResult, ApplyError> {
+    run_with_command(
+        canonical_root,
+        verify_command,
+        wave_id,
+        run_root,
+        stage_id,
+        environment,
+        |environment| environment.command_with_report(crate::acceptance::shell_program()),
+    )
+}
+
+fn run_with_command(
+    canonical_root: &Path,
+    verify_command: Option<&str>,
+    wave_id: WaveId,
+    run_root: &Path,
+    stage_id: &str,
+    environment: Option<crate::acceptance_check_environment::CommandEnvironment>,
+    command: impl FnOnce(
+        &crate::acceptance_check_environment::CommandEnvironment,
+    ) -> (
+        std::process::Command,
+        archon_shell::read_boundary::LaunchReport,
+    ),
+) -> Result<VerifyResult, ApplyError> {
     let Some(cmd) = verify_command.filter(|command| !command.trim().is_empty()) else {
         let result = VerifyResult {
             exit: 0,
@@ -67,8 +92,9 @@ pub(crate) fn run_wave_verify_prepared(
     let environment = environment
         .ok_or_else(|| ApplyError::VerifyEnvironment("verify environment was not prepared".into()))?
         .with_remedy(crate::acceptance_check_environment::RUN_POLICY_REMEDY);
+    let _host_run = archon_shell::spawn::host_run();
     let start = SystemTime::now();
-    let mut process = environment.command(crate::acceptance::shell_program());
+    let (mut process, boundary_report) = command(&environment);
     process.arg("-c").arg(cmd).current_dir(canonical_root);
     let output = archon_shell::read_boundary::prepare_spawn(&process)
         .and_then(|()| process.output())
@@ -80,9 +106,11 @@ pub(crate) fn run_wave_verify_prepared(
             }
         })?;
     let duration_ms = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
-    let environment_note = (!output.status.success())
-        .then(|| environment.note(&[&output.stdout, &output.stderr]))
-        .flatten();
+    let environment_note = crate::acceptance::verify_environment_note(
+        &environment,
+        &output,
+        boundary_report.to_string(),
+    );
     let stderr_tail = utf8_safe_tail(&output.stderr, TAIL_BYTES);
     let result = VerifyResult {
         exit: output.status.code().unwrap_or(-1),
@@ -120,6 +148,44 @@ mod environment_preflight_tests {
         std::fs::create_dir_all(root.path().join("v2")).unwrap();
         std::fs::write(root.path().join("v2/generated-metadata.json"), metadata).unwrap();
         root
+    }
+
+    #[test]
+    fn successful_verify_on_contained_host_omits_environment_note() {
+        let environment = crate::acceptance_check_environment::CommandEnvironment::from_host(
+            &std::collections::BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
+            None,
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let boundary = "Filesystem read boundary: named-paths-denied; operator config/autostart writes: named-paths-denied";
+        let result = run_with_command(
+            root.path(),
+            Some("printf ok"),
+            1,
+            root.path(),
+            "check",
+            Some(environment),
+            |_| {
+                (
+                    archon_shell::spawn::command(crate::acceptance::shell_program()),
+                    boundary.into(),
+                )
+            },
+        )
+        .unwrap();
+        assert_eq!(result.exit, 0);
+        assert_eq!(result.stdout_tail, "ok");
+        assert_eq!(result.environment_note, None);
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                root.path()
+                    .join("write-coordination/stages/check/tests/1.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(persisted["environment_note"].is_null());
     }
 
     #[test]

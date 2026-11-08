@@ -157,3 +157,49 @@ pub(super) fn restrict(ruleset: &OwnedFd) -> io::Result<()> {
     }
     Ok(())
 }
+
+/// Test restriction in a disposable child without resolving any host executable.
+pub(super) fn probe_restriction(ruleset: &OwnedFd) -> Result<(), String> {
+    // SAFETY: the child only restricts itself with raw syscalls and exits.
+    let pid = unsafe { crate::spawn::fork_probe() };
+    if pid < 0 {
+        return Err(format!(
+            "Landlock trial fork failed: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    if pid == 0 {
+        let code = match restrict(ruleset) {
+            Ok(()) => 0,
+            Err(error) => error.raw_os_error().unwrap_or(libc::EIO),
+        };
+        // Linux errno values fit in the exit status byte.
+        unsafe {
+            libc::_exit(code);
+        }
+    }
+    let mut status = 0;
+    loop {
+        // SAFETY: wait for exactly the child created above, into a valid buffer.
+        if unsafe { libc::waitpid(pid, &mut status, 0) } >= 0 {
+            break;
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::EINTR) {
+            return Err(format!("Landlock trial wait failed: {error}"));
+        }
+    }
+    if !libc::WIFEXITED(status) {
+        return Err(format!(
+            "Landlock trial child did not exit normally: wait status {status}"
+        ));
+    }
+    let errno = libc::WEXITSTATUS(status);
+    if errno != 0 {
+        return Err(format!(
+            "a Landlock ruleset cannot be applied to a child of this process: {}",
+            io::Error::from_raw_os_error(errno)
+        ));
+    }
+    Ok(())
+}

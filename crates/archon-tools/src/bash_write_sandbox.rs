@@ -172,8 +172,9 @@ pub(crate) fn for_call(
                 .filter_map(|key| env.iter().rev().find(|(name, _)| name == key))
                 .map(|(_, value)| PathBuf::from(value))
                 .collect();
-            let sandbox = LandlockSandbox::build(&boundary.protected, &boundary.writable, &temps)
-                .map_err(|reason| fail_closed("This bounded shell", &reason))?;
+            let sandbox =
+                LandlockSandbox::build_layered(&boundary.protected, &boundary.writable, &temps)
+                    .map_err(|reason| fail_closed("This bounded shell", &reason))?;
             if let Some(dir) = sandbox.private_temp() {
                 for key in TEMP_ENV_KEYS {
                     crate::bash::bash_env::set_env_override(env, key, &dir.to_string_lossy());

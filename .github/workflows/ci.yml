@@ -721,6 +721,11 @@ jobs:
             throw 'Archive build paths differ from shard paths; env! literals cannot be remapped'
           }
 
+      # Issues #564/#581: private mount seals need unprivileged user namespaces.
+      - name: Allow private mount namespaces for Linux boundary tests
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       # Main run 41990470644: the extracted test build is ~79G (job
       # 127143481207, 41G -> 120G used during extraction on a 145G disk), and
       # the 16G archive sat beside it. Extract once and delete only the

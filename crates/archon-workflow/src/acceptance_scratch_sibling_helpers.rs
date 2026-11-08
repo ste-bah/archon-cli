@@ -25,12 +25,7 @@ pub(super) fn site_destination_first_component(
 }
 
 pub(super) fn git_head(path: &Path) -> WorkflowResult<String> {
-    let output = archon_shell::spawn::command("git")
-        .args(["-C"])
-        .arg(
-            archon_shell::paths::try_plain(path.to_path_buf())
-                .map_err(|error| WorkflowError::io(path, error))?,
-        )
+    let output = archon_shell::spawn::git_command(path)
         .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|error| WorkflowError::io(path, error))?;

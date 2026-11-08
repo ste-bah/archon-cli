@@ -10,6 +10,7 @@ pub async fn run_at(
         crate::task_set_contract::TrustedCwd::ProjectRoot => site.project,
         crate::task_set_contract::TrustedCwd::RepoRoot => site.repository,
     };
+    let _host_run = archon_shell::spawn::host_run();
     let mut environment = site.environment.clone();
     let mut values: Vec<_> = environment.into_iter().collect();
     archon_tools::workflow_resource_env::apply_workflow_resource_defaults(
@@ -19,7 +20,26 @@ pub async fn run_at(
         &site.resource_limits,
     );
     environment = values.into_iter().collect();
-    let mut process = archon_shell::spawn::tokio_command(archon_shell::resolve_posix_shell());
+    let (process, boundary_report) = archon_shell::read_boundary::command_with_report(
+        archon_shell::resolve_posix_shell().as_os_str(),
+    );
+    if boundary_report.contains("launch-refused") {
+        return Ok(CheckResult {
+            acceptance_id: id.into(),
+            exit_code: None,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            operational_error: Some(format!(
+                "Check launch refused: required filesystem boundary could not be prepared. It was NOT run. {boundary_report}"
+            )),
+            environment_note: Some(boundary_report.to_string()),
+            verdict_streams: Default::default(),
+            fault: None,
+            classification: None,
+            quota_walk_count: 0,
+        });
+    }
+    let mut process = tokio::process::Command::from(process);
     archon_shell::spawn::replace_environment(process.as_std_mut(), environment);
     process
         .arg("-s")
@@ -28,6 +48,9 @@ pub async fn run_at(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    archon_shell::read_boundary::prepare_spawn(process.as_std())
+        .map_err(|e| WorkflowError::io(cwd, e))?;
+    tracing::info!(acceptance_id = id, boundary = %boundary_report, "check command launch");
     // A scratch slot lists every group it spawns, so a later holder can
     // tell whether one outlived a killed observation (`cache`).
     if let Some(root) = site.audit_root {
@@ -44,6 +67,7 @@ pub async fn run_at(
     let mut owned = spawn_confined(process, cwd)?;
     #[cfg(windows)]
     let child = &mut owned.child;
+    tracing::info!(boundary = %boundary_report, "child seal outcome");
     let leader = child
         .id()
         .ok_or_else(|| invalid("scratch child has no process id"))?;
@@ -227,7 +251,7 @@ pub async fn run_at(
         stdout: std::mem::take(&mut pipes.0.0),
         stderr: std::mem::take(&mut pipes.1.0),
         operational_error: error,
-        environment_note: None,
+        environment_note: archon_shell::read_boundary::observation_note(boundary_report),
     };
     finish::finish(
         result,

@@ -9,9 +9,10 @@
 //! environment the one check-environment rule gives every site
 //! (`acceptance_check_environment`, Issue 345): built from the host
 //! environment the caller hands over, never that environment itself, with
-//! the host's HOME in the live checkout (no filesystem sandbox makes a fresh
-//! one a boundary there) and a fresh one per check in a probe's copy --
-//! through the SAME bounded process-group runner the
+//! the host's HOME in the live checkout and a fresh one per check in a
+//! probe's copy. Named operator-store read denials apply where the host
+//! supports them; each launched check records the actual containment. Both
+//! sites use the SAME bounded process-group runner the
 //! scratch observer uses. There is one runner; this is the second place it
 //! is pointed at.
 //!
@@ -213,7 +214,13 @@ pub async fn run_check_direct_with_plan(
 /// Preserve the failed result and persist a separate withheld-name note.
 fn with_withheld_note(mut result: CheckResult, withheld: &BTreeSet<String>) -> CheckResult {
     if !result.passed() && result.operational_error.is_none() {
-        result.environment_note = withheld_note(&[&result.stdout, &result.stderr], withheld);
+        if let Some(note) = withheld_note(&[&result.stdout, &result.stderr], withheld) {
+            let existing = result.environment_note.get_or_insert_with(String::new);
+            if !existing.is_empty() {
+                existing.push('\n');
+            }
+            existing.push_str(&note);
+        }
     }
     result
 }

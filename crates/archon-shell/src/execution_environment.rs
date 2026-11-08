@@ -396,6 +396,22 @@ pub fn tokio_command(program: impl AsRef<OsStr>) -> tokio::process::Command {
     tokio::process::Command::from(command(program))
 }
 
+/// Retain the launch outcome for inspection after spawning.
+pub fn command_with_report(
+    program: impl AsRef<OsStr>,
+) -> (Command, crate::read_boundary::LaunchReport) {
+    let (mut command, report) = crate::read_boundary::command_with_report(program.as_ref());
+    apply(&mut command);
+    (command, report)
+}
+
+pub fn tokio_command_with_report(
+    program: impl AsRef<OsStr>,
+) -> (tokio::process::Command, crate::read_boundary::LaunchReport) {
+    let (command, report) = command_with_report(program);
+    (command.into(), report)
+}
+
 /// Host-client connection bindings; never passed into the agent payload.
 pub const SSH_CLIENT_BINDINGS: &[&str] = &["SSH_AUTH_SOCK"];
 /// Docker CLI routing and authentication locations, used by the local client.

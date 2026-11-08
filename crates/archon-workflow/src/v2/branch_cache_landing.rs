@@ -198,8 +198,7 @@ fn blob_state(root: &Path, commit: &str, path: &str) -> Result<String, String> {
 }
 
 fn ignored(root: &Path, path: &str) -> Result<bool, String> {
-    let status = archon_shell::spawn::command("git")
-        .current_dir(root)
+    let status = archon_shell::spawn::git_command(root)
         .args(["check-ignore", "-q", "--", path])
         .status()
         .map_err(|error| format!("git check-ignore: {error}"))?;

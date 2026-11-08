@@ -30,9 +30,7 @@ pub(super) fn repository_regular_blob(
     }
     #[cfg(test)]
     budget_tests::record_body_read();
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    let output = archon_shell::spawn::git_command(repository)
         .args(["cat-file", "blob", &format!("{commit}:{path}")])
         .output()
         .ok()?;
@@ -44,9 +42,7 @@ pub(super) fn repository_tree_entry(
     commit: &str,
     path: &str,
 ) -> Option<Vec<u8>> {
-    let tree_entry = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    let tree_entry = archon_shell::spawn::git_command(repository)
         .args([
             "ls-tree",
             "-l",

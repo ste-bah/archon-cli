@@ -211,6 +211,7 @@ async fn a_sibling_pipe_does_not_reach_the_bash_tool_shell() {
         ends[0], ends[1]
     );
     let output = super::bash_containment::contained_bash_command(&probe, None)
+        .0
         .stdin(std::process::Stdio::null())
         .output()
         .await;

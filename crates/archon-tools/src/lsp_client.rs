@@ -161,7 +161,7 @@ impl LspClient {
         });
 
         // Spawn the server process
-        let mut command = bash_write_sandbox::command(binary, boundary.as_ref());
+        let (mut command, report) = bash_write_sandbox::command(binary, boundary.as_ref());
         archon_shell::spawn::replace_environment(command.as_std_mut(), env);
         command
             .args(args)
@@ -171,6 +171,7 @@ impl LspClient {
             .kill_on_drop(true);
         archon_shell::read_boundary::prepare_spawn(command.as_std())?;
         let mut child = command.spawn()?;
+        tracing::warn!("child seal outcome: {report}");
 
         let stdout = child
             .stdout

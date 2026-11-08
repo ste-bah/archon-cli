@@ -26,21 +26,25 @@ pub(super) fn env_dirs(env: &[(String, String)], extra: &[String]) -> Vec<PathBu
 pub(crate) fn command(
     program: impl AsRef<std::ffi::OsStr>,
     boundary: Option<&ShellBoundary>,
-) -> tokio::process::Command {
+) -> (
+    tokio::process::Command,
+    archon_shell::read_boundary::LaunchReport,
+) {
     match boundary.map(|boundary| &boundary.applied) {
         Some(Applied::SandboxExec(profile)) => {
             let mut command =
                 archon_shell::spawn::tokio_command(archon_shell::write_boundary::SANDBOX_EXEC);
             command.arg("-p").arg(profile).arg("--").arg(program);
             tracing::info!(writes = "kernel-boundary", "agent tool launch");
-            command
+            (command, "named-paths-denied".into())
         }
         #[cfg(target_os = "linux")]
         Some(Applied::Landlock(sandbox)) => {
-            let mut command = archon_shell::execution_environment::tokio_command(program);
+            let (mut command, report) =
+                archon_shell::execution_environment::tokio_command_with_report(program);
             sandbox.install_std(command.as_std_mut());
             tracing::info!(writes = "kernel-boundary", "agent tool launch");
-            command
+            (command, report)
         }
         #[cfg(not(target_os = "linux"))]
         Some(Applied::Landlock(_)) => unreachable!("Linux-only boundary"),
@@ -50,7 +54,7 @@ pub(crate) fn command(
                 snapshot = other.is_some(),
                 "agent tool launch: kernel write isolation unavailable or no workflow boundary"
             );
-            archon_shell::execution_environment::tokio_command(program)
+            archon_shell::execution_environment::tokio_command_with_report(program)
         }
     }
 }
@@ -101,6 +105,7 @@ pub(crate) fn apply_pty(
 pub struct PipelineBoundary {
     boundary: Option<ShellBoundary>,
     env: Vec<(String, String)>,
+    reports: std::sync::Mutex<Vec<archon_shell::read_boundary::LaunchReport>>,
 }
 
 impl PipelineBoundary {
@@ -125,17 +130,33 @@ impl PipelineBoundary {
         let boundary = for_call(&ctx, &mut env, &[]).map_err(|error| {
             std::io::Error::new(std::io::ErrorKind::PermissionDenied, error.content)
         })?;
-        Ok(Self { boundary, env })
+        Ok(Self {
+            boundary,
+            env,
+            reports: Default::default(),
+        })
     }
 
     pub fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
-        let mut command = command(program, self.boundary.as_ref());
+        let (mut command, report) = command(program, self.boundary.as_ref());
+        self.reports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(report);
         archon_shell::execution_environment::apply(command.as_std_mut());
         command.envs(self.env.iter().cloned());
         command
     }
 
     pub fn settle(&self) -> std::io::Result<()> {
+        for report in self
+            .reports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+        {
+            tracing::warn!("child seal outcome: {report}");
+        }
         if let Some(ShellBoundary {
             applied: Applied::HostSnapshot(snapshot),
             ..

@@ -338,9 +338,7 @@ fn filesystem_object(path: &Path, metadata: &std::fs::Metadata) -> Option<serde_
 /// Add the committed Git entries as a secondary key factor. Filesystem state
 /// above remains the proof for uncommitted and empty-directory inputs.
 fn tree_closure(repository: &Path, path: &str) -> Option<String> {
-    let head = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    let head = archon_shell::spawn::git_command(repository)
         .args(["rev-parse", "HEAD"])
         .output()
         .ok()?;
@@ -348,9 +346,7 @@ fn tree_closure(repository: &Path, path: &str) -> Option<String> {
         return None;
     }
     let commit = String::from_utf8_lossy(&head.stdout).trim().to_string();
-    let entries = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    let entries = archon_shell::spawn::git_command(repository)
         .args(["ls-tree", "-r", "-t", "-z", &commit, "--", path])
         .output()
         .ok()?;

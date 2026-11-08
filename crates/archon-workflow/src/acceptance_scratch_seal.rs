@@ -105,7 +105,7 @@ impl TreeSeal {
     }
 
     /// Files read and hashed so far.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn hashed(&self) -> usize {
         self.hashed
     }

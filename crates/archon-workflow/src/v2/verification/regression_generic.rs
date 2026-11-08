@@ -88,9 +88,7 @@ fn sanitize(text: &str) -> String {
 }
 
 fn git(root: &Path, args: &[&std::ffi::OsStr]) -> bool {
-    archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(root)
+    archon_shell::spawn::git_command(root)
         .args(args)
         .output()
         .is_ok_and(|output| output.status.success())

@@ -79,10 +79,13 @@ impl GitRunner for RealGit {
 }
 
 fn run_git(args: &[&str]) -> Result<String, String> {
-    let output = archon_shell::spawn::command("git")
-        .args(args)
-        .output()
-        .map_err(|e| format!("git not available: {}", e))?;
+    let output = archon_shell::spawn::git_command(
+        std::env::current_dir()
+            .map_err(|e| format!("host Git working directory unavailable: {e}"))?,
+    )
+    .args(args)
+    .output()
+    .map_err(|e| format!("git not available: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(

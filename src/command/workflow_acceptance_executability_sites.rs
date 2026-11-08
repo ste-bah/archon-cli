@@ -345,18 +345,14 @@ pub(super) fn object_id(text: &str) -> bool {
 /// Whether `commit` names a commit in `repository`.
 pub(super) fn resolves(repository: &Path, commit: &str) -> bool {
     object_id(commit)
-        && archon_shell::spawn::command("git")
-            .arg("-C")
-            .arg(repository)
+        && archon_shell::spawn::git_command(repository)
             .args(["cat-file", "-e", &format!("{commit}^{{commit}}")])
             .output()
             .is_ok_and(|output| output.status.success())
 }
 
 pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
-    archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    archon_shell::spawn::git_command(repository)
         .args(["rev-parse", "HEAD"])
         .output()
         .ok()
@@ -421,7 +417,7 @@ pub(super) fn scratch_environment(
 
 impl HostProbe {
     /// This probe with `host` as the host's environment.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn with_host_environment(mut self, host: BTreeMap<String, String>) -> Self {
         self.host = host;
         self

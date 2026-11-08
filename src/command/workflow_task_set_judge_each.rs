@@ -38,9 +38,7 @@ pub(super) fn with_commit(roots: &JudgeRoots) -> JudgeRoots {
             .as_deref()
             .and_then(|path| path.canonicalize().ok())
         {
-            let output = archon_shell::spawn::command("git")
-                .arg("-C")
-                .arg(repository)
+            let output = archon_shell::spawn::git_command(repository)
                 .args(["rev-parse", "HEAD"])
                 .output();
             resolved_roots.repository_commit = output.ok().and_then(|output| {

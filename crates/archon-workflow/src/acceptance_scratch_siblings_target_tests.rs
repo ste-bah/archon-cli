@@ -117,6 +117,7 @@ fn combined_view_still_refuses_a_real_preexisting_target() {
     use crate::acceptance_scratch::ScratchRoots;
 
     let fixture = target_fixture(true);
+    assert!(fixture.repository.join("target/committed.txt").is_file());
     let error = match ScratchRoots::prepare_inner_with_checks(&fixture.policy, &fixture.commit, &[])
     {
         Ok(_) => panic!("committed target content must remain a conflict"),

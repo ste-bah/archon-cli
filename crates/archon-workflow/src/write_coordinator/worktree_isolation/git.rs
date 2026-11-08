@@ -12,8 +12,7 @@ use std::process::{Output, Stdio};
 use super::IsolationError;
 
 pub(crate) fn run_git(args: &[&str], cwd: &Path) -> Result<Output, IsolationError> {
-    let output = archon_shell::spawn::command("git")
-        .current_dir(cwd)
+    let output = archon_shell::spawn::git_command(cwd)
         .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .args(args)
         .output()
@@ -32,8 +31,7 @@ pub(crate) fn run_git_with_stdin(
 fn raw_git_with_stdin(args: &[&str], cwd: &Path, stdin: &[u8]) -> Result<Output, IsolationError> {
     use std::io::Write;
 
-    let mut child = archon_shell::spawn::command("git")
-        .current_dir(cwd)
+    let mut child = archon_shell::spawn::git_command(cwd)
         .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .args(args)
         .stdin(Stdio::piped())

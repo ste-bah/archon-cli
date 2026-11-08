@@ -166,10 +166,8 @@ pub(super) fn outside_wait() -> Control {
 pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult<String> {
     use std::{io::Read, process::Stdio};
     check()?;
-    let mut command = archon_shell::spawn::command("git");
+    let mut command = archon_shell::spawn::git_command(root);
     command
-        .arg("-C")
-        .arg(root)
         .args(args)
         .args(paths)
         .env("LC_ALL", "C")

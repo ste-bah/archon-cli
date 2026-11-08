@@ -25,7 +25,7 @@ pub struct CheckResult {
     pub quota_walk_count: u64,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
-    /// Diagnostic about names withheld from the check, kept out of raw output.
+    /// Launch boundary and withheld-name diagnostics, kept out of raw output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment_note: Option<String>,
     pub operational_error: Option<String>,
@@ -352,3 +352,7 @@ mod windows_tests;
 #[path = "acceptance_scratch_process_run.rs"]
 mod run;
 pub use run::run_at;
+
+#[cfg(test)]
+#[path = "acceptance_scratch_read_boundary_tests.rs"]
+mod read_boundary_tests;

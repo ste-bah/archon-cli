@@ -101,9 +101,9 @@ pub(super) fn containment_for_platform(_platform: &str) -> BashContainment {
 pub(super) fn contained_bash_command(
     command_text: &str,
     boundary: Option<&super::bash_write_sandbox::Applied>,
-) -> Command {
+) -> (Command, archon_shell::read_boundary::LaunchReport) {
     use super::bash_write_sandbox::Applied;
-    let mut command = match boundary {
+    let (mut command, report) = match boundary {
         Some(Applied::SandboxExec(profile)) => {
             tracing::info!(
                 credential_reads = "named-paths-denied",
@@ -113,17 +113,19 @@ pub(super) fn contained_bash_command(
             let mut command =
                 archon_shell::spawn::tokio_command(archon_shell::write_boundary::SANDBOX_EXEC);
             command.arg("-p").arg(profile).arg(BASH_PROGRAM.as_path());
-            command
+            (command, "named-paths-denied".into())
         }
         #[cfg(target_os = "linux")]
         Some(Applied::Landlock(sandbox)) => {
-            let mut command =
-                archon_shell::execution_environment::tokio_command(BASH_PROGRAM.as_path());
-            // SAFETY: the hook makes two raw syscalls and allocates nothing.
+            let (mut command, report) =
+                archon_shell::execution_environment::tokio_command_with_report(
+                    BASH_PROGRAM.as_path(),
+                );
+            // SAFETY: the prepared hook uses syscalls without allocation.
             unsafe {
                 command.pre_exec(sandbox.restrict_hook());
             }
-            command
+            (command, report)
         }
         #[cfg(not(target_os = "linux"))]
         Some(Applied::Landlock(_)) => {
@@ -133,9 +135,11 @@ pub(super) fn contained_bash_command(
         // command itself; it was captured before and is restored after
         // (`bash_write_sandbox::annotate`). So the child is plain bash.
         Some(Applied::HostSnapshot(_)) => {
-            archon_shell::execution_environment::tokio_command(BASH_PROGRAM.as_path())
+            archon_shell::execution_environment::tokio_command_with_report(BASH_PROGRAM.as_path())
         }
-        None => archon_shell::execution_environment::tokio_command(BASH_PROGRAM.as_path()),
+        None => {
+            archon_shell::execution_environment::tokio_command_with_report(BASH_PROGRAM.as_path())
+        }
     };
     command.args(["--noprofile", "--norc"]);
     match containment_for_platform(std::env::consts::OS) {
@@ -167,7 +171,7 @@ pub(super) fn contained_bash_command(
             command.arg("-c").arg(command_text);
         }
     }
-    command
+    (command, report)
 }
 
 #[cfg(target_os = "linux")]

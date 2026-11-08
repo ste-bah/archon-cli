@@ -42,13 +42,21 @@ pub(crate) struct BoundaryGuard {
     // Held only for its Drop: the private temp dir lives until the child exits.
     _landlock: Option<LandlockSandbox>,
     snapshot: Option<SnapshotBoundary>,
+    report: Option<archon_shell::read_boundary::LaunchReport>,
 }
 
 impl BoundaryGuard {
+    pub(crate) fn report_outcome(&self) {
+        if let Some(report) = &self.report {
+            tracing::warn!("child seal outcome: {report}");
+        }
+    }
+
     fn landlock(sandbox: LandlockSandbox) -> Self {
         Self {
             _landlock: Some(sandbox),
             snapshot: None,
+            report: None,
         }
     }
 
@@ -56,6 +64,7 @@ impl BoundaryGuard {
         Self {
             _landlock: None,
             snapshot: Some(boundary),
+            report: None,
         }
     }
 
@@ -193,7 +202,16 @@ fn bounded_command(
     writable: &[PathBuf],
     environment: &CommandEnvironment,
 ) -> Result<(std::process::Command, BoundaryGuard), String> {
-    let unbounded = || Ok((environment.command(program), BoundaryGuard::default()));
+    let unbounded = || {
+        let (command, report) = environment.command_with_report(program);
+        Ok((
+            command,
+            BoundaryGuard {
+                report: Some(report),
+                ..Default::default()
+            },
+        ))
+    };
     let Some(run_root) = run_root else {
         return unbounded();
     };
@@ -220,9 +238,9 @@ fn bounded_command(
                 .map(PathBuf::from)
                 .chain([std::env::temp_dir()])
                 .collect();
-            let sandbox =
-                LandlockSandbox::build(&sealed, writable, &temps).map_err(|r| refused(&r))?;
-            let mut command = environment.command(program);
+            let sandbox = LandlockSandbox::build_layered(&sealed, writable, &temps)
+                .map_err(|r| refused(&r))?;
+            let (mut command, report) = environment.command_with_report(program);
             #[cfg(target_os = "linux")]
             sandbox.install_std(&mut command);
             if let Some(dir) = sandbox.private_temp() {
@@ -230,7 +248,9 @@ fn bounded_command(
                     command.env(key, dir);
                 }
             }
-            Ok((command, BoundaryGuard::landlock(sandbox)))
+            let mut guard = BoundaryGuard::landlock(sandbox);
+            guard.report = Some(report);
+            Ok((command, guard))
         }
         // Issue-234: no kernel boundary (Windows). The command runs, and the
         // snapshot restores and names any change to a sealed root after it is
@@ -245,10 +265,10 @@ fn bounded_command(
             let mut excluded = writable.to_vec();
             excluded.extend(super::sealed_roots::user_host_stores());
             let snapshot = SnapshotBoundary::capture(&sealed, &excluded);
-            Ok((
-                environment.command(program),
-                BoundaryGuard::snapshot(snapshot),
-            ))
+            let (command, report) = environment.command_with_report(program);
+            let mut guard = BoundaryGuard::snapshot(snapshot);
+            guard.report = Some(report);
+            Ok((command, guard))
         }
     }
 }

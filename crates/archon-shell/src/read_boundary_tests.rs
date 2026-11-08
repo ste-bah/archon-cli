@@ -2,17 +2,23 @@ use super::*;
 
 #[test]
 #[cfg(target_os = "linux")]
-fn failed_read_boundary_refuses_launch_only_when_landlock_is_active() {
-    for active in [true, false] {
+fn failed_rule_boundary_refuses_launch_only_when_landlock_is_active() {
+    for (active, contained) in [
+        (true, "named-paths-denied"),
+        (false, "named-paths-denied"),
+        (true, "denied"),
+        (false, "denied"),
+    ] {
         let mut command = crate::spawn::command("/bin/true");
         let reads = install_linux_boundary(
             &mut command,
             Err("injected read ruleset construction failure".into()),
             active,
-            "named-paths-denied",
+            contained,
         );
         if active {
-            assert_eq!(reads, "launch-refused");
+            assert!(reads.starts_with("launch-refused"));
+            assert!(reads.contains("injected read ruleset construction failure"));
             let error = command
                 .status()
                 .expect_err("read failure must prevent exec");
@@ -107,9 +113,6 @@ fn credential_and_profile_paths_are_denied_by_absolute_path() {
         ".archon/.credentials.json",
         ".aws",
         ".ssh",
-        ".profile",
-        ".bashrc",
-        ".zshenv",
         ".cargo/credentials.toml",
         ".codex/auth.json",
     ] {
@@ -349,4 +352,120 @@ fn preparation_failure_never_creates_home_or_relaxes_rules() {
         quoted(&home.join(".archon"))
     )));
     assert!(rules.contains(&format!("(deny file-write* (subpath {}))", quoted(&grant))));
+}
+
+#[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn persistent_configuration_has_write_only_and_ancestor_rules() {
+    let home = Path::new("/synthetic-operator");
+    let mut rules = macos_rules_for(
+        &denied_paths(home),
+        &home.join(".archon/operator-env-grants"),
+    );
+    let mut ancestors = std::collections::HashSet::new();
+    for path in config::user_paths(home) {
+        assert!(!denied_paths(home).contains(&path));
+        deny_macos_writes(&mut rules, &path, &mut ancestors);
+        assert!(!rules.contains(&format!("(deny file-read* (subpath {}))", quoted(&path))));
+        assert!(rules.contains(&format!("(deny file-write* (subpath {}))", quoted(&path))));
+        for ancestor in path.ancestors().skip(1) {
+            assert!(rules.contains(&format!(
+                "(deny file-write* (literal {}))",
+                quoted(ancestor)
+            )));
+        }
+    }
+    for path in crate::spawn::host_protected_paths() {
+        assert!(!operator_paths().contains(&path));
+        assert!(config::write_paths().contains(&path));
+    }
+    for name in [".profile", ".bashrc", ".zshenv"] {
+        let path = home.join(name);
+        assert!(!denied_paths(home).contains(&path));
+        assert!(config::user_paths(home).contains(&path));
+    }
+}
+
+#[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn git_status_reads_real_global_config_under_boundary() {
+    const PROBE: &str = "ARCHON_GIT_BOUNDARY_TEST_HOME";
+    if std::env::var_os(PROBE).is_none() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join(".gitconfig"),
+            "[user]\nname = Boundary Test\n",
+        )
+        .unwrap();
+        let output = crate::spawn::command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "read_boundary::tests::git_status_reads_real_global_config_under_boundary",
+                "--nocapture",
+            ])
+            .env("HOME", home.path())
+            .env(PROBE, home.path())
+            .output()
+            .unwrap();
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "{output:?}"
+        );
+        return;
+    }
+    if !operator_grants_supported() {
+        eprintln!(
+            "SKIPPED real git-under-boundary test: kernel sandbox unavailable; no bounded git status was run"
+        );
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    assert!(
+        crate::spawn::command("git")
+            .arg("init")
+            .arg(root.path())
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let (mut command, report) = command_with_report(OsStr::new("git"));
+    // Force Git itself to read the real synthetic ~/.gitconfig, not the host snapshot.
+    command.env(
+        "GIT_CONFIG_GLOBAL",
+        PathBuf::from(std::env::var_os(PROBE).unwrap()).join(".gitconfig"),
+    );
+    let output = command
+        .current_dir(root.path())
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{report}: {output:?}");
+}
+
+#[test]
+fn contained_filesystem_reports_stay_in_launch_logs() {
+    let full = report("named-paths-denied", "named-paths-denied");
+    assert!(full.contains("process reads: not-contained"));
+    assert!(observation_note(full).is_none());
+    for text in [
+        report("not-contained", "named-paths-denied"),
+        report("named-paths-denied", "not-contained"),
+        "launch-refused: injected".into(),
+    ] {
+        assert_eq!(observation_note(text.clone()), Some(text));
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn inactive_ruleset_reports_mount_bypass_and_keeps_observation() {
+    for reads in ["not-contained", "named-paths-denied"] {
+        let text = report(reads, INACTIVE_MOUNT_WRITES);
+        assert!(text.contains("mount-sealed; bypassable through /proc/<pid>/{root,cwd,fd} or ptrace of same-user host processes without Landlock"));
+        assert!(!text.contains("write-sealed"));
+        assert_eq!(observation_note(text.clone()), Some(text));
+    }
 }

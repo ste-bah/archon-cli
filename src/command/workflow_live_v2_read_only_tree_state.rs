@@ -47,9 +47,7 @@ pub(super) struct Snapshot {
 }
 
 pub(crate) fn git(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(root)
+    let output = archon_shell::spawn::git_command(root)
         .args(args)
         .output()
         .ok()?;

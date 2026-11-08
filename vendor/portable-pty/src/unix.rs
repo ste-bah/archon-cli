@@ -1,7 +1,6 @@
 //! Working with pseudo-terminals
-
 use crate::{Child, CommandBuilder, MasterPty, PtyPair, PtySize, PtySystem, SlavePty};
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use filedescriptor::FileDescriptor;
 use libc::{self, winsize};
 use std::cell::RefCell;
@@ -9,27 +8,22 @@ use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
 use std::os::unix::ffi::OsStrExt;
+pub use std::os::unix::io::RawFd;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::{io, mem, ptr};
-
-pub use std::os::unix::io::RawFd;
-
 #[derive(Default)]
 pub struct UnixPtySystem {}
-
 fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
     let mut master: RawFd = -1;
     let mut slave: RawFd = -1;
-
     let mut size = winsize {
         ws_row: size.rows,
         ws_col: size.cols,
         ws_xpixel: size.pixel_width,
         ws_ypixel: size.pixel_height,
     };
-
     let result = unsafe {
         // BSDish systems may require mut pointers to some args
         #[allow(clippy::unnecessary_mut_passed)]
@@ -41,13 +35,10 @@ fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
             &mut size,
         )
     };
-
     if result != 0 {
         bail!("failed to openpty: {:?}", io::Error::last_os_error());
     }
-
     let tty_name = tty_name(slave);
-
     let master = UnixMasterPty {
         fd: PtyFd(unsafe { FileDescriptor::from_raw_fd(master) }),
         took_writer: RefCell::new(false),
@@ -56,17 +47,14 @@ fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
     let slave = UnixSlavePty {
         fd: PtyFd(unsafe { FileDescriptor::from_raw_fd(slave) }),
     };
-
     // Ensure that these descriptors will get closed when we execute
     // the child process.  This is done after constructing the Pty
     // instances so that we ensure that the Ptys get drop()'d if
     // the cloexec() functions fail (unlikely!).
     cloexec(master.fd.as_raw_fd())?;
     cloexec(slave.fd.as_raw_fd())?;
-
     Ok((master, slave))
 }
-
 impl PtySystem for UnixPtySystem {
     fn openpty(&self, size: PtySize) -> anyhow::Result<PtyPair> {
         let (master, slave) = openpty(size)?;
@@ -76,7 +64,6 @@ impl PtySystem for UnixPtySystem {
         })
     }
 }
-
 struct PtyFd(pub FileDescriptor);
 impl std::ops::Deref for PtyFd {
     type Target = FileDescriptor;
@@ -230,8 +217,19 @@ impl PtyFd {
 
     fn spawn_command(&self, builder: CommandBuilder) -> anyhow::Result<std::process::Child> {
         let configured_umask = builder.umask;
-
         let mut cmd = builder.as_command()?;
+        #[cfg(target_os = "linux")]
+        let seal_report = if builder.operator_reads_protected() {
+            let active = matches!(
+                archon_shell::write_boundary::mechanism(),
+                Ok(archon_shell::write_boundary::Mechanism::Landlock { .. })
+            );
+            Some(archon_shell::read_boundary::install_operator_seals(
+                &mut cmd, active,
+            ))
+        } else {
+            None
+        };
         #[cfg(target_os = "linux")]
         if let Some((protected, writable)) = builder.write_boundary() {
             let boundary = archon_shell::write_boundary::landlock::LandlockSandbox::build(
@@ -346,6 +344,10 @@ impl PtyFd {
 
         archon_shell::read_boundary::prepare_spawn(&cmd)?;
         let mut child = cmd.spawn()?;
+        #[cfg(target_os = "linux")]
+        if let Some(report) = seal_report {
+            log::warn!("child seal outcome: {report}");
+        }
 
         // Ensure that we close out the slave fds that Child retains;
         // they are not what we need (we need the master side to reference

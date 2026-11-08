@@ -94,6 +94,22 @@ impl CommandEnvironment {
         )
     }
 
+    pub fn command_with_report(
+        &self,
+        program: impl AsRef<OsStr>,
+    ) -> (
+        std::process::Command,
+        archon_shell::read_boundary::LaunchReport,
+    ) {
+        let (mut command, report) =
+            archon_shell::read_boundary::command_with_report(program.as_ref());
+        archon_shell::execution_environment::apply_mode(
+            &mut command,
+            archon_shell::execution_environment::Mode::Exact(&self.variables),
+        );
+        (command, report)
+    }
+
     /// Host-composed macOS write/read profile; no argv-based exemption.
     #[cfg(target_os = "macos")]
     pub fn macos_sandbox_command(&self, program: &OsStr, profile: &str) -> std::process::Command {

@@ -42,9 +42,6 @@ fn invalid_environment_binding_is_unavailable_not_rejected() {
     ));
 }
 
-// Unix only: on Windows `shell_program()` can name an absolute `sh.exe`
-// beside `git`, so a missing toolchain PATH does not stop the launch.
-#[cfg(unix)]
 #[test]
 fn verifier_launch_failure_is_unavailable_not_rejected() {
     let root = tempfile::tempdir().unwrap();
@@ -52,8 +49,34 @@ fn verifier_launch_failure_is_unavailable_not_rejected() {
         toolchain_path: Some("/definitely/missing".into()),
         ..Default::default()
     };
+    let targets = vec!["output.txt".to_string()];
+    std::fs::write(root.path().join(&targets[0]), "present").unwrap();
+    let after = snapshot_targets(root.path(), &targets);
+    // An absent working directory forces an actual spawn failure even when
+    // the host shell is pinned independently of the child's PATH.
+    let outcome = evaluate_with_policy(
+        &root.path().join("absent"),
+        &targets,
+        &TargetFingerprints::new(),
+        &after,
+        Some("true"),
+        Some(&policy),
+    );
+    let AcceptanceOutcome::Unavailable(reason) = outcome else {
+        panic!("launch failure must be unavailable: {outcome:?}");
+    };
+    assert!(reason.contains("failed to launch"), "{reason}");
+}
+
+#[test]
+fn pinned_host_shell_survives_a_missing_child_path() {
+    let root = tempfile::tempdir().unwrap();
+    let policy = CheckPolicy {
+        toolchain_path: Some("/definitely/missing".into()),
+        ..Default::default()
+    };
     assert!(matches!(
         evaluate(root.path(), &policy),
-        AcceptanceOutcome::Unavailable(_)
+        AcceptanceOutcome::Accepted
     ));
 }

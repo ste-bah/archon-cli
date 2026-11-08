@@ -295,14 +295,16 @@ pub(super) fn spawn_bash_child(
     prepared: &PreparedBashCommand,
 ) -> std::io::Result<Box<dyn ChildWrapper>> {
     let boundary = prepared.write_boundary.as_ref().map(|b| &b.applied);
-    let mut command = contained_bash_command(&prepared.command, boundary);
+    let (mut command, report) = contained_bash_command(&prepared.command, boundary);
     archon_shell::spawn::replace_environment(command.as_std_mut(), prepared.env_vars.clone());
     command
         .current_dir(&ctx.working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    spawn_wrapped_child(command)
+    let child = spawn_wrapped_child(command)?;
+    tracing::warn!("child seal outcome: {report}");
+    Ok(child)
 }
 
 pub(super) async fn await_bash_child(

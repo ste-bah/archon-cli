@@ -21,9 +21,7 @@ pub(super) fn file_is_text(path: &Path) -> io::Result<bool> {
 }
 
 pub(super) fn repository_is_text(repository: &Path, commit: &str, path: &str) -> io::Result<bool> {
-    let mut child = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    let mut child = archon_shell::spawn::git_command(repository)
         .args(["cat-file", "blob", &format!("{commit}:{path}")])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

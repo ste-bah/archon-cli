@@ -327,22 +327,8 @@ fn verify_none_is_noop_success() {
     assert!(v.stdout_tail.is_empty());
 }
 
-#[test]
-fn verify_success_records_command() {
-    let repo = canonical_repo();
-    let v = run_wave_verify(
-        repo.path(),
-        Some("printf ok"),
-        1,
-        &run_root_of(repo.path()),
-        "impl",
-    )
-    .expect("verify");
-
-    assert_eq!(v.exit, 0);
-    assert_eq!(v.command.as_deref(), Some("printf ok"));
-    assert_eq!(v.stdout_tail, "ok");
-}
+#[path = "patch_apply_verify_tests.rs"]
+mod verify_reports;
 
 #[test]
 fn conflict_graph_violation_before_any_git() {

@@ -126,19 +126,19 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
         Err(result) => return result,
     };
     #[cfg(unix)]
-    let mut cmd = {
-        let mut c = bash_write_sandbox::command("/bin/sh", boundary.as_ref());
+    let (mut cmd, report) = {
+        let (mut c, report) = bash_write_sandbox::command("/bin/sh", boundary.as_ref());
         c.arg("-c").arg(command);
-        c
+        (c, report)
     };
     #[cfg(not(unix))]
-    let mut cmd = {
+    let (mut cmd, report) = {
         // Fall back to the system shell on non-unix; the tool's tests
         // are #[cfg(unix)] so this branch is exercised only in prod
         // builds on Windows.
-        let mut c = bash_write_sandbox::command("cmd", boundary.as_ref());
+        let (mut c, report) = bash_write_sandbox::command("cmd", boundary.as_ref());
         c.args(["/D", "/C"]).arg(command);
-        c
+        (c, report)
     };
 
     archon_shell::spawn::replace_environment(cmd.as_std_mut(), env);
@@ -163,6 +163,7 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
             }
         };
 
+    tracing::warn!("child seal outcome: {report}");
     // Issue-134: the whole group ends with this call, however it ends.
     let _live = crate::bash::LiveGroup::arm(child.id(), &ctx.session_id);
     let stdout = match child.stdout.take() {

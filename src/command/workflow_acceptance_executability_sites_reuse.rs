@@ -30,9 +30,7 @@ fn repository_tree_digest(repository: &Path, commit: &str, path: &str) -> Option
 }
 
 fn repository_tree_entries(repository: &Path, commit: &str, path: &str) -> Option<Vec<Vec<u8>>> {
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(repository)
+    let output = archon_shell::spawn::git_command(repository)
         .args(["ls-tree", "-r", "-t", "-z", commit, "--", path])
         .output()
         .ok()?;
@@ -115,9 +113,7 @@ fn sibling_input_state(
         .into_iter()
         .map(|sibling| {
             let revision = if sibling.source.join(".git").exists() {
-                let output = archon_shell::spawn::command("git")
-                    .arg("-C")
-                    .arg(&sibling.source)
+                let output = archon_shell::spawn::git_command(&sibling.source)
                     .args(["rev-parse", "HEAD"])
                     .output()
                     .ok()?;

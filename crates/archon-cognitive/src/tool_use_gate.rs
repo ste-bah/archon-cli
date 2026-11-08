@@ -111,9 +111,7 @@ fn is_git_probe(command: &str) -> bool {
 }
 
 fn is_git_repo(dir: &Path) -> bool {
-    archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(dir)
+    archon_shell::spawn::git_command(dir)
         .arg("rev-parse")
         .arg("--is-inside-work-tree")
         .output()

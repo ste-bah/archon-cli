@@ -72,9 +72,7 @@ pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<Nat
             })
     };
     let repository = canonical(&config.repository)?;
-    let output = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(&repository)
+    let output = archon_shell::spawn::git_command(&repository)
         .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|source| WorkflowError::Io {
@@ -160,9 +158,7 @@ pub(crate) fn record_final_source(
         }
         value
     } else {
-        let output = archon_shell::spawn::command("git")
-            .arg("-C")
-            .arg(&repo)
+        let output = archon_shell::spawn::git_command(&repo)
             .args(["rev-parse", "HEAD"])
             .output()
             .map_err(|source| WorkflowError::Io {

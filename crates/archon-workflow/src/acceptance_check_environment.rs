@@ -16,8 +16,7 @@
 //!    the host, else the check does not run and the error names it
 //!    ([`forwarded_values`]);
 //! 3. the site's own directories (its `HOME` -- the host's at the direct
-//!    site, which has no filesystem sandbox to make a fresh one a boundary,
-//!    a fresh one at a probe's copy and a scratch --, a scratch's `TMPDIR`,
+//!    site, a fresh one at a probe's copy and a scratch --, a scratch's `TMPDIR`,
 //!    `CARGO_HOME` and build directory), which nothing above displaces.
 //!
 //! A configured `[workflow.acceptance_execution]` section is the policy of

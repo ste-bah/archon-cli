@@ -39,10 +39,10 @@ use std::ffi::OsStr;
 use std::process::Command;
 
 /// A `std` command for `program` whose child inherits only its stdio.
+/// Host Git uses a startup snapshot of operator configuration and pinned execution keys.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
-    let mut command = Command::new(program);
-    crate::jobserver::inherit(&mut command);
-    stdio_only(&mut command);
+    let mut command = raw_command(host_config::program(program.as_ref()));
+    host_config::isolate(&mut command);
     command
 }
 
@@ -66,9 +66,20 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
+    let repository = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]
+        .into_iter()
+        .filter_map(|name| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == name)
+                .and_then(|(_, value)| value.map(|value| (name, value.to_owned())))
+        })
+        .collect::<Vec<_>>();
     command.env_clear();
     command.envs(vars);
     crate::jobserver::sanitize_environment(command);
+    host_config::isolate(command);
+    command.envs(repository);
     command
 }
 
@@ -161,4 +172,79 @@ pub fn replace_library_environment<C, I, K, V>(
         let value = crate::jobserver::sanitize_variable(key.as_ref(), value.as_ref().to_owned());
         set(command, key.as_ref(), &value);
     }
+}
+
+#[path = "spawn_host_config.rs"]
+mod host_config;
+
+/// Capture operator configuration and tool locations before agents are started.
+pub fn initialize_host_tools() -> Result<(), String> {
+    host_config::initialize()?;
+    host_repository::boundary_status()
+}
+pub(crate) fn host_protected_paths() -> Vec<std::path::PathBuf> {
+    host_config::protected_paths()
+        .into_iter()
+        .chain(host_repository::protected_paths())
+        .collect()
+}
+fn raw_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    crate::jobserver::inherit(&mut command);
+    stdio_only(&mut command);
+    command
+}
+
+#[path = "spawn_host_repository.rs"]
+mod host_repository;
+/// Capture repository indirection before agents receive a writable tree.
+pub fn register_repository(root: &std::path::Path) -> Result<(), String> {
+    host_repository::register(root)
+}
+/// Host Git with repository selection pinned independently of the worktree .git file.
+pub fn git_command(root: impl AsRef<std::path::Path>) -> Command {
+    host_repository::command(root.as_ref())
+}
+
+/// Own host state for a run. Overlapping launches share state until the last ends.
+#[must_use]
+pub struct HostRun {
+    _private: (),
+}
+static HOST_RUNS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+pub fn host_run() -> HostRun {
+    let mut runs = HOST_RUNS.lock().unwrap_or_else(|e| e.into_inner());
+    *runs += 1;
+    HostRun { _private: () }
+}
+impl Drop for HostRun {
+    fn drop(&mut self) {
+        let mut runs = HOST_RUNS.lock().unwrap_or_else(|e| e.into_inner());
+        *runs -= 1;
+        if *runs == 0 {
+            host_repository::clear();
+            host_config::cleanup();
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn host_program(program: &OsStr) -> std::ffi::OsString {
+    host_config::program(program)
+}
+
+/// Fork a probe that never executes another program.
+///
+/// # Safety
+/// When the result is zero, the caller must use only prepared buffers and
+/// signal-safe operations, then exit without unwinding or running destructors.
+#[cfg(target_os = "linux")]
+pub(crate) unsafe fn fork_probe() -> libc::pid_t {
+    // SAFETY: the caller owns the child-side obligations described above.
+    unsafe { libc::fork() }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", all(test, unix)))]
+pub(crate) fn work_roots() -> Vec<std::path::PathBuf> {
+    host_repository::work_roots()
 }

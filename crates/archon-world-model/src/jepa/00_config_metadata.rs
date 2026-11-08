@@ -359,9 +359,8 @@ fn build_commit_sha() -> String {
 }
 
 fn runtime_git_sha() -> Option<String> {
-    let output = archon_shell::spawn::command("git")
+    let output = archon_shell::spawn::git_command(env!("CARGO_MANIFEST_DIR"))
         .args(["rev-parse", "HEAD"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .ok()?;
     if !output.status.success() {
