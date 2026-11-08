@@ -5,6 +5,7 @@ use archon_workflow::task_set_contract::{
 };
 use std::io::Write;
 
+#[cfg(unix)]
 #[test]
 fn missing_typed_program_uses_existing_product_and_site_classification() {
     let site = tempfile::tempdir().unwrap();

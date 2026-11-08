@@ -147,6 +147,7 @@ fn syntax_gutters_and_runtime_frames_remain_distinct() {
         .any(|l| l.line == 3)
     );
 }
+#[cfg(unix)]
 #[test]
 fn stored_output_uses_bounded_public_stream_bytes() {
     let root = tempfile::tempdir().unwrap();
