@@ -409,8 +409,11 @@ pub(crate) fn publish_acceptance_freeze(
 
 #[path = "workflow_task_set_skeleton_freeze.rs"]
 mod skeleton_freeze;
+#[cfg(test)]
+pub(crate) use skeleton_freeze::prepare_skeleton_freeze_from_candidate;
 pub(crate) use skeleton_freeze::{
-    prepare_skeleton_freeze, prepare_skeleton_freeze_from_candidate, publish_skeleton_freeze,
+    prepare_skeleton_freeze, prepare_skeleton_freeze_from_candidate_with_resume,
+    publish_skeleton_freeze,
 };
 
 fn freeze_mode(mode: GateMode) -> Result<FreezeGateMode> {

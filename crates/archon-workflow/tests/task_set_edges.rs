@@ -15,6 +15,7 @@ fn contract(path: &str) -> WorkflowV2DeliverableContract {
 
 fn task(id: &str) -> FrozenTask {
     FrozenTask {
+        status: None,
         task_id: id.into(),
         file_name: format!("{id}-body.md"),
         depends_on: Vec::new(),

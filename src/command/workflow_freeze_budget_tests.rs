@@ -50,7 +50,7 @@ fn an_unlimited_budget_only_applies_the_cap() {
 fn the_staged_budget_reads_the_catalog_no_progress_window() {
     let catalog =
         crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("").unwrap();
-    for id in ["freeze-acceptance", "task-set-lint"] {
+    for id in ["freeze-acceptance", "freeze-skeleton", "task-set-lint"] {
         let budget = FreezeBudget::for_host_command(id);
         assert_eq!(budget.outer_secs(), catalog.capabilities[id].timeout_secs);
         assert_eq!(budget.check_bound(20_000), 20_000);

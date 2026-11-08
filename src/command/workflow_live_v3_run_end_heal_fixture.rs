@@ -113,6 +113,7 @@ pub(super) fn fixture() -> Fixture {
         schema_version: 1,
         acceptance_digest: acceptance_digest.clone(),
         tasks: vec![FrozenTask {
+            status: None,
             task_id: "TASK-H-001".into(),
             file_name: "TASK-H-001.md".into(),
             depends_on: Vec::new(),

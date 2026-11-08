@@ -365,13 +365,16 @@ fn candidate_entry_with_markers_inner(
         }
         return Err(refusal);
     }
-    let check: AcceptanceCheck =
+    let mut check: AcceptanceCheck =
         serde_json::from_value(value["check"].clone()).map_err(|error| {
             format!(
                 "check '{}': the entry's check does not match either shape ({error})",
                 frozen.id
             )
         })?;
+    if let AcceptanceCheck::Floor { contract } = &mut check {
+        contract.implements.clear();
+    }
     if check == frozen.check {
         return Err(format!(
             "check '{}': the reply repeats the check being replaced; change it so it resolves every finding above",
@@ -392,4 +395,41 @@ fn candidate_entry_with_markers_inner(
             sampling: None,
         },
     })
+}
+
+#[cfg(test)]
+mod floor_tests {
+    use super::*;
+
+    #[test]
+    fn reauthor_floor_discards_implements_before_comparing_checks() {
+        let mut frozen = crate::command::workflow_task_set::republish::test_fixture::criterion(
+            "AC-F-001",
+            "./verify-output",
+            true,
+        );
+        let reply = serde_json::json!({
+            "id": frozen.id,
+            "check": {"kind":"floor", "contract": {
+                "kind":"artifact", "artifact_path":"out.json",
+                "typed_verifier_command":"./verify-output", "implements":["invented"]
+            }}
+        })
+        .to_string();
+        let repaired = candidate_entry(&reply, &frozen).unwrap();
+        let AcceptanceCheck::Floor { contract } = &repaired.check else {
+            panic!("expected floor");
+        };
+        assert!(contract.implements.is_empty());
+        assert!(
+            !serde_json::to_string(&repaired)
+                .unwrap()
+                .contains("invented")
+        );
+        frozen.check = repaired.check;
+        assert_eq!(
+            candidate_entry(&reply, &frozen).unwrap_err(),
+            "check 'AC-F-001': the reply repeats the check being replaced; change it so it resolves every finding above"
+        );
+    }
 }

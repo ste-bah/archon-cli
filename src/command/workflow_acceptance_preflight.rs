@@ -22,6 +22,7 @@ pub(super) fn prepare(
                 serde_json::from_slice(&bytes).context("parsing the candidate acceptance contract")
             }),
     )?;
+    clear_unvalidated_floor_implements(&mut contract);
     contract.prd.path = project_relative(project_root, prd_path);
     contract.prd.digest = prd_digest.to_string();
     contract.gap_policy.forbidden_phrases = residual_gap_forbidden_phrases(prd_text);
@@ -135,4 +136,19 @@ pub(super) fn rooted_policy_findings(
             &bound,
         ),
     )
+}
+
+pub(super) fn clear_unvalidated_floor_implements(contract: &mut AcceptanceContract) {
+    // Authored ownership claims await host validation before being frozen.
+    for entry in contract
+        .acceptance
+        .iter_mut()
+        .chain(&mut contract.supplementary)
+    {
+        if let archon_workflow::task_set_contract::AcceptanceCheck::Floor { contract } =
+            &mut entry.check
+        {
+            contract.implements.clear();
+        }
+    }
 }

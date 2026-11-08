@@ -345,6 +345,7 @@ fn skeleton_and_body_share_every_contract_refusal() {
             schema_version: 1,
             acceptance_digest: "digest".into(),
             tasks: vec![FrozenTask {
+                status: None,
                 task_id: "TASK-X-010".into(),
                 file_name: "TASK-X-010.md".into(),
                 depends_on: vec![],

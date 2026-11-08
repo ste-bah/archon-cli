@@ -4,6 +4,9 @@
 //! the receipt.
 use super::*;
 
+#[path = "workflow_decompose_origin_stamp_tests.rs"]
+mod origin_stamp;
+
 #[path = "workflow_decompose_landing_restore_temp_tests.rs"]
 mod restore_temp_tests;
 use archon_workflow::{
@@ -16,6 +19,7 @@ const FILE: &str = "TASK-X-010.md";
 
 fn frozen() -> FrozenTask {
     FrozenTask {
+        status: None,
         task_id: TASK.into(),
         file_name: FILE.into(),
         depends_on: Vec::new(),
@@ -345,4 +349,30 @@ fn reconcile_takes_the_chain_lock_before_planning_and_defers_to_live_settle() {
         "the completed newer landing must remain on disk"
     );
     assert!(lines[0].contains("queued 0 of 1"), "{lines:?}");
+}
+
+// Origin/main stamping sorts the mapping, retains ready, and inserts empty
+// frozen fields. These receipt bytes are independent of rebuild().
+const ORIGIN_READY: &str = "```yaml\nblocks: []\ncomplexity: low\ndeliverable_contracts: []\ndepends_on: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\nsource_sections: []\nstatus: ready\ntask_id: TASK-X-010\ntitle: origin\n```\n\n## Scope\n\nThe origin body.\n\n## Focused Tests\n\n- `cargo test -p x`\n";
+
+#[test]
+fn landing_reconcile_restores_origin_main_stamped_ready_receipt() {
+    let temp = tempfile::tempdir().unwrap();
+    let (origin, notes) =
+        origin_stamp::stamp_frozen_frontmatter(&candidate("origin"), &frozen()).unwrap();
+    assert!(notes.is_empty());
+    assert!(origin_stamp::HOST_STAMPED_FIELDS.contains(&"implements"));
+    let origin =
+        crate::command::workflow::landed_task_file(origin.into_bytes(), Path::new(FILE)).unwrap();
+    assert_eq!(origin, ORIGIN_READY.as_bytes());
+    let receipt = serde_json::json!({"call_id":"old", "committed_at":"t1", "entries":[{"relative_path":FILE,"blake3":content_digest(ORIGIN_READY.as_bytes()),"byte_len":ORIGIN_READY.len()}]});
+    let old = record("old", "t1", "origin", false, receipt);
+    assert_eq!(
+        rebuild(&old, &frozen(), Path::new(FILE)).unwrap(),
+        ORIGIN_READY.as_bytes()
+    );
+    let result = plan(&[old], temp.path(), &skeleton()).unwrap();
+    assert_eq!(result.restores.len(), 1, "{:?}", result.lines);
+    assert_eq!(result.restores[0].bytes, ORIGIN_READY.as_bytes());
+    assert!(result.lines.iter().any(|line| line.contains("SETTLE")));
 }

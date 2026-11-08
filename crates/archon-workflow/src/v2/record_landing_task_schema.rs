@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 pub fn task_schema() -> Value {
     let sample = FrozenTask {
+        status: None,
         task_id: String::new(),
         file_name: String::new(),
         depends_on: vec![FrozenDependency {
@@ -84,6 +85,7 @@ pub(super) fn task_clause() -> String {
 // Exhaustive construction makes new accepted fields a compile-time hint update.
 fn contract_sample() -> WorkflowV2DeliverableContract {
     WorkflowV2DeliverableContract {
+        implements: Vec::new(),
         kind: String::new(),
         artifact_path: String::new(),
         typed_verifier_command: Some(String::new()),

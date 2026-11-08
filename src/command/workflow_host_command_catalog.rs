@@ -120,7 +120,7 @@ pub(crate) fn fixed_decomposition_catalog(
                 "{GATE_ENVELOPE}",
             ],
             StdinDelivery::Utf8Bytes,
-            EnvironmentProfileId::None,
+            EnvironmentProfileId::FreezeProvider,
             FREEZE_CAPABILITY_TIMEOUT_SECS,
             2 * MIB,
             2 * MIB,

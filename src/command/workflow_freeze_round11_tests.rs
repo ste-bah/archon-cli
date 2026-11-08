@@ -205,7 +205,7 @@ fn generated_repairs(exhaustive: bool) {
             .as_object()
             .unwrap()
             .len(),
-        48
+        49
     );
     let mut corpus = vec![(&TASK_SHAPE, fixtures::skeleton(fixtures::task()))];
     // Fixed representatives cover both cwd values, both verdicts and both

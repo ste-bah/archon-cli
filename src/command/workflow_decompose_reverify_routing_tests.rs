@@ -7,6 +7,7 @@ fn remediation_routes_check_defects_and_behavioral_failures_separately() {
         schema_version: 1,
         acceptance_digest: "digest".into(),
         tasks: vec![FrozenTask {
+            status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010.md".into(),
             depends_on: Vec::new(),

@@ -77,7 +77,7 @@ pub(super) fn stamp_request(
             // as `SpecInvalid`; anything else is the host's.
             Err(WorkflowError::SpecInvalid(cause)) => {
                 return refused(format!(
-                    "candidate TASK body for {task_id} does not parse: {cause}; return the whole task file"
+                    "candidate TASK body for {task_id} is refused: {cause}; return the whole task file"
                 ));
             }
             Err(error) => return Err(error),

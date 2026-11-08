@@ -129,3 +129,81 @@ async fn a_failing_checks_reply_keeps_its_failure_lines_and_its_end() {
     );
     assert!(frozen.ends_with("i=$((i+1)); done; exit 1"), "{frozen}");
 }
+
+#[test]
+fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
+    use crate::command::acceptance_scratch_guardian::{
+        Request, parse_request_line, request_line, validate_selected,
+    };
+    let fixture = fixture(true);
+    let scratch = tempfile::tempdir().unwrap();
+    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(
+        fixture.project.path(),
+        &fixture.task_root,
+    );
+    let request = Request {
+        policy: ScratchPolicy {
+            repository: fixture.repo.path().canonicalize().map(plain).unwrap(),
+            project: fixture.project.path().canonicalize().map(plain).unwrap(),
+            task_root: fixture.task_root.canonicalize().map(plain).unwrap(),
+            scratch_parent: scratch.path().to_path_buf(),
+            project_inputs: vec![],
+            project_input_excludes: vec![],
+            combined: false,
+            toolchain_path: "/usr/bin:/bin".into(),
+            environment: Default::default(),
+            environment_allowlist: vec![],
+            cargo_seed: None,
+            timeout_secs: 60,
+            output_bytes: 2048,
+            scratch_bytes: 16_777_216,
+            build_cache: None,
+        },
+        source_commit: "0".repeat(40),
+        pin_path: pin_path.clone(),
+        expected_pin_digest: content_digest(&std::fs::read(&pin_path).unwrap()),
+        evidence: scratch.path().join("evidence"),
+        resource_limits: Some(Default::default()),
+    };
+    let ids = |refs: &[archon_workflow::acceptance_world::FrozenCommandRef]| {
+        refs.iter()
+            .map(|r| r.acceptance_id.clone())
+            .collect::<Vec<_>>()
+    };
+    let (_, _, all) = validate_selected(&request, &None).expect("whole chain");
+    assert_eq!(ids(&all), vec!["REQ-1", "REQ-2", "REQ-9"]);
+    let selection = Some(std::collections::BTreeSet::from(["REQ-2".to_string()]));
+    let (_, _, narrowed) = validate_selected(&request, &selection).expect("narrowed");
+    assert_eq!(ids(&narrowed), vec!["REQ-2"]);
+    let error = validate_selected(
+        &request,
+        &Some(std::collections::BTreeSet::from(["REQ-404".to_string()])),
+    )
+    .expect_err("an id outside the chain is refused");
+    assert!(
+        error.to_string().contains("not in the pinned contract"),
+        "{error}"
+    );
+    let line = request_line(&request, &selection).unwrap();
+    let (parsed, carried) = parse_request_line(std::str::from_utf8(&line).unwrap()).unwrap();
+    assert_eq!(carried, selection);
+    assert_eq!(parsed.evidence, request.evidence);
+    let plain = request_line(&request, &None).unwrap();
+    let (parsed, carried) = parse_request_line(std::str::from_utf8(&plain).unwrap()).unwrap();
+    assert_eq!(carried, None);
+    assert_eq!(parsed.pin_path, request.pin_path);
+    let mut old_request: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+    old_request
+        .as_object_mut()
+        .unwrap()
+        .remove("resource_limits");
+    let error = parse_request_line(&old_request.to_string())
+        .err()
+        .expect("an old request without resource limits was accepted");
+    assert!(
+        error
+            .to_string()
+            .contains(&request.pin_path.display().to_string())
+    );
+    assert!(error.to_string().contains("missing resource_limits"));
+}

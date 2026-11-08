@@ -143,7 +143,7 @@ async fn stage_acceptance(
                 "gate_mode=off must return before staged acceptance preparation"
             ));
         }
-        let resume = staged_freeze_resume(&mut std::io::stderr());
+        let resume = staged_freeze_resume("freeze-acceptance", &mut std::io::stderr());
         let candidate = read_bounded_stdin(
             archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
             staged.staging_root,
@@ -285,12 +285,18 @@ fn stage_skeleton(
     config: &ArchonConfig,
     staged: StagedArgs<'_>,
 ) -> Result<()> {
+    let gate = (
+        "freeze-skeleton",
+        crate::command::workflow_gate::GateId::FreezeSkeleton,
+        "skeleton",
+    );
     let result = (|| {
         if config.workflow.gate_mode == archon_core::config::GateMode::Off {
             return Err(anyhow!(
                 "gate_mode=off must return before staged skeleton preparation"
             ));
         }
+        let resume = staged_freeze_resume(gate.0, &mut std::io::stderr());
         let candidate = read_bounded_stdin(
             archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
             staged.staging_root,
@@ -301,11 +307,6 @@ fn stage_skeleton(
         )?;
         let tasks_root = absolute(cwd, tasks);
         let prd_path = absolute(cwd, prd);
-        let gate = (
-            "freeze-skeleton",
-            crate::command::workflow_gate::GateId::FreezeSkeleton,
-            "skeleton",
-        );
         if let Some(refused) =
             defects::refuse_element_shapes(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
         {
@@ -325,12 +326,13 @@ fn stage_skeleton(
             );
         }
         let prepared =
-            match crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate(
+            match crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate_with_resume(
                 cwd,
                 &tasks_root,
                 &prd_path,
                 config.workflow.gate_mode,
                 candidate_document(&candidate).into_owned(),
+                &resume,
             ) {
                 Ok(prepared) => prepared,
                 Err(error)
@@ -356,7 +358,7 @@ fn stage_skeleton(
 }
 
 /// The staged freeze's budget and progress (Issue 255): the host's wall
-/// clock for `freeze-acceptance`, counted from here, and a progress
+/// clock for the selected capability, counted from here, and a progress
 /// baseline on `stderr` before anything slow (stdin, the judge client, the
 /// probe) runs. Without it an attempt the host kills before its first saved
 /// verdict reports no progress, and the executor reads the next attempt's
@@ -364,9 +366,10 @@ fn stage_skeleton(
 /// is 0, not the count of verdicts a retry will reuse: their keys need the
 /// probe site and tree, which exist only later.
 fn staged_freeze_resume(
+    command_id: &str,
     stderr: &mut dyn std::io::Write,
 ) -> crate::command::workflow_freeze_budget::FreezeResume {
-    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged(command_id);
     let _ = writeln!(stderr, "{}", resume.progress.line());
     resume
 }

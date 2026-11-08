@@ -32,6 +32,7 @@ fn skeleton() -> TaskSkeleton {
     use crate::task_skeleton::{ConsumedArtifact, FrozenDependency, FrozenTask};
     use crate::task_universe::WorkflowV2DeliverableContract;
     let task = |id: &str| FrozenTask {
+        status: None,
         task_id: id.to_string(),
         file_name: format!("{id}.md"),
         depends_on: Vec::new(),

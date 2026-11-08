@@ -198,6 +198,10 @@ impl RecordLanding {
         }
         let mut record: StageRecord =
             serde_path_to_error::deserialize(value).map_err(|e| describe(e, self.kind))?;
+        // Completion is host-owned and remains unset until proof classification is enabled.
+        if let Some(task) = &mut record.task {
+            task.status = None;
+        }
         self.validate_patch(&record)?;
         if record.remove {
             return self.remove_task(&record.subject);

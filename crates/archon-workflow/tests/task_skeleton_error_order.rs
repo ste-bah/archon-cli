@@ -35,6 +35,7 @@ fn skeleton(acceptance_digest: &str) -> TaskSkeleton {
         schema_version: 1,
         acceptance_digest: acceptance_digest.into(),
         tasks: vec![FrozenTask {
+            status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010-body.md".into(),
             depends_on: vec![FrozenDependency {

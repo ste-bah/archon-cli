@@ -217,6 +217,7 @@ pub(crate) fn write_chain(
         .iter()
         .enumerate()
         .map(|(index, entry)| FrozenTask {
+            status: None,
             task_id: format!("TASK-F-{:03}", index + 1),
             file_name: format!("TASK-F-{:03}.md", index + 1),
             depends_on: Vec::new(),

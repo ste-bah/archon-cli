@@ -134,6 +134,7 @@ pub(super) fn seed_frozen_subjects(
         tasks: subjects
             .iter()
             .map(|(task_id, file_name)| FrozenTask {
+                status: None,
                 task_id: (*task_id).into(),
                 file_name: (*file_name).into(),
                 depends_on: Vec::new(),
