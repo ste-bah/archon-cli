@@ -87,8 +87,8 @@ pub(in crate::command::workflow_task_set) fn stamp_judgment_with_content_digest(
 
 /// The complete source closure for the static author prompt and candidate
 /// judge instruction. `author.rs` assembles the prompt, `reauthor.rs` owns
-/// `ENTRY_SHAPES`, `acceptance_coverage.rs` owns the requirement prefix the
-/// covers rule names, and `live_root.rs` supplies the shared root guidance.
+/// `ENTRY_SHAPES`, `acceptance_coverage.rs` owns the coverable inventory the
+/// covers rule uses, and `live_root.rs` supplies the shared root guidance.
 /// `task_set_judge.rs` assembles the adversarial judge instruction, and its
 /// named-file evidence helper supplies the contents included in that prompt.
 pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[

@@ -19,7 +19,8 @@
 const HISTORY_SHARE = 8192;
 const PRIOR_SHARE = 14336;
 const CATALOGUE_SHARE = 10240;
-const CONTEXT_BUDGET = HISTORY_SHARE + PRIOR_SHARE + CATALOGUE_SHARE;
+const COVERABLE_SHARE = 10240;
+const CONTEXT_BUDGET = HISTORY_SHARE + PRIOR_SHARE + CATALOGUE_SHARE + COVERABLE_SHARE;
 // The most bytes of one record line (an entry, a criterion) and of one
 // earlier finding. A cut line ends in CUT_MARK.
 const RECORD_BYTES = 320;
@@ -135,15 +136,14 @@ function priorText(prior, id, order, pendingIds = new Set()) {
 }
 // The criterion catalogue, whole while it fits its share; otherwise the
 // criteria nearest this entry, one line each, and the exact catalogue file.
-function catalogueText(criteria, id, order) {
+function catalogueText(criteria, id, order, head = "All criterion IDs and text (for consistency):", budget = CATALOGUE_SHARE, noun = "criteria") {
   const whole = JSON.stringify(criteria);
-  const head = "All criterion IDs and text (for consistency):";
-  if (utf8Bytes(whole) <= CATALOGUE_SHARE) return `${head} ${whole}`;
+  if (utf8Bytes(whole) <= budget) return `${head} ${whole}`;
   const ids = nearestFirst(Object.keys(criteria).sort(), (value) => value, id, order);
-  const count = fitLines(ids.map((value) => clipBytes(`${value}: ${oneLine(criteria[value])}`, RECORD_BYTES)), CATALOGUE_SHARE).length;
+  const count = fitLines(ids.map((value) => clipBytes(`${value}: ${oneLine(criteria[value])}`, RECORD_BYTES)), budget).length;
   const shown = ids.slice(0, count).sort();
   const file = contextFile("json", whole);
-  return `${head} ${ids.length} criteria; the ${count} nearest this entry are listed, one line each, and the exact catalogue is ${file.path} (sha256 ${file.sha256}).\n- ${shown.map((value) => clipBytes(`${value}: ${oneLine(criteria[value])}`, RECORD_BYTES)).join("\n- ")}`;
+  return `${head} ${ids.length} ${noun}; the ${count} nearest this entry are listed, one line each, and the exact catalogue is ${file.path} (sha256 ${file.sha256}).\n- ${shown.map((value) => clipBytes(`${value}: ${oneLine(criteria[value])}`, RECORD_BYTES)).join("\n- ")}`;
 }
 // Whitespace only: findings that differ by case, a sign, a digit or
 // punctuation are different findings (a path or a flag can differ by case).

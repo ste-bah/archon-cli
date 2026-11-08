@@ -282,14 +282,21 @@ fn an_accepted_unreadable_reply_names_its_id_and_reconstruction_failure() {
 fn supplementary_host_stamp_uses_current_prd_text_not_finding_text() {
     let current = "full current derived PRD requirement";
     let criteria = criteria(&[]);
-    let requirement_texts = [("REQ-1".to_string(), current.to_string())]
-        .into_iter()
-        .collect();
-    let host = super::super::host_owned::HostOwned::new(&criteria, &requirement_texts);
-    assert_eq!(
-        host.stamp(entry("SUP-REQ-1"), "SUP-REQ-1")["criterion"],
-        current
-    );
+    for requirement in ["REQ-1", "DONE-1", "NFR-001", "TF-X-001", "G-X-001"] {
+        let requirement_texts = [(requirement.to_string(), current.to_string())]
+            .into_iter()
+            .collect();
+        let host = super::super::host_owned::HostOwned::new(&criteria, &requirement_texts);
+        for id in [
+            format!("SUP-{requirement}"),
+            format!("SUP-{requirement}-R2"),
+        ] {
+            let stamped = host.stamp(entry(&id), &id);
+            assert_eq!(stamped["criterion"], current);
+            assert_eq!(stamped["covers"], json!([requirement]));
+            assert_eq!(stamped["gap_permitted"], false);
+        }
+    }
 }
 
 #[test]

@@ -88,7 +88,7 @@ mod tests {
         );
         assert_eq!(
             enriched["prdRequirementTexts"],
-            serde_json::json!({"REQ-X-001": "work"})
+            serde_json::json!({"REQ-X-001": "work", "QX-001": "constraint", "G-X-001": "goal", "DONE-1": "Complete."})
         );
         assert_eq!(
             enriched["prdConstraintTexts"],

@@ -93,6 +93,10 @@ fn every_acceptance_id_is_exactly_once_and_supplementary_ids_are_distinct() {
     let mut distinct = parsed;
     let mut supplementary = distinct.acceptance[0].clone();
     supplementary.id = "SUP-X-001".into();
+    supplementary.check = archon_workflow::task_set_contract::AcceptanceCheck::Command {
+        command: "jq -e '.complete == true' other.json".into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
     distinct.supplementary.push(supplementary);
     assert!(validate_acceptance_contract(&distinct, &expected(), true).is_ok());
 }
@@ -417,4 +421,37 @@ fn frozen_acceptance_contract_findings() {
     if findings.is_empty() {
         println!("  (none — the recorded freeze finding was not a policy finding)");
     }
+}
+
+#[test]
+fn duplicate_check_is_deterministic_across_both_lists_and_respects_cwd() {
+    use archon_workflow::task_set_contract::{
+        AcceptanceCheck, TrustedCwd, acceptance_structure_defects, duplicate_check_defects,
+    };
+    let mut contract: AcceptanceContract =
+        serde_json::from_str(&acceptance("./verify", "project_root", false)).unwrap();
+    let mut supplementary = contract.acceptance[0].clone();
+    supplementary.id = "SUP-NFR-001".into();
+    contract.supplementary.push(supplementary.clone());
+    supplementary.id = "SUP-TF-X-001".into();
+    contract.supplementary.push(supplementary);
+    assert!(acceptance_structure_defects(&contract, &expected(), false).is_empty());
+    let defects = duplicate_check_defects(&contract);
+    let duplicates: Vec<_> = defects
+        .iter()
+        .filter(|d| d.identity.code == "duplicate_check")
+        .collect();
+    assert_eq!(duplicates.len(), 2);
+    assert_eq!(duplicates[0].identity.subject, "SUP-NFR-001");
+    assert_eq!(duplicates[1].identity.subject, "SUP-TF-X-001");
+    assert_eq!(defects, duplicate_check_defects(&contract));
+    contract.supplementary[0].check = AcceptanceCheck::Command {
+        command: "./verify".into(),
+        cwd: TrustedCwd::RepoRoot,
+    };
+    contract.supplementary[1].check = AcceptanceCheck::Command {
+        command: "./other".into(),
+        cwd: TrustedCwd::ProjectRoot,
+    };
+    assert!(duplicate_check_defects(&contract).is_empty());
 }

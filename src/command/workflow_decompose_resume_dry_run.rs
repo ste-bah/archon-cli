@@ -349,7 +349,10 @@ pub(crate) async fn dry_run_fixed_decomposition(
                 let criterion = script_arguments["acceptanceCriteria"][entry]
                     .as_str()
                     .or_else(|| {
-                        entry.strip_prefix("SUP-").and_then(|requirement| {
+                        archon_workflow::v2::acceptance_stage::coverage::supplementary_requirement(
+                            entry,
+                        )
+                        .and_then(|requirement| {
                             script_arguments["prdRequirementTexts"][requirement].as_str()
                         })
                     })

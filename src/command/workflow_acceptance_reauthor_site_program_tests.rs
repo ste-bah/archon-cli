@@ -98,7 +98,7 @@ fn fixture() -> Fixture {
             "test -f src/state.txt",
             true,
         ))],
-        supplementary: vec![in_repo(criterion(ID, "test -f src/state.txt", false))],
+        supplementary: vec![in_repo(criterion(ID, "test -s src/state.txt", false))],
     };
     crate::command::workflow_task_set::republish::test_fixture::write_chain(
         &project,
