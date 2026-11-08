@@ -176,3 +176,35 @@ async fn acceptance_author_drift_owes_supplementary_after_reauthor_republish_dro
     assert_eq!(owed[0].id, "SUP-REQ-X-004");
     assert_eq!(owed[0].covers, ["REQ-X-004"]);
 }
+
+#[test]
+fn drift_owes_routed_ids_and_refreshes_existing_new_class_entries() {
+    let prd = "## Done Definition\n1. Complete.\n- NFR-001: retain evidence.\n- TF-X-001: preserve interface.\n\n| ID | Goal |\n|---|---|\n| G-X-001 | reach goal |\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | accepted |\n";
+    let mut contract = AcceptanceContract {
+        schema_version: 1,
+        prd: PrdIdentity {
+            path: "prd.md".into(),
+            digest: "same".into(),
+        },
+        gap_policy: GapPolicy {
+            permitted_acceptance_ids: BTreeSet::new(),
+            forbidden_phrases: vec![],
+            required_fields: vec![],
+        },
+        acceptance: vec![placeholder("AC-X-001", "accepted", vec!["NFR-001".into()])],
+        supplementary: vec![],
+    };
+    assert!(super::super::author_drift::owed_by(&contract, prd, false).is_empty());
+    contract.supplementary = vec![placeholder(
+        "SUP-DONE-1",
+        "Complete.",
+        vec!["DONE-1".into()],
+    )];
+    assert!(super::super::author_drift::owed_by(&contract, prd, false).is_empty());
+    contract.supplementary[0].id.push_str("-R2");
+    contract.supplementary[0].criterion = "old".into();
+    let drift = super::super::author_drift::owed_by(&contract, prd, false);
+    assert_eq!(drift.len(), 1);
+    assert_eq!(drift[0].id, "SUP-DONE-1-R2");
+    assert_eq!(drift[0].criterion, "Complete.");
+}

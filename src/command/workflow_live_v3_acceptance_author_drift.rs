@@ -22,8 +22,8 @@ use archon_workflow::task_set_contract::{
 use archon_workflow::task_skeleton::TaskSkeleton;
 use archon_workflow::v2::acceptance_stage::AcceptanceContractRepairV1;
 use archon_workflow::v2::acceptance_stage::coverage::{
-    missing_acceptance_ids, prd_requirement_texts, supplementary_requirement,
-    uncovered_requirements,
+    missing_acceptance_ids, prd_requirement_texts, routed_requirement_ids,
+    supplementary_requirement, uncovered_requirements,
 };
 
 use super::author::{
@@ -242,9 +242,10 @@ pub(super) fn owed_by(
     for id in missing_acceptance_ids(&criteria.keys().cloned().collect(), contract) {
         owed.insert(id.clone(), placeholder(&id, &criteria[&id], Vec::new()));
     }
-    let uncovered: BTreeSet<String> = uncovered_requirements(&requirements, contract)
-        .into_iter()
-        .collect();
+    let uncovered: BTreeSet<String> =
+        uncovered_requirements(&routed_requirement_ids(prd_text), contract)
+            .into_iter()
+            .collect();
     for sup in owed_supplementary(prd_text, &uncovered) {
         owed.insert(sup.id.clone(), sup);
     }

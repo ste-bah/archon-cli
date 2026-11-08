@@ -337,7 +337,8 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
     let mut owed: Vec<AcceptanceCriterion> = (criteria.iter())
         .map(|(id, text)| placeholder(id, text, Vec::new()))
         .collect();
-    let requirements = prd_requirement_texts(&prd_text).into_keys().collect();
+    let requirements =
+        archon_workflow::v2::acceptance_stage::coverage::routed_requirement_ids(&prd_text);
     owed.extend(owed_supplementary(&prd_text, &requirements));
     let mut base = AcceptanceContract {
         schema_version: 1,

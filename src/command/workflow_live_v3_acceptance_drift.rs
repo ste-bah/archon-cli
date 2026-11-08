@@ -6,7 +6,7 @@
 //! check covers, passed every round. Here the round reads the PRD the
 //! contract names and records, as round-level errors that block completion,
 //! every PRD acceptance id with no check and every PRD requirement id no
-//! check covers (`acceptance_coverage`), each with the check it is owed and
+//! routed check covers (`acceptance_coverage`), each with the check it is owed and
 //! the command that authors it. The checks still run: the failures they
 //! show are remediated as usual while the contract is extended.
 
@@ -15,7 +15,8 @@ use std::path::PathBuf;
 
 use archon_workflow::task_set_contract::AcceptanceContract;
 use archon_workflow::v2::acceptance_stage::coverage::{
-    missing_acceptance_ids, prd_requirement_ids, supplementary_id, uncovered_requirements,
+    coverage_diagnostics, missing_acceptance_ids, routed_requirement_ids, supplementary_id,
+    uncovered_requirements,
 };
 
 use super::exec::StageContext;
@@ -59,7 +60,7 @@ pub(super) fn drift_errors(context: &StageContext, contract: &AcceptanceContract
             path.display()
         ));
     }
-    let uncovered = uncovered_requirements(&prd_requirement_ids(&prd), contract);
+    let uncovered = uncovered_requirements(&routed_requirement_ids(&prd), contract);
     if !uncovered.is_empty() {
         errors.push(format!(
             "no frozen check covers PRD requirement id(s) {} ({}), so no round can show them met; each is owed a supplementary check ({}) covering it: {command}",
@@ -73,4 +74,26 @@ pub(super) fn drift_errors(context: &StageContext, contract: &AcceptanceContract
         ));
     }
     errors
+}
+
+/// Persist informational findings without making them completion errors.
+pub(super) fn persist_diagnostics(
+    context: &StageContext,
+    contract: &AcceptanceContract,
+) -> archon_workflow::WorkflowResult<()> {
+    let mut diagnostics = archon_workflow::task_set_contract::duplicate_check_defects(contract)
+        .into_iter()
+        .map(|defect| defect.message)
+        .collect::<Vec<_>>();
+    if let Ok(prd) = std::fs::read_to_string(prd_path(context, contract)) {
+        diagnostics.extend(coverage_diagnostics(&prd, contract));
+    }
+    let log = context.task_root.join(".decompose.log");
+    let previous = std::fs::read_to_string(&log).unwrap_or_default();
+    for diagnostic in diagnostics {
+        if !previous.lines().any(|line| line == diagnostic) {
+            crate::command::workflow_decompose_log::append_nofollow_line(&log, &diagnostic)?;
+        }
+    }
+    Ok(())
 }

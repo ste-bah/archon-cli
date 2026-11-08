@@ -152,3 +152,19 @@ fn an_unreadable_record_is_an_error_not_a_silent_baseline() {
         "{error:#}"
     );
 }
+
+#[test]
+fn launch_inventory_contains_coverable_obligations_and_constraints_but_not_acceptance_entries() {
+    let (_temp, store, run_id) = run_store();
+    let prd = "## Done Definition\n1. Complete.\n- NFR-001: retain evidence.\n- TF-X-001: preserve interface.\n\n| ID | Goal |\n|---|---|\n| G-X-001 | reach goal |\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | accepted |\n";
+    record_launch(&store, run_id, "digest", prd).unwrap();
+    let record: RequirementInventoryV1 =
+        serde_json::from_slice(&std::fs::read(store.run_dir(run_id).join(INVENTORY_PATH)).unwrap())
+            .unwrap();
+    assert_eq!(
+        record.ids,
+        ["DONE-1", "G-X-001", "NFR-001", "TF-X-001"]
+            .map(String::from)
+            .into()
+    );
+}

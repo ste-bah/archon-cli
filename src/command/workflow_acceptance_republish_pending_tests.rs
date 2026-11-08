@@ -39,7 +39,10 @@ fn staggered() -> ScriptedAuthorJudge {
             if entry["id"] == "AC-F-002" && attempt == 1 {
                 "no entry here".to_string()
             } else {
-                command_entry(entry, "test -s out")
+                command_entry(
+                    entry,
+                    &format!("test -s out-{}", entry["id"].as_str().unwrap()),
+                )
             }
         },
         |_, _| true,
@@ -189,8 +192,15 @@ async fn under_enforce_a_defect_one_saved_candidate_carries_goes_back_to_its_aut
         &set.probe,
     )
     .unwrap();
-    let client =
-        ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "test -s out"), |_, _| true);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            command_entry(
+                entry,
+                &format!("test -s out-{}", entry["id"].as_str().unwrap()),
+            )
+        },
+        |_, _| true,
+    );
     let named = ids(&NAMED);
     let result = reauthor_and_republish(&client, request(&set, &named), &scope(&set))
         .await

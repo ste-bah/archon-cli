@@ -307,7 +307,7 @@ async fn a_supplementary_check_that_covers_nothing_is_reauthored() {
     contract.prd.digest = content_digest(prd.as_bytes());
     contract
         .supplementary
-        .push(criterion("SUP-REQ-F-001", "test -f present", true));
+        .push(criterion("SUP-REQ-F-001", "test -s present", true));
     let project = run.set.project.path().to_path_buf();
     write_chain(
         &project,
@@ -452,3 +452,47 @@ async fn r7_resumed_unstamped_entry_clears_evidence_before_extension_publication
 
 #[path = "workflow_live_v3_acceptance_recovery_tests.rs"]
 mod recovery_tests;
+
+#[tokio::test]
+async fn heal_unfrozen_owes_only_acceptance_and_routed_supplementary_ids() {
+    let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+    let mut prd = std::fs::read_to_string(&run.set.prd).unwrap();
+    prd.push_str("\n- REQ-F-001: present\n- NFR-001: evidence\n\n| ID | Goal |\n|---|---|\n| G-F-001 | goal |\n\n## Done Definition\n1. Complete.\n");
+    std::fs::write(&run.set.prd, prd).unwrap();
+    unfrozen(&run);
+    pre_implementation_head(&run);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            command_entry(
+                entry,
+                &format!("test -s present # {}", entry["id"].as_str().unwrap()),
+            )
+        },
+        |_, _| true,
+    );
+    let (_, record) = stage(&run, &client).await;
+    assert_eq!(
+        record.contract_repairs[0].check_ids,
+        ["AC-F-001", "SUP-REQ-F-001"]
+    );
+    assert!(record.contract_repairs[0].repaired, "{record:?}");
+    let log = std::fs::read_to_string(run.set.tasks.join(".decompose.log")).unwrap();
+    for id in ["DONE-1", "NFR-001", "G-F-001"] {
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.contains(&format!("uncovered item {id}:")))
+                .count(),
+            1,
+            "{log}"
+        );
+        assert!(
+            !record
+                .operational_errors
+                .iter()
+                .any(|error| error.contains(id))
+        );
+    }
+}
+
+#[path = "workflow_live_v3_acceptance_diagnostic_tests.rs"]
+mod diagnostic_tests;

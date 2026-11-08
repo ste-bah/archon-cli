@@ -25,6 +25,10 @@ pub use source_sections::obligation_source_sections;
 
 use regex::Regex;
 
+#[path = "obligation_requirement_rows.rs"]
+mod requirement_rows;
+pub use requirement_rows::{is_exact_requirement_id, requirement_row_ids};
+
 #[path = "obligation_continuations.rs"]
 mod continuations;
 
@@ -90,8 +94,12 @@ pub fn acceptance_ids(prd: &str) -> BTreeSet<String> {
 pub fn acceptance_criteria(prd: &str) -> BTreeMap<String, String> {
     table_obligation_entries(prd)
         .into_iter()
-        .filter(|(id, _)| id.starts_with("AC-"))
+        .filter(|(id, _)| is_acceptance_id(id))
         .collect()
+}
+
+fn is_acceptance_id(id: &str) -> bool {
+    id.starts_with("AC-")
 }
 
 fn exact_req_or_ac_pattern() -> &'static Regex {
@@ -203,6 +211,7 @@ pub fn malformed_obligation_ids(prd: &str) -> Vec<String> {
     malformed.into_iter().collect()
 }
 
+/// Identifiers extracted in the requirement-bullet role.
 fn bullet_requirement_ids(prd: &str) -> BTreeSet<String> {
     requirement_candidate_pattern()
         .captures_iter(prd)

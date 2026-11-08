@@ -1,5 +1,8 @@
-// Keep in sync with Rust acceptance_stage::coverage::REQUIREMENT_PREFIX.
-const REQUIREMENT_PREFIX = "REQ-";
+function supplementaryRequirement(id) {
+  if (typeof id !== "string" || !id.startsWith("SUP-")) return null;
+  const requirement = id.slice(4).replace(/-R[0-9]+$/, "");
+  return requirement.length > 0 && !/[^A-Za-z0-9-]/.test(requirement) ? requirement : null;
+}
 const COMMAND_EXAMPLES = 'Command examples: {"kind":"command","cwd":"repo_root","command":"make test"} and {"kind":"command","cwd":"project_root","command":"./verify"}.';
 
 const ACCEPTANCE_SHAPE = JSON.stringify({
@@ -21,7 +24,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         }
       },
       gap_permitted: false,
-      covers: [`<${REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>`],
+      covers: ["<coverable id from the PRD whose violation makes this check fail>"],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     },
     {
@@ -34,7 +37,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         cwd: "<repo_root or project_root>"
       },
       gap_permitted: false,
-      covers: [`<${REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>`],
+      covers: ["<coverable id from the PRD whose violation makes this check fail>"],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     }
   ],
@@ -418,7 +421,7 @@ async function authorCandidate(w, policy) {
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = routed.retryFindings;
-      const latest = attributeEntryFindings(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+      const latest = attributeEntryFindings(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries, policy.capability);
       settleGateFindings(authorState, latest.own);
       settlePhaseFindings(authorState, latest.phase);
       authorState.judgeNotes = null;
@@ -429,7 +432,7 @@ async function authorCandidate(w, policy) {
         // With nothing else to repair the rebuilt candidate is frozen again at
         // once, inside the ordinary no-progress window.
         const rebuilt = refreshFromCurrentContract(authorState, outcome.gateEnvelope.report,
-          repair.filter(finding => finding !== stale), ids, JSON.parse(authored.content));
+          repair.filter(finding => finding !== stale), ids, JSON.parse(authored.content), policy.capability);
         if (rebuilt !== null) {
           recordAnswered(progress, call, "stale_acceptance_contract", advanced, !measuredReplies, round);
           lastFindings = [String(stale.text)];
@@ -439,7 +442,7 @@ async function authorCandidate(w, policy) {
       } else {
         const selected = repair.map(finding => ownedFatal.includes(finding)
           ? {...finding, text: `check '${finding.subject}': ${finding.text}`} : finding);
-        authorState.retryIds = acceptanceRepairIds(selected, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
+        authorState.retryIds = acceptanceRepairIds(selected, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries, policy.capability);
       }
     }
     // A committed artifact is not the finished one: repairable findings are

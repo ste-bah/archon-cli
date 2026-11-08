@@ -126,9 +126,9 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
 #[tokio::test]
 async fn setup_path_finding_retries_one_check_and_republishes_its_siblings() {
     let mut set = frozen_set(&[
-        ("AC-F-101", "true", false),
-        ("AC-F-102", "true", false),
-        ("AC-F-103", "true", false),
+        ("AC-F-101", "test -f missing-a", false),
+        ("AC-F-102", "test -f missing-b", false),
+        ("AC-F-103", "test -f missing-c", false),
     ]);
     for name in ["a", "b", "c"] {
         let path = set.project.path().join(format!("data/{name}.txt"));

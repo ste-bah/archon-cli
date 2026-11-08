@@ -26,9 +26,13 @@ impl<'a> HostOwned<'a> {
     /// (Issue 357): the criterion is the host's. Supplementary IDs take their
     /// current requirement text and cover exactly that requirement with no gap.
     pub(super) fn stamp(&self, mut entry: Value, id: &str) -> Value {
-        let supplementary = id.strip_prefix("SUP-").filter(|requirement| {
-            !self.criteria.contains_key(id) && self.requirement_texts.contains_key(*requirement)
-        });
+        let supplementary =
+            archon_workflow::v2::acceptance_stage::coverage::supplementary_requirement(id).filter(
+                |requirement| {
+                    !self.criteria.contains_key(id)
+                        && self.requirement_texts.contains_key(*requirement)
+                },
+            );
         let criterion = self.criteria.get(id).or_else(|| {
             supplementary.and_then(|requirement| self.requirement_texts.get(requirement))
         });

@@ -148,6 +148,11 @@ pub(crate) fn frozen_set_in(
     std::fs::create_dir_all(&tasks).unwrap();
     let prd = project.path().join("prds/PRD-F.md");
     std::fs::create_dir_all(prd.parent().unwrap()).unwrap();
+    let inputs = project.path().join("proof-inputs");
+    std::fs::create_dir_all(&inputs).unwrap();
+    for (id, _, _) in checks {
+        std::fs::write(inputs.join(format!("{id}.txt")), "ready").unwrap();
+    }
     let mut table = String::from("## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n");
     for (id, _, _) in checks {
         table.push_str(&format!("| {id} | criterion text for {id} |\n"));

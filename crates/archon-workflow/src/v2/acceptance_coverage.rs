@@ -9,8 +9,8 @@
 //! contract alone:
 //!
 //! - [`uncovered_requirements`]: PRD requirement ids no check covers. Each
-//!   one is owed a supplementary check [`supplementary_id`] covering it, and
-//!   a freeze that still has one is not finished;
+//!   routed item is owed a supplementary check [`supplementary_id`]; other
+//!   roles are reported by [`coverage_diagnostics`] until repair routes land;
 //! - [`missing_acceptance_ids`]: PRD acceptance ids the contract has no
 //!   check for (drift after the freeze, A7);
 //! - [`tasks_without_checks`]: tasks no check answers for (A12);
@@ -24,14 +24,14 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 
 /// Id prefix of every supplementary check.
 pub const SUPPLEMENTARY_PREFIX: &str = "SUP-";
-/// Prefix of a PRD requirement id.
-pub const REQUIREMENT_PREFIX: &str = "REQ-";
 
 /// Every requirement id the PRD states, with its exact text.
 pub fn prd_requirement_texts(prd: &str) -> BTreeMap<String, String> {
+    let acceptance = crate::obligation_ids::acceptance_ids(prd);
     crate::obligation_ids::obligation_texts(prd)
         .into_iter()
-        .filter(|(id, _)| id.starts_with(REQUIREMENT_PREFIX))
+        .chain(crate::obligation_ids::constraint_texts(prd))
+        .filter(|(id, _)| !acceptance.contains(id))
         .collect()
 }
 
@@ -40,9 +40,26 @@ pub fn prd_requirement_ids(prd: &str) -> BTreeSet<String> {
     prd_requirement_texts(prd).into_keys().collect()
 }
 
-/// Requirement ids with an active repair route; the coverable-ids step narrows it.
+/// Requirements whose uncovered state has an authoring route today.
+/// Other extractor roles remain coverable while their routes are pending.
 pub fn routed_requirement_ids(prd: &str) -> BTreeSet<String> {
-    prd_requirement_ids(prd)
+    crate::obligation_ids::requirement_row_ids(prd)
+}
+
+/// Uncovered items whose extractor roles do not yet have repair routes.
+pub fn coverage_diagnostics(prd: &str, contract: &AcceptanceContract) -> Vec<String> {
+    let routed = routed_requirement_ids(prd);
+    let texts = prd_requirement_texts(prd);
+    uncovered_requirements(&texts.keys().cloned().collect(), contract)
+        .into_iter()
+        .filter(|id| !routed.contains(id))
+        .map(|id| {
+            format!(
+                "uncovered item {id}: {}; coverage repair route pending",
+                texts[&id]
+            )
+        })
+        .collect()
 }
 
 fn entries(contract: &AcceptanceContract) -> impl Iterator<Item = &AcceptanceCriterion> {
@@ -78,12 +95,24 @@ pub fn supplementary_id(requirement: &str) -> String {
 
 /// The requirement a supplementary id was minted for, if it was.
 pub fn supplementary_requirement(id: &str) -> Option<&str> {
-    id.strip_prefix(SUPPLEMENTARY_PREFIX)
-        .filter(|requirement| requirement.starts_with(REQUIREMENT_PREFIX))
+    let requirement = id.strip_prefix(SUPPLEMENTARY_PREFIX)?;
+    let requirement = match requirement.rsplit_once("-R") {
+        Some((base, suffix))
+            if !suffix.is_empty() && suffix.bytes().all(|ch| ch.is_ascii_digit()) =>
+        {
+            base
+        }
+        _ => requirement,
+    };
+    (!requirement.is_empty()
+        && requirement
+            .bytes()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == b'-'))
+    .then_some(requirement)
 }
 
 /// `(check id, covered id)` for every covered id outside the PRD requirement
-/// inventory: only obligation ids starting with `REQUIREMENT_PREFIX` qualify.
+/// inventory of coverable obligations and constraints.
 pub fn unknown_covers(
     prd_requirement_ids: &BTreeSet<String>,
     contract: &AcceptanceContract,

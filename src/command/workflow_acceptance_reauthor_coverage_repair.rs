@@ -40,7 +40,10 @@ pub(super) fn validate_covers(
     if !after.is_subset(&before) {
         return Err("covers may only retain or drop existing ids".into());
     }
+    // Only a minted entry (one whose frozen covers hold its own id) must keep
+    // it; a legacy free-form SUP id names no requirement of its own.
     if let Some(required) = supplementary_requirement(&frozen.id)
+        .filter(|required| frozen.covers.iter().any(|id| id.trim() == *required))
         && !candidate.covers.iter().any(|id| id == required)
     {
         return Err(format!(

@@ -77,6 +77,7 @@ pub(super) const SCRIPT_DECLS: &[&str] = &[
     "HISTORY_SHARE",
     "PRIOR_SHARE",
     "CATALOGUE_SHARE",
+    "COVERABLE_SHARE",
     "CONTEXT_BUDGET",
     "HISTORY_RECORD_BYTES",
     "CUT_MARK",

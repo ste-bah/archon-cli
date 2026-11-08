@@ -107,6 +107,28 @@ pub fn acceptance_structure_defects(
     defects
 }
 
+/// Candidate rejection; existing frozen contracts retain their validity.
+pub fn duplicate_check_defects(contract: &AcceptanceContract) -> Vec<ValidationDefect> {
+    let mut defects = Vec::new();
+    let mut commands: Vec<(&str, TrustedCwd, &str)> = Vec::new();
+    for entry in contract.acceptance.iter().chain(&contract.supplementary) {
+        if let AcceptanceCheck::Command { command, cwd } = &entry.check {
+            if let Some((_, _, first)) = commands
+                .iter()
+                .find(|(held, root, _)| *held == command.as_str() && root == cwd)
+            {
+                defects.push(ValidationDefect::new(
+                    "duplicate_check", &entry.id, "check",
+                    format!("check '{}' repeats the command and working directory of check '{first}'; write a check whose command or working directory differs from check '{first}', or cover {:?} in that check instead", entry.id, entry.covers),
+                ));
+            } else {
+                commands.push((command.as_str(), *cwd, entry.id.as_str()));
+            }
+        }
+    }
+    defects
+}
+
 fn criterion_defects(
     entry: &AcceptanceCriterion,
     subject: &str,

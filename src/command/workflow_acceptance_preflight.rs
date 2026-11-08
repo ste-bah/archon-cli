@@ -62,6 +62,9 @@ pub(super) fn prepare(
             continue;
         };
         let Some(text) = requirements.get(requirement).cloned() else {
+            if !archon_workflow::obligation_ids::is_exact_requirement_id(requirement) {
+                continue;
+            }
             defects.push(ValidationDefect::new("unknown_supplementary_requirement", "acceptance",
                 &format!("supplementary/{index}"), format!(
                     "supplementary check '{}' names requirement {requirement}, which the PRD does not define; remove it or correct the id", criterion.id)));
@@ -77,6 +80,10 @@ pub(super) fn prepare(
             &contract, expected, false,
         ),
     );
+
+    defects.extend(archon_workflow::task_set_contract::duplicate_check_defects(
+        &contract,
+    ));
 
     // Authored verdicts are placeholders. Only check defects, never those
     // placeholder judgments, decide whether the candidate reaches the judge.
