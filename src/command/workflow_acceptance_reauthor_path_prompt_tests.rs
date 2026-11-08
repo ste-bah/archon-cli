@@ -14,6 +14,8 @@ fn reauthor_prompt_omits_path_when_site_policy_capture_fails() {
         &["repair".into()],
         1,
         &[],
-    );
+        &[],
+    )
+    .expect("read requirement texts");
     assert!(!prompt.contains("Checks run at the check site with PATH="));
 }

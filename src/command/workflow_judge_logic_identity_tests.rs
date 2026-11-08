@@ -169,6 +169,7 @@ fn changed_named_file_keeps_the_fresh_refutation() {
     let named_file = root.path().join("input");
     std::fs::write(&named_file, "judge saw this").unwrap();
     let roots = super::super::judge::JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),

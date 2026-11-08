@@ -472,6 +472,7 @@ fn discovery_preserves_missing_candidates_but_prompt_view_explains_uncertainty()
         candidate.path == "ABC-1/2" && candidate.exclusion == Some(ExclusionReason::MissingAtRoot)
     }));
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),

@@ -13,6 +13,7 @@ fn named_inputs_report_absence_exclusion_and_shared_budget_status() {
     std::fs::write(root.path().join("second"), "second content").unwrap();
 
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),
@@ -115,6 +116,7 @@ fn a_budget_exhausted_entry_is_stamped_with_its_full_content_digest() {
 
 fn roots_at(root: &std::path::Path) -> JudgeRoots {
     JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.to_path_buf()),
         repository: None,
         task_root: Some(root.to_path_buf()),

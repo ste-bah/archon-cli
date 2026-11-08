@@ -25,6 +25,8 @@ fn prompt_and_judge_digest_covers_every_static_source_contributor() {
     assert!(listed.contains("workflow_acceptance_reauthor_author.rs"));
     assert!(listed.contains("workflow_acceptance_reauthor.rs"));
     assert!(listed.contains("acceptance_coverage.rs"));
+    assert!(listed.contains("obligation_ids.rs"));
+    assert!(listed.contains("workflow_acceptance_reauthor_coverage_repair.rs"));
     assert!(author.contains("live_root::check_path_rule("));
     assert!(live_root.contains("pub(crate) fn check_path_rule("));
     assert!(listed.contains("workflow_acceptance_live_root.rs"));

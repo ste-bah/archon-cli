@@ -7,6 +7,7 @@ fn binary_inputs_are_not_source_bytes_but_remain_probe_inputs() {
     binary.set_len(100_173_120).unwrap();
     let subject = command_check("inspect input", TrustedCwd::ProjectRoot);
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: Some(root.path().to_path_buf()),
         task_root: Some(root.path().to_path_buf()),
@@ -84,6 +85,7 @@ PY
         TrustedCwd::ProjectRoot,
     );
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),
@@ -120,6 +122,7 @@ PY
         TrustedCwd::ProjectRoot,
     );
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),

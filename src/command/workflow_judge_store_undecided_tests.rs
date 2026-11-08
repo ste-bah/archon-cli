@@ -45,6 +45,7 @@ async fn an_undecided_outcome_is_reused_only_for_unchanged_named_file_content_55
     let source = project.path().join("settings.toml");
     std::fs::write(&source, "token = \"old-secret-value-0001\"\n").unwrap();
     let roots = super::super::judge::JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(project.path().to_path_buf()),
         repository: None,
         task_root: Some(project.path().to_path_buf()),

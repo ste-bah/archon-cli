@@ -103,7 +103,9 @@ fn oversized_prefetch_keeps_output_contract_and_id_ahead_of_content() {
         &["finding".into()],
         1,
         &[huge],
-    );
+        &[],
+    )
+    .expect("read requirement texts");
     let fitted_head = &prompt[..prompt.find("Files already identified").unwrap()];
     assert!(fitted_head.contains("Return one JSON object with id, criterion, check"));
     assert!(fitted_head.contains(&format!("Use the exact id {}", frozen.id)));
