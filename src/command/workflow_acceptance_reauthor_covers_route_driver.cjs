@@ -7,7 +7,7 @@ const ctx = withAuthorContext({args:{acceptanceCriteria:{'AC-F-001':'first outpu
   prdRequirementTexts: input.texts, authorMaxParallelism:1},
   __archonValidateAcceptanceEntry:() => '[]'});
 vm.createContext(ctx);
-for (const name of ['v1','v1_body','reply_blocks','v1_acceptance','v1_set_gate','v1_frozen','v1_progress','v1_context','v1_seed']) {
+for (const name of ['v1','v1_body','reply_blocks','v1_acceptance','v1_set_gate','v1_frozen','v1_prompt','v1_progress','v1_context','v1_seed']) {
   vm.runInContext(fs.readFileSync(`${__dirname}/workflow_decompose_${name}.js`, 'utf8'), ctx);
 }
 ctx.requireDispatchable = async (_w, _label, task) => task;
