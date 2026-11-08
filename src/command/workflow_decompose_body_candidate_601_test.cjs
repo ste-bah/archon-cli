@@ -4,9 +4,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const source = ['v1', 'v1_body', 'reply_blocks', 'v1_acceptance', 'v1_set_gate',
-  'v1_frozen', 'v1_prompt', 'v1_progress', 'v1_failing_set', 'v1_seed', 'v1_context']
-  .map(name => fs.readFileSync(`${root}/workflow_decompose_${name}.js`, 'utf8')).join('\n');
+const embedded = fs.readFileSync(`${__dirname}/workflow_decompose.rs`, 'utf8')
+  .split('const FIXED_SCRIPT_SOURCE: &str = concat!(')[1].split('\n);')[0];
+const source = [...embedded.matchAll(/include_str!\("([^"]+)"\)/g)]
+  .map(([, name]) => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const subject = { taskId: 'TASK-SAMPLE-001', fileName: 'TASK-SAMPLE-001.md' };
 const phase = `body-${subject.taskId}`;
 const reply = content => ({ status: 'accepted', stopReason: 'end_turn', content });
@@ -77,23 +78,16 @@ test('39 -> 59 -> 5 -> 33 repairs from the five-finding body and accepts only th
   assert.match(run.prompts[2], /Prioritize this group first/);
 });
 
-test('Rust declaration-slicing harness still runs the body repair driver with the new dependencies', async () => {
-  const names = [...fs.readFileSync(`${root}/workflow_decompose_repair_decls.rs`, 'utf8')
-    .matchAll(/^    "([^"]+)",/gm)].map(match => match[1]);
-  const sliced = names.map(name => {
-    const marker = [`async function ${name}(`, `function ${name}(`, `const ${name} =`]
-      .find(marker => source.includes(marker));
-    assert.ok(marker, `Rust test declaration ${name} exists`);
-    const rest = source.slice(source.indexOf(marker));
-    return rest.slice(0, marker.includes('function') ? rest.indexOf('\n}') + 2 : rest.indexOf(';\n') + 1);
-  }).join('\n');
+test('Rust full-script harness still runs the body repair driver with the new dependencies', async () => {
+  const harness = fs.readFileSync(`${__dirname}/workflow_decompose_repair_tests.rs`, 'utf8');
+  assert.match(harness, /let mut script = script_source\(\)\.into_owned\(\)/);
   const rust = fs.readFileSync(`${root}/workflow_decompose_body_repair_tests.rs`, 'utf8');
   const tail = rust.slice(rust.indexOf('fn issue551_'));
   const driver = tail.split('let driver = r##"')[1].split('"##;')[0];
   let report;
   const done = new Promise(resolve => { report = resolve; });
   const ctx = vm.createContext({ console: { log: text => report(JSON.parse(text)) } });
-  vm.runInContext(sliced + '\n' + driver, ctx);
+  vm.runInContext(source + '\n{\n' + driver + '\n}', ctx);
   const result = await done;
   assert.equal(result.error, undefined);
   assert.equal(result.prompts.length, 5);

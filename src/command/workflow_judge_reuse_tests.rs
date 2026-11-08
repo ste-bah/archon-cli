@@ -114,6 +114,11 @@ async fn frozen() -> (
     contract.acceptance[0].covers = vec!["REQ-X-001".into()];
     let mut second = contract.acceptance[0].clone();
     second.id = "AC-X-002".into();
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut second.check
+    {
+        command.push_str(" && test -f out.json");
+    }
     contract.acceptance.push(second);
     std::fs::write(
         tasks.join(ACCEPTANCE_CONTRACT_FILE),

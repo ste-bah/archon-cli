@@ -43,6 +43,7 @@ fn skeleton(artifact: &str) -> TaskSkeleton {
         schema_version: 1,
         acceptance_digest: String::new(),
         tasks: vec![FrozenTask {
+            status: None,
             task_id: "TASK-X-001".into(),
             file_name: "TASK-X-001.md".into(),
             depends_on: vec![],

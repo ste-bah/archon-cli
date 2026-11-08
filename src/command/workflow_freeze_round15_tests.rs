@@ -72,7 +72,7 @@ fn sites() -> Vec<(&'static str, String, bool)> {
             false,
         ),
         ("read string field", task(r#""implements":[@]"#), false),
-        ("read status field", task(r#""status":@"#), false),
+        ("read JSON status field", task(r#""status":@"#), false),
         (
             "read task id",
             format!(r#"{{{HEAD},"tasks":[{{"task_id":@,"file_name":"f"}}]}}"#),
@@ -119,11 +119,12 @@ fn workflow_freeze_shape_precheck_and_reader_agree_on_every_value_in_every_site(
             let (precheck, reader, shown) = verdicts(&document);
             assert_eq!(precheck, reader, "{site} / {value}: {shown}");
             // A plain string is also valid where the reader reads a string.
-            let string_site = matches!(
-                site,
-                "read string field" | "read task id" | "read status field"
-            );
-            let expected = ignored || (value == "plain string" && string_site);
+            let string_site = matches!(site, "read string field" | "read task id");
+            // Status reads a JSON value, retaining only strings. Unlike an
+            // ignored field, it still enforces Value's decoding limits.
+            let json_status = site == "read JSON status field"
+                && serde_json::from_slice::<serde_json::Value>(&bytes).is_ok();
+            let expected = ignored || json_status || (value == "plain string" && string_site);
             assert_eq!(reader, expected, "{site} / {value}: {shown}");
             checked += 1;
         }
