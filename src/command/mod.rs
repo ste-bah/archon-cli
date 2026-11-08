@@ -166,6 +166,7 @@ pub(crate) mod pipeline_support_result;
 pub(crate) mod pipeline_workflow_llm;
 pub(crate) mod pipeline_workflow_llm_identity;
 pub(crate) mod provider_gate;
+mod workflow_decompose_prd_tools;
 pub(crate) mod workflow_mcp;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
 pub(crate) mod plan;

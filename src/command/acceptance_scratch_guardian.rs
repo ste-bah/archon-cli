@@ -1,7 +1,8 @@
 //! Owned observation subprocess. Parent keeps stdin open as a liveness pipe.
+#[cfg(unix)]
+use archon_workflow::acceptance_scratch::OBSERVATION_STALLED;
 use archon_workflow::acceptance_scratch::{
-    OBSERVATION_STALLED, ObservationResult, ObserveControl, ScratchPolicy, observation_stall,
-    observe_commands_hooked,
+    ObservationResult, ObserveControl, ScratchPolicy, observation_stall, observe_commands_hooked,
 };
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{
@@ -310,7 +311,7 @@ pub(crate) fn acquire_lease(
 fn acquire_lease_observing_busy(
     root: &std::path::Path,
     identity: &str,
-    mut on_busy: impl FnMut(),
+    on_busy: impl FnMut(),
 ) -> WorkflowResult<std::fs::File> {
     std::fs::create_dir_all(root).map_err(|source| WorkflowError::Io {
         path: root.into(),
@@ -319,13 +320,14 @@ fn acquire_lease_observing_busy(
     let path = root.join(format!("{}.lock", content_digest(identity.as_bytes())));
     #[cfg(not(unix))]
     {
-        let _ = path;
+        let _ = (path, on_busy);
         Err(WorkflowError::PolicyDenied(
             "native observation requires a supported Unix locking implementation".into(),
         ))
     }
     #[cfg(unix)]
     {
+        let mut on_busy = on_busy;
         use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
         let mut options = std::fs::OpenOptions::new();
         options.create(true).read(true).write(true).truncate(false);

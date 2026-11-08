@@ -408,6 +408,7 @@ fn finalizer_spec() -> WorkflowSpec {
             max_parallelism: None,
             item_kind: None,
             filter: None,
+            required_tools: Vec::new(),
             extra: Default::default(),
         }],
         permissions: Default::default(),

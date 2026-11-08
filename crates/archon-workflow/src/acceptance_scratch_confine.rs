@@ -13,7 +13,8 @@
 //!
 //! On Windows an owned Job Object confirms accounting reaches zero, bounding
 //! only inactivity; an active job without progress is an operational stall.
-use super::*;
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// How long teardown keeps killing before it reports survivors.

@@ -53,7 +53,7 @@ pub(super) use setup::package_findings;
 mod usage;
 pub(crate) use audit::audited_verdict;
 pub(super) use audit::verdict_key;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use evidence::test_secret;
 use evidence::{Evidence, Redactor};
 pub(crate) use usage::{cannot_pass_findings, original_usage_error, silent_stall_finding};

@@ -233,6 +233,7 @@ fn a_journal_no_read_can_settle_pauses_the_run_and_heals_once_fixed() {
 /// journal behind, as if its removal had failed, and the recovery log beside
 /// the pin cannot be written, so no read can settle it. Returns the
 /// operator's fix: the log made writable again.
+#[cfg(unix)]
 pub(crate) fn stick_next_commit(pin: &Path) -> impl FnOnce() + use<> {
     use std::cell::{Cell, RefCell};
     let paths = JournalPaths::for_pin(pin);

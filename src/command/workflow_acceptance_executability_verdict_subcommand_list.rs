@@ -66,7 +66,7 @@ static LISTED: LazyLock<Mutex<BTreeMap<Key, Listing>>> =
 #[cfg(test)]
 static LAST_LISTING: LazyLock<Mutex<BTreeMap<PathBuf, Listing>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn last_listing(program: &Path) -> Option<Listing> {
     LAST_LISTING
         .lock()
@@ -142,7 +142,7 @@ struct Scratch(Option<PathBuf>);
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 /// The names the next `count` listing directories would try first.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn next_scratch(count: u64) -> Vec<PathBuf> {
     let next = NEXT.load(Ordering::SeqCst);
     (next..next + count)

@@ -63,14 +63,14 @@ impl HostProbe {
     }
 
     /// Bound every check by `secs` instead of its site's own limit.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn with_check_cap(mut self, secs: u64) -> Self {
         self.check_cap_secs = secs;
         self
     }
 
     /// Stand for a new process: verdicts come only from disk.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn without_process_memo(mut self) -> Self {
         self.process_memo = false;
         self
@@ -162,7 +162,7 @@ impl HostProbe {
     /// The hooks one observation (or copy) of `keys` (id to memo key) runs
     /// under: the budget's allowance per check, and each verdict saved as
     /// it finishes, its key pushed to `written`.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn observe_hooks(
         &self,
         keys: &BTreeMap<String, String>,

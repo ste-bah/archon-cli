@@ -83,6 +83,7 @@ impl super::super::executability::HostProbe {
         );
     }
 
+    #[cfg(unix)]
     pub(crate) fn assert_p1_readers(text: &str, baseline: bool) {
         use crate::command::workflow_gate::{GateFinding, GateId};
         assert_eq!(

@@ -63,6 +63,7 @@ pub mod obligation_ids;
 mod persistence;
 pub mod planner;
 pub mod policy;
+pub mod prd_tools;
 pub mod stage_write;
 // Issue 342: the probe moved down to the archon-shell leaf; same path here.
 pub use archon_shell::process_liveness;
@@ -82,6 +83,7 @@ mod spec_compat;
 mod spec_deser;
 mod spec_inference;
 mod spec_policy;
+mod spec_stage_compat;
 mod spec_work_units;
 pub mod stage;
 pub mod stage_activity;

@@ -2,21 +2,28 @@
 //! HTTP/service adapters are not MCP clients; no ambient tool union is granted.
 
 use crate::command::workflow_gate::{GateFinding, GateId};
+use archon_workflow::prd_tools::{complete_mcp_tool, tool_matches};
 use archon_workflow::task_universe::{
     WorkflowV2TaskUniverseTask, parsing::parse_task_file, task_files_under,
 };
-use archon_workflow::tool_declarations::raw_tool_name;
 use std::collections::BTreeSet;
 use std::path::Path;
 
 pub(super) fn inspect(project: &Path, task: &WorkflowV2TaskUniverseTask, raw: &str) -> Vec<String> {
-    let permitted = crate::command::workflow_mcp::explicitly_permitted_tools(project);
+    let (config, permitted) = match crate::command::workflow_mcp::project_permitted_tools(project) {
+        Ok(input) => input,
+        Err(error) => {
+            let prefix = format!("{}{}", project.display(), std::path::MAIN_SEPARATOR);
+            return vec![error.replace(&prefix, "")];
+        }
+    };
+    let config = config.strip_prefix(project).unwrap_or(&config).display();
     let granted: BTreeSet<_> = permitted
         .iter()
         .filter(|name| {
             task.required_tools
                 .iter()
-                .any(|tool| matches_tool(tool, name))
+                .any(|tool| tool_matches(tool, name))
         })
         .cloned()
         .collect();
@@ -42,7 +49,7 @@ pub(super) fn inspect(project: &Path, task: &WorkflowV2TaskUniverseTask, raw: &s
             .collect();
         if !candidates.iter().any(|name| granted.contains(*name)) {
             defects.insert(format!(
-                "{}: required_tools does not grant the MCP access declared by contract '{}'; declare the exact project-permitted MCP tools this task must exercise, using .mcp.json. Available matching tools: {}. If this is an HTTP or offline adapter, correct its contract rather than declaring unrelated tools.",
+                "{}: required_tools does not grant the MCP access declared by contract '{}'; declare the exact project-permitted MCP tools this task must exercise, using {config}. Available matching tools: {}. If this is an HTTP or offline adapter, correct its contract rather than declaring unrelated tools.",
                 task.canonical_task_id, contract.kind,
                 candidates.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(", ")
             ));
@@ -63,8 +70,8 @@ pub(super) fn inspect(project: &Path, task: &WorkflowV2TaskUniverseTask, raw: &s
             line.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':' || c == '-'))
         {
             let token = token.trim_end_matches([':', '-', '_', '.']);
-            let named = permitted.iter().find(|name| matches_tool(token, name));
-            let invocation = focused_mcp_invocation(token);
+            let named = permitted.iter().find(|name| tool_matches(token, name));
+            let invocation = complete_mcp_tool(token);
             if (invocation.is_some() || named.is_some())
                 && !named.is_some_and(|name| granted.contains(name))
             {
@@ -84,7 +91,7 @@ pub(super) fn inspect(project: &Path, task: &WorkflowV2TaskUniverseTask, raw: &s
                 } else {
                     format!("; permitted for that server: {}", server_tools.join(", "))
                 };
-                defects.insert(format!("{}: required_tools is missing a permitted grant for focused MCP call '{token}'; use an exact permitted name from .mcp.json and declare that invocation{hint}", task.canonical_task_id));
+                defects.insert(format!("{}: required_tools is missing a permitted grant for focused MCP call '{token}'; use an exact permitted name from {config} and declare that invocation{hint}", task.canonical_task_id));
             }
         }
     }
@@ -93,31 +100,11 @@ pub(super) fn inspect(project: &Path, task: &WorkflowV2TaskUniverseTask, raw: &s
         .iter()
         .filter(|tool| tool.starts_with("mcp__") || tool.starts_with("mcp_action:"))
     {
-        if !permitted.iter().any(|name| matches_tool(tool, name)) {
-            defects.insert(format!("{}: required_tools names MCP tool '{tool}' which is not permitted by the project .mcp.json", task.canonical_task_id));
+        if !permitted.iter().any(|name| tool_matches(tool, name)) {
+            defects.insert(format!("{}: required_tools names MCP tool '{tool}' which is not permitted by the project config {config}", task.canonical_task_id));
         }
     }
     defects.into_iter().collect()
-}
-
-/// Issue-40: a Focused Tests token is an MCP invocation only when it carries a complete
-/// `mcp__<server>__<tool>` or `mcp_action:<name>` identifier, returned as `(server, name)`.
-/// A bare server prefix left by a glob such as `mcp__srv__*` is prose, not an obligation.
-fn focused_mcp_invocation(token: &str) -> Option<(Option<&str>, &str)> {
-    if let Some(rest) = token.strip_prefix("mcp__") {
-        let (server, tool) = rest.split_once("__")?;
-        return (!server.is_empty() && !tool.is_empty()).then_some((Some(server), tool));
-    }
-    let name = token.strip_prefix("mcp_action:")?;
-    (!name.is_empty()).then_some((None, name))
-}
-
-fn matches_tool(declared: &str, qualified: &str) -> bool {
-    if declared.starts_with("mcp__") {
-        declared == qualified
-    } else {
-        raw_tool_name(declared) == raw_tool_name(qualified)
-    }
 }
 
 pub(super) fn set_findings(project: &Path, root: &Path) -> Vec<GateFinding> {

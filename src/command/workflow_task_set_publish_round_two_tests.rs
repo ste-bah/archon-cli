@@ -217,12 +217,14 @@ fn crafted_foreign_traversal_and_symlink_targets_cannot_delete_victims() {
     )
     .unwrap();
     std::fs::write(&foreign_gate, b"victim").unwrap();
-    let mut targets = vec![
+    let targets = vec![
         victim.clone(),
         s.tasks().join("../../victim.json"),
         foreign_gate,
     ];
     std::fs::write(s.root().join("victim.json"), b"victim").unwrap();
+    #[cfg(unix)]
+    let mut targets = targets;
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(outside.path(), s.tasks().join("escape")).unwrap();

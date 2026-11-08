@@ -180,7 +180,7 @@ pub(crate) async fn resume_guarded_at_binary_revision(
         ));
     }
     let (prd_bytes, prd_digest, acceptance_criteria) =
-        super::super::workflow_task_set::validate_prd_input(&prd_path)?;
+        validate_prd_launch_input(&prd_path, &project_root)?;
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let prd_requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);

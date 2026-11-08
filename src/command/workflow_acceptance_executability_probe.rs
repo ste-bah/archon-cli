@@ -7,7 +7,7 @@ use crate::command::workflow_task_set::live_root;
 mod stalled_tree;
 
 impl HostProbe {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn inject_prove_run(&self, run: repairs::TreeRun, markers: mutation::Markers) {
         *self
             .injected_prove_run
@@ -87,7 +87,7 @@ impl HostProbe {
             .collect()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) async fn run(
         &self,
         contract: &AcceptanceContract,

@@ -27,6 +27,9 @@
 //! than a guess at which was meant.
 
 mod candidate;
+mod prd_tool_coverage;
+mod source_text;
+use source_text::{absolute, describe};
 mod contracts;
 mod coverage;
 mod declarations;
@@ -236,6 +239,11 @@ fn base_blocking_findings_with_mode(
     if let Some(root) = root {
         findings.extend(task_set::inspect(cwd, root, mode)?.blockers);
         findings.extend(
+            prd_tool_coverage::set_findings(cwd, root)
+                .map(|findings| findings.into_iter().map(|finding| finding.text).collect())
+                .unwrap_or_else(|error| vec![error.to_string()]),
+        );
+        findings.extend(
             tool_obligations::set_findings(cwd, root)
                 .into_iter()
                 .map(|f| f.text),
@@ -386,14 +394,27 @@ pub(crate) fn evaluate_lint(
     if let Some(root) = coverage_root.as_deref() {
         findings.extend(tool_obligations::set_findings(cwd, root));
         findings.extend(scope_declarations::set_findings(root));
+        match prd_tool_coverage::set_findings(cwd, root) {
+            Ok(tools) => findings.extend(tools),
+            Err(error) => {
+                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
+                repository_error = Some(format!(
+                    "prd tool coverage failed: {}",
+                    crate::command::workflow_host_fault::diagnostic(&error)
+                ));
+            }
+        }
         match repository_claims::set_findings(cwd, root) {
             Ok(claims) => findings.extend(claims),
             Err(error) => {
                 fault_classes.push(crate::command::workflow_host_fault::classify(&error));
-                repository_error = Some(format!(
+                let text = format!(
                     "repository claim check failed: {}",
                     crate::command::workflow_host_fault::diagnostic(&error)
-                ))
+                );
+                repository_error = Some(
+                    repository_error.map_or(text.clone(), |existing| format!("{existing}; {text}")),
+                );
             }
         }
         match owner_coverage::set_findings(root) {
@@ -464,27 +485,6 @@ pub(crate) fn evaluate_lint(
         None => evaluation,
     })
 }
-fn describe(source: &LintSource) -> String {
-    match source {
-        LintSource::TaskFile(path) => {
-            format!("task file {}", archon_shell::paths::stored_text(path))
-        }
-        LintSource::Tasks(path) => {
-            format!("task directory {}", archon_shell::paths::stored_text(path))
-        }
-        LintSource::Spec(path) => {
-            format!("workflow spec {}", archon_shell::paths::stored_text(path))
-        }
-        LintSource::Graph(id) => format!("recorded graph {id}"),
-    }
-}
-fn absolute(cwd: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    }
-}
 
 #[cfg(test)]
 mod tests;
@@ -492,3 +492,7 @@ mod tests;
 #[cfg(test)]
 #[path = "topology_lint/tool_obligation_tests.rs"]
 mod tool_obligation_tests;
+
+#[cfg(test)]
+#[path = "topology_lint/prd_tool_coverage_tests.rs"]
+mod prd_tool_coverage_tests;

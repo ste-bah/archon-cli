@@ -121,7 +121,7 @@ thread_local! {
         std::sync::Arc<dyn archon_memory::embedding::EmbeddingProvider>>> = Default::default();
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn with_test_embedder<T>(
     path: &Path,
     embedder: std::sync::Arc<dyn archon_memory::embedding::EmbeddingProvider>,

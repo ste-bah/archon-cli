@@ -56,7 +56,9 @@ pub(crate) fn prepare_parent(run_dir: &Path, relative: &Path) -> WorkflowResult<
 }
 
 fn private_directory(path: &Path) -> WorkflowResult<()> {
-    let mut builder = DirBuilder::new();
+    let builder = DirBuilder::new();
+    #[cfg(unix)]
+    let mut builder = builder;
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;

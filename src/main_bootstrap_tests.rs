@@ -1,5 +1,7 @@
+#[cfg(unix)]
 use std::io::{Read, Seek, SeekFrom};
 
+#[cfg(unix)]
 use clap::Parser;
 
 #[cfg(unix)]

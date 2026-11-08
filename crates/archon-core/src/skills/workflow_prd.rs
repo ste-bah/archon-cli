@@ -143,6 +143,12 @@ fn user_block(path_instruction: &str, extra: &str) -> String {
          10. No \"should work\", \"probably\", \"later\", \"TBD\", or \
             \"best effort\". State what fails, and which way it fails.\n\
          \n\
+         11. Read the project's `.mcp.json`; write the numbered Required Tools \
+            section per template §4.6. \
+            Copy permitted tool names exactly; never invent a tool name. \
+            Every task that declares a listed tool cites this section in \
+            source_sections; with `None.` one task cites it.\n\
+         \n\
          OUTPUT REQUIREMENTS:\n\
          1. {path_instruction}\n\
          2. Write the PRD to disk with complete, valid tool JSON. The Write \
@@ -255,6 +261,16 @@ mod tests {
             assert!(text.contains("where `<AREA>` is uppercase letters only"));
             assert!(text.contains("and `<NNN>` is exactly three digits"));
             assert!(text.contains("one independently testable criterion per row"));
+        }
+    }
+
+    #[test]
+    fn workflow_prd_requires_tool_declarations_and_section_citations() {
+        let emitted = prompt(&[]);
+        assert!(emitted.contains("11. Read the project's"));
+        for text in [templates::WORKFLOW_PRD, emitted.as_str()] {
+            assert!(text.contains("### 4.6 A numbered Required Tools section"));
+            assert!(text.contains("with `None.` one task cites it"));
         }
     }
 

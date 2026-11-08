@@ -25,7 +25,7 @@
 use std::io::Read;
 use std::path::PathBuf;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use super::silent_strike::normalize_path;
 use super::silent_strike::setup_path_signature;
 use super::verdict::{Context, no_verdict_cause};
@@ -208,7 +208,7 @@ pub(super) use test_helpers::settle;
 
 #[path = "workflow_acceptance_executability_silent_baseline.rs"]
 mod baseline;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) use baseline::settle_timed_out;
 pub(super) use baseline::{settle_as, settle_timed_out_with_diagnostics};
 

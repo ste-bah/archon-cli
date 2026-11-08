@@ -2,7 +2,7 @@
 
 use super::Markers;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub fn wrap(
     original: &str,
     inputs: &[String],

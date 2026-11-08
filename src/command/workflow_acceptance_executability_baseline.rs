@@ -317,7 +317,7 @@ pub(crate) async fn originals(
 
 /// How each of `results` fared, by id. A placeholder's result is never a
 /// verdict of its own ([`Original::Defect`]).
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn originals_now<'a>(
     contract: &AcceptanceContract,
     results: impl IntoIterator<Item = &'a CheckResult>,

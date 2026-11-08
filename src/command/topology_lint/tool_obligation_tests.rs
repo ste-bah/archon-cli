@@ -243,3 +243,35 @@ fn mcp_obligation_validate_local_task_and_frozen_chain() {
         expected.len()
     );
 }
+
+#[test]
+fn strict_body_reader_reports_project_relative_config_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("TASK-X-001.md");
+    let raw = "```yaml\ntask_id: TASK-X-001\ntitle: Probe\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_tools: [mcp__sample__fetch]\nrequired_env_keys: []\ndeliverable_contracts: []\n```\n";
+    let task = archon_workflow::task_universe::parsing::parse_task_file(&path, raw).unwrap();
+    let config = dir.path().join(".mcp.json");
+    for contents in [
+        "{",
+        "{}",
+        r#"{"mcpServers":{"sample":{"disabled":true,"toolPolicy":{"toolPermissions":{"fetch":"safe"}}}}}"#,
+    ] {
+        std::fs::write(&config, contents).unwrap();
+        let defects = tool_obligations::inspect(dir.path(), &task, raw);
+        assert_eq!(defects.len(), 1);
+        assert!(defects[0].contains(".mcp.json"), "{defects:?}");
+        assert!(!defects[0].contains(&dir.path().display().to_string()));
+        if contents == "{" {
+            let error =
+                crate::command::workflow_mcp::project_permitted_tools(dir.path()).unwrap_err();
+            let prefix = format!("{}{}", dir.path().display(), std::path::MAIN_SEPARATOR);
+            assert_eq!(defects[0], error.replace(&prefix, ""));
+        }
+    }
+    std::fs::write(
+        &config,
+        r#"{"mcpServers":{"sample":{"toolPolicy":{"toolPermissions":{"fetch":"safe"}}}}}"#,
+    )
+    .unwrap();
+    assert!(tool_obligations::inspect(dir.path(), &task, raw).is_empty());
+}
