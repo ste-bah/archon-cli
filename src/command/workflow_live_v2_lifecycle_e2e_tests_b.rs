@@ -29,6 +29,7 @@ pub(super) async fn run_full_lifecycle(runner: WorkflowV2ScriptRunner) -> Workfl
 }
 
 pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFixture {
+    super::native_verifier::initialize();
     installed_board();
     let repo = root.join("repo");
     std::fs::create_dir_all(repo.join("src")).expect("repo src");

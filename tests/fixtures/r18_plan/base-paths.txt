@@ -1,4 +1,3 @@
-.archon/trading-lab/strategies/AHDM-v1/strategy-spec.json
 crates/archon-trading/src/ahdm_backtest.rs
 crates/archon-trading/src/ahdm_backtest/engine.rs
 crates/archon-trading/src/ahdm_backtest/report.rs
@@ -8,8 +7,6 @@ crates/archon-trading/src/ahdm_backtest/spec/resolution_gate.rs
 crates/archon-trading/src/backtest_gates.rs
 crates/archon-trading/src/backtest_gates/catalog.rs
 crates/archon-trading/src/backtest_gates/run_record.rs
-crates/archon-trading/src/coverage.rs
-crates/archon-trading/src/data_lake.rs
 crates/archon-trading/src/data_lake/backtest_gate_contracts.rs
 crates/archon-trading/src/data_lake/identity.rs
 crates/archon-trading/src/data_lake/metadata_gate.rs
@@ -40,7 +37,6 @@ crates/archon-trading/src/data_store/data_store_ahdm_tests/prerequisites.rs
 crates/archon-trading/src/data_store/data_store_ahdm_tests/readiness_review.rs
 crates/archon-trading/src/data_store/data_store_ahdm_tests/strategy_spec.rs
 crates/archon-trading/src/data_store/data_store_tests.rs
-crates/archon-trading/src/data_store/migration.rs
 crates/archon-trading/src/data_store/openbb_polygon_ingest.rs
 crates/archon-trading/src/data_store/records.rs
 crates/archon-trading/src/data_store/stooq_ingest.rs
@@ -54,19 +50,15 @@ crates/archon-trading/src/data_store/validation_tests/contract_core.rs
 crates/archon-trading/src/data_store/validation_tests/security_contract.rs
 crates/archon-trading/src/data_store/yfinance_ingest.rs
 crates/archon-trading/src/data_store/yfinance_ingest_tests.rs
-crates/archon-trading/src/lib.rs
 crates/archon-trading/src/pine_lab/ahdm.rs
 crates/archon-trading/src/pine_lab/ahdm_tests/capture_tests.rs
 crates/archon-trading/src/promotion.rs
 crates/archon-trading/src/providers/capability/report.rs
 crates/archon-trading/src/providers/capability_tests/engine_tests.rs
 crates/archon-trading/src/providers/mod.rs
-crates/archon-trading/src/providers/openbb_polygon.rs
 crates/archon-trading/src/providers/openbb_polygon_store.rs
-crates/archon-trading/src/providers/stooq.rs
 crates/archon-trading/src/providers/stooq_store.rs
 crates/archon-trading/src/providers/tradingview.rs
-crates/archon-trading/src/providers/yfinance.rs
 crates/archon-trading/src/providers/yfinance_store.rs
 crates/archon-trading/src/validation/checks.rs
 crates/archon-trading/src/validation/gates.rs
@@ -90,7 +82,6 @@ crates/archon-trading/tests/dataset_identity_metadata_v1.rs
 crates/archon-trading/tests/ingest_artifacts.rs
 crates/archon-trading/tests/kb.rs
 crates/archon-trading/tests/migration_v1_to_v2.rs
-crates/archon-trading/tests/nfr_gates.rs
 crates/archon-trading/tests/openbb_polygon_adapter_mapping.rs
 crates/archon-trading/tests/openbb_polygon_adapter_unavailable.rs
 crates/archon-trading/tests/openbb_polygon_ingest_artifacts.rs
@@ -115,11 +106,9 @@ crates/archon-trading/tests/yfinance_fallback_ingest.rs
 crates/archon-trading/tests/yfinance_ingest_artifacts.rs
 crates/archon-trading/tests/yfinance_ingest_artifacts/crypto_provenance.rs
 crates/archon-trading/tests/yfinance_ingest_artifacts/providers_lane_crypto_provenance.rs
-registry-migration-report.json
 src/cli_args/tests.rs
 src/cli_args/tests_trading_data.rs
 src/cli_args/tests_trading_data/fetch_native.rs
-src/command/trading_backtest.rs
 src/command/trading_data.rs
 src/command/trading_data_registry_read_tests.rs
 src/command/trading_data_tests.rs

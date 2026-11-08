@@ -27,15 +27,15 @@ static VALUE_HEADER: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?im)((?:x-api-key|api-key|cookie|set-cookie)\s*:\s*)[^\r\n]*").unwrap()
 });
 static QUOTED_CREDENTIAL_FIELD: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
+    Regex::new(concat!(
         r#"(?i)(^|[\s"'({,;&?])(["']?[A-Za-z0-9_.-]*(?:api[_-]?key|apikey|token|secret|password|passwd|authorization|credential|private[_-]?key|cookie|thinking|reasoning|raw_text|encrypted_reasoning)[A-Za-z0-9_.-]*["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'[^'\r\n]*'|`[^`\r\n]*`)"#
-    )
+    ))
     .unwrap()
 });
 static TRUNCATED_CREDENTIAL_FIELD: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
+    Regex::new(concat!(
         r#"(?i)(^|[\s"'({,;&?])(["']?[A-Za-z0-9_.-]*(?:api[_-]?key|apikey|token|secret|password|passwd|authorization|credential|private[_-]?key|cookie|thinking|reasoning|raw_text|encrypted_reasoning)[A-Za-z0-9_.-]*["']?\s*:\s*["'])[^"\r\n]*$"#
-    )
+    ))
     .unwrap()
 });
 static CREDENTIAL_FIELD_WITH_VALUE: Lazy<Regex> = Lazy::new(|| {

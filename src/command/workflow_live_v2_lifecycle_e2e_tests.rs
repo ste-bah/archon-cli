@@ -39,3 +39,6 @@ use workflow_live_v2_lifecycle_e2e_tests_d::*;
 // The board drain gate, driven through the same entry point production uses.
 #[path = "workflow_live_v2_lifecycle_e2e_tests_e.rs"]
 mod workflow_live_v2_lifecycle_e2e_tests_e;
+
+#[path = "workflow_live_v2_lifecycle_native_tests.rs"]
+mod native_verifier;

@@ -5,7 +5,14 @@ fn r18_snapshot_bench_uses_real_base_inventory_and_all_deliverables() {
     let repository = repo();
     let root = repository.path();
     let project = tempfile::tempdir().unwrap();
-    for key in include_str!("../../../../tests/fixtures/r18_plan/base-paths.txt").lines() {
+    // S5 needs base deliverables as well as the acceptance command read inventory.
+    for key in include_str!("../../../../tests/fixtures/r18_plan/base-paths.txt")
+        .lines()
+        .chain(
+            include_str!("../../../../tests/fixtures/r18_plan/base-non-read-deliverable-paths.txt")
+                .lines(),
+        )
+    {
         write(root, key, b"base");
     }
     write(root, ".gitignore", b".archon/\n");

@@ -126,3 +126,36 @@ fn adapter_keeps_missing_kind_and_executes_typed_commands() {
     assert_eq!(failed.status.code(), Some(3));
     assert_eq!(std::fs::read_to_string(marker).unwrap(), "ran");
 }
+
+#[test]
+fn presence_metadata_is_excluded_but_unknown_declarations_still_fail() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("out.json"), "{}").unwrap();
+    let roots = ContractRoots::project_only(directory.path().to_string_lossy());
+    let mut contract = serde_json::json!({
+        "kind":"evidence", "artifact_path":"out.json",
+        "artifact_status":{"exists":false,"bytes":0}
+    });
+    let passed = run(&command(&roots, &contract));
+    assert!(passed.status.success(), "{passed:?}");
+    contract["unexpected_predicate"] = Value::Bool(true);
+    let failed = run(&command(&roots, &contract));
+    assert!(!failed.status.success());
+    assert!(
+        String::from_utf8_lossy(&failed.stdout).contains("unknown field `unexpected_predicate`")
+    );
+}
+
+#[test]
+fn presence_metadata_cannot_make_an_empty_deliverable_pass() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("out.json"), "").unwrap();
+    let roots = ContractRoots::project_only(directory.path().to_string_lossy());
+    let contract = serde_json::json!({
+        "kind":"evidence", "artifact_path":"out.json",
+        "artifact_status":{"exists":true,"bytes":123}
+    });
+    let failed = run(&command(&roots, &contract));
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stdout).contains("missing or empty"));
+}

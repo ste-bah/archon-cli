@@ -165,10 +165,11 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     // Issue 611: acceptance authoring runs as a bounded pool with prompts frozen before fan-out.
     // Issues 623/624/625: skeleton landing refuses seed-only and prose replies, keeps landings on refusal and resumes from the latest judged candidate.
     // Issue 630: one skeleton author landing domain; a repair call with no byte-changing landing, or an empty store, is refused.
+    // S4a (1931ade9a): deliverable implements in skeleton shape.
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "6853ff9ea483f845ea871ecbdd9804997de6950e087fd1236cdd1c5af127c0ac"
+        "3892b714c93307c26b39e09de3608ccdf8d01099a6a91d33263a6f6a90a60d39"
     );
 }

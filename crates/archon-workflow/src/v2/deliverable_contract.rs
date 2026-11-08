@@ -15,6 +15,12 @@ pub fn set_verifier_program(program: Result<std::path::PathBuf, String>) {
 }
 
 pub fn verification_command(roots: &ContractRoots, contract: &Value) -> String {
+    // Presence observations are prompt metadata, not declared predicates.
+    let mut declaration = contract.clone();
+    if let Some(fields) = declaration.as_object_mut() {
+        fields.remove("artifact_status");
+    }
+    let contract = &declaration;
     if let Some(reason) = contract_defect(contract) {
         return fail_closed_command(&reason);
     }

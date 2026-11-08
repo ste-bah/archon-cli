@@ -138,8 +138,13 @@ fn r18_classification_has_no_invented_base_outcomes() {
     use archon_workflow::v2::requirement_classes::{RequirementClass, classify};
     let skeleton: TaskSkeleton = serde_json::from_slice(SKELETON).unwrap();
     let contract: AcceptanceContract = serde_json::from_slice(CONTRACT).unwrap();
+    // Classification needs the full base inventory, including non-read deliverables.
     let paths: BTreeSet<_> = include_str!("../../tests/fixtures/r18_plan/base-paths.txt")
         .lines()
+        .chain(
+            include_str!("../../tests/fixtures/r18_plan/base-non-read-deliverable-paths.txt")
+                .lines(),
+        )
         .collect();
     let entries = classify(&skeleton, &contract, &Default::default(), |path| {
         (paths.contains(path), false)

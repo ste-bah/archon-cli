@@ -229,6 +229,14 @@ pub(super) fn verification_result(
     // that without erroring, so the shell receives a half-written script and
     // exits non-zero on a syntax error that looks like a failed verification.
     let output = run_shell_script(cwd, command)?;
+    if !output.status.success() {
+        eprintln!(
+            "focused verifier failed for {task_id}: {:?} stdout={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
     if item.get("deliverable_contract").is_some() {
         deliverable_contract_executed.store(true, Ordering::SeqCst);
     }
