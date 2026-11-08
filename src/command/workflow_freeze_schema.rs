@@ -77,6 +77,7 @@ pub(super) const DELIVERABLE: ObjectShape = ObjectShape {
         optional("validation_check_status_field", &String),
         defaulted("validation_failed_values", STRINGS),
         defaulted("validation_passed_values", STRINGS),
+        defaulted("implements", STRINGS),
     ],
 };
 const CONSUMED: ObjectShape = ObjectShape {
@@ -109,6 +110,7 @@ pub(super) const TASK: ObjectShape = ObjectShape {
         defaulted("implements", STRINGS),
         defaulted("source_sections", STRINGS),
         defaulted("deliverable_contracts", List(&Object(&DELIVERABLE))),
+        optional("status", &Any),
     ],
 };
 const COMMAND: ObjectShape = ObjectShape {

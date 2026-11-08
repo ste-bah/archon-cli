@@ -119,3 +119,92 @@ fn r7_staged_feedback_keeps_every_closing_fence_within_the_cap() {
     );
     assert!(feedback.chars().count() <= 4000);
 }
+
+#[tokio::test]
+async fn acceptance_author_drift_owes_supplementary_after_reauthor_republish_drops_only_cover() {
+    use crate::command::workflow_task_set::{reauthor, republish};
+    use reauthor::test_client::ScriptedAuthorJudge;
+    use republish::test_fixture::{frozen_set_in_proven, write_chain};
+    let set = frozen_set_in_proven(
+        &[("AC-F-004", "false", false)],
+        archon_workflow::task_set_contract::FreezeGateMode::Observe,
+        "\n- REQ-X-004: The output is ready.\n",
+    );
+    let text = std::fs::read_to_string(&set.prd).unwrap();
+    let mut before = set.contract();
+    before.acceptance[0].covers = vec!["REQ-X-004".into()];
+    before.acceptance[0].judgment.reason = "REQ-X-004 can be violated while this passes.".into();
+    write_chain(
+        set.project.path(),
+        &set.tasks,
+        &before,
+        archon_workflow::task_set_contract::FreezeGateMode::Observe,
+        1,
+    );
+    assert!(super::super::author_drift::owed_by(&before, &text, false).is_empty());
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            let mut reply = entry.clone();
+            reply["covers"] = serde_json::json!([]);
+            reply.to_string()
+        },
+        |_, _| true,
+    );
+    let scope =
+        reauthor::AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd)
+            .unwrap();
+    let named = ["AC-F-004".to_string()].into();
+    let result = republish::reauthor_and_republish(
+        &client,
+        republish::ReauthorRequest {
+            project_root: set.project.path(),
+            tasks_root: &set.tasks,
+            prd_path: &set.prd,
+            ids: &named,
+            gate: set.gate(),
+            trigger: "test",
+        },
+        &scope,
+    )
+    .await
+    .unwrap();
+    assert!(result.published);
+    let published = set.contract();
+    assert!(published.acceptance[0].covers.is_empty());
+    let owed = super::super::author_drift::owed_by(&published, &text, false);
+    assert_eq!(owed.len(), 1);
+    assert_eq!(owed[0].id, "SUP-REQ-X-004");
+    assert_eq!(owed[0].covers, ["REQ-X-004"]);
+}
+
+#[test]
+fn drift_owes_routed_ids_and_refreshes_existing_new_class_entries() {
+    let prd = "## Done Definition\n1. Complete.\n- NFR-001: retain evidence.\n- TF-X-001: preserve interface.\n\n| ID | Goal |\n|---|---|\n| G-X-001 | reach goal |\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | accepted |\n";
+    let mut contract = AcceptanceContract {
+        schema_version: 1,
+        prd: PrdIdentity {
+            path: "prd.md".into(),
+            digest: "same".into(),
+        },
+        gap_policy: GapPolicy {
+            permitted_acceptance_ids: BTreeSet::new(),
+            forbidden_phrases: vec![],
+            required_fields: vec![],
+        },
+        acceptance: vec![placeholder("AC-X-001", "accepted", vec!["NFR-001".into()])],
+        supplementary: vec![],
+    };
+    assert!(super::super::author_drift::owed_by(&contract, prd, false).is_empty());
+    contract.supplementary = vec![placeholder(
+        "SUP-DONE-1",
+        "Complete.",
+        vec!["DONE-1".into()],
+    )];
+    assert!(super::super::author_drift::owed_by(&contract, prd, false).is_empty());
+    contract.supplementary[0].id.push_str("-R2");
+    contract.supplementary[0].criterion = "old".into();
+    let drift = super::super::author_drift::owed_by(&contract, prd, false);
+    assert_eq!(drift.len(), 1);
+    assert_eq!(drift[0].id, "SUP-DONE-1-R2");
+    assert_eq!(drift[0].criterion, "Complete.");
+}

@@ -219,13 +219,14 @@ fn publish_chain(
 fn publish_chain_owned(
     request: &ReauthorRequest<'_>,
     verified: verify::Verified,
-    repaired: AcceptanceContract,
+    mut repaired: AcceptanceContract,
     mut diagnostics: Vec<String>,
     extension: Option<&extend::Extension>,
     publish_ids: &BTreeSet<String>,
 ) -> Result<ReauthorResult> {
     let tasks_root = request.tasks_root;
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
+    super::preflight::clear_unvalidated_floor_implements(&mut repaired);
     let contract_bytes = serde_json::to_vec_pretty(&repaired)?;
     let findings = findings::acceptance_findings(
         request.project_root,
@@ -453,3 +454,7 @@ pub(crate) mod test_fixture;
 #[cfg(test)]
 #[path = "workflow_acceptance_republish_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_republish_floor_tests.rs"]
+mod floor_tests;

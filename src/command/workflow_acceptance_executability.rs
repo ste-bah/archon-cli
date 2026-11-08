@@ -482,3 +482,12 @@ mod verdict_probe_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_probe_tests_b.rs"]
 mod verdict_probe_tests_b;
+
+/// Resolve the same repository selection used by the freeze probe.
+pub(super) fn diagnostic_repository(project: &Path, tasks: &Path) -> Result<PathBuf, String> {
+    let (site, root) = sites::freeze_site(project, tasks);
+    match site {
+        Site::Unavailable(reason) => Err(reason.0),
+        _ => Ok(root),
+    }
+}

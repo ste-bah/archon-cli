@@ -66,6 +66,37 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
     assert!(root.join("tasks/PRD-X/task-skeleton.json").exists());
     assert!(root.join("tasks/PRD-X/TASK-X-010.md").exists());
     assert!(root.join("tasks/PRD-X/TASK-X-020.md").exists());
+    let judge_requests = project.provider.requests.snapshot();
+    let mut covered = 0;
+    for request in judge_requests
+        .iter()
+        .filter(|request| request.role == "judge")
+    {
+        let body: serde_json::Value = serde_json::from_str(&request.prompt).unwrap();
+        let text = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|message| message["content"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.starts_with("Adversarially judge every acceptance check below.") {
+            continue;
+        }
+        let checks: Vec<serde_json::Value> =
+            serde_json::from_str(text.rsplit_once("Checks: ").unwrap().1).unwrap();
+        for check in checks {
+            for id in check["covers"].as_array().into_iter().flatten() {
+                let id = id.as_str().unwrap();
+                assert!(!check["covers_text"][id].as_str().unwrap().is_empty());
+                covered += 1;
+            }
+        }
+    }
+    assert!(
+        covered > 0,
+        "real judge requests include covered requirement text"
+    );
     let actual = final_snapshot(&project, &[]);
     snapshot::assert_golden_snapshot(&serde_json::to_value(&actual).unwrap());
     let counts = project.provider.counts.snapshot();

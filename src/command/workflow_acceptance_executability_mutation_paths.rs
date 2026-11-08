@@ -17,7 +17,9 @@ pub(super) use fs_paths::{
 
 #[path = "workflow_acceptance_executability_mutation_paths_lex.rs"]
 mod lex;
-pub(super) use lex::{group_has_exit, lex};
+#[cfg(test)]
+pub(super) use lex::lex;
+pub(super) use lex::{group_has_exit, lex_with_quotes};
 
 pub(super) const SUBSHELL_OPEN: &str = "\u{0}subshell-open";
 pub(super) const SUBSHELL_CLOSE: &str = "\u{0}subshell-close";
@@ -45,6 +47,20 @@ pub(super) fn path_tokens(text: &str) -> Vec<String> {
         })
         .map(str::to_string)
         .collect()
+}
+
+/// Absolute observations are separate from the mutation token grammar.
+pub(super) fn diagnostic_path_tokens(text: &str) -> Vec<String> {
+    text.split(|c: char| {
+        !(archon_workflow::acceptance_sibling_paths::is_path_character(c)
+            || matches!(c, ':' | '\\'))
+    })
+    // Backslashes inside a larger word can be escapes in an expression.
+    // Only a complete operand supplies evidence for a rooted backslash path.
+    .filter(|token| !token.contains('\\') || token.len() == text.len())
+    .filter(|token| token.len() <= 4096 && Path::new(token).has_root())
+    .map(str::to_owned)
+    .collect()
 }
 
 pub(super) fn effective_directories(

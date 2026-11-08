@@ -209,7 +209,9 @@ pub fn validate_acceptance_contract(
 
 #[path = "task_set_contract_structure.rs"]
 mod structure;
-pub use structure::{acceptance_structure_defects, validate_acceptance_structure};
+pub use structure::{
+    acceptance_structure_defects, duplicate_check_defects, validate_acceptance_structure,
+};
 
 pub fn validate_acceptance_bundle(
     tasks_root: &Path,

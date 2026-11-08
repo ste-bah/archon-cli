@@ -38,6 +38,8 @@ mod incremental;
 pub(crate) mod judge;
 #[path = "workflow_judge_store.rs"]
 mod judge_store;
+#[path = "workflow_acceptance_link_diagnostics.rs"]
+mod link_diagnostics;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
 #[path = "workflow_acceptance_passability.rs"]
@@ -104,6 +106,7 @@ pub(crate) struct FreezeSkeletonResult {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct PreparedAcceptanceFreeze {
     tasks_root: PathBuf,
     project_root: PathBuf,
@@ -260,6 +263,9 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         repository: Some(repository_root.clone()),
         task_root: Some(tasks_root.to_path_buf()),
         repository_commit: None,
+        covered_texts: archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(
+            &prd_text,
+        ),
     };
     let judged = resume.persist.then(|| {
         judge_store::JudgeStore::for_project(
@@ -409,8 +415,11 @@ pub(crate) fn publish_acceptance_freeze(
 
 #[path = "workflow_task_set_skeleton_freeze.rs"]
 mod skeleton_freeze;
+#[cfg(test)]
+pub(crate) use skeleton_freeze::prepare_skeleton_freeze_from_candidate;
 pub(crate) use skeleton_freeze::{
-    prepare_skeleton_freeze, prepare_skeleton_freeze_from_candidate, publish_skeleton_freeze,
+    prepare_skeleton_freeze, prepare_skeleton_freeze_from_candidate_with_resume,
+    publish_skeleton_freeze,
 };
 
 fn freeze_mode(mode: GateMode) -> Result<FreezeGateMode> {

@@ -137,6 +137,9 @@ pub(super) async fn evaluate(
     else {
         return Ok(());
     };
+    if let Err(error) = drift::persist_diagnostics(&context, &contract) {
+        eprintln!("diagnostics not persisted: {error}");
+    }
     let mut authored_pending = pending::ids_from_record(record);
     for (id, why) in &sources.defects {
         defects.entry(id.clone()).or_insert(why.clone());

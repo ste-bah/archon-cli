@@ -49,6 +49,7 @@ async fn workflow_decompose_rungs_use_real_host_checkpoints_then_pause_at_the_at
                 "workflow_decompose_v1_acceptance.js",
                 "workflow_decompose_v1_set_gate.js",
                 "workflow_decompose_v1_frozen.js",
+                "workflow_decompose_v1_prompt.js",
                 "workflow_decompose_v1_progress.js",
                 "workflow_decompose_v1_failing_set.js",
                 "workflow_decompose_v1_seed.js",

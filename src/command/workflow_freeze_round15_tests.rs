@@ -72,6 +72,7 @@ fn sites() -> Vec<(&'static str, String, bool)> {
             false,
         ),
         ("read string field", task(r#""implements":[@]"#), false),
+        ("read JSON status field", task(r#""status":@"#), false),
         (
             "read task id",
             format!(r#"{{{HEAD},"tasks":[{{"task_id":@,"file_name":"f"}}]}}"#),
@@ -84,7 +85,7 @@ fn sites() -> Vec<(&'static str, String, bool)> {
         ),
         (
             "extra positional field",
-            format!(r#"{{{HEAD},"tasks":[["T","f",[],[],[],[],[],@]]}}"#),
+            format!(r#"{{{HEAD},"tasks":[["T","f",[],[],[],[],[],null,@]]}}"#),
             false,
         ),
         ("read list", format!(r#"{{{HEAD},"tasks":@}}"#), false),
@@ -119,7 +120,11 @@ fn workflow_freeze_shape_precheck_and_reader_agree_on_every_value_in_every_site(
             assert_eq!(precheck, reader, "{site} / {value}: {shown}");
             // A plain string is also valid where the reader reads a string.
             let string_site = matches!(site, "read string field" | "read task id");
-            let expected = ignored || (value == "plain string" && string_site);
+            // Status reads a JSON value, retaining only strings. Unlike an
+            // ignored field, it still enforces Value's decoding limits.
+            let json_status = site == "read JSON status field"
+                && serde_json::from_slice::<serde_json::Value>(&bytes).is_ok();
+            let expected = ignored || json_status || (value == "plain string" && string_site);
             assert_eq!(reader, expected, "{site} / {value}: {shown}");
             checked += 1;
         }
@@ -224,3 +229,20 @@ const MARKED: &str = r#"{"schema_version":1,"acceptance_digest":"d","zz":@,"task
   "deliverable_contracts":[{"kind":"file","artifact_path":"o <redacted>",
     "typed_verifier_command":"v","minimum_count_fields":{"m":1},
     "registry_identity_fields":{"r":"<redacted>"}}]}]}"#;
+
+#[test]
+fn skeleton_preparation_shape_accepts_non_string_authored_status() {
+    for status in [
+        serde_json::json!(1),
+        serde_json::json!(true),
+        serde_json::json!(["done"]),
+        serde_json::json!({"value": "done"}),
+        serde_json::Value::Null,
+    ] {
+        let candidate = serde_json::json!({"schema_version":1,"acceptance_digest":"pending","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","status":status}]});
+        let bytes = serde_json::to_vec(&candidate).unwrap();
+        assert!(element_shape_defects(&bytes, &TASK_SHAPE).is_empty());
+        let frozen: TaskSkeleton = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(frozen.tasks[0].status, None);
+    }
+}

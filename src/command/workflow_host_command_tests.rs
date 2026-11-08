@@ -441,3 +441,18 @@ fn verify_frozen_chain_capabilities_publish_only_their_envelope_and_route_author
         assert!(resolve_host_command(&with_stdin, &catalog, &context, "call-1").is_err());
     }
 }
+
+#[test]
+fn skeleton_capability_uses_the_provider_profile_and_inherited_scope() {
+    let catalog = fixed_decomposition_catalog("test").unwrap();
+    let capability = &catalog.capabilities["freeze-skeleton"];
+    assert_eq!(
+        capability.environment_profile,
+        archon_workflow::EnvironmentProfileId::FreezeProvider
+    );
+    assert!(
+        capability
+            .remediation_scopes
+            .contains(&RemediationScope::InheritedPredecessor)
+    );
+}

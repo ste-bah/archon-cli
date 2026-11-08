@@ -81,14 +81,10 @@ pub(crate) fn resolve(
     context: &HostCommandResolutionContext,
 ) -> BTreeMap<String, OsString> {
     let mut environment = process_environment();
-    // None: the skeleton freeze, requirements trace (git only; its argv never
-    // passes --falsify, so no verifier runs) and frozen-chain verification run
-    // no project code, so they get the process essentials and nothing else.
-    // FreezeProvider: acceptance probes run project checks and the body/set
-    // fidelity judges call the provider, so they also get provider settings
-    // and the configured allowlist. Scratch preparation fails on a missing
-    // value, by name, before any check runs; output is redacted in
-    // workflow_host_secrets.
+    // None receives process essentials only. FreezeProvider also receives
+    // provider settings and the configured allowlist; preparation may reserve
+    // this profile before it executes checks. Missing allowlisted values fail
+    // scratch preparation by name, and captured output is redacted.
     match profile {
         EnvironmentProfileId::None => {}
         EnvironmentProfileId::FreezeProvider => {

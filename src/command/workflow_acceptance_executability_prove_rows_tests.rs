@@ -6,6 +6,8 @@ use mutation::{CandidateDiagnostic, ExclusionReason::*};
 
 pub(super) fn candidate(reason: mutation::ExclusionReason) -> CandidateDiagnostic {
     CandidateDiagnostic {
+        message_mention: false,
+        written_ancestor: false,
         path: "data/input".into(),
         move_path: None,
         move_root: None,

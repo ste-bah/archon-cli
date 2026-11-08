@@ -112,7 +112,9 @@ pub(super) fn keep_pinned_entries(
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
-        if entry.judgment.verdict == JudgeDecision::Accepted {
+        if entry.judgment.verdict == JudgeDecision::Accepted
+            || super::preflight::parse_refusal(entry)
+        {
             continue;
         }
         let Some(old) = base
@@ -258,12 +260,18 @@ pub(super) async fn judge(
         .and_then(|bytes| serde_json::from_slice::<AcceptancePin>(&bytes).ok())
         .and_then(|pin| validate_acceptance_bundle(tasks, Some(&pin), expected).ok());
     drop(read);
-    let mut reused = BTreeSet::new();
+    let mut reused: BTreeSet<_> = super::preflight::parse_checks(&mut contract)
+        .into_iter()
+        .map(|defect| defect.identity.subject)
+        .collect();
     for entry in contract
         .acceptance
         .iter_mut()
         .chain(&mut contract.supplementary)
     {
+        if reused.contains(&entry.id) {
+            continue;
+        }
         let named_file_digest = super::judge::named_files_content_digest(entry, roots);
         let Some((key, named_file_digest)) = entry_key_with_named_digest(
             client,

@@ -99,10 +99,15 @@ mod tests {
     fn an_ancestor_directory_covers_a_preceding_child_input() {
         let names = vec!["d/f".to_string(), "d".to_string()];
         let discovery = mutation::InputDiscovery {
+            unshaped_missing: Vec::new(),
+            unconfirmed_reads: Vec::new(),
+            absolute_reads: Vec::new(),
             eligible: names.clone(),
             candidates: names
                 .iter()
                 .map(|path| mutation::CandidateDiagnostic {
+                    message_mention: false,
+                    written_ancestor: false,
                     path: path.clone(),
                     move_path: None,
                     move_root: None,
@@ -132,10 +137,15 @@ mod tests {
     fn parent_components_do_not_make_a_path_an_ancestor_child() {
         let names = vec!["d/../e/f".to_string(), "d".to_string()];
         let discovery = mutation::InputDiscovery {
+            unshaped_missing: Vec::new(),
+            unconfirmed_reads: Vec::new(),
+            absolute_reads: Vec::new(),
             eligible: names.clone(),
             candidates: names
                 .iter()
                 .map(|path| mutation::CandidateDiagnostic {
+                    message_mention: false,
+                    written_ancestor: false,
                     path: path.clone(),
                     move_path: None,
                     move_root: None,

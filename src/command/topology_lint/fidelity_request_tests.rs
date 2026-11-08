@@ -104,6 +104,15 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let old_digest = "83b6c39e67e41a9f0fcd6fececa0e009379ac534bf5e511e8d2ded33afa24472";
     let mut old = catalog.clone();
     old.schema_version = 1;
+    // Reconstruct the historical profile as well as its schema and argv.
+    assert_eq!(
+        catalog.capabilities["freeze-skeleton"].environment_profile,
+        archon_workflow::EnvironmentProfileId::FreezeProvider,
+    );
+    old.capabilities
+        .get_mut("freeze-skeleton")
+        .unwrap()
+        .environment_profile = archon_workflow::EnvironmentProfileId::None;
     let landing = old.capabilities.get_mut("land-task-body").unwrap();
     let context_arg = landing
         .argv_template
@@ -160,6 +169,6 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "de17e11fbf3955e8889a03e0a20b9fd6de026b8517492c0bbbeaabf998e58464"
+        "6853ff9ea483f845ea871ecbdd9804997de6950e087fd1236cdd1c5af127c0ac"
     );
 }

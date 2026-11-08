@@ -52,7 +52,22 @@ pub(super) fn substitute_leading_variables(
 
 /// Shell words by simple command plus here-doc bodies and their command index.
 /// Quote-aware and deliberately best effort.
+#[cfg(test)]
 pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
+    let (commands, bodies, _, _) = lex_with_quotes(text);
+    (commands, bodies)
+}
+
+pub(crate) fn lex_with_quotes(
+    text: &str,
+) -> (
+    Vec<Vec<String>>,
+    Vec<(usize, String)>,
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<(usize, usize)>,
+) {
+    let mut quoted = std::collections::BTreeSet::new();
+    let mut unquoted = std::collections::BTreeSet::new();
     let (mut commands, mut bodies) = (vec![Vec::new()], Vec::new());
     let (mut word, mut quote, mut escaped, mut pending_tags): (
         String,
@@ -65,12 +80,20 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
     let mut quoted_word = false;
     // Case header (0/1), pattern (2), or body (3), scoped to its shell.
     let mut cases: Vec<(usize, usize)> = Vec::new();
-    let finish = |word: &mut String,
-                  commands: &mut Vec<Vec<String>>,
-                  cases: &mut Vec<(usize, usize)>,
-                  depth: usize,
-                  quoted_word: &mut bool| {
+    let mut finish = |word: &mut String,
+                      commands: &mut Vec<Vec<String>>,
+                      cases: &mut Vec<(usize, usize)>,
+                      depth: usize,
+                      quoted_word: &mut bool| {
         let keyword = !std::mem::take(quoted_word);
+        if !keyword {
+            quoted.insert(word.clone());
+        } else if !word.is_empty() {
+            unquoted.insert((
+                commands.len() - 1,
+                commands.last().expect("one command").len(),
+            ));
+        }
         let at_start = commands.last().is_none_or(|words| {
             words.iter().all(|word| {
                 word.starts_with('\0') || matches!(word.as_str(), "then" | "do" | "else" | "!")
@@ -382,5 +405,5 @@ pub fn lex(text: &str) -> (Vec<Vec<String>>, Vec<(usize, String)>) {
         scopes.len(),
         &mut quoted_word,
     );
-    (commands, bodies)
+    (commands, bodies, quoted, unquoted)
 }

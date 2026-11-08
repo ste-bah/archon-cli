@@ -119,6 +119,7 @@ pub(crate) fn freeze_skeleton(project: &Path, tasks: &Path, acceptance_digest: &
         tasks: ids
             .iter()
             .map(|id| FrozenTask {
+                status: None,
                 task_id: (*id).into(),
                 file_name: format!("{id}.md"),
                 depends_on: Vec::new(),

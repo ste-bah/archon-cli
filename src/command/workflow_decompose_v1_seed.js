@@ -98,8 +98,8 @@ function seedEntries(seed, policy, state) {
     : []);
   const owed = owedSupplementary();
   for (const entry of listed) {
-    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
-    if (requirement) owed.set(entry.id, { requirement, text: currentRequirementText(requirement) });
+    const requirement = supplementaryRequirement(entry.id);
+    if (requirement && Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, requirement)) owed.set(entry.id, { requirement, text: currentRequirementText(requirement), origin: "" });
     state.entries.set(entry.id, entry);
   }
   // Every gate registers the supplementary checks it says are owed, in order,
@@ -117,7 +117,7 @@ function seedEntries(seed, policy, state) {
     const findings = seedRepairFindings(gate, policy);
     const stale = findings.some(isStaleContractFinding);
     const named = seedRepairIds(findings.filter((finding) => !isStaleContractFinding(finding)), ids,
-      gate.published === true && !stale, last ? candidate : null, last ? heldOmissionIds : new Set());
+      gate.published === true && !stale, last ? candidate : null, last ? heldOmissionIds : new Set(), policy.capability);
     if (last) refuted = stale && named !== null ? new Set([...named].filter((id) => !carriedIds.has(id))) : named;
   });
   // Current-logic refutations remain owed per id even when a later candidate
@@ -129,7 +129,7 @@ function seedEntries(seed, policy, state) {
   const currentCriterion = (id) => {
     const criteria = args.acceptanceCriteria || {};
     if (Object.prototype.hasOwnProperty.call(criteria, id)) return criteria[id];
-    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(id)?.[1];
+    const requirement = supplementaryRequirement(id);
     return requirement ? (args.prdRequirementTexts || {})[requirement] : undefined;
   };
   // A reply authored after that gate is the entry's latest version, and a
@@ -193,7 +193,7 @@ function seedEntries(seed, policy, state) {
     const isLast = index === gates.length - 1;
     const found = seedRepairFindings(gate, policy).filter((finding) => isLast || !SEED_POINTER.test(String(finding.text || "")));
     const opened = attributeEntryFindings(found, ids, gate.published === true && !found.some(isStaleContractFinding),
-      isLast ? candidate : null, isLast ? heldOmissionIds : new Set());
+      isLast ? candidate : null, isLast ? heldOmissionIds : new Set(), policy.capability);
     settleGateFindings(state, opened.own);
     settlePhaseFindings(state, opened.phase);
   });
@@ -212,7 +212,8 @@ function seedEntries(seed, policy, state) {
 // returns null, "every entry", exactly as the live loop reads it.
 const SEED_POINTER = /^(?:candidate artifact (?:was refused|rejected):\s*)?\/?(entries|supplementary)\/(0|[1-9]\d*)(?=[/\s]|$)/;
 
-function seedRepairIds(findings, ids, published, candidate, heldOmissionIds = new Set()) {
+function seedRepairIds(findings, ids, published, candidate, heldOmissionIds = new Set(), origin = "") {
+  pruneOwedSupplementary(findings, candidate, heldOmissionIds, origin);
   const named = new Set();
   for (const finding of findings) {
     const match = SEED_POINTER.exec(String(finding.text || ""));
@@ -220,7 +221,7 @@ function seedRepairIds(findings, ids, published, candidate, heldOmissionIds = ne
     const entry = list ? list[Number(match[2])] : null;
     if (entry && typeof entry.id === "string") named.add(entry.id);
     else {
-      const attributed = acceptanceRepairIds([finding], ids, published, candidate, heldOmissionIds);
+      const attributed = acceptanceRepairIds([finding], ids, published, candidate, heldOmissionIds, origin, false);
       if (attributed === null) {
         return null;
       } else for (const id of attributed) named.add(id);

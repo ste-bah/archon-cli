@@ -112,3 +112,33 @@ async fn a_requirement_no_check_covers_blocks_the_round() {
     assert_eq!(record.checks.len(), 3);
     assert!(record.blocks_completion());
 }
+
+#[tokio::test]
+async fn table_requirements_block_drift_while_new_roles_are_persisted_diagnostics() {
+    let fixture = fixture(true);
+    std::fs::write(
+        fixture.project.path().join("prd.md"),
+        "- C-X-001: retain evidence.\n\n| ID | Goal |\n|---|---|\n| REQ-X-001 | table role |\n\n## Done Definition\n1. Complete.\n",
+    ).unwrap();
+    let result = run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    assert_eq!(failing_ids(&result), vec!["REQ-2", "REQ-9"]);
+    let errors = result.data["operational_errors"].to_string();
+    assert!(errors.contains("no frozen check covers"), "{errors}");
+    assert!(errors.contains("SUP-REQ-X-001"), "{errors}");
+    assert!(!errors.contains("SUP-DONE-1"), "{errors}");
+    let log = std::fs::read_to_string(fixture.task_root.join(".decompose.log")).unwrap();
+    for id in ["DONE-1", "C-X-001"] {
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.contains(&format!("uncovered item {id}:")))
+                .count(),
+            1,
+            "{log}"
+        );
+    }
+    let (record, _) = latest_round_record(&fixture.store.run_dir(&fixture.run_id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.checks.len(), 3);
+    assert!(record.blocks_completion());
+}

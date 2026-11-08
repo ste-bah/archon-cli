@@ -37,6 +37,8 @@ pub enum WorkflowEventKind {
     /// A fixed decomposition re-verification reserved this event sequence
     /// before writing any call records, so an interrupted retry gets new IDs.
     DecompositionReverifyStarted,
+    /// A repair/reverification round and its continuation or stop decision.
+    DecompositionReverifyRound,
     /// A fixed decomposition resumed on a different build than the one that
     /// launched it (Issue-59). The persisted identity keeps the launch
     /// revision; this event, carrying `persisted` and `current`, is the record

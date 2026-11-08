@@ -14,12 +14,12 @@
 
 use super::*;
 use archon_workflow::v2::acceptance_stage::coverage::{
-    REQUIREMENT_PREFIX, prd_requirement_texts, supplementary_id, tasks_without_checks,
-    uncovered_requirements, unknown_covers,
+    coverage_diagnostics, prd_requirement_texts, routed_requirement_ids, supplementary_id,
+    tasks_without_checks, uncovered_requirements, unknown_covers,
 };
 
-/// Findings for every PRD requirement no check of `contract` covers and
-/// every covered id outside the PRD requirement inventory.
+/// Findings for uncovered requirements with repair routes and unknown covers.
+/// Uncovered items in other extractor roles use the diagnostic channel.
 pub(super) fn acceptance_coverage_findings(
     prd_text: &str,
     contract_path: &Path,
@@ -38,7 +38,10 @@ pub(super) fn acceptance_coverage_findings(
         )
         .with_defect(identity)
     };
-    let mut findings: Vec<GateFinding> = uncovered_requirements(&ids, contract)
+    for diagnostic in coverage_diagnostics(prd_text, contract) {
+        eprintln!("{diagnostic}");
+    }
+    let mut findings: Vec<GateFinding> = uncovered_requirements(&routed_requirement_ids(prd_text), contract)
         .into_iter()
         .map(|requirement| {
             let id = supplementary_id(&requirement);
@@ -58,7 +61,7 @@ pub(super) fn acceptance_coverage_findings(
             .map(|(check, covered)| {
                 finding(
                     format!(
-                        "check '{check}': covers names {covered}; covers takes only the PRD's {REQUIREMENT_PREFIX} requirement ids (requirement bullets or obligation-table rows that start with {REQUIREMENT_PREFIX}); remove it or replace it with a {REQUIREMENT_PREFIX} id whose violation makes this check fail"
+                        "check '{check}': covers names {covered}; covers takes only coverable PRD ids the host lists; remove it or replace it with a listed id whose violation makes this check fail"
                     ),
                     check.clone(),
                     "unknown_covered_requirement", format!("covers/{}", contract.acceptance.iter().chain(&contract.supplementary)

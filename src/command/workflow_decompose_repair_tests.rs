@@ -1,7 +1,7 @@
 //! The phase loop must consume the findings it routes.
 //!
-//! Driven under `node` by extracting the loop and its helpers from the embedded
-//! script, the same way the v3 prelude tests exercise prelude functions.
+//! Driven under `node` with the full embedded script, so the loop always has
+//! the same helpers as the product.
 
 use super::FIXED_SCRIPT_SOURCE;
 /// The embedded script, or the same files under `ARCHON_TEST_SCRIPT_ROOT` (the
@@ -11,23 +11,24 @@ pub(super) fn script_source() -> std::borrow::Cow<'static, str> {
     let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") else {
         return FIXED_SCRIPT_SOURCE.into();
     };
-    [
-        "workflow_decompose_v1.js",
-        "workflow_decompose_v1_body.js",
-        "workflow_decompose_reply_blocks.js",
-        "workflow_decompose_v1_acceptance.js",
-        "workflow_decompose_v1_set_gate.js",
-        "workflow_decompose_v1_frozen.js",
-        "workflow_decompose_v1_progress.js",
-        "workflow_decompose_v1_failing_set.js",
-        "workflow_decompose_v1_seed.js",
-        "workflow_decompose_v1_context.js",
-    ]
-    .iter()
-    .map(|name| std::fs::read_to_string(std::path::Path::new(&root).join(name)).unwrap())
-    .collect::<Vec<_>>()
-    .join("\n")
-    .into()
+    // Read the product's include list so the override follows the same source
+    // order and gains new helpers whenever the embedded script does.
+    let product = include_str!("workflow_decompose.rs");
+    let sources = product
+        .split_once("const FIXED_SCRIPT_SOURCE: &str = concat!(")
+        .unwrap()
+        .1
+        .split_once("\n);")
+        .unwrap()
+        .0;
+    sources
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("include_str!(\""))
+        .map(|line| line.split_once('"').unwrap().0)
+        .map(|name| std::fs::read_to_string(std::path::Path::new(&root).join(name)).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into()
 }
 
 /// Slice one top-level `function NAME(...) { ... }` or `const NAME = ...;` out
@@ -60,8 +61,6 @@ fn decl(name: &str) -> String {
 mod author_calls;
 #[path = "workflow_decompose_body_repair_tests.rs"]
 mod body_repair;
-#[path = "workflow_decompose_repair_decls.rs"]
-mod decls;
 #[path = "workflow_decompose_frozen_routing_tests.rs"]
 pub(crate) mod frozen_routing;
 #[path = "workflow_decompose_refusal_progress_tests.rs"]
@@ -72,11 +71,8 @@ mod set_gate;
 pub(crate) mod set_gate_skeleton;
 
 fn run_js(driver: &str) -> String {
-    let mut script = String::new();
-    for name in decls::SCRIPT_DECLS {
-        script.push_str(&decl(name));
-        script.push('\n');
-    }
+    let mut script = script_source().into_owned();
+    script.push('\n');
     script.push_str(
         r#"
 globalThis.terminalStops = [];
@@ -90,8 +86,10 @@ async function __archonHost(method, payload) {
 }
 "#,
     );
+    // Keep driver bindings separate from the product's top-level helpers.
+    script.push_str("{\n");
     script.push_str(driver);
-    script.push('\n');
+    script.push_str("\n}\n");
     let dir = tempfile::tempdir().expect("tmp");
     let path = dir.path().join("phase.mjs");
     std::fs::write(&path, script).expect("write driver");

@@ -3,6 +3,76 @@ use archon_shell::process_tree::Pinned;
 use std::os::unix::process::CommandExt;
 use std::time::Duration;
 
+type Observation = Box<dyn FnOnce(&mut archon_shell::process_tree::Table)>;
+thread_local! {
+    static OBSERVATION: std::cell::RefCell<Option<Observation>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn after_snapshot(
+    mut table: archon_shell::process_tree::Table,
+) -> archon_shell::process_tree::Table {
+    if let Some(observe) = OBSERVATION.take() {
+        observe(&mut table);
+    }
+    table
+}
+
+#[test]
+fn exit_between_listing_and_read_recovers_only_checkpointed_child() {
+    let run = tempfile::tempdir().unwrap();
+    let (mut root, descendant, guard) = tree(run.path(), false);
+    let pid = root.0.id();
+    let mut record = guard.record.clone();
+    record.file = Some(guard.path().to_owned());
+    record.survivors = vec![(descendant.0.pid, descendant.0.start)];
+    std::fs::write(guard.path(), serde_json::to_vec(&record).unwrap()).unwrap();
+    OBSERVATION.set(Some(Box::new(move |table| {
+        // Force exactly the listing/read gap that the original recovery fenced.
+        table.listed.insert(pid);
+        table.processes.retain(|process| process.pid != pid);
+        root.0.kill().unwrap();
+        root.0.wait().unwrap();
+    })));
+    terminate_recorded(&mut record, &Default::default()).unwrap();
+    assert!(record.teardown_complete);
+    assert_eq!(
+        archon_shell::process_tree::identity_of(descendant.0.pid).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn listed_but_missing_identity_rechecks_exit_reuse_and_uncertainty() {
+    let run = tempfile::tempdir().unwrap();
+    let mut child = Child(child());
+    let guard = record_group(
+        run.path(),
+        child.0.id(),
+        child.0.id(),
+        Some(child.0.id()),
+        None,
+        "fixture",
+    )
+    .unwrap();
+    let record = &guard.record;
+    let mut table = archon_shell::process_tree::Table::default();
+    table.listed.insert(record.pgid);
+    // An identity disappearing after listing is a confirmed exit, not damaged JSON.
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    assert!(!replacement(record, &table, archon_shell::process_tree::identity_of).unwrap());
+    assert!(!replacement(record, &table, |_| Ok(Some(record.leader_start.unwrap()))).unwrap());
+    assert!(
+        replacement(record, &table, |_| Ok(Some(
+            record.leader_start.unwrap() + 1
+        )))
+        .unwrap()
+    );
+    assert!(replacement(record, &table, |_| Err(std::io::Error::other("unreadable"))).is_err());
+    table.listed.clear();
+    assert!(replacement(record, &table, |_| Err(std::io::Error::other("unreadable"))).is_err());
+}
+
 fn child() -> std::process::Child {
     let mut command = archon_shell::spawn::command("sleep");
     command.arg("30");
@@ -338,4 +408,40 @@ async fn groups_recover_adoption_checkpoint_failure_stops_all_signals_and_keeps_
     .await
     .expect("recovery must return promptly")
     .unwrap();
+}
+
+#[test]
+fn gone_leader_with_unpinned_live_member_keeps_teardown_fenced() {
+    let run = tempfile::tempdir().unwrap();
+    let (mut leader, member, guard) = tree(run.path(), true);
+    drop(leader.0.stdin.take());
+    leader.0.wait().unwrap();
+    let mut record = guard.record.clone();
+    record.file = Some(guard.path().to_owned());
+    assert!(record.survivors.is_empty());
+    assert_eq!(
+        archon_shell::process_tree::identity_of(record.pgid).unwrap(),
+        None
+    );
+    let table = snapshot().unwrap();
+    assert!(!replacement(&record, &table, archon_shell::process_tree::identity_of).unwrap());
+    let result = terminate_recorded(&mut record, &Default::default());
+    let error = result.unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("members without durable ownership identities"),
+        "{error:#}"
+    );
+    assert_eq!(
+        archon_shell::process_tree::identity_of(member.0.pid).unwrap(),
+        Some(member.0.start)
+    );
+    assert!(!record.teardown_complete);
+    assert!(guard.path().exists());
+    let marker = guard::pending_record(&guard.path().with_extension("pending"))
+        .unwrap()
+        .unwrap();
+    assert!(marker.record.survivors_unknown);
+    assert!(!marker.record.teardown_complete);
 }

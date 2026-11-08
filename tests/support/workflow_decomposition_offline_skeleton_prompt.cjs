@@ -6,7 +6,7 @@ const command = path.join(__dirname, '../../src/command');
 const { withAuthorContext } = require(path.join(command, 'workflow_decompose_context_stub.cjs'));
 const ctx = withAuthorContext({args:{prdPath:'prd.md',taskRoot:'tasks'}});
 vm.createContext(ctx);
-for (const name of ['v1', 'v1_body', 'v1_frozen', 'v1_acceptance', 'v1_context', 'v1_set_gate']) {
+for (const name of ['v1', 'v1_body', 'v1_frozen', 'v1_prompt', 'v1_acceptance', 'v1_context', 'v1_set_gate']) {
   vm.runInContext(fs.readFileSync(path.join(command, `workflow_decompose_${name}.js`), 'utf8'), ctx);
 }
 process.stdout.write(JSON.stringify([

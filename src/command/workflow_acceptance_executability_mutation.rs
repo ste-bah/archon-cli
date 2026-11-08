@@ -6,38 +6,31 @@
 //! `trap` or `exit` runs. Nonce markers prevent forged results. Each
 //! mutation uses a hermetic copy; a live-root guard prevents moving live data.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
-
 use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::{
     AcceptanceCheck, AcceptanceContract, AcceptanceCriterion, TrustedCwd,
 };
 use paths::path_tokens;
-
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+#[path = "workflow_acceptance_executability_mutation_observations.rs"]
+mod observations;
 use super::executed_text;
-
-#[path = "workflow_acceptance_executability_mutation_operational.rs"]
-mod operational;
-
 #[path = "workflow_acceptance_executability_mutation_markers.rs"]
 mod marker_protocol;
+#[path = "workflow_acceptance_executability_mutation_operational.rs"]
+mod operational;
 pub(super) use marker_protocol::Markers;
-
 #[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
 mod wrapper_script;
 #[cfg(test)]
 pub(super) use wrapper_script::wrap;
-
 #[path = "workflow_acceptance_executability_mutation_inline.rs"]
 mod inline;
-
 #[path = "workflow_acceptance_executability_mutation_paths.rs"]
 mod paths;
-
 #[path = "workflow_acceptance_executability_mutation_repository_alias.rs"]
 mod repository_alias;
-
 /// The exit status of a run stopped at the live-root guard.
 pub(super) const GUARD_STATUS: i32 = 97;
 /// What every finding for a check that passes before any implementation
@@ -47,9 +40,8 @@ pub(crate) const CANNOT_FAIL: &str = "so it is not yet shown able to fail";
 #[path = "workflow_acceptance_executability_mutation_manifests.rs"]
 mod manifests;
 use manifests::MANIFESTS;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ExclusionReason {
+pub(in crate::command::workflow_task_set) enum ExclusionReason {
     MissingAtRoot,
     ManifestOrSetup,
     SiblingFromRoot,
@@ -88,17 +80,22 @@ impl ExclusionReason {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct CandidateDiagnostic {
-    pub(super) path: String,
+pub(in crate::command::workflow_task_set) struct CandidateDiagnostic {
+    pub(in crate::command::workflow_task_set) path: String,
+    pub(in crate::command::workflow_task_set) message_mention: bool,
+    pub(in crate::command::workflow_task_set) written_ancestor: bool,
     pub(super) move_path: Option<String>,
     pub(super) move_root: Option<String>,
-    pub(super) exclusion: Option<ExclusionReason>,
+    pub(in crate::command::workflow_task_set) exclusion: Option<ExclusionReason>,
 }
 
 #[derive(Default)]
-pub(super) struct InputDiscovery {
-    pub(super) eligible: Vec<String>,
-    pub(super) candidates: Vec<CandidateDiagnostic>,
+pub(in crate::command::workflow_task_set) struct InputDiscovery {
+    pub(in crate::command::workflow_task_set) unshaped_missing: Vec<String>,
+    pub(in crate::command::workflow_task_set) unconfirmed_reads: Vec<String>,
+    pub(in crate::command::workflow_task_set) absolute_reads: Vec<String>,
+    pub(in crate::command::workflow_task_set) eligible: Vec<String>,
+    pub(in crate::command::workflow_task_set) candidates: Vec<CandidateDiagnostic>,
 }
 
 #[cfg(test)]
@@ -110,14 +107,14 @@ pub(super) fn input_discovery(
     input_discovery_for_check(entry, project, repository, None)
 }
 
-pub(super) fn input_discovery_for_check(
+pub(in crate::command::workflow_task_set) fn input_discovery_for_check(
     entry: &AcceptanceCriterion,
     project: &Path,
     repository: &Path,
     copy_layout: Option<&super::hermetic::CopyLayout>,
 ) -> InputDiscovery {
     let text = executed_text(entry).map_or_else(String::new, |(_, text)| text.to_string());
-    let (raw_commands, bodies) = paths::lex(&text);
+    let (raw_commands, bodies, quoted, unquoted_positions) = paths::lex_with_quotes(&text);
     let cwd = match &entry.check {
         AcceptanceCheck::Command {
             cwd: TrustedCwd::RepoRoot,
@@ -134,17 +131,15 @@ pub(super) fn input_discovery_for_check(
         .join("; ");
     let siblings =
         archon_workflow::acceptance_sibling_paths::discover(&cwd, &[text.clone(), expanded_text]);
+    let is_message = |word: &str| {
+        Path::new(word)
+            .file_name()
+            .is_some_and(|name| matches!(name.to_str(), Some("echo" | "printf" | "fail" | "die")))
+    };
     let message_words: BTreeSet<String> = commands
         .iter()
-        .filter_map(|words| {
-            let program = words
-                .first()
-                .and_then(|word| Path::new(word).file_name())?
-                .to_string_lossy();
-            matches!(program.as_ref(), "echo" | "printf" | "fail" | "die")
-                .then(|| words.iter().skip(1).cloned().collect::<Vec<_>>())
-        })
-        .flatten()
+        .filter(|words| words.first().is_some_and(|word| is_message(word)))
+        .flat_map(|words| words.iter().skip(1).cloned())
         .collect();
     let written_words: BTreeSet<String> = commands
         .iter()
@@ -220,14 +215,26 @@ pub(super) fn input_discovery_for_check(
     if let AcceptanceCheck::Floor { contract } = &entry.check {
         words.push((contract.artifact_path.clone(), Some(cwd.clone())));
     }
+    let (absolute_reads, quoted_tokens, diagnostic_messages, mut unconfirmed_reads) =
+        observations::collect(
+            &words,
+            &raw_commands,
+            &commands,
+            quoted,
+            &unquoted_positions,
+            &written_words,
+            is_message,
+        );
+    let mut unshaped_missing = BTreeSet::new();
     let mut seen = BTreeSet::new();
     let candidates: Vec<CandidateDiagnostic> = (words.iter())
         .flat_map(|(word, base)| {
-            path_tokens(word)
-                .into_iter()
-                .map(move |token| (token, base.clone()))
+            path_tokens(word).into_iter().map(move |token| {
+                let whole = token == *word;
+                (token, base.clone(), whole)
+            })
         })
-        .filter_map(|(token, base)| {
+        .filter_map(|(token, base, whole)| {
             let path = Path::new(&token);
             let Some(base) = base else {
                 return None;
@@ -308,6 +315,10 @@ pub(super) fn input_discovery_for_check(
             let message_mention = message_mentions
                 .iter()
                 .any(|word| Path::new(word).starts_with(path));
+            let diagnostic_message = diagnostic_messages.contains(&token);
+            let written_ancestor = written_words
+                .iter()
+                .any(|word| Path::new(word).starts_with(path));
             let has_manifest_sibling = manifest_sibling.is_some();
             let mapped = paths::diagnostic_path(
                 &token,
@@ -358,6 +369,17 @@ pub(super) fn input_discovery_for_check(
             } else {
                 None
             };
+            observations::record_bare(
+                &token,
+                &mapped,
+                (shaped || (whole && observations::nonnumeric_extension(path)))
+                    && (!exists || quoted_tokens.contains(&token))
+                    && !diagnostic_message
+                    && !written_ancestor,
+                &quoted_tokens,
+                &mut unshaped_missing,
+                &mut unconfirmed_reads,
+            );
             (shaped
                 || exists
                 || canonical_move.is_some()
@@ -365,6 +387,8 @@ pub(super) fn input_discovery_for_check(
                 || written_words.contains(&token))
             .then_some(CandidateDiagnostic {
                 path: mapped,
+                message_mention: diagnostic_message,
+                written_ancestor,
                 move_path: canonical_move.as_ref().map(|(path, _)| path.clone()),
                 move_root: canonical_move.map(|(_, root)| root),
                 exclusion,
@@ -384,6 +408,9 @@ pub(super) fn input_discovery_for_check(
         .map(|candidate| candidate.path.clone())
         .collect();
     InputDiscovery {
+        absolute_reads,
+        unconfirmed_reads: unconfirmed_reads.into_iter().collect(),
+        unshaped_missing: unshaped_missing.into_iter().collect(),
         eligible,
         candidates,
     }

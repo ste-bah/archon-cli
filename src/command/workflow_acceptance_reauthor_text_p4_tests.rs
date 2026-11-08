@@ -19,7 +19,8 @@ fn P4_14_R4_reauthor_explains_handles_and_build_failure() {
             crate::command::workflow_task_set::executability::CANNOT_FAIL
         )],
     ] {
-        let prompt = author::author_prompt_with_prefetch(&scope, frozen, &notes, 1, &[]);
+        let prompt = author::author_prompt_with_prefetch(&scope, frozen, &notes, 1, &[], &[])
+            .expect("read requirement texts");
         assert!(prompt.contains(S1));
         assert!(prompt.contains("a build failure at or naming a moved input also proves it, while any other build failure leaves the check unproven"));
         assert!(!prompt.contains("tree at unknown"));
@@ -98,7 +99,9 @@ fn P4_22_every_applicable_reason_reaches_the_author() {
         &[seeds["AC-X-001"].clone()],
         1,
         &[],
-    );
+        &[],
+    )
+    .expect("read requirement texts");
     assert!(prompt.contains("the caller's first gate reason"));
     assert!(prompt.contains("the caller's second gate reason"));
     assert!(!prompt.contains("a sibling's reason"));
@@ -187,4 +190,37 @@ async fn explicit_id_repair_without_prior_seeds_shows_the_original_defect() {
     let prompts = client.prompts.lock().unwrap();
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains("original script syntax defect"));
+}
+#[cfg(unix)]
+#[test]
+fn reauthor_candidates_keep_parse_and_policy_defects_567() {
+    use archon_workflow::task_set_contract::AcceptanceCheck;
+    let set = frozen_set(&[("AC-X-001", "./verify-output", true)]);
+    let scope =
+        AuthorScope::for_task_set_without_cache(set.project.path(), &set.tasks, &set.prd).unwrap();
+    let working = set.contract();
+    for floor in [false, true] {
+        let mut candidate = working.acceptance[0].clone();
+        candidate.check = if floor {
+            serde_json::from_value(serde_json::json!({"kind":"floor", "contract": {
+                "kind":"artifact", "artifact_path":"out.json", "artifact_format":"", "required_true_fields":[],
+                "typed_verifier_command":"./verify-output\nif then\n"
+            }}))
+            .unwrap()
+        } else {
+            AcceptanceCheck::Command {
+                command: "./verify-output\nif then\n".into(),
+                cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+            }
+        };
+        let note = check_defects(&working, candidate, &scope).unwrap_err();
+        assert!(note.contains("parse-only"), "{note}");
+        assert!(
+            note.contains("syntax error") || note.contains("Syntax error"),
+            "{note}"
+        );
+        if floor {
+            assert!(note.contains("artifact_format"), "{note}");
+        }
+    }
 }

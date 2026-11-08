@@ -5,19 +5,20 @@ const { test } = require('node:test');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js',
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', "workflow_decompose_v1_prompt.js", 'workflow_decompose_v1_progress.js',
   'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const entry = (id = 'A', extra = {}) => ({id, criterion:'criterion',
   check:{kind:'command', cwd:'project_root', command:'true'}, gap_permitted:false,
   judgment:{verdict:'accepted', counterexample:'', reason:'', host_call_id:''}, ...extra});
-function context(phaseSeed) {
+function context(phaseSeed, keepCatalogue = false) {
   const ctx = {args:{acceptanceCriteria:{A:'criterion'}, prdRequirementTexts:{'REQ-X':'requirement'},
     authorMaxParallelism:1, phaseSeed}, __archonValidateAcceptanceEntry:() => '[]'};
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   ctx.requireDispatchable = async (_w, _label, task) => task;
-  ctx.catalogueText = ctx.priorText = () => '';
+  if (!keepCatalogue) ctx.catalogueText = () => '';
+  ctx.priorText = () => '';
   return ctx;
 }
 async function author(ctx, state, reply, round = 1) {
@@ -30,30 +31,27 @@ async function author(ctx, state, reply, round = 1) {
 }
 const state = () => ({entries:new Map(), retryIds:null});
 
-test('entry shapes name the requirement prefix and match Rust apart from the P4 cwd handoff', () => {
+test('entry shapes name coverable ids and match Rust apart from the P4 cwd handoff', () => {
   const ctx = context();
-  const prefix = vm.runInContext('REQUIREMENT_PREFIX', ctx);
-  const rustCoverage = fs.readFileSync(`${root}/../../crates/archon-workflow/src/v2/acceptance_coverage.rs`, 'utf8');
-  assert.equal(prefix, rustCoverage.match(/pub const REQUIREMENT_PREFIX: &str = "([^"]+)";/)[1]);
   const shapes = vm.runInContext('ENTRY_SHAPES', ctx);
-  const expected = `<${prefix} requirement id from the PRD whose violation makes this check fail>`;
+  const expected = '<coverable id from the PRD whose violation makes this check fail>';
   for (const shape of JSON.parse(shapes)) assert.deepEqual(shape.covers, [expected]);
   const rust = fs.readFileSync(`${root}/workflow_acceptance_reauthor.rs`, 'utf8');
   const template = rust.match(/static ENTRY_SHAPES:[\s\S]*?r#"([\s\S]*?)"#/)[1];
   // P4 updates the Rust prompt in its branch; P6 removes the single-root example here.
-  const rustShapes = JSON.parse(template.replaceAll('{REQUIREMENT_PREFIX}', prefix));
+  const rustShapes = JSON.parse(template);
   const command = JSON.parse(shapes).find(entry => entry.check.kind === 'command');
   assert.equal(command.check.cwd, '<repo_root or project_root>');
   rustShapes.find(entry => entry.check.kind === 'command').check.cwd = command.check.cwd;
   assert.deepEqual(JSON.parse(shapes), rustShapes);
-  assert.ok(ctx.acceptanceAuthorPrompt().includes(`covers lists every one of the PRD's ${prefix} requirement ids (requirement bullets or obligation-table rows that start with ${prefix})`));
+  assert.ok(ctx.acceptanceAuthorPrompt().includes('covers lists every coverable PRD id the host lists'));
 });
 
 test('reply format includes covers between gap_permitted and judgment', () => {
   const format = context().acceptanceReplyFormat();
   const example = JSON.parse(format.split('\n').find(line => line.startsWith('{')));
-  assert.deepEqual(example.covers, ['<REQ-ID>']);
-  assert.match(format, /"gap_permitted":false,"covers":\["<REQ-ID>"\],"judgment"/);
+  assert.deepEqual(example.covers, ['<coverable id>']);
+  assert.match(format, /"gap_permitted":false,"covers":\["<coverable id>"\],"judgment"/);
 });
 
 test('re-author prompt shows current covers; a new entry has no coverage line', async () => {
@@ -143,4 +141,12 @@ test('a refused draft never supplies coverage to the next live rewrite', async (
   const rewritten = await author(ctx, s, entry(), 3);
   assert.equal(rewritten.result.status, 'accepted');
   assert.deepEqual([...s.entries.get('A').covers], ['REQ-P']);
+});
+
+test('the dispatched acceptance prompt supplies coverable ids and texts', async () => {
+  const ctx = context(undefined, true);
+  ctx.args.prdRequirementTexts = {'DONE-1':'Exact completion text.', 'NFR-001':'Exact constraint text.'};
+  const out = await author(ctx, state(), entry('A', {covers:[]}));
+  assert.equal(out.result.status, 'accepted');
+  assert(out.task.includes('Coverable IDs and exact texts: {"DONE-1":"Exact completion text.","NFR-001":"Exact constraint text."}'));
 });

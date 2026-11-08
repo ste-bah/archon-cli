@@ -282,14 +282,21 @@ fn an_accepted_unreadable_reply_names_its_id_and_reconstruction_failure() {
 fn supplementary_host_stamp_uses_current_prd_text_not_finding_text() {
     let current = "full current derived PRD requirement";
     let criteria = criteria(&[]);
-    let requirement_texts = [("REQ-1".to_string(), current.to_string())]
-        .into_iter()
-        .collect();
-    let host = super::super::host_owned::HostOwned::new(&criteria, &requirement_texts);
-    assert_eq!(
-        host.stamp(entry("SUP-REQ-1"), "SUP-REQ-1")["criterion"],
-        current
-    );
+    for requirement in ["REQ-1", "DONE-1", "NFR-001", "TF-X-001", "G-X-001"] {
+        let requirement_texts = [(requirement.to_string(), current.to_string())]
+            .into_iter()
+            .collect();
+        let host = super::super::host_owned::HostOwned::new(&criteria, &requirement_texts);
+        for id in [
+            format!("SUP-{requirement}"),
+            format!("SUP-{requirement}-R2"),
+        ] {
+            let stamped = host.stamp(entry(&id), &id);
+            assert_eq!(stamped["criterion"], current);
+            assert_eq!(stamped["covers"], json!([requirement]));
+            assert_eq!(stamped["gap_permitted"], false);
+        }
+    }
 }
 
 #[test]
@@ -318,3 +325,37 @@ fn omitted_empty_covers_still_match_the_recorded_gate_round() {
 
 #[path = "workflow_decompose_seed_covers_tests.rs"]
 mod covers;
+
+#[test]
+fn acceptance_reply_seed_reads_only_the_criterion_after_prompt_reduction() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_oversize_test.cjs"
+        ))
+        .arg("seed")
+        .output()
+        .expect("node must be available for the reduced prompt seed regression");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let task = String::from_utf8(output.stdout).unwrap();
+    assert!(task.len() <= 262144);
+    assert!(task.contains("All criterion IDs and text (for consistency): [moved to context file]"));
+    let mut record = reply(
+        "acceptance-author-AC-001-4",
+        "01:00:00",
+        &entry("AC-001").to_string(),
+    );
+    record.call.options.task = Some(task);
+    let derived = super::super::derive(&[record], &[], &criteria(&["AC-001"])).unwrap();
+    let SubjectSeed::Entries { replies, .. } = &derived.subjects["acceptance"] else {
+        panic!("expected acceptance seed")
+    };
+    assert_eq!(
+        replies[0].criterion.as_deref(),
+        Some("criterion of AC-001\ncontinued criterion")
+    );
+}

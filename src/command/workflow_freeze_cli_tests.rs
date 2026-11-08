@@ -384,7 +384,7 @@ async fn an_undecided_judge_staged_freeze_writes_its_finding_and_returns_552() {
         )
         .with_judge_reply("{ truncated"),
     );
-    let resume = staged_freeze_resume(&mut std::io::sink());
+    let resume = staged_freeze_resume("freeze-acceptance", &mut std::io::sink());
     stage_acceptance_candidate(
         project.path(),
         (&tasks, &prd),
@@ -400,4 +400,21 @@ async fn an_undecided_judge_staged_freeze_writes_its_finding_and_returns_552() {
     )
     .await
     .unwrap();
+}
+
+#[test]
+fn staged_skeleton_resume_saves_progress_with_the_catalog_budget() {
+    let mut output = Vec::new();
+    let resume = staged_freeze_resume("freeze-skeleton", &mut output);
+    let catalog =
+        crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("").unwrap();
+    assert!(resume.persist);
+    assert_eq!(
+        resume.budget.outer_secs(),
+        catalog.capabilities["freeze-skeleton"].timeout_secs
+    );
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        format!("{}\n", resume.progress.line())
+    );
 }

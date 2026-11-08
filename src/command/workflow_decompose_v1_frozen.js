@@ -41,7 +41,7 @@ async function verifyFrozenStage(w, capability) {
     if (routed.operationalKind === "permanent") await stopFixed(`${capability} stopped: ${routed.operational}`);
     if (!routed.operational) {
       if (routed.allFindings.length > 0 && routed.allFindings.every((finding) => frozenFindingOwner(finding))) {
-        return await repairFrozenStage(w, outcome, routed.allFindings);
+        return await repairFrozenStage(w, outcome, routed.allFindings, capability);
       }
       if (routed.all.length > 0) {
         await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
@@ -173,7 +173,7 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate, directi
     initialFeedback,
     directive,
     ...(Number.isInteger(initialRung) ? { initialRung } : {}),
-    prompt: (previous) => [
+    prompt: (previous, blocks) => requiredAuthorContext("phase prompt", [
       SKELETON_AUTHOR_MARKER,
       ...(directive ? [directive] : []),
       `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
@@ -197,18 +197,19 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate, directi
       "Generate large or repetitive fixture data with code rather than writing it literally.",
       "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. A call with open findings must make at least one byte-changing landing; a call with an empty task store must land at least one task. The gate then judges the whole set again.",
       "Do not run commands or write files."
-    ].join("\n") + previousSkeletonContext(previous)
+    ].join("\n"), blocks) + previousSkeletonContext(previous, blocks, blocks?.[blocks.length - 1]?.text.length || 0)
   };
 }
 
 // #568: carry exact candidate bytes through the existing host-written context
 // binding. No content means no extra line, including on a first attempt.
-function previousSkeletonContext(content) {
+function previousSkeletonContext(content, blocks, start = 0) {
   if (typeof content !== "string" || content.length === 0) return "";
   const file = contextFile("json", content);
-  return `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
+  const text = `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
     + "\nWhatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the Landed subjects list at the end of this prompt with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed there have been retained. Re-land changed tasks. "
     + (frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null ? "Keep every frozen task_id and file_name." : "Use remove:true to drop a draft task.");
+  return optionalAuthorContext("previous candidate reference", text, blocks, start);
 }
 
 // #554: the operational findings of a freeze outcome whose subject is an
@@ -238,12 +239,13 @@ function unprovenAuthored(state, outcome, routed) {
 // no rule attributes to one entry is phase-level. An entry's prompt shows
 // its own findings and the phase-level ones, never a sibling's. A stale
 // contract is the loop's to rebuild (refreshFromCurrentContract), no author's.
-function attributeEntryFindings(findings, ids, published, candidate, held) {
+function attributeEntryFindings(findings, ids, published, candidate, held, origin = "") {
+  pruneOwedSupplementary(findings, candidate, held, origin);
   const own = new Map();
   const phase = [];
   for (const finding of findings) {
     const selected = ids.has(finding.subject) ? new Set([finding.subject])
-      : acceptanceRepairIds([finding], ids, published, candidate, held);
+      : acceptanceRepairIds([finding], ids, published, candidate, held, origin, false);
     const holder = [finding.subject, finding.deterministic_defect?.subject].find((id) => typeof id === "string" && held?.has(id));
     const owners = selected && selected.size === 0 && holder ? new Set([holder]) : selected;
     if (owners === null && finding?.deterministic_defect?.code !== "stale_acceptance_contract") {
@@ -286,12 +288,12 @@ function earlierFindingsText(heading, texts) {
   return out;
 }
 
-async function repairFrozenStage(w, verified, findings) {
+async function repairFrozenStage(w, verified, findings, origin = "") {
   const owner = frozenFindingOwner(findings[0]);
   if (findings.some((finding) => frozenFindingOwner(finding) !== owner)) {
     // Verification of one stage reports one owning artifact. Keep all mixed
     // ownership findings pending by repairing the predecessor first.
-    return await repairFrozenStage(w, verified, findings.filter((finding) => frozenFindingOwner(finding) === "acceptance"));
+    return await repairFrozenStage(w, verified, findings.filter((finding) => frozenFindingOwner(finding) === "acceptance"), origin);
   }
   if (owner === "skeleton") {
     const repaired = await authorCandidate(w, skeletonPolicy(findings.map(findingText), undefined, skeletonCandidateContent(verified)));
@@ -309,12 +311,12 @@ async function repairFrozenStage(w, verified, findings) {
       initialized = true;
       state.entries = new Map(listed.map((entry) => [entry.id, entry]));
       for (const entry of contract?.supplementary || []) {
-        const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
-        if (requirement) owedSupplementary().set(entry.id, { requirement, text: currentRequirementText(requirement) });
+        const requirement = supplementaryRequirement(entry.id);
+        if (requirement && Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, requirement)) owedSupplementary().set(entry.id, { requirement, text: currentRequirementText(requirement), origin: "" });
       }
-      state.retryIds = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract, state.entries);
+      state.retryIds = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract, state.entries, origin);
       // #555: each entry starts with only its own verification findings.
-      const opened = attributeEntryFindings(findings, new Set(Object.keys(args.acceptanceCriteria || {})), true, contract, state.entries);
+      const opened = attributeEntryFindings(findings, new Set(Object.keys(args.acceptanceCriteria || {})), true, contract, state.entries, origin);
       [state.gateFindings, state.phaseFindings, state.earlierPhaseFindings] = [opened.own, opened.phase, []];
     }
     finalState = state;
@@ -324,7 +326,7 @@ async function repairFrozenStage(w, verified, findings) {
   // Every reported check remains an affected dependency, even when a judge
   // accepts its unchanged check after re-authoring. Unknown attribution reaches
   // all bodies rather than silently retaining an unproven dependency.
-  const ids = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract);
+  const ids = acceptanceRepairIds(findings, new Set(listed.map((entry) => entry.id)), true, contract, undefined, origin);
   const affected = ids ? new Set(ids) : null;
   if (affected && finalState) {
     for (const [id, entry] of finalState.entries) {
@@ -454,4 +456,27 @@ function refuseUnchangedSkeleton(authored, carry, openFindings = []) {
   if (!empty && openFindings.length === 0) return authored;
   return { ...authored, status: "failed", invalid_answer: true,
     summary: openFindings.length > 0 ? "This call has open findings and made no byte-changing landing. Land at least one new or changed task record before replying; the gate judges the retained set." : "The task store is empty: land at least one task before replying." };
+}
+
+// A gate can close only its own debts; a sibling gate's outstanding ids survive.
+function pruneOwedSupplementary(findings, candidate, held, origin = "") {
+  const coverage = findings.some(f => ["uncovered_requirement", "unknown_covered_requirement"].includes(f.deterministic_defect?.code)
+    || /^check '[^']+': PRD requirement .* is covered by no acceptance check;/.test(String(f.text || "")));
+  const entries = [...(candidate?.entries || candidate?.acceptance || []), ...(candidate?.supplementary || []),
+    ...(held?.values ? held.values() : [])];
+  const named = new Set(findings.map(f => f.deterministic_defect?.subject || f.subject));
+  for (const [id, debt] of owedSupplementary()) {
+    if ((debt.origin || "") !== origin || entries.some(e => e.id === id) || held?.has(id)) continue;
+    if ((coverage && !named.has(id)) || entries.some(e => e.id !== id && entryCoversRequirement(e, debt.requirement))) owedSupplementary().delete(id);
+  }
+}
+
+function entryCoversRequirement(entry, requirement) {
+  return Array.isArray(entry?.covers) && entry.covers.some(id => typeof id === "string" && id.trim() === requirement);
+}
+
+// Outstanding supplementary entries, with the gate that requested each one.
+function owedSupplementary() {
+  if (!acceptanceRepairIds.owed) acceptanceRepairIds.owed = new Map();
+  return acceptanceRepairIds.owed;
 }

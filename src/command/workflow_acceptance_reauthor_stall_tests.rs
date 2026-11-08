@@ -64,8 +64,15 @@ async fn one_host_unproven_check_does_not_discard_two_proven_repairs() {
     let before = set.contract_bytes();
     let named = ids(&["AC-F-001", "AC-F-002", "AC-F-003"]);
     let probe = OneUnprovenProbe::default();
-    let client =
-        ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "test -s out"), |_, _| true);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            command_entry(
+                entry,
+                &format!("test -s proof-inputs/{}.txt", entry["id"].as_str().unwrap()),
+            )
+        },
+        |_, _| true,
+    );
     let result = reauthor_and_republish(
         &client,
         ReauthorRequest {
@@ -118,8 +125,15 @@ async fn enforce_partial_republish_publishes_proven_siblings_and_keeps_pending_i
     let before = set.contract_bytes();
     let named = ids(&["AC-X-001", "AC-X-002", "AC-X-003"]);
     let probe = OneUnprovenProbe::default();
-    let client =
-        ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "test -s out"), |_, _| true);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            command_entry(
+                entry,
+                &format!("test -s proof-inputs/{}.txt", entry["id"].as_str().unwrap()),
+            )
+        },
+        |_, _| true,
+    );
     let result = reauthor_and_republish(
         &client,
         ReauthorRequest {
@@ -169,11 +183,15 @@ async fn enforce_timeout_stays_pending_while_proven_siblings_publish() {
         |entry, _| {
             command_entry(
                 entry,
-                if entry["id"] == "AC-X-001" {
-                    "sleep 5; test -s out"
-                } else {
-                    "test -s out"
-                },
+                &format!(
+                    "{}test -s proof-inputs/{}.txt",
+                    if entry["id"] == "AC-X-001" {
+                        "sleep 5; "
+                    } else {
+                        ""
+                    },
+                    entry["id"].as_str().unwrap()
+                ),
             )
         },
         |_, _| true,
@@ -214,7 +232,12 @@ async fn an_unaccepted_authored_check_stays_pending_while_accepted_siblings_publ
     let before = set.contract();
     let named = ids(&["AC-F-001", "AC-F-002", "AC-F-003"]);
     let client = ScriptedAuthorJudge::new(
-        |entry, _| command_entry(entry, "test -s out"),
+        |entry, _| {
+            command_entry(
+                entry,
+                &format!("test -s proof-inputs/{}.txt", entry["id"].as_str().unwrap()),
+            )
+        },
         |id, _| id != "AC-F-001",
     );
     let result = reauthor_and_republish(
@@ -256,9 +279,16 @@ async fn malformed_judge_replies_send_each_check_back_to_its_author_552() {
         ("AC-F-002", "test -f missing-b", false),
     ]);
     let named = ids(&["AC-F-001", "AC-F-002"]);
-    let client =
-        ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "test -s out"), |_, _| true)
-            .with_judge_reply("{ truncated");
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            command_entry(
+                entry,
+                &format!("test -s proof-inputs/{}.txt", entry["id"].as_str().unwrap()),
+            )
+        },
+        |_, _| true,
+    )
+    .with_judge_reply("{ truncated");
     let result = reauthor_and_republish(
         &client,
         ReauthorRequest {
@@ -329,8 +359,15 @@ async fn an_all_unproven_republish_returns_a_pending_partial_result_without_publ
     let set = frozen_set(&[("AC-F-001", "test -f missing", false)]);
     let probe = UnprovenProbe::default();
     let named = ids(&["AC-F-001"]);
-    let client =
-        ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "test -s out"), |_, _| true);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| {
+            command_entry(
+                entry,
+                &format!("test -s proof-inputs/{}.txt", entry["id"].as_str().unwrap()),
+            )
+        },
+        |_, _| true,
+    );
     let seeds = BTreeMap::new();
     let before = set.contract_bytes();
     let result = reauthor_and_republish(

@@ -8,8 +8,6 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use archon_workflow::v2::acceptance_stage::coverage::REQUIREMENT_PREFIX;
-
 use archon_core::agents::harness::HOST_READ_ONLY_TOOLS;
 #[cfg(test)]
 use archon_workflow::task_set_contract::AcceptanceCheck;
@@ -27,9 +25,12 @@ pub(crate) use scope::{AuthorScope, site_uses_build_cache};
 mod reply_parse;
 #[cfg(test)]
 use reply_parse::candidate_entry;
+#[cfg(test)]
 use reply_parse::candidate_entry_with_markers;
 #[path = "workflow_acceptance_reauthor_check_defects.rs"]
 mod check_defects;
+#[path = "workflow_acceptance_reauthor_coverage_repair.rs"]
+mod coverage_repair;
 pub(crate) use check_defects::seed_findings;
 #[path = "workflow_acceptance_reauthor_passability.rs"]
 mod passability_pending;
@@ -52,7 +53,7 @@ const COMMAND_CWD_EXAMPLES: &str = r#"Command examples: {"kind":"command","cwd":
 
 /// The two entry shapes the decomposition author is shown.
 static ENTRY_SHAPES: LazyLock<String> = LazyLock::new(|| {
-    r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<{REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<{REQUIREMENT_PREFIX} requirement id from the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#.replace("{REQUIREMENT_PREFIX}", REQUIREMENT_PREFIX)
+    r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<coverable id from the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<coverable id from the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#.to_string()
 });
 
 fn entry<'a>(contract: &'a AcceptanceContract, id: &str) -> Option<&'a AcceptanceCriterion> {
@@ -150,7 +151,6 @@ pub(crate) async fn reauthor_partial_with_cache(
     gate: &ReauthorGate<'_>,
     state_dir: Option<&Path>,
 ) -> Result<ReauthorProgress> {
-    let mut feedback: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut unseeded_accepted = BTreeSet::new();
     for id in ids {
         let frozen = entry(contract, id)
@@ -179,19 +179,11 @@ pub(crate) async fn reauthor_partial_with_cache(
         .with_context(|| format!("reading the PRD {}", scope.prd_path.display()))?;
     let reply_leaked_markers =
         crate::command::workflow_live::load_reply_leaked_markers_for_fixed(&scope.project_root)?;
-    for id in ids {
-        let frozen = entry(contract, id).expect("named ids were checked above");
-        let first = if let Some(seed) = gate.seeds.get(id).or_else(|| crashed.get(id)) {
-            seed.clone()
-        } else if frozen.judgment.verdict == JudgeDecision::Accepted {
-            format!(
-                "check '{id}' was named for re-authoring; replace it with a check that fails whenever the criterion is false"
-            )
-        } else {
-            judge::author_note(frozen)
-        };
-        feedback.insert(id.clone(), vec![first]);
-    }
+    let mut feedback = coverage_repair::feedback(contract, ids, gate, &crashed);
+    let mut coverage = coverage_repair::Repair::new(
+        contract,
+        archon_workflow::v2::acceptance_stage::coverage::routed_requirement_ids(&prd_text),
+    );
     let mut working = contract.clone();
     let mut pending = ids.clone();
     let mut reused = BTreeMap::new();
@@ -212,16 +204,17 @@ pub(crate) async fn reauthor_partial_with_cache(
                 gate.probe,
             ) {
                 // A saved candidate is held to every rule a fresh reply is.
-                Ok(Some(candidate)) => match author::live_root_refusal(candidate, &refused)
-                    .and_then(|candidate| check_defects::check_defects(&working, candidate, scope))
-                {
-                    Ok(candidate) => {
-                        *entry_mut(&mut working, id).expect("named id") = candidate.clone();
-                        reused.insert(id.clone(), candidate);
-                        eprintln!("acceptance re-author reused check {id}");
+                Ok(Some(candidate)) => {
+                    match coverage.cached(candidate, frozen, &refused, &working, scope) {
+                        Ok(Some(candidate)) => {
+                            *entry_mut(&mut working, id).expect("named id") = candidate.clone();
+                            reused.insert(id.clone(), candidate);
+                            eprintln!("acceptance re-author reused check {id}");
+                        }
+                        Ok(None) => {}
+                        Err(reason) => feedback.get_mut(id).expect("feedback per id").push(reason),
                     }
-                    Err(reason) => feedback.get_mut(id).expect("feedback per id").push(reason),
-                },
+                }
                 Ok(None) => {}
                 Err(reason) => eprintln!("acceptance re-author ignored saved check {id}: {reason}"),
             }
@@ -257,9 +250,11 @@ pub(crate) async fn reauthor_partial_with_cache(
                 notes,
                 attempt,
                 &prefetched_files,
+                &coverage.droppable(frozen),
             )
             .await?;
-            match candidate_entry_with_markers(&reply, frozen, &reply_leaked_markers)
+            match coverage
+                .repair(&reply, frozen, &reply_leaked_markers)
                 .and_then(|candidate| author::live_root_refusal(candidate, &refused))
                 .and_then(|candidate| check_defects::check_defects(&working, candidate, scope))
             {
@@ -286,15 +281,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                 client,
                 subset,
                 judge_model,
-                &judge::JudgeRoots {
-                    project: Some(scope.project_root.clone()),
-                    repository: Some(scope.repository_root.clone()),
-                    task_root: Some(scope.task_root.clone()),
-                    repository_commit: scope
-                        .baseline
-                        .as_ref()
-                        .map(|baseline| baseline.commit.clone()),
-                },
+                &coverage_repair::judge_roots(scope)?,
             )
             .await;
             // D2: a judge that could not complete holds the candidates of
@@ -317,6 +304,7 @@ pub(crate) async fn reauthor_partial_with_cache(
                         let id = candidate.id.clone();
                         *entry_mut(&mut working, &id).expect("named id") = candidate;
                     } else if let Some(notes) = feedback.get_mut(&candidate.id) {
+                        coverage.update(&candidate);
                         notes.push(judge::author_note(&candidate));
                     }
                 }

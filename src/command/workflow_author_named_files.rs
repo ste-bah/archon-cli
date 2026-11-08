@@ -53,6 +53,7 @@ fn files(
         repository: Some(roots.repository.clone()),
         task_root: Some(roots.tasks.clone()),
         repository_commit,
+        covered_texts: Default::default(),
     };
     let files =
         judge::named_files_for_reauthor_cached(&frozen, &roots, &inputs, &mut remaining, cache);

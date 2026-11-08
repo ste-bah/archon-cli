@@ -119,6 +119,7 @@ fn project(files: &[(&str, usize)]) -> (tempfile::TempDir, JudgeRoots, Acceptanc
         acceptance.push(entry(&format!("AC-X-{:03}", index + 1), name));
     }
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),

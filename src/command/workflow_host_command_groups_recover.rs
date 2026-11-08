@@ -152,6 +152,8 @@ fn terminate_recorded(
         .as_ref()
         .context("recorded child has no record path")?;
     let table = snapshot()?;
+    #[cfg(test)]
+    let table = tests::after_snapshot(table);
     let pins = {
         let mut pins = retained.lock().unwrap_or_else(|error| error.into_inner());
         pins.extend(
@@ -172,20 +174,8 @@ fn terminate_recorded(
     };
     // A reused leader invalidates scope selectors, never explicit pinned identities.
     // Select from this complete snapshot, then signal only its pinned identities.
-    let replaced = record.leader_start.is_some_and(|start| {
-        table
-            .processes
-            .iter()
-            .any(|process| process.pid == record.pgid && process.start != start)
-    });
-    if !replaced && record.leader_start.is_some() {
-        anyhow::ensure!(
-            !table.listed.contains(&record.pgid)
-                || table.processes.iter().any(|p| p.pid == record.pgid),
-            "cannot read the leader identity in {}; recorded-child teardown remains fenced",
-            path.display()
-        );
-    }
+    let replaced = replacement(record, &table, archon_shell::process_tree::identity_of)
+        .with_context(|| format!("cannot establish identity for {}", path.display()))?;
     let mut protected = BTreeSet::from([0, 1]);
     let mut ancestor = std::process::id();
     while protected.insert(ancestor) {
@@ -286,6 +276,24 @@ fn terminate_recorded(
     record.survivors.clear();
     record.teardown_complete = true;
     Ok(())
+}
+
+// Listing and reading are separate observations. A missing entry needs a fresh
+// identity probe: only a confirmed exit permits recovery; errors retain the fence.
+#[cfg(unix)]
+fn replacement(
+    record: &HostCommandGroupRecord,
+    table: &archon_shell::process_tree::Table,
+    probe: impl FnOnce(u32) -> std::io::Result<Option<u64>>,
+) -> std::io::Result<bool> {
+    let Some(start) = record.leader_start else {
+        return Ok(false);
+    };
+    let current = match table.processes.iter().find(|p| p.pid == record.pgid) {
+        Some(process) => Some(process.start),
+        None => probe(record.pgid)?,
+    };
+    Ok(current.is_some_and(|current| current != start))
 }
 
 /// Recovery cannot use the supervisor's best-effort kill: every signal here

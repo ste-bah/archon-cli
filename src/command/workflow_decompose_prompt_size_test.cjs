@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const dir = process.env.ARCHON_DECOMPOSE_SCRIPT_DIR || __dirname;
-const FILES = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'];
+const FILES = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', "workflow_decompose_v1_prompt.js", 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'];
 const source = FILES.map((f) => fs.readFileSync(`${dir}/${f}`, 'utf8')).join('\n');
 
 function context(args, binding) {
@@ -164,27 +164,100 @@ async function unwritableContextIsAnOutageAndAMissingBindingThrows() {
   await assert.rejects(bare.authorAcceptanceEntries(w, 'author', 2, { entries: new Map([['AC-001', kept]]), retryIds: new Set(['AC-002']) }), /author-context binding is missing/);
 }
 
-// The current findings are never cut, whatever their size; a prompt whose
-// mandatory text alone passes the dispatch limit pauses instead of sending.
-async function currentFindingsStayWholeAndOversizedPromptsPause() {
-  const ctx = context({ acceptanceCriteria: { 'AC-001': 'one' }, authorMaxParallelism: 1, gateMode: 'enforce' });
-  const big = Array.from({ length: 40 }, (_, i) => `check 'AC-001' finding ${i}: ${words(i, 2000)}`);
-  const prompt = ctx.authorPrompt('author', 2, big, [{ attempt: 1, findings: big }]);
-  for (const finding of big) assert(prompt.includes(finding), 'a current finding is shown whole');
-  const huge = Array.from({ length: 200 }, (_, i) => `check 'AC-001' finding ${i}: ${words(i, 2000)}`);
-  const pauses = [];
-  let agents = 0;
-  const w = {
-    agent: async () => { agents += 1; return { status: 'failed', summary: 'unreached' }; },
-    pause: async (id, evidence) => { pauses.push({ id, evidence }); if (pauses.length === 2) throw new Error('paused'); return { resumed: true }; },
-  };
-  await assert.rejects(ctx.authorAcceptanceEntries(w, ctx.authorPrompt('author', 2, huge, []), 1, { entries: new Map(), retryIds: null }), /paused/);
-  assert.equal(agents, 0, 'never sent');
-  assert.deepEqual(pauses.map((p) => p.id), ['pause-acceptance-prompt-AC-001-1', 'pause-acceptance-prompt-AC-001-2'], 'a resumed loop that still measures it pauses again');
-  assert.equal(pauses[0].evidence.reason, 'author_prompt_oversized');
-  assert.match(pauses[0].evidence.remedy, /raise AUTHOR_PROMPT_LIMIT/);
-  assert.match(pauses[0].evidence.remedy, /resuming alone pauses again/);
-  assert(pauses[0].evidence.prompt_bytes > pauses[0].evidence.limit_bytes);
+// Authored findings move to exact context instead of stopping an entry call.
+async function currentFindingsMoveAndDispatch() {
+  const files = new Map();
+  const ctx = context({ acceptanceCriteria: { 'AC-001': 'one' }, authorMaxParallelism: 1 }, authorContext(files));
+  const huge = ['first finding', '東京🚀'.repeat(40000)];
+  const blocks = [];
+  ctx.requiredAuthorContext('phase prompt', 'contract and shape', blocks);
+  const prompt = ctx.authorPrompt('contract and shape', 2, huge, [], blocks);
+  assert(prompt.includes(huge[1]), 'the unreduced source keeps exact current findings');
+  const tasks = [];
+  const w = { agent: async (_id, options) => { tasks.push(options.task); return { status: 'failed', summary: 'captured' }; } };
+  await ctx.authorAcceptanceEntries(w, prompt, 1, { entries: new Map(), retryIds: null, promptBlocks: blocks });
+  assert.equal(tasks.length, 1);
+  assert(Buffer.byteLength(tasks[0]) <= 262144);
+  assert(tasks[0].includes('2 findings in full context; first entries that fit:\n- first finding'));
+  assert(tasks[0].endsWith(ctx.acceptanceReplyFormat()));
+  assert([...files.values()].some(text => text.includes(huge[1])));
+}
+
+async function oversizedOptionalBlocksMoveAndContinue() {
+  const files = new Map();
+  const ctx = context({}, authorContext(files));
+  const base = 'contract and shape\n' + 'r'.repeat(258000);
+  const blocks = [];
+  const candidate = ctx.bodyRepairContext({ capability: 'land-task-body' }, 1, {
+    body: 'candidate'.repeat(1800), findings: [{ text: 'current defect', remediation_scope: 'body' }], score: 1, history: []
+  });
+  const siblings = ctx.priorText(Array.from({ length: 50 }, (_, i) => entry(`AC-${pad(i)}`, i)), 'AC-051', Array.from({ length: 52 }, (_, i) => `AC-${pad(i)}`));
+  blocks.push(...candidate.blocks.map(block => ({ ...block, start: base.length + block.start })));
+  ctx.optionalAuthorContext('sibling context', siblings, blocks, (base + candidate.text + '\n').length);
+  const history = Array.from({ length: 15 }, (_, i) => ({ attempt: i + 1, findings: [words(i, 700)] }));
+  const task = ctx.authorPrompt(base + candidate.text + '\n' + siblings, 20, ['current defect'], history, blocks);
+  assert(Buffer.byteLength(task) > 262144);
+  const w = { pause: () => assert.fail('must not pause') };
+  const reduced = await ctx.requireDispatchable(w, 'test', task, blocks);
+  assert(Buffer.byteLength(reduced) <= 262144);
+  assert(reduced.includes(base));
+  assert(reduced.includes('Repair these exact authoritative findings:\n- current defect'));
+  const path = reduced.match(/Moved optional blocks: .* Read (\S+) /)[1];
+  const moved = JSON.parse(files.get(path));
+  assert.deepEqual(moved.map(block => block.name), ['full candidate text', 'sibling context', 'prior history']);
+  assert.equal(moved[1].text, siblings);
+  const rawPath = moved[0].text.match(/raw text at (\S+) /)[1];
+  assert.equal(files.get(rawPath), 'candidate'.repeat(1800));
+  assert(moved[2].text.includes('Earlier attempts in this phase'));
+  for (const block of moved) {
+    assert(reduced.includes(block.name), 'moved block is named');
+    if (block.name === 'full candidate text') assert(!reduced.includes('candidate'.repeat(1800)), 'candidate bytes are out of line');
+    else assert(!reduced.includes(block.text), 'moved bytes are out of line');
+  }
+  assert.equal(await ctx.requireDispatchable(w, 'test', task, blocks), reduced, 'deterministic bytes and path');
+  const calls = [];
+  const result = await ctx.authorOne({ agent: async (_id, options) => { calls.push(options.task); return { status: 'failed', summary: 'answered' }; } }, task, 1, 'AC-X', 'criterion', [], { 'AC-X': 'criterion' }, { entries: new Map(), order: ['AC-X'] }, undefined, blocks);
+  assert.equal(result.failure.summary, 'answered');
+  assert.equal(calls.length, 1, 'oversize prompt continues to the author');
+  assert(Buffer.byteLength(calls[0]) <= 262144);
+}
+
+async function reductionStopsWhenItFitsAndWriteFailureIsExplicit() {
+  const files = new Map();
+  const ctx = context({}, authorContext(files));
+  const blocks = [];
+  const history = 'Earlier history:\n' + 'h'.repeat(4000);
+  const siblings = ctx.optionalAuthorContext('sibling context', 'Siblings:\n' + 's'.repeat(8000));
+  const required = 'required contract and shape ' + 'r'.repeat(253000);
+  const task = required + history + siblings;
+  ctx.optionalAuthorContext('prior history', history, blocks, required.length);
+  ctx.optionalAuthorContext('sibling context', siblings, blocks, required.length + history.length);
+  const reduced = await ctx.requireDispatchable({}, 'test', task, blocks);
+  assert(reduced.includes(required + history), 'smaller optional block stays inline');
+  const path = reduced.match(/Read (\S+) /)[1];
+  assert.deepEqual(JSON.parse(files.get(path)), [{ name: 'sibling context', text: siblings }]);
+  const failed = context({}, () => { throw new Error('disk full'); });
+  failed.optionalAuthorContext('sibling context', siblings);
+  await assert.rejects(failed.requireDispatchable({}, 'test', task, blocks), error => {
+    assert.equal(error.authorContext, true);
+    assert.match(error.message, /author context could not be written: disk full/);
+    return true;
+  });
+}
+
+async function normalPromptIsByteIdentical() {
+  const prompt = await acceptancePrompt(1, 3);
+  // Verify both intentional additions, then retain the pre-merge digest for all other bytes.
+  const added = '\nCoverable IDs and exact texts: {}';
+  assert.equal(prompt.split(added).length, 2, 'exactly one coverable catalogue');
+  const cover = '"covers":["<coverable id>"]';
+  assert.equal(prompt.split(cover).length, 2, 'reply example uses a coverable id');
+  const legacy = prompt.replace(added, '').replace(cover, '"covers":["<REQ-ID>"]');
+  assert.equal(require('node:crypto').createHash('sha256').update(legacy).digest('hex'), 'a5c1d5ee56224e5bb1a54deece0b39ca06660ee31ae2dba765930d18993e3c2f');
+  const ctx = context({});
+  const filesBefore = ctx.__archonAuthorContext.files.size;
+  assert.equal(await ctx.requireDispatchable({}, 'normal', prompt), prompt);
+  assert.equal(ctx.__archonAuthorContext.files.size, filesBefore, 'no extra context write');
 }
 
 // The findings a phase was opened with (attempt 0) were unbounded: a set
@@ -310,8 +383,9 @@ async function emptyNamedFilesStayWithinTheDispatchBudget() {
   assert.deepEqual(failures, []);
 }
 
-(async () => {
-  for (const test of [emptyNamedFilesStayWithinTheDispatchBudget, priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsStayWholeAndOversizedPromptsPause, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
+module.exports = { context, criteria, entry };
+if (require.main === module) (async () => {
+  for (const test of [...require('./workflow_decompose_oversize_test.cjs').tests, emptyNamedFilesStayWithinTheDispatchBudget, priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsMoveAndDispatch, oversizedOptionalBlocksMoveAndContinue, reductionStopsWhenItFitsAndWriteFailureIsExplicit, normalPromptIsByteIdentical, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
     try { await test(); } catch (error) { console.error(`${test.name}: ${error.message}`); process.exitCode = 1; }
   }
 })();

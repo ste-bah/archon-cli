@@ -1,7 +1,6 @@
 // Acceptance-entry authoring helpers for the fixed decomposition script.
 // Loaded after workflow_decompose_v1.js as one script: every declaration
 // here is hoisted into the same scope as `workflow`.
-
 // Issue 366: one rule for both authors, held equal by test; absolute live roots are refused unrun.
 // Apply it in every configuration, including live runs without isolation.
 // The proof and entry validator refuse absolute live roots before any check runs.
@@ -27,7 +26,7 @@ function acceptanceAuthorPrompt() {
     "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
     "Every check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every file (source, test or data) it reads by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.",
     "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
-    `covers lists every one of the PRD's ${REQUIREMENT_PREFIX} requirement ids (requirement bullets or obligation-table rows that start with ${REQUIREMENT_PREFIX}) whose violation, on the path this check drives, makes the check fail; list only these ids and none the check would still pass under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. Every PRD ${REQUIREMENT_PREFIX} requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.`,
+    "covers lists every coverable PRD id the host lists whose violation, on the path this check drives, makes the check fail; list only ids the check would fail under; each covered requirement must be made false-detectable by this check; split a check whose covers it cannot all fail on. The host reports uncovered ids and names each routed uncovered id as a supplementary check SUP-<id> to author, covering that id.",
     "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.",
     "For a multi-line script, use block form: set \"command_block\": true in the entry and put the script unescaped in exactly one fence labelled check after the JSON entry; then no escaping is needed.",
     "Do not run commands or write files."
@@ -40,7 +39,7 @@ function acceptanceReplyFormat() {
     COMMAND_EXAMPLES,
     "A complete reply looks exactly like this (each fence line alone on its line):",
     "```json",
-    "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<REQ-ID>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",
+    "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"covers\":[\"<coverable id>\"],\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",
     "```",
     "```check",
     "set -eu",
@@ -57,13 +56,6 @@ function acceptanceReplyFormat() {
   ].join("\n");
 }
 
-// The live roots a check must not name, as the validator reads them: the
-// roots this prompt names, and the task root the host reads the freeze's own
-// roots from (its configured scratch repository), so both steps refuse a
-// check from one source.
-function liveRootsText() {
-  return JSON.stringify({repository: args.repositoryRoot, project: args.projectRoot, tasks: args.taskRoot});
-}
 
 // Completed entries survive a sibling's incomplete reply. The host validates
 // each authored entry with freeze's shape validator; freeze assembles and
@@ -95,17 +87,12 @@ function unwrapEntry(parsed, id) {
   return parsed;
 }
 
-// H4 (Batch O): every PRD requirement id is covered by some check. The host
+// H4 (Batch O): every routed requirement is covered by some check. The host
 // freeze names each requirement no entry covers as the supplementary check it
 // is owed ("check 'SUP-<id>': PRD requirement <id> is covered by no
 // acceptance check; ...: <requirement text>"); acceptanceRepairIds records it
 // on itself (`acceptanceRepairIds.owed`, so it stays one self-contained
 // declaration), and the next attempt authors exactly those, beside the entries.
-function owedSupplementary() {
-  if (!acceptanceRepairIds.owed) acceptanceRepairIds.owed = new Map();
-  return acceptanceRepairIds.owed;
-}
-
 // The host owns an entry's criterion: freeze stamps the exact acceptance
 // criterion over it, and a supplementary check's requirement text
 // (workflow_acceptance_preflight.rs). A supplementary check also always
@@ -130,18 +117,9 @@ function setHostOwnedFields(entry, criteria) {
 // retained work and failure; no inner retry window can hide malformed replies
 // or restart its count when a transport error interrupts them. Keep the call
 // id stride so replay of already-recorded rounds uses the same namespace.
-async function authorOne(w, prompt, round, id, text, prior, criteria, state, pendingIds) {
+async function authorOne(w, prompt, round, id, text, prior, criteria, state, pendingIds, promptBlocks = []) {
   // Each entry reads only its own shape refusal: a sibling's names another
   // entry and is not this entry's repair.
-  const refused = state.refusals && state.refusals.get(id);
-  const superseded = supersededDraftText(state, id);
-  const ownOf = () => (refused ? `\nThe host refused this entry's last answered reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "")
-    + (state.gateFindings?.has(id) ? `\nRepair this entry's gate findings open in the latest gate result:\n- ${state.gateFindings.get(id).join("\n- ")}` : "")
-    + (state.judgeNotes?.has(id) ? `\nThe freeze judge could not use this entry's last check:\n- ${state.judgeNotes.get(id)}` : "")
-    + earlierFindingsText("Earlier gate results raised these findings for this entry; the latest gate result no longer reports them. Do not regress them:", state.earlierGateFindings?.get(id))
-    + (state.phaseFindings?.length > 0 ? `\nPhase-level findings of the latest gate result name no single entry; change this entry only where it causes one:\n- ${state.phaseFindings.join("\n- ")}` : "")
-    + earlierFindingsText("Earlier gate results raised these phase-level findings; the latest gate result no longer reports them. Do not regress them:", state.earlierPhaseFindings)
-    + superseded + currentCoversText(state.entries?.get(id));
   // Issue 288: the catalogue and the completed entries are bounded records
   // that name host-written files (workflow_decompose_v1_context.js). A file
   // the host could not write is an outage of this entry's call, made before
@@ -150,10 +128,23 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state, pen
   const preparation = newProgress();
   for (;;) {
     try {
-      const own = ownOf();
-      task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order, pendingIds)}`;
-      task = namedFilesContext(task, state.entries?.get(id) || {id, criterion:text}, [text, own, ...currentAuthorFindings(prompt)], `\n${acceptanceReplyFormat()}`);
-      task = await requireDispatchable(w, `acceptance-prompt-${id}`, task);
+      const blocks = (state.promptBlocks || promptBlocks).slice();
+      if (!blocks.some(block => block.required)) requiredAuthorContext("phase prompt", prompt, blocks);
+      task = prompt + requiredAuthorContext("entry subject", `\nAuthor ONLY entry ${id}: `, blocks, prompt.length);
+      task += optionalAuthorContext("entry criterion", text, blocks, task.length);
+      const own = acceptanceOwnContext(state, id, blocks, task.length);
+      task += own;
+      for (const [name, content] of [
+        ["criterion catalogue", catalogueText(criteria, id, state.order)],
+        ["coverable ids", catalogueText(args.prdRequirementTexts || {}, id, state.order, "Coverable IDs and exact texts:", COVERABLE_SHARE, "ids")],
+        ["sibling context", priorText(prior, id, state.order, pendingIds)]
+      ]) {
+        task += "\n";
+        task += optionalAuthorContext(name, content, blocks, task.length);
+      }
+      const tail = `\n${acceptanceReplyFormat()}`;
+      task = await requireDispatchable(w, `acceptance-prompt-${id}`, task, blocks, tail);
+      task = namedFilesContext(task, state.entries?.get(id) || {id, criterion:text}, [text, own, ...currentAuthorFindings(prompt)], tail);
       break;
     } catch (error) {
       if (!error || error.authorContext !== true) throw error;
@@ -345,24 +336,27 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
 // Pre-judge validation can reject a candidate before any receipt exists. Its
 // check-local diagnostic still identifies which entries to repair; preserving
 // siblings here is not acceptance credit. The full gate runs again afterwards.
-function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntries) {
+function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntries, origin = "", prune = true) {
+  if (prune) pruneOwedSupplementary(findings, candidate, heldEntries, origin);
   const retry = new Set();
   // A supplementary check the host says is owed is known from then on.
-  const supFinding = /^check '(SUP-(REQ-[A-Za-z0-9-]+))': PRD requirement \2 is covered by no acceptance check;[^:]*:\s*([\s\S]*)$/;
+  const supFinding = /^check '([^']+)': PRD requirement ([A-Za-z0-9-]+) is covered by no acceptance check;[^:]*:\s*([\s\S]*)$/;
   if (!acceptanceRepairIds.owed) acceptanceRepairIds.owed = new Map();
   const owed = acceptanceRepairIds.owed;
   const heldOmissions = new Set();
   for (const finding of findings) {
     const match = supFinding.exec(String(finding.text || ""));
     const defect = finding && finding.deterministic_defect;
-    const defectId = defect?.code === "uncovered_requirement" && typeof defect.subject === "string"
-      ? /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(defect.subject)
-      : null;
     const omissionSubject = defect?.code === "uncovered_requirement"
       && typeof defect.subject === "string" ? defect.subject : null;
     const id = match?.[1] || omissionSubject;
-    const requirement = match?.[2] || (defectId ? defectId[1] : null);
-    if (id && requirement) owed.set(id, { requirement, text: currentRequirementText(requirement) });
+    const requirement = supplementaryRequirement(id);
+    if (match && match[2] !== requirement) return null;
+    if (id && requirement && Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, requirement)) {
+      const entries = [...(candidate?.entries || candidate?.acceptance || []), ...(candidate?.supplementary || []), ...(heldEntries?.values ? heldEntries.values() : [])];
+      if (entries.some(entry => entry.id !== id && entryCoversRequirement(entry, requirement))) { heldOmissions.add(id); continue; }
+      owed.set(id, { requirement, text: currentRequirementText(requirement), origin: origin });
+    } else if (id && requirement) return null;
     if (id && heldEntries && typeof heldEntries.has === "function" && heldEntries.has(id)) {
       heldOmissions.add(id);
       continue;
@@ -375,7 +369,7 @@ function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntri
     const defect = finding && finding.deterministic_defect;
     if (defect?.code === "uncovered_requirement" && heldOmissions.has(defect.subject)) continue;
     if (supFinding.test(String(finding.text || ""))
-      || (defect?.code === "uncovered_requirement" && /^SUP-REQ-[A-Za-z0-9-]+$/.test(defect.subject || ""))) continue;
+      || (defect?.code === "uncovered_requirement" && supplementaryRequirement(defect.subject))) continue;
     // #552: a finding names its entry as data; an unpublished set (a check
     // refuted or not judged) is routed by it too. The text is the fallback.
     if (known.has(finding.subject)) {
@@ -417,7 +411,7 @@ function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntri
 // current contract does not supply; that, or an id with no entry, is
 // re-authored. Returns the rebuilt candidate when nothing is, else null with
 // `state.retryIds` set for the next author round.
-function refreshFromCurrentContract(state, report, others, ids, candidate) {
+function refreshFromCurrentContract(state, report, others, ids, candidate, origin = "") {
   if (!report || !Object.prototype.hasOwnProperty.call(report, "current_acceptance_contract")) {
     throw new Error("a stale acceptance freeze returned no current contract to rebuild from");
   }
@@ -428,8 +422,8 @@ function refreshFromCurrentContract(state, report, others, ids, candidate) {
   }
   const owed = owedSupplementary();
   for (const entry of current.supplementary) {
-    const sup = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(String(entry && entry.id));
-    if (sup && !owed.has(entry.id)) owed.set(entry.id, { requirement: sup[1], text: currentRequirementText(sup[1]) });
+    const sup = supplementaryRequirement(entry && entry.id);
+    if (sup && Object.prototype.hasOwnProperty.call(args.prdRequirementTexts || {}, sup) && !owed.has(entry.id)) owed.set(entry.id, { requirement: sup, text: currentRequirementText(sup), origin: "" });
   }
   const supplied = new Set();
   const drafts = state.drafts || new Map();
@@ -449,7 +443,7 @@ function refreshFromCurrentContract(state, report, others, ids, candidate) {
     state.entries.set(entry.id, entry);
   }
   const all = [...ids].sort().concat([...owed.keys()].sort());
-  const attributed = acceptanceRepairIds(others, ids, false, candidate, state.entries);
+  const attributed = acceptanceRepairIds(others, ids, false, candidate, state.entries, origin);
   const flagged = attributed === null ? null : new Set([...attributed].filter((id) => !supplied.has(id)));
   const missing = all.filter((id) => !state.entries.has(id));
   if (flagged !== null && flagged.size === 0 && missing.length === 0) {

@@ -48,7 +48,11 @@ pub(super) fn refuse_candidate_error(
             crate::command::workflow_gate::GateFinding::new(
                 gate_id,
                 format!("candidate artifact was refused: {}", defect.message),
-                subject,
+                if defect.identity.code == "shell_parse" {
+                    &defect.identity.subject
+                } else {
+                    subject
+                },
                 None,
                 archon_workflow::RemediationScope::CandidateArtifact,
             )
@@ -319,6 +323,7 @@ mod tests {
             acceptance_digest: "d".into(),
             tasks: (1..=70)
                 .map(|n| FrozenTask {
+                    status: None,
                     task_id: format!("TASK-X-{n:03}"),
                     file_name: format!("bad{n}"),
                     depends_on: vec![],
@@ -403,3 +408,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "workflow_freeze_shell_parse_567_tests.rs"]
+mod shell_parse_567_tests;

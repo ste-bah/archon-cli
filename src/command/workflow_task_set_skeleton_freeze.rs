@@ -22,6 +22,48 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     mode: GateMode,
     candidate: Vec<u8>,
 ) -> Result<PreparedSkeletonFreeze> {
+    prepare_skeleton_freeze_from_candidate_with_resume(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        candidate,
+        &crate::command::workflow_freeze_budget::FreezeResume::none(),
+    )
+}
+
+/// Carries the staged budget for future proof execution; preparation currently runs no checks.
+pub(crate) fn prepare_skeleton_freeze_from_candidate_with_resume(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+    _resume: &crate::command::workflow_freeze_budget::FreezeResume,
+) -> Result<PreparedSkeletonFreeze> {
+    prepare_with_diagnostics(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        candidate,
+        super::link_diagnostics::child,
+        gate_stamp,
+    )
+}
+
+pub(super) fn prepare_with_diagnostics(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+    diagnostics: fn(&TaskSkeleton, &AcceptanceContract, &Path, &Path),
+    stamp: fn(
+        FreezeGateMode,
+        &[GateFinding],
+    ) -> archon_workflow::task_set_contract::FreezeGateStamp,
+) -> Result<PreparedSkeletonFreeze> {
     let freeze_mode = freeze_mode(mode)?;
     let pin_path = acceptance_pin_path(project_root, tasks_root);
     let original_pin = std::fs::read(&pin_path).with_context(|| {
@@ -84,6 +126,13 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         serde_json::from_slice(&candidate)
             .with_context(|| format!("parsing {}", skeleton_path.display())),
     )?;
+    // Authored completion is discarded until host proof classification is enabled.
+    for task in &mut skeleton.tasks {
+        task.status = None;
+        for deliverable in &mut task.deliverable_contracts {
+            deliverable.implements.clear();
+        }
+    }
     skeleton
         .acceptance_digest
         .clone_from(&pin.acceptance_digest);
@@ -114,6 +163,8 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         &skeleton_path,
     ));
 
+    diagnostics(&skeleton, &contract, project_root, tasks_root);
+
     if !defects.is_empty() {
         // Shape and set defects are one complete refusal, including siblings
         // that a first-error shape validator used to hide from the author.
@@ -133,7 +184,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
             crate::command::workflow_task_set_candidate::CandidateDefects(defects).into(),
         ));
     }
-    let stamp = gate_stamp(freeze_mode, &findings);
+    let stamp = stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
     let digest = content_digest(&skeleton_bytes);
     let lock = TaskSkeletonLock {

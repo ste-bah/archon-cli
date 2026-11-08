@@ -41,7 +41,7 @@ async fn a_check_its_shell_cannot_parse_is_never_run_and_never_unproven_554() {
     let finding = findings
         .get("AC-X-001")
         .unwrap_or_else(|| panic!("no author finding: {findings:?}; unproven={unproven:?}"));
-    assert!(finding.contains("never ran it"), "{finding}");
+    assert!(finding.contains("refused to run it"), "{finding}");
     assert!(!unproven.contains_key("AC-X-001"), "{unproven:?}");
     // Its sibling is still probed on its own merits.
     assert!(!unproven.contains_key("AC-X-002"), "{unproven:?}");

@@ -243,6 +243,7 @@ fn directory_lint_renders_kind_mismatch_as_information_only() {
     skeleton.tasks.insert(
         0,
         archon_workflow::task_skeleton::FrozenTask {
+            status: None,
             task_id: "TASK-X-001".into(),
             file_name: "TASK-X-001-base.md".into(),
             depends_on: Vec::new(),

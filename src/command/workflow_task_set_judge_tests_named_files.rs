@@ -16,6 +16,7 @@ fn named_existing_file_content_is_shown_and_judge_rule_is_updated() {
         *command = "operation data/input".into();
     }
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),
@@ -109,6 +110,7 @@ fn named_source_budget_is_shared_across_the_batch() {
     let prompt = batched_judge_prompt_with_roots(
         &subject,
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: None,
             task_root: Some(root.path().to_path_buf()),
@@ -151,6 +153,7 @@ fn a_small_batch_keeps_the_single_check_named_file_prompt_unchanged() {
     std::fs::write(root.path().join("input"), "stable source\n").unwrap();
     let subject = command_check("operation input", TrustedCwd::ProjectRoot);
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),
@@ -177,6 +180,7 @@ fn checks_without_files_keep_their_entry_shape_and_retain_existing_prompt_bytes(
     let rooted = batched_judge_prompt_with_roots(
         &subject,
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: None,
             task_root: Some(root.path().to_path_buf()),
@@ -203,6 +207,7 @@ fn outside_and_missing_named_paths_are_omitted() {
     let prompt = batched_judge_prompt_with_roots(
         &subject,
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: None,
             task_root: Some(root.path().to_path_buf()),
@@ -231,6 +236,7 @@ fn named_file_content_is_truncated_at_existing_judged_source_limit() {
     let prompt = batched_judge_prompt_with_roots(
         &subject,
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: None,
             task_root: Some(root.path().to_path_buf()),
@@ -255,6 +261,7 @@ fn untracked_repository_file_is_not_named_to_the_judge() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation untracked", TrustedCwd::RepoRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: Some(root.path().to_path_buf()),
             task_root: Some(root.path().to_path_buf()),
@@ -270,6 +277,7 @@ fn untracked_repository_file_is_not_named_to_the_judge() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation missing/check.test", TrustedCwd::RepoRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: Some(root.path().to_path_buf()),
             task_root: Some(root.path().to_path_buf()),
@@ -295,6 +303,7 @@ fn tracked_repository_file_is_named_to_the_judge() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation tracked", TrustedCwd::RepoRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: Some(root.path().to_path_buf()),
             task_root: Some(root.path().to_path_buf()),
@@ -322,6 +331,7 @@ fn repository_named_file_uses_committed_blob_and_skips_committed_symlink() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation tracked", TrustedCwd::RepoRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: Some(root.path().to_path_buf()),
             task_root: Some(root.path().to_path_buf()),
@@ -335,6 +345,7 @@ fn repository_named_file_uses_committed_blob_and_skips_committed_symlink() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation link", TrustedCwd::RepoRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: Some(root.path().to_path_buf()),
             task_root: Some(root.path().to_path_buf()),
@@ -354,6 +365,7 @@ fn project_paths_drop_curdir_and_reject_parent_components() {
     std::fs::write(root.path().join("x"), "included").unwrap();
     std::fs::write(root.path().join("secret"), "must not be reached").unwrap();
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),
@@ -385,6 +397,7 @@ fn project_file_under_nested_repository_is_omitted() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation nested/input", TrustedCwd::ProjectRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(project.path().to_path_buf()),
             repository: Some(nested),
             task_root: Some(project.path().to_path_buf()),
@@ -404,6 +417,7 @@ fn named_file_digest_tracks_content_and_truncates_at_utf8_boundary() {
     let path = root.path().join("x");
     let mut subject = command_check("operation x", TrustedCwd::ProjectRoot);
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),
@@ -436,6 +450,7 @@ fn project_copy_exclusions_are_omitted_and_named_content_is_redacted() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation credentials/input", TrustedCwd::ProjectRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: None,
             task_root: Some(root.path().to_path_buf()),
@@ -453,6 +468,7 @@ fn project_copy_exclusions_are_omitted_and_named_content_is_redacted() {
     let prompt = batched_judge_prompt_with_roots(
         &command_check("operation data-input", TrustedCwd::ProjectRoot),
         &JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(root.path().to_path_buf()),
             repository: None,
             task_root: Some(root.path().to_path_buf()),

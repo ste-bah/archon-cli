@@ -176,12 +176,12 @@ fn none_profile_environment_child() {
     let context = configured_context(temp.path());
     let catalog = fixed_decomposition_catalog("rev-1").unwrap();
     let none = [
-        "freeze-skeleton",
         "requirements-trace",
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",
     ];
-    // These are exactly the catalog's commands that run no project code.
+    // The skeleton freeze now reserves the provider profile for future proof execution.
+    // These are exactly the catalog's commands using only the process environment.
     for (id, capability) in &catalog.capabilities {
         assert_eq!(
             capability.environment_profile == archon_workflow::EnvironmentProfileId::None,
@@ -190,8 +190,7 @@ fn none_profile_environment_child() {
         );
     }
     for id in none {
-        let stdin = (id == "freeze-skeleton").then(|| "{}".into());
-        let request = HostCommandRequest::new(id, stdin).unwrap();
+        let request = HostCommandRequest::new(id, None).unwrap();
         let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
         assert!(
             resolved.environment.contains_key("PATH"),

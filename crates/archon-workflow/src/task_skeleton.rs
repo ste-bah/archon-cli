@@ -60,6 +60,19 @@ pub struct FrozenTask {
     pub source_sections: Vec<String>,
     #[serde(default)]
     pub deliverable_contracts: Vec<WorkflowV2DeliverableContract>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_status"
+    )]
+    pub status: Option<String>,
+}
+
+fn optional_status<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().map(str::to_string))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

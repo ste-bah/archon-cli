@@ -235,6 +235,15 @@ pub(crate) fn stamp_frozen_frontmatter(
     }
     let mut notes = Vec::new();
     stamp_owned_fields(map, frozen, &mut notes)?;
+    if let Some(status) = &frozen.status {
+        stamp_typed_field(map, "status", status, &mut notes)?;
+    } else if archon_workflow::task_universe::task_status::declared_status_is_complete(
+        map.get("status").and_then(serde_json::Value::as_str),
+    ) {
+        return Err(WorkflowError::SpecInvalid(
+            "authored status claims completion; completion is host-owned until proven; declare status: ready".into(),
+        ));
+    }
     // Serializing the host's own mapping is a host fault, never `SpecInvalid`.
     let stamped_yaml = serde_yaml_ng::to_string(&metadata)?;
     let stamped_yaml = stamped_yaml.strip_prefix("---\n").unwrap_or(&stamped_yaml);
@@ -323,6 +332,7 @@ fn named_subject_refusal(
     let frozen = tasks.iter().find(|frozen| frozen.task_id == named)?;
     let task_file = task_root.join(&frozen.file_name);
     let block = &candidate[anchor.opener..];
+    let mut refusal = "does not parse";
     let cause = match archon_workflow::task_universe::parsing::parse_task_file(&task_file, block) {
         Err(error) => unclosed_frontmatter(block, candidate).unwrap_or_else(|| match error {
             WorkflowError::SpecInvalid(text) => text,
@@ -330,13 +340,16 @@ fn named_subject_refusal(
         }),
         // #428: it parses, yet the host cannot stamp it (an unknown field).
         Ok(_) => match stamp_frozen_frontmatter(block, frozen) {
-            Err(WorkflowError::SpecInvalid(text)) => text,
+            Err(WorkflowError::SpecInvalid(text)) => {
+                refusal = "is refused";
+                text
+            }
             _ => return None,
         },
     };
     Some(UnparsedSubject {
         reason: format!(
-            "candidate TASK body for {named} does not parse: {cause}; return the whole task file"
+            "candidate TASK body for {named} {refusal}: {cause}; return the whole task file"
         ),
         task_file,
     })

@@ -135,6 +135,7 @@ fn pinned_restore_matches_full_named_content_past_the_shared_source_byte_budget(
     std::fs::write(root.path().join("first"), &content).unwrap();
     std::fs::write(root.path().join("second"), &content).unwrap();
     let roots = super::super::judge::JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),

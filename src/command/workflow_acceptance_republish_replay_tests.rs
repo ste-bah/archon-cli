@@ -99,7 +99,7 @@ fn replay_fixture() -> ReplayFixture {
     std::fs::write(&prd, prd_text).unwrap();
     let mut entry = crate::command::workflow_task_set::republish::test_fixture::criterion(
         "SUP-REQ-F-083",
-        "test -f Cargo.toml",
+        "test -s crates/sample-core/src/data_lake/tests.rs",
         false,
     );
     entry.criterion = "A missing `native_interval` field means `false`.".into();

@@ -3,6 +3,8 @@ use super::*;
 #[test]
 fn setup_file_that_was_not_moved_has_no_site_copy_note() {
     let candidate = super::mutation::CandidateDiagnostic {
+        message_mention: false,
+        written_ancestor: false,
         path: "../project/setup.toml".into(),
         move_path: Some("/site/project/setup.toml".into()),
         move_root: Some("/site/project".into()),

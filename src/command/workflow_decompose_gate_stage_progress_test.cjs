@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const files = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_reply_blocks.js',
-  'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js',
+  'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', "workflow_decompose_v1_prompt.js",
   'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'];
 const source = files.map(file => fs.readFileSync(`${scriptRoot}/${file}`, 'utf8')).join('\n');
 function freshContext() {
@@ -329,3 +329,17 @@ const regressions = [
   }
   process.exitCode = failed ? 1 : 0;
 })();
+
+// Issue 567: a pre-judge syntax refusal has one validator identity beside
+// a sibling's policy defect and after that sibling is repaired.
+{
+  const context = freshContext();
+  const parse = defect('AC-X-001', 'shell_parse', 'check');
+  const sibling = defect('AC-X-002', 'invalid_verifier', 'check');
+  const before = [parse, sibling], after = [parse];
+  assert.equal(context.openFindingKey(before[0]), context.openFindingKey(after[0]));
+  assert(context.gateStageRank(parse) < context.gateStageRank(judged('AC-X-001', 'judge')),
+    'a pre-judge parse refusal must rank below a judged finding');
+  const regression = attempts([[judged('AC-X-001', 'judge')], [parse]]);
+  assert.deepEqual(regression.flags, [true, false], 'regressing to syntax refusal is no progress');
+}

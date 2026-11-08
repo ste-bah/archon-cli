@@ -32,6 +32,7 @@ fn an_extension_that_leaves_a_requirement_uncovered_is_refused_by_its_gate() {
         crate::command::workflow_task_set::republish::test_fixture::FIXTURE_JUDGE_MODEL,
         Some(crate::command::workflow_task_set::reauthor::test_client::SCRIPTED_PROVIDER),
         &super::judge::JudgeRoots {
+            covered_texts: Default::default(),
             project: Some(set.project.path().to_path_buf()),
             repository: None,
             task_root: Some(set.tasks.clone()),

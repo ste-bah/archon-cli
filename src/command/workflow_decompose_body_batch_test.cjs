@@ -7,7 +7,7 @@ const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const scriptSource = () => ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js','workflow_decompose_reply_blocks.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(__dirname+'/'+f,'utf8')).join('\n');
+const scriptSource = () => ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js','workflow_decompose_reply_blocks.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_frozen.js', "workflow_decompose_v1_prompt.js",'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_failing_set.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(__dirname+'/'+f,'utf8')).join('\n');
 const SUBJECTS = Array.from({length:7},(_,i)=>({taskId:`TASK-X-${i+1}`,fileName:`TASK-X-${i+1}.md`}));
 
 function harness(cap, options = {}) {
@@ -82,6 +82,19 @@ async function frozenBodiesAreSkipped() {
  assert.equal(h.peak(),4);
 }
 
+async function reverifyFindingsReopenOnlyTheNamedBody() {
+ const frozen={acceptance:true,skeleton:true,subjects:SUBJECTS,bodies:SUBJECTS.map(s=>s.fileName)};
+ const h=harness(1,{frozenChain:frozen});
+ const findings=['The body omits REQ-X-001.', 'The focused test does not prove the requirement.'];
+ h.context.args.forceBodySubjects=['TASK-X-1'];
+ h.context.args.remediationBodyFindings={'TASK-X-1':findings};
+ const report=await h.context.workflow(h.w);
+ assert.deepEqual(h.bodyCalls.map(c=>c.taskId),['TASK-X-1']);
+ assert.deepEqual(Array.from(h.context.currentAuthorFindings(h.bodyPrompts[0])),findings);
+ assert.equal(h.landed.length,1,'the repaired body passes through its landing gate');
+ assert.equal(report.status,'accepted');
+}
+
 async function failureSurfacesAfterSiblingsSettle() {
  const h=harness(3,{failing:'TASK-X-2'});
  await assert.rejects(()=>h.context.workflow(h.w),/author of TASK-X-2 exhausted/);
@@ -98,5 +111,5 @@ async function lowestFailingBodyIsRaised() {
  assert.equal(h.active(),0,'no sibling agent abandoned mid-call');
 }
 
-bodyPathsAreRepositoryRootRelative().then(boundedPool).then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(failureSurfacesAfterSiblingsSettle).then(lowestFailingBodyIsRaised)
+bodyPathsAreRepositoryRootRelative().then(boundedPool).then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(reverifyFindingsReopenOnlyTheNamedBody).then(failureSurfacesAfterSiblingsSettle).then(lowestFailingBodyIsRaised)
  .then(()=>console.log('bounded body pool passed')).catch(e=>{console.error(e);process.exitCode=1});

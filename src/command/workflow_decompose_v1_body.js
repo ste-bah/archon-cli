@@ -60,8 +60,10 @@ function retainBodyCandidate(prior, policy, body, findings, history = []) {
 function bodyRepairContext(policy, rung, best) {
   if (policy.capability !== "land-task-body") return null;
   if (!best || best.findings.length === 0) return null;
+  const blocks = [];
   if (rung === 4) return {
-    text: `\nRe-author a complete replacement from fresh context. Keep the subject contract. Previously seen defects:\n- ${best.findings.map(findingText).join("\n- ")}`,
+    blocks,
+    text: findingsAuthorContext("previously seen defects", `\nRe-author a complete replacement from fresh context. Keep the subject contract. Previously seen defects:\n- ${best.findings.map(findingText).join("\n- ")}`, blocks, 0, best.findings.map(findingText)),
     feedback: [], history: best.history
   };
   const instruction = "Correct the retained candidate below. Change only what its findings require and keep every other line exactly. Return the complete corrected file, never a patch.";
@@ -72,13 +74,18 @@ function bodyRepairContext(policy, rung, best) {
     const path = utf8Bytes(body) > 16384 ? contextFile("txt", body).path : null;
     reference = path
       ? `Read the retained candidate as raw text at ${path} (host-written body context for this call: read it by its exact path, even under an excluded directory).`
-      : `Retained candidate (raw text):\n${body}\nEnd retained candidate.`;
-    reference += utf8Bytes(details) > 16384
+      : optionalAuthorContext("full candidate text", `Retained candidate (raw text):\n${body}\nEnd retained candidate.`, blocks, instruction.length + 2);
+    if (!path) blocks[0].raw = body;
+    else optionalAuthorContext("retained candidate reference", reference, blocks, instruction.length + 2);
+    const findingsStart = instruction.length + 2 + reference.length;
+    const findingsText = utf8Bytes(details) > 16384
       ? `\nRead exact gate findings (JSON) at ${contextFile("json", details).path} (host-written context: read this exact path).`
       : `\nExact gate findings (JSON):\n${details}`;
+    reference += optionalAuthorContext(utf8Bytes(details) > 16384 ? "gate findings reference" : "inline gate findings JSON", findingsText, blocks, findingsStart);
   } catch (error) {
     error.retainedBodyContext = true;
     throw error;
   }
-  return { text: `\n${instruction}\n${reference}`, feedback: best.findings.map(findingText), history: best.history };
+  requiredAuthorContext("retained candidate repair instructions", `\n${instruction}\n`, blocks);
+  return { blocks, text: `\n${instruction}\n${reference}`, feedback: best.findings.map(findingText), history: best.history };
 }
