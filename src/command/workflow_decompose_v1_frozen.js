@@ -173,7 +173,7 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate, directi
     initialFeedback,
     directive,
     ...(Number.isInteger(initialRung) ? { initialRung } : {}),
-    prompt: (previous) => [
+    prompt: (previous, blocks) => requiredAuthorContext("phase prompt", [
       SKELETON_AUTHOR_MARKER,
       ...(directive ? [directive] : []),
       `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
@@ -197,18 +197,19 @@ function skeletonPolicy(initialFeedback, initialRung, previousCandidate, directi
       "Generate large or repetitive fixture data with code rather than writing it literally.",
       "Land each task with the landing tool; your final reply is exactly {\"records_landed\":N}, with N from the last landing receipt. N counts new landings in this call, excluding seeds. A call with open findings must make at least one byte-changing landing; a call with an empty task store must land at least one task. The gate then judges the whole set again.",
       "Do not run commands or write files."
-    ].join("\n") + previousSkeletonContext(previous)
+    ].join("\n"), blocks) + previousSkeletonContext(previous, blocks, blocks?.[blocks.length - 1]?.text.length || 0)
   };
 }
 
 // #568: carry exact candidate bytes through the existing host-written context
 // binding. No content means no extra line, including on a first attempt.
-function previousSkeletonContext(content) {
+function previousSkeletonContext(content, blocks, start = 0) {
   if (typeof content !== "string" || content.length === 0) return "";
   const file = contextFile("json", content);
-  return `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
+  const text = `\nThe previous candidate is in ${file.path} (sha256 ${file.sha256}; host-written context for this call: read it by its exact path).`
     + "\nWhatever you restructure, keep every task, implements id, source_sections entry, deliverable and edge of the previous candidate that no current finding names. Compare the Landed subjects list at the end of this prompt with the previous candidate before landing changes and re-land every missing task with valid fields, preserving its work unless a current finding requires its removal. The host can drop invalid seeds. Only the subjects listed there have been retained. Re-land changed tasks. "
     + (frozenChain().skeleton || CURRENT_SKELETON_TASKS !== null ? "Keep every frozen task_id and file_name." : "Use remove:true to drop a draft task.");
+  return optionalAuthorContext("previous candidate reference", text, blocks, start);
 }
 
 // #554: the operational findings of a freeze outcome whose subject is an

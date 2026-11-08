@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
-const names = ['v1','v1_body','reply_blocks','v1_acceptance','v1_set_gate','v1_frozen',
+const names = ['v1','v1_body','reply_blocks','v1_acceptance','v1_set_gate','v1_frozen', 'v1_prompt',
   'v1_progress','v1_failing_set','v1_seed','v1_context'];
 const source = names.map(n => fs.readFileSync(`${__dirname}/workflow_decompose_${n}.js`, 'utf8')).join('\n');
 const candidate = JSON.stringify({ schema_version: 1, acceptance_digest: '', tasks: [

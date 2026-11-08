@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const {withAuthorContext} = require('./workflow_decompose_context_stub.cjs');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const files = ['v1', 'v1_body', 'reply_blocks', 'v1_acceptance', 'v1_set_gate', 'v1_frozen',
+const files = ['v1', 'v1_body', 'reply_blocks', 'v1_acceptance', 'v1_set_gate', 'v1_frozen', 'v1_prompt',
   'v1_progress', 'v1_failing_set', 'v1_seed', 'v1_context'];
 function context(extra = {}) {
   const ctx = withAuthorContext({args: {projectRoot:'project', repositoryRoot:'repo',

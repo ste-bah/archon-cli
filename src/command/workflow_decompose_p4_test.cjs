@@ -13,7 +13,7 @@ function context() {
   vm.createContext(ctx);
   vm.runInContext(read('workflow_decompose_v1.js') + '\n' + read('workflow_decompose_v1_acceptance.js')
     + '\n' + read('workflow_decompose_v1_context.js') + '\n' + read('workflow_decompose_v1_progress.js')
-    + '\n' + read('workflow_decompose_v1_frozen.js'), ctx);
+    + '\n' + read('workflow_decompose_v1_frozen.js') + '\n' + read('workflow_decompose_v1_prompt.js'), ctx);
   return ctx;
 }
 

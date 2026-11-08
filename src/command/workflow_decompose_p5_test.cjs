@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
-const names = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_v1_frozen.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_set_gate.js'];
+const names = ['workflow_decompose_v1.js', 'workflow_decompose_v1_body.js', 'workflow_decompose_v1_frozen.js', "workflow_decompose_v1_prompt.js", 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_set_gate.js'];
 const source = names.map(name => fs.readFileSync(`${__dirname}/${name}`, 'utf8')).join('\n');
 function context() {
   const ctx = withAuthorContext({args:{prdPath:'prd.md', taskRoot:'tasks',

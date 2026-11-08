@@ -5,6 +5,7 @@ fn run(driver: &str) {
     let script = [
         decl("AUTHOR_PROMPT_LIMIT"),
         decl("utf8Bytes"),
+        decl("NAMED_FILES_PREAMBLE"),
         decl("namedFilesContext"),
         driver.to_owned(),
     ]

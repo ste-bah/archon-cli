@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['v1', 'v1_body', 'reply_blocks', 'v1_acceptance', 'v1_set_gate',
-  'v1_frozen', 'v1_progress', 'v1_failing_set', 'v1_seed', 'v1_context']
+  'v1_frozen', 'v1_prompt', 'v1_progress', 'v1_failing_set', 'v1_seed', 'v1_context']
   .map(name => fs.readFileSync(`${root}/workflow_decompose_${name}.js`, 'utf8')).join('\n');
 const subject = { taskId: 'TASK-SAMPLE-001', fileName: 'TASK-SAMPLE-001.md' };
 const phase = `body-${subject.taskId}`;
