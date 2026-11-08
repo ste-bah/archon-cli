@@ -43,17 +43,14 @@ impl HostProbe {
     }
 }
 
-fn excluded(relative: &Path, task_root: Option<&Path>) -> bool {
-    acceptance_input_excluded(relative, &[], task_root)
-}
-
 /// The copy. [`HermeticCopy::remove`] removes it and says whether it could;
 /// dropping it removes it best-effort.
-pub(super) struct HermeticCopy {
+pub(crate) struct HermeticCopy {
     root: PathBuf,
     pub(super) repository: PathBuf,
     pub(super) project: PathBuf,
     removed: bool,
+    base_guard: Option<base_copy::BaseGuard>,
 }
 
 impl HermeticCopy {
@@ -167,10 +164,7 @@ pub(super) fn data_digest_scoped(
     let mut lines = Vec::new();
     let mut stack = vec![scope.to_path_buf()];
     while let Some(relative) = stack.pop() {
-        if !relative.as_os_str().is_empty()
-            && (excluded(&relative, task_root_relative.as_deref())
-                || acceptance_input_excluded(&relative, excludes, task_root_relative.as_deref()))
-        {
+        if acceptance_input_excluded(&relative, excludes, task_root_relative.as_deref()) {
             continue;
         }
         if nested_repository_skipped(&relative, nested.as_deref()) {
@@ -232,99 +226,26 @@ fn task_root_relative_paths(project: &Path, task_root: &Path) -> Result<PathBuf,
         .map_err(|_| ())
 }
 
-impl HermeticCopy {
-    /// `repository` at `commit` and `project`'s data, under `parent`.
-    fn at(
-        parent: &Path,
-        repository: &Path,
-        project: &Path,
-        task_root: Option<&Path>,
-        commit: &str,
-    ) -> Result<Self, Unrun> {
-        let canonical = |path: &Path| {
-            archon_shell::paths::canonicalize(path).map_err(|error| {
-                let text = format!("{}: {error}", path.display());
-                Unrun::error(error.into(), text)
-            })
-        };
-        let (source, live_project) = (canonical(repository)?, canonical(project)?);
-        std::fs::create_dir_all(parent).map_err(|error| {
-            let text = format!("{}: {error}", parent.display());
-            Unrun::error(error.into(), text)
-        })?;
-        let root = canonical(parent)?.join(format!("{COPY_PREFIX}{}", uuid::Uuid::new_v4()));
-        for live in [&source, &live_project] {
-            if root.starts_with(live) {
-                return Err(Unrun::unknown(format!(
-                    "the probe copy parent {} lies inside the live root {}",
-                    parent.display(),
-                    live.display()
-                )));
-            }
-        }
-        let mut copy = Self {
-            repository: root.join("repo"),
-            project: root.join("project"),
-            root,
-            removed: false,
-        };
-        git(&[
-            "clone".as_ref(),
-            "--quiet".as_ref(),
-            "--shared".as_ref(),
-            "--no-checkout".as_ref(),
-            "--".as_ref(),
-            source.as_os_str(),
-            copy.repository.as_os_str(),
-        ])?;
-        git(&[
-            "-C".as_ref(),
-            copy.repository.as_os_str(),
-            "checkout".as_ref(),
-            "--quiet".as_ref(),
-            "--detach".as_ref(),
-            commit.as_ref(),
-            "--".as_ref(),
-        ])?;
-        let tracked = live_project
-            .strip_prefix(&source)
-            .ok()
-            .map(|relative| copy.repository.join(relative))
-            .filter(|inside| inside.is_dir());
-        match tracked {
-            Some(inside) => copy.project = inside,
-            None => {
-                let task_root = task_root.map(canonical).transpose()?;
-                let task_root_relative = task_root
-                    .as_deref()
-                    .and_then(|root| root.strip_prefix(&live_project).ok());
-                let before = data_digest(&live_project, &source, task_root.as_deref())?;
-                let mut remaining = PROJECT_COPY_BYTES;
-                copy_data(
-                    &live_project,
-                    Path::new(""),
-                    &copy.project,
-                    &source,
-                    task_root_relative,
-                    &mut remaining,
-                )?;
-                if data_digest(&live_project, &source, task_root.as_deref())? != before {
-                    return Err(Unrun::transient(
-                        "the project data changed while it was copied, so the copy is no evidence of any one tree".into(),
-                    ));
-                }
-            }
-        }
-        Ok(copy)
-    }
-}
+#[path = "workflow_acceptance_executability_base_git.rs"]
+mod base_git;
+
+#[path = "workflow_acceptance_executability_copy_create.rs"]
+mod create;
+
+#[allow(dead_code)]
+#[path = "workflow_acceptance_executability_base_copy.rs"]
+mod base_copy;
+#[allow(unused_imports)]
+pub(crate) use base_copy::{BaseCopy, materialise_base_copy};
 
 /// Copy `root/relative` into `dest/relative`: regular files and
-/// directories only (a symlink is never followed), skipping [`excluded`]
+/// directories only (a symlink is never followed), skipping excluded
 /// paths and the nested `repository`.
 #[path = "workflow_acceptance_executability_copy_data.rs"]
 mod copy_data_impl;
+#[cfg(test)]
 use copy_data_impl::copy_data;
+use copy_data_impl::copy_data_scoped;
 
 /// Run `refs` of `contract` in one hermetic copy of `repository` at
 /// `commit` (see the module docs).
@@ -362,102 +283,30 @@ pub(super) async fn run_in_copy(
         let text = format!("the copy task failed: {error}");
         Unrun::error(error.into(), text)
     })??;
-    let mut layout = copy.layout();
-    siblings::install_copy_layout(
-        &mut layout,
-        &copy.project,
-        &probe.project,
-        &copy.repository,
+    let result = run_refs_in_copy(
+        probe,
+        &copy,
         repository,
         contract,
-    )?;
-    *observed_layout.lock().expect("observation layout lock") = Some(layout.clone());
-    let target = warm_target(&probe.copy_parent, repository);
-    let mut site = DirectSite {
-        repository: copy.repository.clone(),
-        project: copy.project.clone(),
-        host: probe.host.clone(),
-        policy: None,
-        resource_limits: probe.resource_limits.clone(),
-        target: Some(target),
-        fresh_home: true,
-        timeout_secs: probe.check_bound_secs(),
-        output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
-    };
-    let cancel = Arc::new(AtomicBool::new(false));
-    let mut results = Vec::new();
-    let mut failure = None;
-    for (index, reference) in refs.iter().enumerate() {
-        let allowance = hooks.allowance.as_ref().map(|allowance| allowance());
-        let cut = match allowance {
-            Some(CheckAllowance::Defer) => {
-                results.extend(refs[index..].iter().map(|r| deferred(&r.acceptance_id)));
-                break;
-            }
-            Some(CheckAllowance::Run { timeout_secs, cut }) => {
-                site.timeout_secs = timeout_secs.clamp(1, probe.check_bound_secs());
-                cut
-            }
-            None => false,
-        };
-        let execution = async {
-            #[cfg(test)]
-            crate::command::workflow_host_fault_test_hooks::fire(
-                crate::command::workflow_host_fault_test_hooks::Point::Direct,
-                repository,
-            )
-            .map_err(|source| archon_workflow::WorkflowError::Io {
-                path: repository.to_owned(),
-                source,
-            })?;
-            archon_workflow::acceptance_scratch::run_check_direct_with_plan(
-                &site,
-                contract,
-                digest,
-                reference,
-                hooks.mutation_plans.get(&reference.acceptance_id),
-                cancel.clone(),
-            )
-            .await
-        }
-        .await;
-        match execution {
-            Ok(mut result) => {
-                let stopped = cut && result.operational_error.as_deref() == Some(CHECK_TIMED_OUT);
-                if stopped {
-                    result.operational_error = Some(CHECK_DEFERRED.to_string());
-                }
-                if let Some(on_check) = &hooks.on_check {
-                    on_check(&result);
-                }
-                results.push(result);
-                if stopped {
-                    results.extend(refs[index + 1..].iter().map(|r| deferred(&r.acceptance_id)));
-                    break;
-                }
-            }
-            Err(error) => {
-                let context = format!(
-                    "running check {} in the disposable site {}",
-                    reference.acceptance_id,
-                    site.project.display()
-                );
-                failure = Some(Unrun::error(error.into(), context));
-                break;
-            }
-        }
-    }
+        digest,
+        refs,
+        hooks,
+        observed_layout,
+    )
+    .await;
     let removal = tokio::task::spawn_blocking(move || copy.remove()).await;
     match removal {
         Ok(Ok(())) => {}
         Ok(Err(error)) => probe.note(format!("a probe copy could not be removed: {error}")),
         Err(error) => probe.note(format!("a probe copy's removal failed: {error}")),
     }
-    match failure {
-        Some(error) => Err(error),
-        None => Ok(CopyRun { results, layout }),
-    }
+    result
 }
+#[path = "workflow_acceptance_executability_copy_run.rs"]
+mod run;
+#[allow(unused_imports)]
+pub(crate) use run::run_refs_in_copy;
+
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_nested_repository_tests.rs"]
 mod nested_repository_tests;

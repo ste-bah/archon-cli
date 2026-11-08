@@ -291,6 +291,7 @@ impl PreparedAcceptanceFreeze {
             let lock = TaskSkeletonLock {
                 classification: Some(super::findings::classification(
                     &self.tasks_root,
+                    &self.project_root,
                     &skeleton,
                     &contract,
                     &self.lock,

@@ -138,3 +138,78 @@ fn paths_ending_with_matches_whole_trailing_components_only() {
     );
     assert!(found("").is_empty());
 }
+
+fn assert_original_paths(repo: &Path) {
+    let record = record_for(repo);
+    let result = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "ls-tree",
+            "-r",
+            "-t",
+            "-z",
+            "--name-only",
+            &record.base_commit,
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let original: BTreeSet<String> = result
+        .stdout
+        .split(|b| *b == 0)
+        .map(|p| String::from_utf8_lossy(p).trim_end_matches('/').to_owned())
+        .filter(|p| !p.is_empty() && p != ".")
+        .collect();
+    let tree = RepositoryTree::load(&record).unwrap();
+    assert_eq!(
+        serde_json::to_vec(tree.paths_at_base()).unwrap(),
+        serde_json::to_vec(&original).unwrap()
+    );
+    assert_eq!(tree.objects_at_base().len(), original.len());
+}
+#[test]
+fn original_paths_are_byte_identical_for_root_and_subdirectories() {
+    let repo = committed_repo();
+    std::fs::write(repo.path().join("top-level"), b"outside subdirectories").unwrap();
+    std::fs::write(repo.path().join("fïle"), b"unicode").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(repo.path(), &["commit", "-qm", "top level"]);
+    assert_original_paths(repo.path());
+    for sub in ["src", "docs"] {
+        let root = repo.path().join(sub);
+        assert_original_paths(&root);
+        let tree = RepositoryTree::load(&record_for(&root)).unwrap();
+        assert!(!tree.exists_at_base("top-level"));
+        assert!(!tree.exists_at_base("fïle"));
+        assert!(!tree.exists_at_base("src/lib.rs"));
+        assert!(!tree.exists_at_base("docs/guide.md"));
+        assert_eq!(tree.paths_at_base().len(), 1);
+    }
+}
+#[test]
+fn non_utf8_names_load_lossily_without_losing_other_paths() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let repo = committed_repo();
+        for bytes in [vec![b'a', 255], vec![b'b', 255], vec![b'c', 255]] {
+            let name = std::ffi::OsString::from_vec(bytes);
+            if let Err(error) = std::fs::write(repo.path().join(name), b"base") {
+                eprintln!("skipping non-UTF-8 path test: filesystem cannot create name: {error}");
+                return;
+            }
+        }
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-qm", "byte names"]);
+        assert_original_paths(repo.path());
+        let tree = RepositoryTree::load(&record_for(repo.path())).unwrap();
+        assert!(tree.exists_at_base("src/lib.rs"));
+        assert!(tree.exists_at_base("docs/guide.md"));
+        for prefix in ["a", "b", "c"] {
+            assert!(tree.exists_at_base(&format!("{prefix}�")));
+        }
+    }
+    #[cfg(not(unix))]
+    eprintln!("skipping non-UTF-8 byte name test: platform names cannot represent this byte");
+}

@@ -182,7 +182,10 @@ pub(super) fn prepare_with_diagnostics(
         ));
     }
     let classification = Some(findings::classification_from_lock(
-        tasks_root, &skeleton, &contract,
+        tasks_root,
+        project_root,
+        &skeleton,
+        &contract,
     ));
     let stamp = stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;

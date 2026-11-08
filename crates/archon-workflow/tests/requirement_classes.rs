@@ -81,14 +81,14 @@ fn classifier_table_covers_every_branch_and_c2() {
             vec![],
             false,
             RequirementClass::Missing,
-            Some("deliverables_absent_at_base"),
+            Some("deliverable_unverified_at_base"),
             None,
         ),
         (
             vec![("AC-1", Passed)],
             false,
             RequirementClass::Missing,
-            Some("deliverables_absent_at_base"),
+            Some("deliverable_unverified_at_base"),
             None,
         ),
     ];
@@ -318,6 +318,43 @@ fn requirement_classes_and_floor_share_declared_format_normalization() {
         assert_eq!(entry.deliverables[0].text, is_text, "{format:?}");
         if is_text {
             assert_eq!(floor, DeclarativeFloorEvaluation::Passed);
+        }
+    }
+}
+
+#[test]
+fn every_nontracked_deliverable_prevents_candidate_done_including_text_and_mixed_ids() {
+    let contract = contract();
+    let mut skeleton = skeleton();
+    let outcomes = results(
+        &contract,
+        &[
+            ("AC-1", BaselineOutcome::Passed),
+            ("AC-2", BaselineOutcome::Passed),
+        ],
+    );
+    let mut other = skeleton.tasks[0].deliverable_contracts[0].clone();
+    other.artifact_path = "tracked".into();
+    skeleton.tasks[0].deliverable_contracts.push(other);
+    for (at_base, live, reason) in [
+        (false, false, "deliverables_absent_at_base"),
+        (false, true, "deliverable_unverified_at_base"),
+        (true, true, "unused"),
+    ] {
+        let entry = classify(&skeleton, &contract, &outcomes.outcomes, |path| {
+            if path == "tracked" {
+                (true, true)
+            } else {
+                (at_base, live)
+            }
+        })
+        .remove(0);
+        if !at_base {
+            assert_eq!(entry.class, RequirementClass::Missing);
+            assert_eq!(entry.reason.as_deref(), Some(reason));
+            assert!(entry.passing_check_without_deliverable);
+        } else {
+            assert_eq!(entry.class, RequirementClass::CandidateDone);
         }
     }
 }

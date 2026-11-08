@@ -330,7 +330,11 @@ fn publish_chain_owned(
         let digest = content_digest(&skeleton_bytes);
         let skeleton_lock = TaskSkeletonLock {
             classification: Some(findings::classification(
-                tasks_root, &skeleton, &repaired, &lock,
+                tasks_root,
+                request.project_root,
+                &skeleton,
+                &repaired,
+                &lock,
             )),
             algorithm: "blake3".into(),
             digest: digest.clone(),

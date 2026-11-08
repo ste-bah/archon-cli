@@ -39,19 +39,21 @@ pub(crate) fn carry_baseline_results(
 
 pub(crate) fn classification(
     tasks_root: &Path,
+    project_root: &Path,
     skeleton: &TaskSkeleton,
     contract: &AcceptanceContract,
     lock: &AcceptanceLock,
 ) -> RequirementClassification {
     let mut record = RequirementClassification {
-        schema_version: 1,
+        schema_version: 2,
+        base_snapshot: None,
         baseline_commit: lock.baseline_commit.clone(),
         acceptance_digest: lock.digest.clone(),
         baseline_results_digest: results_digest(&lock.baseline_results),
         error: None,
         entries: Vec::new(),
     };
-    let tree = (|| -> std::result::Result<RepositoryTree, &str> {
+    let tree = (|| -> std::result::Result<RepositoryTree, String> {
         let mut repository = read_repository_record(tasks_root)
             .map_err(|_| "repository_record_unreadable")?
             .ok_or("repository_record_absent")?;
@@ -59,19 +61,48 @@ pub(crate) fn classification(
             .baseline_commit
             .clone()
             .filter(|commit| !commit.trim().is_empty())
-            .ok_or("baseline_commit_absent")?;
-        RepositoryTree::load(&repository).map_err(|_| "baseline_tree_unavailable")
+            .unwrap_or_else(|| archon_workflow::repository_record::UNBORN_BASE_COMMIT.into());
+        if lock
+            .baseline_commit
+            .as_ref()
+            .is_none_or(|c| c.trim().is_empty())
+        {
+            record.error = Some("baseline_commit_absent".into());
+        }
+        RepositoryTree::load(&repository).map_err(|_| "baseline_tree_unavailable".to_string())
     })();
     match tree {
         Ok(tree) => {
-            record.entries = classify_checked(skeleton, contract, &lock.baseline_results, |path| {
-                tree.relative_to_root(path)
-                    .map(|path| {
-                        let truth = tree.truth(&path);
-                        (truth.at_base, truth.in_checkout)
-                    })
-                    .ok_or_else(|| "deliverable_presence_error".into())
-            })
+            let paths = skeleton
+                .tasks
+                .iter()
+                .flat_map(|task| &task.deliverable_contracts)
+                .map(|d| d.artifact_path.as_str());
+            match archon_workflow::base_snapshot::snapshot_deliverables(&tree, project_root, paths)
+            {
+                Ok(snapshot) => {
+                    record.entries =
+                        classify_checked(skeleton, contract, &lock.baseline_results, |path| {
+                            let key = archon_workflow::base_snapshot::snapshot_key(&tree, path);
+                            let entry = snapshot
+                                .entries
+                                .get(&key)
+                                .ok_or_else(|| format!("snapshot entry missing: {key}"))?;
+                            Ok((
+                                matches!(
+                                    entry,
+                                    archon_workflow::base_snapshot::SnapshotEntry::Tracked { .. }
+                                ),
+                                matches!(
+                                    entry,
+                                    archon_workflow::base_snapshot::SnapshotEntry::Unverified { .. }
+                                ),
+                            ))
+                        });
+                    record.base_snapshot = Some(snapshot);
+                }
+                Err(error) => record.error = Some(error),
+            }
         }
         Err(error) => record.error = Some(error.to_string()),
     }
@@ -80,6 +111,7 @@ pub(crate) fn classification(
 
 pub(crate) fn classification_from_lock(
     tasks_root: &Path,
+    project_root: &Path,
     skeleton: &TaskSkeleton,
     contract: &AcceptanceContract,
 ) -> RequirementClassification {
@@ -88,9 +120,10 @@ pub(crate) fn classification_from_lock(
         .map_err(anyhow::Error::from)
         .and_then(|bytes| Ok(serde_json::from_slice::<AcceptanceLock>(&bytes)?))
     {
-        Ok(lock) => classification(tasks_root, skeleton, contract, &lock),
+        Ok(lock) => classification(tasks_root, project_root, skeleton, contract, &lock),
         Err(_) => RequirementClassification {
-            schema_version: 1,
+            schema_version: 2,
+            base_snapshot: None,
             baseline_commit: None,
             acceptance_digest: skeleton.acceptance_digest.clone(),
             baseline_results_digest: results_digest(&Default::default()),
@@ -125,7 +158,13 @@ mod tests {
         let mut record = read_repository_record(&trees.set.tasks).unwrap().unwrap();
         record.base_commit = trees.head.clone();
         write_repository_record(&trees.set.tasks, &record).unwrap();
-        let good = classification(&trees.set.tasks, &skeleton(), &trees.contract(), &lock);
+        let good = classification(
+            &trees.set.tasks,
+            trees.set.project.path(),
+            &skeleton(),
+            &trees.contract(),
+            &lock,
+        );
         assert!(good.error.is_none(), "{good:?}");
         assert_eq!(
             good.entries[0].class,
@@ -134,21 +173,110 @@ mod tests {
         assert!(good.entries[0].deliverables[0].live_only);
         assert!(!good.entries[0].deliverables[0].at_base);
         lock.baseline_commit = Some("invalid-commit".into());
-        let bad = classification(&trees.set.tasks, &skeleton(), &trees.contract(), &lock);
+        let bad = classification(
+            &trees.set.tasks,
+            trees.set.project.path(),
+            &skeleton(),
+            &trees.contract(),
+            &lock,
+        );
         assert_eq!(bad.error.as_deref(), Some("baseline_tree_unavailable"));
         assert!(bad.entries.is_empty());
+        lock.baseline_commit = Some(archon_workflow::repository_record::UNBORN_BASE_COMMIT.into());
+        let unborn = classification(
+            &trees.set.tasks,
+            trees.set.project.path(),
+            &skeleton(),
+            &trees.contract(),
+            &lock,
+        );
+        assert!(unborn.error.is_none());
+        assert_eq!(
+            unborn.entries[0].class,
+            archon_workflow::v2::requirement_classes::RequirementClass::Missing
+        );
+        assert!(unborn.base_snapshot.is_some());
         lock.baseline_commit = None;
-        let missing = classification(&trees.set.tasks, &skeleton(), &trees.contract(), &lock);
+        let missing = classification(
+            &trees.set.tasks,
+            trees.set.project.path(),
+            &skeleton(),
+            &trees.contract(),
+            &lock,
+        );
         assert_eq!(missing.error.as_deref(), Some("baseline_commit_absent"));
-        assert!(missing.entries.is_empty());
+        assert_eq!(
+            missing.entries[0].class,
+            archon_workflow::v2::requirement_classes::RequirementClass::Missing
+        );
         std::fs::remove_file(archon_workflow::repository_record::repository_record_path(
             &trees.set.tasks,
         ))
         .unwrap();
-        let missing = classification(&trees.set.tasks, &skeleton(), &trees.contract(), &lock);
+        let missing = classification(
+            &trees.set.tasks,
+            trees.set.project.path(),
+            &skeleton(),
+            &trees.contract(),
+            &lock,
+        );
         assert_eq!(missing.error.as_deref(), Some("repository_record_absent"));
         assert!(missing.entries.is_empty());
     }
+    #[test]
+    fn normal_empty_and_really_unborn_baselines_classify_every_id() {
+        let trees = trees(&[("AC-X-001", "test -f feature.txt", TrustedCwd::RepoRoot)]);
+        let mut lock: AcceptanceLock = serde_json::from_slice(
+            &std::fs::read(
+                trees
+                    .set
+                    .tasks
+                    .join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let repository = read_repository_record(&trees.set.tasks).unwrap().unwrap();
+        for baseline in [trees.base.as_str(), "", "unborn"] {
+            if baseline == "unborn" {
+                let output = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&repository.repository_root)
+                    .args(["update-ref", "-d", "HEAD"])
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                assert_eq!(
+                    archon_workflow::repository_record::git_head(Path::new(
+                        &repository.repository_root
+                    ))
+                    .unwrap(),
+                    "unborn"
+                );
+            }
+            lock.baseline_commit = Some(baseline.into());
+            let result = classification(
+                &trees.set.tasks,
+                trees.set.project.path(),
+                &skeleton(),
+                &trees.contract(),
+                &lock,
+            );
+            assert_eq!(result.entries.len(), 1, "{result:?}");
+            assert_eq!(
+                result.entries[0].class,
+                archon_workflow::v2::requirement_classes::RequirementClass::Missing
+            );
+            assert!(result.entries[0].reason.is_some());
+            assert!(result.base_snapshot.is_some());
+            if baseline.is_empty() {
+                assert_eq!(result.error.as_deref(), Some("baseline_commit_absent"));
+            } else {
+                assert!(result.error.is_none(), "{result:?}");
+            }
+        }
+    }
+
     #[test]
     fn s4a_rejudge_retains_only_unchanged_checks_on_the_same_commit() {
         use archon_workflow::baseline_results::BaselineOutcome;
@@ -208,7 +336,7 @@ mod presence_tests {
     use archon_workflow::v2::requirement_classes::RequirementClass;
 
     #[test]
-    fn s4a_outside_deliverable_has_an_error_and_no_base_classification() {
+    fn outside_deliverable_is_unverified_and_missing() {
         let trees = trees(&[("AC-X-001", "test -f feature.txt", TrustedCwd::RepoRoot)]);
         let outside = tempfile::tempdir().unwrap();
         let path = outside
@@ -233,12 +361,18 @@ mod presence_tests {
         )
         .unwrap();
         lock.baseline_commit = Some(trees.base.clone());
-        let record = classification(&trees.set.tasks, &skeleton, &trees.contract(), &lock);
+        let record = classification(
+            &trees.set.tasks,
+            trees.set.project.path(),
+            &skeleton,
+            &trees.contract(),
+            &lock,
+        );
         assert!(record.error.is_none(), "{record:?}");
-        assert_eq!(record.entries[0].class, RequirementClass::NoBaseResult);
+        assert_eq!(record.entries[0].class, RequirementClass::Missing);
         assert_eq!(
-            record.entries[0].deliverables[0].error,
-            Some("deliverable_presence_error".into())
+            record.entries[0].reason,
+            Some("deliverable_unverified_at_base".into())
         );
     }
 }

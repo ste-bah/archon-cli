@@ -55,6 +55,8 @@ pub struct RequirementClassification {
     pub baseline_results_digest: String,
     pub error: Option<String>,
     pub entries: Vec<RequirementEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_snapshot: Option<crate::base_snapshot::BaseSnapshot>,
 }
 
 pub fn classify(
@@ -122,7 +124,7 @@ pub fn classify_checked(
                 .collect();
             let passed = checks.values().any(|v| *v == Some(BaselineOutcome::Passed));
             let failed = checks.values().any(|v| *v == Some(BaselineOutcome::Failed));
-            let absent = !deliverables.is_empty() && deliverables.iter().all(|d| !d.at_base);
+            let absent = !deliverables.is_empty() && deliverables.iter().any(|d| !d.at_base);
             let (class, reason, fallback) = if checks.is_empty() {
                 (RequirementClass::NoCheck, None, None)
             } else if deliverables.iter().any(|d| d.error.is_some()) {
@@ -134,7 +136,14 @@ pub fn classify_checked(
             } else if absent {
                 (
                     RequirementClass::Missing,
-                    Some("deliverables_absent_at_base".into()),
+                    Some(
+                        if deliverables.iter().any(|d| !d.at_base && d.live_only) {
+                            "deliverable_unverified_at_base"
+                        } else {
+                            "deliverables_absent_at_base"
+                        }
+                        .into(),
+                    ),
                     None,
                 )
             } else if passed {

@@ -1,11 +1,24 @@
 //! Copy input data while retaining typed I/O causes.
 use super::*;
+#[cfg(test)]
 pub(super) fn copy_data(
     root: &Path,
     relative: &Path,
     dest: &Path,
     repository: &Path,
     task_root: Option<&Path>,
+    remaining: &mut u64,
+) -> Result<(), Unrun> {
+    copy_data_scoped(root, relative, dest, repository, task_root, &[], remaining)
+}
+
+pub(super) fn copy_data_scoped(
+    root: &Path,
+    relative: &Path,
+    dest: &Path,
+    repository: &Path,
+    task_root: Option<&Path>,
+    excludes: &[PathBuf],
     remaining: &mut u64,
 ) -> Result<(), Unrun> {
     let root = archon_shell::paths::canonicalize(root).map_err(|error| {
@@ -26,6 +39,7 @@ pub(super) fn copy_data(
         dest,
         nested_repository(&root, &repository).as_deref(),
         task_root.as_deref(),
+        excludes,
         remaining,
     )
 }
@@ -36,6 +50,7 @@ fn copy_data_relative(
     dest: &Path,
     nested: Option<&Path>,
     task_root: Option<&Path>,
+    excludes: &[PathBuf],
     remaining: &mut u64,
 ) -> Result<(), Unrun> {
     let io = |path: &Path, error: std::io::Error| {
@@ -43,7 +58,7 @@ fn copy_data_relative(
         Unrun::error(error.into(), text)
     };
     let source = root.join(relative);
-    if !relative.as_os_str().is_empty() && excluded(relative, task_root) {
+    if acceptance_input_excluded(relative, excludes, task_root) {
         return Ok(());
     }
     if nested_repository_skipped(relative, nested) {
@@ -61,6 +76,7 @@ fn copy_data_relative(
                 dest,
                 nested,
                 task_root,
+                excludes,
                 remaining,
             )?;
         }

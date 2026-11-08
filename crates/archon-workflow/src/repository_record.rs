@@ -27,7 +27,7 @@
 //! in this module, and the git it speaks is the plumbing every checkout
 //! answers.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -181,6 +181,14 @@ pub struct RepositoryTree {
     /// Every file and directory path at the base commit, relative to `root`,
     /// with forward slashes and no trailing slash.
     at_base: BTreeSet<String>,
+    objects: BTreeMap<String, BaseObject>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseObject {
+    pub mode: String,
+    pub kind: String,
+    pub object: String,
 }
 
 impl RepositoryTree {
@@ -195,18 +203,12 @@ impl RepositoryTree {
             )));
         }
         let mut at_base = BTreeSet::new();
+        let mut objects = BTreeMap::new();
         if record.base_commit != UNBORN_BASE_COMMIT {
             let output = archon_shell::spawn::command("git")
                 .arg("-C")
                 .arg(&root)
-                .args([
-                    "ls-tree",
-                    "-r",
-                    "-t",
-                    "-z",
-                    "--name-only",
-                    &record.base_commit,
-                ])
+                .args(["ls-tree", "-r", "-t", "-z", &record.base_commit])
                 .output()
                 .map_err(|source| WorkflowError::io(&root, source))?;
             if !output.status.success() {
@@ -218,19 +220,44 @@ impl RepositoryTree {
                 )));
             }
             for entry in output.stdout.split(|byte| *byte == 0) {
-                let text = String::from_utf8_lossy(entry);
-                let text = text.trim_end_matches('/');
-                if text.is_empty() || text == "." {
+                if entry.is_empty() {
                     continue;
                 }
-                at_base.insert(text.to_string());
+                let text = String::from_utf8_lossy(entry);
+                let (header, path) = text
+                    .split_once('\t')
+                    .ok_or_else(|| WorkflowError::SpecInvalid("base entry has no path".into()))?;
+                let fields: Vec<_> = header.split_whitespace().collect();
+                if fields.len() != 3 {
+                    return Err(WorkflowError::SpecInvalid(
+                        "base entry has invalid metadata".into(),
+                    ));
+                }
+                let path = path.trim_end_matches('/');
+                if path.is_empty() || path == "." {
+                    continue;
+                }
+                at_base.insert(path.to_string());
+                objects.insert(
+                    path.to_string(),
+                    BaseObject {
+                        mode: fields[0].into(),
+                        kind: fields[1].into(),
+                        object: fields[2].into(),
+                    },
+                );
             }
         }
         Ok(Self {
             root,
             base_commit: record.base_commit.clone(),
             at_base,
+            objects,
         })
+    }
+
+    pub fn objects_at_base(&self) -> &BTreeMap<String, BaseObject> {
+        &self.objects
     }
 
     pub fn root(&self) -> &Path {

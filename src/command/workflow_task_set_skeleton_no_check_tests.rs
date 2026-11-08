@@ -235,16 +235,44 @@ fn s4a_freezes_in_different_temp_roots_have_identical_lock_bytes() {
             archon_workflow::task_set_contract::JudgeDecision::Accepted;
         let bytes = serde_json::to_vec_pretty(&contract).unwrap();
         let base = if scenario == "present" {
-            "unborn"
+            let git = |args: &[&str]| {
+                let output = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(root.path())
+                    .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")
+                    .env("GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z")
+                    .args(args)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            };
+            git(&["init", "-q"]);
+            git(&["config", "core.autocrlf", "false"]);
+            let empty_tree = git(&["mktree"]);
+            git(&[
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit-tree",
+                &empty_tree,
+                "-m",
+                "fixture",
+            ])
         } else {
-            "invalid-commit"
+            "invalid-commit".into()
         };
         let (lock, pin) = findings::acceptance_lock_and_pin(
             &tasks,
             archon_workflow::task_set_contract::FreezeGateMode::Observe,
             &[],
             &bytes,
-            Some(base.into()).into(),
+            Some(base.clone()).into(),
         );
         std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), bytes).unwrap();
         std::fs::write(
@@ -303,7 +331,10 @@ fn s4a_freezes_in_different_temp_roots_have_identical_lock_bytes() {
             }
             let skeleton = serde_json::from_slice(&prepared.skeleton_bytes).unwrap();
             prepared.lock.classification = Some(findings::classification_from_lock(
-                &tasks, &skeleton, &contract,
+                &tasks,
+                root.path(),
+                &skeleton,
+                &contract,
             ));
         }
         let record = prepared.lock.classification.as_ref().unwrap();
