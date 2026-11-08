@@ -375,8 +375,8 @@ pub enum Mode<'a> {
 
 pub fn apply_mode(command: &mut Command, mode: Mode<'_>) {
     match mode {
-        Mode::Inherited => crate::spawn::replace_environment(command, environment()),
-        Mode::Exact(bindings) => crate::spawn::replace_environment(command, bindings),
+        Mode::Inherited => crate::spawn::replace_child_environment(command, environment()),
+        Mode::Exact(bindings) => crate::spawn::replace_child_environment(command, bindings),
     };
 }
 

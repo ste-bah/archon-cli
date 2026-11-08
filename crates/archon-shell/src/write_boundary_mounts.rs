@@ -4,7 +4,7 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Seal {
     path: CString,
     display: PathBuf,
@@ -22,14 +22,26 @@ pub(super) struct MountSeals {
 
 #[path = "write_boundary_mounts_failure.rs"]
 mod diagnostics;
+use crate::read_boundary::status_record::StatusRecord;
 use diagnostics::Failure;
 #[cfg(test)]
 use diagnostics::namespace_step;
 
 impl MountSeals {
     pub(super) fn build(protected: &[PathBuf], writable: &[PathBuf]) -> Result<Self, String> {
+        let mounts = Self::prepare(protected, writable, &topology::mountpoints()?)?;
+        if !mounts.seals.is_empty() {
+            mounts.preflight()?;
+        }
+        Ok(mounts)
+    }
+
+    fn prepare(
+        protected: &[PathBuf],
+        writable: &[PathBuf],
+        mountpoints: &[PathBuf],
+    ) -> Result<Self, String> {
         let mut seals = Vec::new();
-        let mountpoints = topology::mountpoints()?;
         for path in protected {
             let real = super::spellings(path).pop().unwrap_or_else(|| path.clone());
             if !writable.iter().any(|root| real.starts_with(root)) {
@@ -107,43 +119,10 @@ impl MountSeals {
             uid: format!("{uid} {uid} 1\n").into_bytes(),
             gid: format!("{gid} {gid} 1\n").into_bytes(),
         };
-        if !mounts.seals.is_empty() {
-            mounts.preflight()?;
+        if mounts.seals.len() > 256 {
+            return Err("seal status capacity exceeded".into());
         }
         Ok(mounts)
-    }
-
-    pub(super) fn build_available(protected: &[PathBuf]) -> Result<(Self, Vec<String>), String> {
-        let writable = [PathBuf::from(std::path::MAIN_SEPARATOR_STR)];
-        let mut combined = Self::build(&[], &writable)?;
-        let mut notes = Vec::new();
-        for path in protected {
-            match Self::build(std::slice::from_ref(path), &writable) {
-                Ok(prepared) => {
-                    for seal in prepared.seals {
-                        if let Some(existing) =
-                            combined.seals.iter_mut().find(|s| s.path == seal.path)
-                        {
-                            existing.readonly |= seal.readonly;
-                        } else {
-                            combined.seals.push(seal);
-                        }
-                    }
-                }
-                Err(reason) => notes.push(format!("{} not sealed: {reason}", path.display())),
-            }
-        }
-        // Merging independently prepared paths can introduce nested mounts.
-        let planned: Vec<_> = combined
-            .seals
-            .iter()
-            .map(|seal| PathBuf::from(std::ffi::OsStr::from_bytes(seal.path.as_bytes())))
-            .collect();
-        for seal in &mut combined.seals {
-            let path = std::path::Path::new(std::ffi::OsStr::from_bytes(seal.path.as_bytes()));
-            seal.submounts |= topology::contains_mount(path, &planned);
-        }
-        Ok((combined, notes))
     }
 
     pub(super) fn probe() -> Result<(), String> {
@@ -154,21 +133,21 @@ impl MountSeals {
         };
         mounts.preflight()
     }
+}
 
-    pub(super) fn packet(&self) -> [i32; 4] {
+impl MountSeals {
+    pub(super) fn packet(&self) -> StatusRecord {
         let mut cwd_reentered = false;
-        let result = self.apply(&mut cwd_reentered);
+        let mut failed = [0u64; 4];
+        let result = self.apply_record(true, &mut cwd_reentered, &mut failed, |_, syscall| {
+            syscall()
+        });
         let mut packet = match result {
             Ok(()) => [0; 4],
             Err(f) => [step_index(f.step), f.errno, f.seal as i32, 0],
         };
         packet[3] = i32::from(cwd_reentered);
-        packet
-    }
-
-    /// Only libc syscalls and stack buffers: safe in a pre_exec hook.
-    pub(super) fn apply(&self, cwd_reentered: &mut bool) -> Result<(), Failure> {
-        self.apply_with_status(true, cwd_reentered, |_, syscall| syscall())
+        StatusRecord(packet, failed)
     }
 
     fn apply_with(
@@ -176,15 +155,30 @@ impl MountSeals {
         reenter: bool,
         result: impl FnMut(&'static str, &mut dyn FnMut() -> i32) -> i32,
     ) -> Result<(), Failure> {
-        self.apply_with_status(reenter, &mut false, result)
+        self.apply_record(reenter, &mut false, &mut [0; 4], result)
     }
 
+    #[cfg(test)]
     fn apply_with_status(
         &self,
         reenter: bool,
         cwd_reentered: &mut bool,
+        result: impl FnMut(&'static str, &mut dyn FnMut() -> i32) -> i32,
+    ) -> Result<(), Failure> {
+        self.apply_record(reenter, cwd_reentered, &mut [0; 4], result)
+    }
+
+    fn apply_record(
+        &self,
+        reenter: bool,
+        cwd_reentered: &mut bool,
+        failed: &mut [u64; 4],
         mut result: impl FnMut(&'static str, &mut dyn FnMut() -> i32) -> i32,
     ) -> Result<(), Failure> {
+        // Until a seal succeeds its bit remains set, including setup failures.
+        for index in 0..self.seals.len() {
+            failed[index / 64] |= 1 << (index % 64);
+        }
         if reenter && self.seals.is_empty() {
             return Ok(());
         }
@@ -236,86 +230,98 @@ impl MountSeals {
                     },
                     0,
                 )?;
+                let mut first = None;
                 for (index, seal) in self.seals.iter().enumerate() {
-                    let path = seal.path.as_ptr();
-                    let mut stat: libc::statfs64 = std::mem::zeroed();
-                    check(
-                        "statfs",
-                        &mut || {
-                            #[cfg(target_pointer_width = "64")]
-                            {
-                                libc::syscall(
-                                    libc::SYS_statfs,
-                                    path,
-                                    &mut stat as *mut libc::statfs64,
-                                ) as i32
-                            }
-                            #[cfg(target_pointer_width = "32")]
-                            {
-                                libc::syscall(
-                                    libc::SYS_statfs64,
-                                    path,
-                                    std::mem::size_of_val(&stat),
-                                    &mut stat as *mut libc::statfs64,
-                                ) as i32
-                            }
-                        },
-                        index,
-                    )?;
-                    check(
-                        "bind",
-                        &mut || {
-                            libc::mount(
-                                path,
-                                path,
-                                std::ptr::null(),
-                                libc::MS_BIND | libc::MS_REC,
-                                std::ptr::null(),
-                            )
-                        },
-                        index,
-                    )?;
-                    if !seal.readonly {
-                        continue;
-                    }
-                    let flags = remount_flags(stat.f_flags as libc::c_ulong);
-                    check(
-                        "remount-readonly",
-                        &mut || {
-                            libc::mount(
-                                std::ptr::null(),
-                                path,
-                                std::ptr::null(),
-                                libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | flags,
-                                std::ptr::null(),
-                            )
-                        },
-                        index,
-                    )?;
-                    if seal.directory {
-                        let attributes = [1u64, 0, 0, 0]; // read-only, clear, propagation, namespace
-                        let recursive = check(
-                            "recursive-readonly",
+                    let attempt = (|| {
+                        let path = seal.path.as_ptr();
+                        let mut stat: libc::statfs64 = std::mem::zeroed();
+                        check(
+                            "statfs",
                             &mut || {
-                                libc::syscall(
-                                    libc::SYS_mount_setattr,
-                                    libc::AT_FDCWD,
-                                    path,
-                                    libc::AT_RECURSIVE,
-                                    attributes.as_ptr(),
-                                    std::mem::size_of_val(&attributes),
-                                ) as i32
+                                #[cfg(target_pointer_width = "64")]
+                                {
+                                    libc::syscall(
+                                        libc::SYS_statfs,
+                                        path,
+                                        &mut stat as *mut libc::statfs64,
+                                    ) as i32
+                                }
+                                #[cfg(target_pointer_width = "32")]
+                                {
+                                    libc::syscall(
+                                        libc::SYS_statfs64,
+                                        path,
+                                        std::mem::size_of_val(&stat),
+                                        &mut stat as *mut libc::statfs64,
+                                    ) as i32
+                                }
                             },
                             index,
-                        );
-                        if let Err(failure) = recursive {
-                            if failure.errno != libc::ENOSYS || seal.submounts {
-                                return Err(failure);
+                        )?;
+                        check(
+                            "bind",
+                            &mut || {
+                                libc::mount(
+                                    path,
+                                    path,
+                                    std::ptr::null(),
+                                    libc::MS_BIND | libc::MS_REC,
+                                    std::ptr::null(),
+                                )
+                            },
+                            index,
+                        )?;
+                        if !seal.readonly {
+                            return Ok(());
+                        }
+                        let flags = remount_flags(stat.f_flags as libc::c_ulong);
+                        check(
+                            "remount-readonly",
+                            &mut || {
+                                libc::mount(
+                                    std::ptr::null(),
+                                    path,
+                                    std::ptr::null(),
+                                    libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | flags,
+                                    std::ptr::null(),
+                                )
+                            },
+                            index,
+                        )?;
+                        if seal.directory {
+                            let attributes = [1u64, 0, 0, 0]; // read-only, clear, propagation, namespace
+                            let recursive = check(
+                                "recursive-readonly",
+                                &mut || {
+                                    libc::syscall(
+                                        libc::SYS_mount_setattr,
+                                        libc::AT_FDCWD,
+                                        path,
+                                        libc::AT_RECURSIVE,
+                                        attributes.as_ptr(),
+                                        std::mem::size_of_val(&attributes),
+                                    ) as i32
+                                },
+                                index,
+                            );
+                            if let Err(failure) = recursive {
+                                if failure.errno != libc::ENOSYS || seal.submounts {
+                                    return Err(failure);
+                                }
+                            }
+                        }
+                        Ok(())
+                    })();
+                    match attempt {
+                        Ok(()) => failed[index / 64] &= !(1 << (index % 64)),
+                        Err(failure) => {
+                            if first.is_none() {
+                                first = Some(failure);
                             }
                         }
                     }
                 }
-                Ok(())
+                first.map_or(Ok(()), Err)
             })();
             let mut first_failure = sealing.err();
             let mut retain = |result: Result<(), Failure>| {
@@ -472,3 +478,6 @@ mod outcome;
 #[cfg(test)]
 #[path = "write_boundary_mounts_cleanup_tests.rs"]
 mod cleanup_tests;
+
+#[path = "write_boundary_mounts_available.rs"]
+mod available;

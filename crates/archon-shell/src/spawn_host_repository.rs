@@ -31,7 +31,7 @@ pub(super) fn boundary_status() -> Result<(), String> {
                 Ok(())
             } else {
                 Err(format!(
-                    "repository includes were absent at capture and remain unsealed; host commands may read child-created configuration: {}",
+                    "repository includes were absent at capture; host commands refuse observed child-created configuration: {}",
                     absent.join("; ")
                 ))
             }
@@ -49,8 +49,11 @@ pub(super) fn register(root: &Path) -> Result<(), String> {
 }
 fn capture(root: &Path) -> Result<(), String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
-    let mut repositories = repositories().lock().map_err(|e| e.to_string())?;
-    if repositories.contains_key(&root) {
+    if repositories()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .contains_key(&root)
+    {
         return Ok(());
     }
     let mut command = super::command("git");
@@ -93,6 +96,7 @@ fn capture(root: &Path) -> Result<(), String> {
         config_sources,
         absent_sources,
     };
+    let mut repositories = repositories().lock().map_err(|e| e.to_string())?;
     if repositories.len() >= 256 {
         return Err("repository registration limit reached for this run".into());
     }
@@ -108,8 +112,16 @@ pub(super) fn command(root: &Path) -> std::process::Command {
         .and_then(|root| repositories().lock().ok()?.get(&root).cloned());
     let mut command = super::command("git");
     if let Some(repository) = captured {
-        if !repository.absent_sources.is_empty() {
-            tracing::warn!(paths = ?repository.absent_sources, "host launch reads repository includes absent at capture; child-created configuration is not sealed");
+        if let Some(path) = repository
+            .absent_sources
+            .iter()
+            .find(|path| path.symlink_metadata().is_ok())
+        {
+            tracing::error!(path = %path.display(), "host command refused: previously absent configuration now exists");
+            let mut refused =
+                super::raw_command(super::host_config::unavailable(command.get_program()));
+            refused.current_dir(root);
+            return refused;
         }
         command
             .env("GIT_DIR", repository.git)
@@ -118,6 +130,24 @@ pub(super) fn command(root: &Path) -> std::process::Command {
     }
     command.current_dir(root);
     command
+}
+
+// Commands receive their directory after construction. With no directory yet,
+// conservatively check every registered tree rather than trust the caller later.
+pub(super) fn planted_source(directory: Option<&Path>) -> Option<PathBuf> {
+    let directory = directory.and_then(|path| path.canonicalize().ok());
+    repositories()
+        .lock()
+        .ok()?
+        .values()
+        .filter(|entry| {
+            directory
+                .as_ref()
+                .is_none_or(|path| path.starts_with(&entry.work))
+        })
+        .flat_map(|entry| &entry.absent_sources)
+        .find(|path| path.symlink_metadata().is_ok())
+        .cloned()
 }
 
 pub(super) fn protected_paths() -> Vec<PathBuf> {

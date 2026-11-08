@@ -37,11 +37,11 @@ fn empty_and_relative_path_entries_are_skipped_for_every_program() {
     }
     initialize().unwrap();
     assert!(std::env::split_paths(startup_path().as_ref().unwrap()).all(|p| p.is_absolute()));
-    for (name, path) in programs() {
+    for (name, path) in programs::recorded() {
         let mut command = crate::spawn::command(name);
-        assert_eq!(Path::new(command.get_program()), path);
+        assert_eq!(Path::new(command.get_program()), path.as_path());
         crate::spawn::replace_environment(&mut command, [("PATH", "relative")]);
-        assert_eq!(Path::new(command.get_program()), path);
+        assert_eq!(Path::new(command.get_program()), path.as_path());
     }
     let (_, report) = crate::read_boundary::command_with_report(OsStr::new("probe"));
     // Skipping is true regardless of whether this host can install a kernel boundary.
@@ -384,17 +384,44 @@ fn absent_repository_include_flags_launch_even_after_planting() {
             .success()
     );
     crate::spawn::register_repository(root.path()).unwrap();
+    let mut child_program = None;
     for planted in [false, true] {
         if planted {
+            std::fs::write(root.path().join(".gitattributes"), "* filter=injected\n").unwrap();
+            std::fs::write(root.path().join("payload"), "changed\n").unwrap();
             std::fs::write(
                 root.path().join("absent"),
-                "[filter \"injected\"]\nclean = false\n",
+                "[filter \"injected\"]\nclean = \"echo executed > marker; cat\"\n",
             )
             .unwrap();
+            for args in [["add", "-A"], ["diff", "--stat"]] {
+                let mut command = crate::spawn::git_command(root.path());
+                let result = command.args(args).status();
+                assert!(
+                    result.is_err(),
+                    "refused command unexpectedly started: {result:?}"
+                );
+                assert!(!root.path().join("marker").exists());
+                let result = crate::spawn::command("git")
+                    .current_dir(root.path())
+                    .args(args)
+                    .status();
+                assert!(
+                    result.is_err(),
+                    "refused command unexpectedly started: {result:?}"
+                );
+                assert!(!root.path().join("marker").exists());
+            }
         }
-        let (_, report) = crate::read_boundary::command_with_report(OsStr::new("git"));
+        let (command, report) =
+            crate::execution_environment::command_with_report(OsStr::new("git"));
+        if let Some(program) = &child_program {
+            assert_eq!(command.get_program(), program);
+        } else {
+            child_program = Some(command.get_program().to_owned());
+        }
         assert!(
-            report.contains("includes were absent at capture and remain unsealed"),
+            report.contains("repository includes were absent at capture; host commands refuse observed child-created configuration:"),
             "{report}"
         );
         assert!(crate::read_boundary::observation_note(report).is_some());

@@ -216,6 +216,27 @@ fn unsupported_git_is_reported_without_refusing_an_available_program() {
     }
     let error = initialize().unwrap_err();
     assert!(error.contains("requires version 2.32 or newer"), "{error}");
+    assert!(error.contains("Git <2.32 ignores GIT_CONFIG_GLOBAL; operator global configuration is read; execution keys pinned by -c"));
+    let pinned = crate::spawn::command("git");
+    let args: Vec<_> = pinned
+        .get_args()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+    for (key, value) in pins() {
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["-c", &format!("{key}={value}")])
+        );
+    }
+    assert_ne!(
+        pinned
+            .get_envs()
+            .find(|(key, _)| *key == "GIT_CONFIG_COUNT")
+            .unwrap()
+            .1,
+        Some(OsStr::new("0"))
+    );
+
     let executable = std::env::current_exe().unwrap();
     let (mut command, report) = crate::read_boundary::command_with_report(executable.as_os_str());
     assert!(report.contains(&error), "{report}");

@@ -408,14 +408,20 @@ fn observed_outcome_lists_completed_and_partial_seals() {
         uid: Vec::new(),
         gid: Vec::new(),
     };
-    let report = mounts.outcome([step_index("bind"), libc::EACCES, 1, 1]);
+    let report = mounts.outcome_record(StatusRecord(
+        [step_index("bind"), libc::EACCES, 1, 1],
+        [2, 0, 0, 0],
+    ));
     assert!(
         report.contains("applied seals: [read-only /first]"),
         "{report}"
     );
     assert!(report.contains("failed step bind (errno 13)"), "{report}");
     assert!(!report.contains("read-only /second"), "{report}");
-    let report = mounts.outcome([step_index("recursive-readonly"), libc::ENOSYS, 1, 1]);
+    let report = mounts.outcome_record(StatusRecord(
+        [step_index("recursive-readonly"), libc::ENOSYS, 1, 1],
+        [2, 0, 0, 0],
+    ));
     assert!(
         report.contains("read-only /first; read-only /second; submounts writable"),
         "{report}"
@@ -424,20 +430,27 @@ fn observed_outcome_lists_completed_and_partial_seals() {
         report.contains("failed step recursive-readonly (errno 38)"),
         "{report}"
     );
-    let report = mounts.outcome([step_index("clear process capabilities"), libc::EPERM, 0, 1]);
+    let report = mounts.outcome_record(StatusRecord(
+        [step_index("clear process capabilities"), libc::EPERM, 0, 1],
+        [0; 4],
+    ));
     assert!(
         report.contains("applied seals: [read-only /first; read-only /second]"),
         "{report}"
     );
     assert!(
         mounts
-            .outcome([0, 0, 0, 1])
+            .outcome_record(StatusRecord([0, 0, 0, 1], [0; 4]))
             .contains("all seal steps completed")
     );
-    assert!(mounts.outcome([i32::MAX, 0, 0, 0]).contains("unknown"));
     assert!(
         mounts
-            .outcome([step_index("bind"), 1, 2, 0])
+            .outcome_record(StatusRecord([i32::MAX, 0, 0, 0], [0; 4]))
+            .contains("unknown")
+    );
+    assert!(
+        mounts
+            .outcome_record(StatusRecord([step_index("bind"), 1, 2, 0], [0; 4]))
             .contains("unknown")
     );
 }
@@ -473,10 +486,7 @@ fn child_continues_without_recursive_support_only_without_submounts() {
         });
         assert_eq!(visited.last(), Some(&"re-enter working directory"));
         assert!(cwd_reentered);
-        assert_eq!(
-            visited.iter().filter(|step| **step == "bind").count(),
-            if submounts { 1 } else { 2 }
-        );
+        assert_eq!(visited.iter().filter(|step| **step == "bind").count(), 2);
         if submounts {
             assert_eq!(result.unwrap_err().errno, libc::ENOSYS);
         } else {

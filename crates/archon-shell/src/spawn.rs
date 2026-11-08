@@ -41,8 +41,16 @@ use std::process::Command;
 /// A `std` command for `program` whose child inherits only its stdio.
 /// Host Git uses a startup snapshot of operator configuration and pinned execution keys.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
-    let mut command = raw_command(host_config::program(program.as_ref()));
-    host_config::isolate(&mut command);
+    command_in_scope(program.as_ref(), true)
+}
+
+pub(crate) fn child_command(program: &OsStr) -> Command {
+    command_in_scope(program, false)
+}
+
+fn command_in_scope(program: &OsStr, check_repository: bool) -> Command {
+    let mut command = raw_command(host_config::program(program));
+    host_config::isolate(&mut command, check_repository);
     command
 }
 
@@ -66,6 +74,28 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
+    replace_environment_in_scope(command, vars, true)
+}
+
+pub(crate) fn replace_child_environment<I, K, V>(command: &mut Command, vars: I) -> &mut Command
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    replace_environment_in_scope(command, vars, false)
+}
+
+fn replace_environment_in_scope<I, K, V>(
+    command: &mut Command,
+    vars: I,
+    check_repository: bool,
+) -> &mut Command
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
     let repository = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]
         .into_iter()
         .filter_map(|name| {
@@ -78,7 +108,7 @@ where
     command.env_clear();
     command.envs(vars);
     crate::jobserver::sanitize_environment(command);
-    host_config::isolate(command);
+    host_config::isolate(command, check_repository);
     command.envs(repository);
     command
 }

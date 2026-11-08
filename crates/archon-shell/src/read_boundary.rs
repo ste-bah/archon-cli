@@ -289,7 +289,7 @@ fn boundary_command(program: &OsStr) -> (Command, LaunchReport) {
         );
     }
     #[allow(unused_mut)]
-    let mut command = crate::spawn::command(program);
+    let mut command = crate::spawn::child_command(program);
     #[cfg(target_os = "linux")]
     {
         let active = matches!(

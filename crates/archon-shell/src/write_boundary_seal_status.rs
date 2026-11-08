@@ -17,7 +17,7 @@ struct Channel {
 #[derive(Debug)]
 struct Reader {
     file: std::fs::File,
-    bytes: [u8; 16],
+    bytes: [u8; 48],
     filled: usize,
     latest: Option<String>,
 }
@@ -37,7 +37,7 @@ impl SealStatus {
                 (
                     Mutex::new(Reader {
                         file: std::fs::File::from_raw_fd(fds[0]),
-                        bytes: [0; 16],
+                        bytes: [0; 48],
                         filled: 0,
                         latest: None,
                     }),
@@ -53,7 +53,7 @@ impl SealStatus {
         let Ok((_, writer)) = &self.0.pipe else {
             return; // Without a reporting channel, skip optional operations.
         };
-        let bytes = StatusRecord(self.0.mounts.packet()).encode();
+        let bytes = self.0.mounts.packet().encode();
         loop {
             // SAFETY: a live descriptor and a fixed stack buffer, smaller than PIPE_BUF.
             let written =
@@ -86,9 +86,9 @@ impl SealStatus {
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => return format!("seal outcome unknown: {error}"),
             }
-            if *filled == 16 {
+            if *filled == 48 {
                 let record = StatusRecord::decode(*bytes);
-                reader.latest = Some(self.0.mounts.outcome(record.0));
+                reader.latest = Some(self.0.mounts.outcome_record(record));
                 reader.filled = 0;
             }
         }

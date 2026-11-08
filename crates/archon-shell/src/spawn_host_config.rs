@@ -16,7 +16,7 @@ static HOST: OnceLock<Result<Host, String>> = OnceLock::new();
 static SNAPSHOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub(super) fn initialize() -> Result<(), String> {
-    let _ = programs();
+    programs::initialize();
     let host = host()?;
     write_snapshot(host)
 }
@@ -27,18 +27,22 @@ fn capture() -> Result<Host, String> {
     let path = startup_path().clone();
     let cwd = std::env::current_dir()
         .map_err(|e| format!("host tool working directory unavailable: {e}"))?;
-    let git = programs()
-        .get(OsStr::new("git"))
-        .cloned()
+    let git = programs::resolve(OsStr::new("git"))
         .ok_or("host Git is missing from the absolute startup PATH entries")?;
     let output = super::raw_command(&git)
         .arg("--version")
         .output()
         .map_err(|e| e.to_string())?;
     let version = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() || !supported_version(&version) {
+    if !output.status.success() {
         return Err(format!(
-            "Host Git requires version 2.32 or newer (GIT_CONFIG_GLOBAL/SYSTEM support); reported: {}",
+            "host version discovery failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    if !supported_version(&version) {
+        return Err(format!(
+            "Host Git requires version 2.32 or newer (GIT_CONFIG_GLOBAL/SYSTEM support); reported: {}; Git <2.32 ignores GIT_CONFIG_GLOBAL; operator global configuration is read; execution keys pinned by -c",
             version.trim()
         ));
     }
@@ -88,16 +92,7 @@ fn capture() -> Result<Host, String> {
         }
     }
     let mut contents = String::new();
-    let mut pinned = vec![
-        ("core.fsmonitor".into(), "false".into()),
-        ("core.hooksPath".into(), neutral().into()),
-        ("core.sshCommand".into(), "ssh".into()),
-        ("core.editor".into(), "false".into()),
-        ("sequence.editor".into(), "false".into()),
-        ("core.pager".into(), "cat".into()),
-        ("core.askPass".into(), "".into()),
-        ("credential.helper".into(), "".into()),
-    ];
+    let mut pinned = pins();
     for entry in globals {
         let entry = std::str::from_utf8(entry)
             .map_err(|_| "non-UTF8 operator Git configuration cannot be snapshotted")?;
@@ -167,9 +162,13 @@ fn write_snapshot(host: &Host) -> Result<(), String> {
     use std::io::Write;
     let _lock = SNAPSHOT_LOCK.lock().map_err(|e| e.to_string())?;
     let directory = host.snapshot.parent().ok_or("snapshot parent missing")?;
-    let mut builder = std::fs::DirBuilder::new();
+    let builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    let builder = {
+        let mut builder = builder;
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+    };
     match builder.create(directory) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -216,44 +215,6 @@ fn startup_path() -> &'static Option<std::ffi::OsString> {
     })
 }
 
-static PROGRAMS: OnceLock<std::collections::BTreeMap<std::ffi::OsString, PathBuf>> =
-    OnceLock::new();
-fn programs() -> &'static std::collections::BTreeMap<std::ffi::OsString, PathBuf> {
-    PROGRAMS.get_or_init(|| {
-        let mut programs = std::collections::BTreeMap::new();
-        if let Some(path) = startup_path() {
-            for directory in std::env::split_paths(path) {
-                let Ok(entries) = std::fs::read_dir(&directory) else {
-                    continue;
-                };
-                for entry in entries.flatten() {
-                    let name = program_key(&entry.file_name());
-                    if programs.contains_key(&name) {
-                        continue;
-                    }
-                    if let Ok(path) =
-                        which::which_in(&name, Some(directory.as_os_str()), &directory)
-                    {
-                        programs.entry(name).or_insert_with(|| path.clone());
-                        #[cfg(windows)]
-                        if let Some(stem) = path.file_stem() {
-                            let key = program_key(stem);
-                            if !programs.contains_key(&key) {
-                                if let Ok(resolved) =
-                                    which::which_in(&key, startup_path().as_ref(), &directory)
-                                {
-                                    programs.insert(key, resolved);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        programs
-    })
-}
-
 pub(super) fn cleanup() {
     let _lock = SNAPSHOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(Ok(host)) = HOST.get() {
@@ -263,6 +224,18 @@ pub(super) fn cleanup() {
     }
 }
 
+fn pins() -> Vec<(String, String)> {
+    vec![
+        ("core.fsmonitor".into(), "false".into()),
+        ("core.hooksPath".into(), neutral().into()),
+        ("core.sshCommand".into(), "ssh".into()),
+        ("core.editor".into(), "false".into()),
+        ("sequence.editor".into(), "false".into()),
+        ("core.pager".into(), "cat".into()),
+        ("core.askPass".into(), "".into()),
+        ("credential.helper".into(), "".into()),
+    ]
+}
 fn escape(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -286,38 +259,40 @@ pub(super) fn protected_paths() -> Vec<PathBuf> {
         }
     }
 }
-fn program_key(name: &OsStr) -> std::ffi::OsString {
-    #[cfg(windows)]
-    {
-        name.to_string_lossy().to_lowercase().into()
-    }
-    #[cfg(not(windows))]
-    {
-        name.to_owned()
-    }
+#[path = "spawn_host_programs.rs"]
+mod programs;
+pub(super) fn program(name: &OsStr) -> std::ffi::OsString {
+    programs::program(name)
 }
-pub(super) fn program(program: &OsStr) -> std::ffi::OsString {
-    if Path::new(program).components().count() != 1 || Path::new(program).is_absolute() {
-        return program.to_owned();
-    }
-    programs()
-        .get(&program_key(program))
-        .map(|path| path.as_os_str().to_owned())
-        .unwrap_or_else(|| {
-            // A file cannot become a directory in which a later child plants
-            // a missing executable. An unavailable executable path fails closed.
-            std::env::current_exe()
-                .map(|path| path.join(program).into_os_string())
-                .unwrap_or_default()
-        })
+pub(super) fn unavailable(name: &OsStr) -> std::ffi::OsString {
+    programs::unavailable(name)
 }
 
-pub(super) fn isolate(command: &mut Command) {
+pub(super) fn isolate(command: &mut Command, check_repository: bool) {
     let name = Path::new(command.get_program())
         .file_stem()
         .and_then(|n| n.to_str());
     if !name.is_some_and(|name| name.eq_ignore_ascii_case("git")) {
         return;
+    }
+    if check_repository
+        && let Some(path) = super::host_repository::planted_source(command.get_current_dir())
+    {
+        tracing::error!(path = %path.display(), "host command refused: previously absent configuration now exists");
+        *command = super::raw_command(programs::unavailable(command.get_program()));
+        return;
+    }
+    let pinned = host()
+        .map(|host| host.pinned.clone())
+        .unwrap_or_else(|_| pins());
+    let already_pinned = command.get_args().take(2).eq([
+        OsStr::new("-c"),
+        OsStr::new(&format!("{}={}", pinned[0].0, pinned[0].1)),
+    ]);
+    if !already_pinned {
+        for (key, value) in &pinned {
+            command.arg("-c").arg(format!("{key}={value}"));
+        }
     }
     if let Ok(host) = host() {
         if command.get_program() != host.git.as_os_str() {
@@ -354,20 +329,21 @@ pub(super) fn isolate(command: &mut Command) {
             .env("SSH_ASKPASS", "false")
             .env_remove("GIT_CONFIG_PARAMETERS")
             .env_remove("GIT_CONFIG");
-        for (index, (key, value)) in host.pinned.iter().enumerate() {
-            command
-                .env(format!("GIT_CONFIG_KEY_{index}"), key)
-                .env(format!("GIT_CONFIG_VALUE_{index}"), value);
-        }
     } else {
-        tracing::error!("host configuration unavailable; using null configuration");
+        let reason = host().err().unwrap_or_default();
+        tracing::error!(%reason, "host configuration unavailable; execution keys pinned by command arguments");
         command
             .env("GIT_CONFIG_GLOBAL", neutral())
             .env("GIT_CONFIG_SYSTEM", neutral())
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_COUNT", "0")
+            .env("GIT_CONFIG_COUNT", pinned.len().to_string())
             .env_remove("GIT_CONFIG_PARAMETERS")
             .env_remove("GIT_CONFIG");
+    }
+    for (index, (key, value)) in pinned.iter().enumerate() {
+        command
+            .env(format!("GIT_CONFIG_KEY_{index}"), key)
+            .env(format!("GIT_CONFIG_VALUE_{index}"), value);
     }
 }
 

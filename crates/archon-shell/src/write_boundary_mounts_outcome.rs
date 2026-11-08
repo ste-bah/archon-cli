@@ -1,7 +1,11 @@
 use super::*;
 
 impl MountSeals {
-    pub(in crate::write_boundary::landlock) fn outcome(&self, packet: [i32; 4]) -> String {
+    pub(in crate::write_boundary::landlock) fn outcome_record(
+        &self,
+        record: StatusRecord,
+    ) -> String {
+        let StatusRecord(packet, failed) = record;
         if packet[0] < 0
             || packet[0] as usize > STEPS.len()
             || packet[2] < 0
@@ -26,15 +30,12 @@ impl MountSeals {
                 return "seal outcome unknown: invalid entry index".into();
             }
         }
-        let complete = match failure {
-            None => self.seals.len(),
-            Some(f) if step_index(f.step) >= step_index("drop mount capability") => {
-                self.seals.len()
-            }
-            Some(f) => f.seal,
-        };
-        let mut applied: Vec<_> = self.seals[..complete]
+        let mut applied: Vec<_> = self
+            .seals
             .iter()
+            .enumerate()
+            .filter(|(index, _)| failed[index / 64] & (1 << (index % 64)) == 0)
+            .map(|(_, seal)| seal)
             .map(|seal| {
                 format!(
                     "{} {}",
@@ -70,7 +71,7 @@ impl MountSeals {
             }
         }
         format!(
-            "applied seals: [{}]; {}{}",
+            "applied seals: [{}]; {}{}{}",
             applied.join("; "),
             failure.map_or_else(
                 || "all seal steps completed".into(),
@@ -83,6 +84,26 @@ impl MountSeals {
                     )
                 }
             ),
+            {
+                let unapplied: Vec<_> = self
+                    .seals
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| failed[index / 64] & (1 << (index % 64)) != 0)
+                    .map(|(_, seal)| {
+                        format!(
+                            "{} not sealed",
+                            std::path::Path::new(std::ffi::OsStr::from_bytes(seal.path.as_bytes()))
+                                .display()
+                        )
+                    })
+                    .collect();
+                if unapplied.is_empty() {
+                    String::new()
+                } else {
+                    format!("; {}", unapplied.join("; "))
+                }
+            },
             if packet[3] == 0 && !applied.is_empty() {
                 "; applied seals bypassable through the inherited working directory"
             } else {
