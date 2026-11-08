@@ -475,7 +475,7 @@ mod resume;
 pub(crate) use resume::upgrade::{decode, unmapped};
 pub(crate) use resume::{
     dry_run_fixed_decomposition, resume_fixed_decomposition_with_factory,
-    resume_fixed_decomposition_with_factory_and_sink,
+    resume_fixed_decomposition_with_factory_and_sink, resume_guarded_at_binary_revision,
 };
 #[cfg(test)]
 pub(crate) use resume::{resume_fixed_decomposition_at_binary_revision, upgrade};

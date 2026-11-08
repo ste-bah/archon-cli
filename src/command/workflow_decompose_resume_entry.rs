@@ -12,7 +12,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
     interactive_owner: Option<&str>,
     cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<String> {
-    super::resume_fixed_decomposition_at_binary_revision(
+    super::resume_guarded_at_binary_revision(
         cwd,
         run_id,
         yes,
@@ -23,6 +23,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         interactive_owner,
         cancellation_requested,
         &crate::command::workflow_test_seams::binary_revision(),
+        None,
     )
     .await
 }
@@ -98,4 +99,51 @@ pub(super) fn cancel_if_requested(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
+    cwd: &Path,
+    run_id: &str,
+    yes: bool,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    factory: &dyn WorkflowLlmClientFactory,
+    ui_sink: archon_workflow::SharedWorkflowUiSink,
+    interactive_owner: Option<&str>,
+    cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
+    current_binary_revision: &str,
+) -> Result<String> {
+    super::resume_guarded_at_binary_revision(
+        cwd,
+        run_id,
+        yes,
+        config,
+        env_vars,
+        factory,
+        ui_sink,
+        interactive_owner,
+        cancellation_requested,
+        current_binary_revision,
+        None,
+    )
+    .await
+}
+
+pub(super) fn apply_resume(
+    store: &WorkflowStore,
+    run_id: &str,
+    expected: Option<&(u64, archon_workflow::RunStatus)>,
+) -> Result<archon_workflow::WorkflowRun> {
+    store
+        .with_run_lock(run_id, |locked| {
+            crate::command::workflow::workflow_decompose_reverify::rounds::check_control(
+                &locked.load_state(run_id)?,
+                expected,
+            )?;
+            archon_workflow::LifecycleController::new(locked.clone())
+                .apply(run_id, archon_workflow::LifecycleAction::Resume)
+        })
+        .context("applying fixed decomposition resume lifecycle")
 }

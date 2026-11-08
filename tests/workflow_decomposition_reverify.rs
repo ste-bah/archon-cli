@@ -6,6 +6,8 @@ mod deadline;
 mod diagnostics;
 #[path = "support/workflow_decomposition_offline_faults.rs"]
 mod faults;
+#[path = "support/workflow_decomposition_reverify_healing.rs"]
+mod healing;
 #[path = "support/workflow_decomposition_reverify_paused_second.rs"]
 mod paused_second;
 #[path = "support/workflow_decomposition_offline_project.rs"]
