@@ -13,6 +13,10 @@ pub(crate) fn prepare_from_judged(
 ) -> Result<PreparedAcceptanceFreeze> {
     let (prd, _, _) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd).context("PRD is not UTF-8")?;
+    // Floor `implements` ids are not validated until S4: never freeze them.
+    let mut contract = contract.clone();
+    super::super::preflight::clear_unvalidated_floor_implements(&mut contract);
+    let contract = &contract;
     let candidate_bytes = serde_json::to_vec_pretty(contract)?;
     let candidate_digest = content_digest(&candidate_bytes);
     let mut prepared = finish_acceptance(

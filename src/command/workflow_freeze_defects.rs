@@ -323,6 +323,7 @@ mod tests {
             acceptance_digest: "d".into(),
             tasks: (1..=70)
                 .map(|n| FrozenTask {
+                    status: None,
                     task_id: format!("TASK-X-{n:03}"),
                     file_name: format!("bad{n}"),
                     depends_on: vec![],

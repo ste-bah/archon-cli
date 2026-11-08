@@ -157,7 +157,7 @@ async fn a_frontmatter_the_stamp_cannot_read_is_refused_with_its_cause() {
             .expect("a refusal, not a failed call");
         assert_eq!(
             refused(&outcome).text,
-            "candidate TASK body for TASK-X-010 does not parse: task frontmatter contains unknown field 'author_note'; return the whole task file",
+            "candidate TASK body for TASK-X-010 is refused: task frontmatter contains unknown field 'author_note'; return the whole task file",
             "prebound={prebound}"
         );
     }
@@ -233,7 +233,9 @@ fn host_faults_still_fail_the_call() {
             .unwrap(),
         Vec::<String>::new()
     );
-    assert!(request.stdin.unwrap().starts_with("```yaml\n"));
+    let stamped = request.stdin.unwrap();
+    assert!(stamped.starts_with("```yaml\n"));
+    assert!(stamped.contains("status: ready"));
 }
 
 /// The fixed script's body loop receives the host's refusal exactly as the

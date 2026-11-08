@@ -6,6 +6,7 @@ fn skeleton() -> TaskSkeleton {
         schema_version: 1,
         acceptance_digest: "digest".into(),
         tasks: vec![FrozenTask {
+            status: None,
             task_id: "TASK-X-001".into(),
             file_name: "TASK-X-001.md".into(),
             depends_on: vec![],

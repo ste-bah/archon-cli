@@ -120,4 +120,6 @@ pub struct WorkflowV2DeliverableContract {
     pub validation_failed_values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub validation_passed_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub implements: Vec<String>,
 }

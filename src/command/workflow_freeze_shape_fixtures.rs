@@ -8,6 +8,7 @@ use serde_json::Value;
 
 pub(super) fn contract() -> WorkflowV2DeliverableContract {
     WorkflowV2DeliverableContract {
+        implements: vec!["item".into()],
         kind: "out.json".into(),
         artifact_path: "out.json".into(),
         typed_verifier_command: Some("field".into()),
@@ -72,6 +73,7 @@ pub(super) fn task() -> Value {
         ordering_only: true,
     };
     serde_json::to_value(FrozenTask {
+        status: Some("done".into()),
         task_id: "TASK-X-002".into(),
         file_name: "TASK-X-002.md".into(),
         depends_on: vec![dependency.clone(), dependency],
@@ -216,6 +218,7 @@ fn positional_contract() -> Value {
         c.validation_check_status_field,
         c.validation_failed_values,
         c.validation_passed_values,
+        c.implements,
     ])
 }
 pub(super) fn positional_samples() -> Vec<(bool, Value)> {
@@ -229,7 +232,8 @@ pub(super) fn positional_samples() -> Vec<(bool, Value)> {
         ["TASK-X-003", "TASK-X-004"],
         ["REQ-1", "REQ-2"],
         ["7", "7.1"],
-        [positional_contract(), positional_contract()]
+        [positional_contract(), positional_contract()],
+        "done"
     ]);
     let judgment = json!(["accepted", "none", "reason", "call", {"arbitrary":[0,null,false]}]);
     let entry = |check: Value| {

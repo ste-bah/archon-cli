@@ -126,6 +126,8 @@ fn P5_24_hint_uses_exact_schema() {
             assert!(
                 fields.get(field.0).is_some()
                     != [
+                        // Deferred from the author hint until host proof is enabled.
+                        "implements",
                         "required_universe",
                         "registry_minimum_count",
                         "series_overlap_min_rows"
@@ -290,4 +292,18 @@ fn seed_still_skips_tasks_with_invalid_shape() {
     records.seed_skeleton(&seed, true).unwrap();
     let composed = records.compose(&json!({"records_landed":1})).unwrap();
     assert_eq!(composed["tasks"][0]["task_id"], "TASK-X-002");
+}
+
+#[test]
+fn P5_authored_completion_is_not_landed() {
+    let dir = tempfile::tempdir().unwrap();
+    let records = open(dir.path());
+    let mut candidate = task(1);
+    candidate["status"] = json!("done");
+    land(&records, candidate);
+    let composed = records.compose(&json!({"records_landed":1})).unwrap();
+    let frozen: archon_workflow::task_skeleton::FrozenTask =
+        serde_json::from_value(composed["tasks"][0].clone()).unwrap();
+    assert_eq!(frozen.status, None);
+    assert!(composed["tasks"][0].get("status").is_none());
 }

@@ -57,6 +57,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
         schema_version: 1,
         acceptance_digest: acceptance_digest.clone(),
         tasks: vec![FrozenTask {
+            status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010-body.md".into(),
             depends_on: Vec::new(),
@@ -451,5 +452,40 @@ fn phase_local_candidate_lint_reads_candidate_bytes_and_preserves_live_task() {
             .report
             .as_str()
             .is_some_and(|report| report.contains("coverage: NOT ANALYSED for --task-file"))
+    );
+}
+
+#[test]
+fn stamped_blocked_without_dependency_keeps_invalid_declared_status_finding() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_task_file_lint_fixture(temp.path());
+    let raw = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("status: ready", "status: blocked");
+    let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(
+        &std::fs::read(path.parent().unwrap().join("task-skeleton.json")).unwrap(),
+    )
+    .unwrap();
+    let (body, notes) = crate::command::workflow_host_command_binding::stamp_frozen_frontmatter(
+        &raw,
+        &skeleton.tasks[0],
+    )
+    .unwrap();
+    assert!(body.contains("status: blocked"));
+    assert!(!notes.iter().any(|note| note == "status"));
+    let evaluation = crate::command::topology_lint::evaluate_task_file_candidate(
+        temp.path(),
+        &path,
+        body.as_bytes(),
+        archon_core::config::GateMode::Enforce,
+    )
+    .unwrap();
+    assert!(
+        evaluation.findings.iter().any(|finding| finding
+            .deterministic_defect
+            .as_ref()
+            .is_some_and(|defect| defect.code == "invalid_declared_status")),
+        "{:?}",
+        evaluation.findings
     );
 }

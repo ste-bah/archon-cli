@@ -10,6 +10,7 @@ use super::workflow_host_command_exec_tests::{context, seed_frozen_chain, seed_f
 
 fn frozen_with_owned_fields() -> archon_workflow::task_skeleton::FrozenTask {
     archon_workflow::task_skeleton::FrozenTask {
+        status: None,
         task_id: "TASK-X-010".into(),
         file_name: "TASK-X-010.md".into(),
         depends_on: vec![archon_workflow::task_skeleton::FrozenDependency {
@@ -487,3 +488,6 @@ fn body_cannot_override_frozen_deliverable_contracts() {
     .unwrap();
     assert_eq!(task.deliverable_contracts, frozen.deliverable_contracts);
 }
+
+#[path = "workflow_host_command_status_tests.rs"]
+mod status_tests;

@@ -63,7 +63,9 @@ pub(crate) fn candidate_findings_prevent_publication(
             ),
             "freeze-skeleton" => matches!(
                 finding.remediation_scope,
-                RemediationScope::CandidateArtifact | RemediationScope::Skeleton
+                RemediationScope::CandidateArtifact
+                    | RemediationScope::Skeleton
+                    | RemediationScope::InheritedPredecessor
             ),
             "land-task-body" => finding.remediation_scope != RemediationScope::InheritedPredecessor,
             _ => false,
@@ -294,6 +296,30 @@ mod tests {
             archon_core::config::GateMode::Observe,
             &policy_finding(RemediationScope::InheritedPredecessor),
         ));
+    }
+
+    #[test]
+    fn skeleton_inherited_findings_block_enforce_and_preserve_observe() {
+        for (mode, blocked) in [
+            (archon_core::config::GateMode::Enforce, true),
+            (archon_core::config::GateMode::Observe, false),
+        ] {
+            assert_eq!(
+                candidate_findings_prevent_publication(
+                    "freeze-skeleton",
+                    mode,
+                    &policy_finding(RemediationScope::InheritedPredecessor),
+                ),
+                blocked
+            );
+            let mut clean = policy_finding(RemediationScope::InheritedPredecessor);
+            clean.policy_findings.clear();
+            assert!(!candidate_findings_prevent_publication(
+                "freeze-skeleton",
+                mode,
+                &clean
+            ));
+        }
     }
 
     fn prepared(paths: &[&str]) -> PreparedPublicationV1 {
