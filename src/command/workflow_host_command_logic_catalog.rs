@@ -66,7 +66,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #593 re-pin only: the decomposition script's acceptance author window (workflow_decompose_v1_acceptance.js) keeps starting entries after a shape refusal; no verdict reads it.
         // #599 re-pin: version 83 covers retained skeleton contract validation and shared contract refusals; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 (#572 S0-S3, #567, #497, #460): version 86, see the version line.
-        sources_digest: "72121fbea0a1022722f58f1e7b727bf864daa0958cee6bbd53ea92d64414b4b7",
+        // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
+        sources_digest: "318024f347de632706341f92fef2adf53597a291c22c7856bbfed95b155ce7f6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -118,7 +119,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #593 re-pin only: the decomposition script's acceptance author window (workflow_decompose_v1_acceptance.js) keeps starting entries after a shape refusal; no verdict reads it.
         // #599 re-pin: version 11 covers shared contract refusals and repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 (#572 S0-S3, #567, #497, #460): version 12, see the version line.
-        sources_digest: "72121fbea0a1022722f58f1e7b727bf864daa0958cee6bbd53ea92d64414b4b7",
+        // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
+        sources_digest: "318024f347de632706341f92fef2adf53597a291c22c7856bbfed95b155ce7f6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -198,7 +200,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #593 re-pin only: the decomposition script's acceptance author window (workflow_decompose_v1_acceptance.js) keeps starting entries after a shape refusal; no verdict reads it.
         // #599 re-pin: version 33 covers shared contract refusals and frozen-field repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 (#572 S0-S3, #567, #497, #460): version 34, see the version line.
-        sources_digest: "406112fdbc6e92e9d7e27a51ac3fcff8f14f6791f03a2e8d0172a18f875e8da2",
+        // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
+        sources_digest: "c6aac4d44ec477274e5a842639cf61b413fa5933cbcf8422ba06dce91cb3bcf9",
         build_bound: false,
     },
     CapabilityLogic {
@@ -264,7 +267,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #593 re-pin only: the decomposition script's acceptance author window (workflow_decompose_v1_acceptance.js) keeps starting entries after a shape refusal; no verdict reads it.
         // #599 re-pin: version 29 covers shared contract refusals and frozen-field repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 re-pin only (#572 S3): a body deliverable `implements` is now parsed; no host-landed body can carry it because land-task-body stamps the frozen contracts; set-lint still refuses it as frozen_field_changed; #567/#497/#460/#572 S1 prompt and script changes are read by no verdict here.
-        sources_digest: "406112fdbc6e92e9d7e27a51ac3fcff8f14f6791f03a2e8d0172a18f875e8da2",
+        // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
+        sources_digest: "c6aac4d44ec477274e5a842639cf61b413fa5933cbcf8422ba06dce91cb3bcf9",
         build_bound: false,
     },
     CapabilityLogic {
@@ -357,7 +361,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #593 re-pin only: the decomposition script's acceptance author window (workflow_decompose_v1_acceptance.js) keeps starting entries after a shape refusal; no verdict reads it.
         // #599 re-pin: version 22 covers shared deliverable-contract validation of frozen inputs; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108: version 23, see the version line.
-        sources_digest: "299a0d64b47872d17eb040936b6618bd286771190e59165dae6313cae0a05ccf",
+        // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
+        sources_digest: "3a60ea83dbd050ba0529028d91f793fc0e637c7c621b11a75589d6c1d6cce77f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -404,7 +409,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #593 re-pin only: the decomposition script's acceptance author window (workflow_decompose_v1_acceptance.js) keeps starting entries after a shape refusal; no verdict reads it.
         // #599 re-pin: version 10 covers shared contract refusals and frozen-field repair ownership; closed-whitelist correction scans each byte once with an explicit delimiter stack (32 levels, 4096 bytes), checks nested operands and substitutions in that scan, and drops inert POSIX assignments, grouping, comments, redirections and here-doc bodies before judging all words; bare negation is never a template, refusal text describes unreplaced placeholders without claiming an exit status, and template rows live in the sibling test module and the inline tests. Same unreleased version; pins are NOT recomputed here; CI must recompute them.
         // integ-1108 re-pin only (#572 S3): shared schema closure (FrozenTask.status, deliverable implements) round-trips byte-identical; no verdict rule changed.
-        sources_digest: "299a0d64b47872d17eb040936b6618bd286771190e59165dae6313cae0a05ccf",
+        // integ-1108 S2 re-pin only: link and ownership diagnostics at freeze-skeleton write .decompose.log lines only; A4 candidates, eligibility and exclusions are unchanged (observations moved to a child module); test-only harness files follow S1ab script functions; no verdict rule changed.
+        sources_digest: "3a60ea83dbd050ba0529028d91f793fc0e637c7c621b11a75589d6c1d6cce77f",
         build_bound: true,
     },
 ];
