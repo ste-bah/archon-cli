@@ -32,7 +32,7 @@ pub(super) async fn blocking<T: Send + 'static>(
 }
 pub(super) async fn materialise(
     probe: &HostProbe,
-    snapshot: &BaseSnapshot,
+    anchor: &Anchor<'_>,
     work: &Path,
 ) -> Result<Arc<BaseCopy>, RunOutcome> {
     let (parent, repository, project, task, snapshot, work) = (
@@ -40,7 +40,7 @@ pub(super) async fn materialise(
         probe.repository.clone(),
         probe.project.clone(),
         probe.task_root.clone(),
-        snapshot.clone(),
+        anchor.snapshot.clone(),
         work.to_path_buf(),
     );
     blocking(move || {
@@ -177,7 +177,7 @@ fn resolve(
 }
 pub(super) async fn observe(
     probe: &HostProbe,
-    req: &BreakageRequest<'_>,
+    req: &Anchor<'_>,
     copy: &Arc<BaseCopy>,
     id: &str,
     touched: &[String],
@@ -185,10 +185,7 @@ pub(super) async fn observe(
 ) -> (RunOutcome, Option<Vec<u8>>, bool) {
     let (owned, snapshot, repo, project) = (
         copy.clone(),
-        req.classification
-            .base_snapshot
-            .clone()
-            .expect("validated snapshot"),
+        req.snapshot.clone(),
         probe.repository.clone(),
         probe.project.clone(),
     );

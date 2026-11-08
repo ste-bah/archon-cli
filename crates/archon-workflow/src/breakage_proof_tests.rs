@@ -140,3 +140,21 @@ fn attribution_is_strict_for_files_trees_and_shared_paths() {
         Some(NotCounted::TouchesShared)
     );
 }
+
+// Keep the existing selection assertions while adapting the engine input shape.
+mod selection {
+    pub(super) use super::super::selection::attribution;
+
+    pub(super) fn validate(
+        set: &super::MutantSet,
+        lock: &crate::task_set_contract::AcceptanceLock,
+        classes: &crate::v2::requirement_classes::RequirementClassification,
+    ) -> Result<(Vec<super::SuppliedMutant>, Vec<String>), &'static str> {
+        let pairs = classes
+            .entries
+            .iter()
+            .map(|e| (e.task_id.clone(), e.id.clone()))
+            .collect::<Vec<_>>();
+        super::super::selection::validate(set, lock.baseline_commit.as_deref().unwrap(), &pairs)
+    }
+}

@@ -323,9 +323,15 @@ fn patch_round_trip_restore_and_inventory() {
         assert!(!c.repository().join("new").exists());
     }
 }
+#[cfg(test)]
+#[cfg(unix)]
+#[path = "workflow_acceptance_executability_breakage_anchor_tests.rs"]
+mod anchor_cases;
+#[cfg(test)]
 #[cfg(unix)]
 #[path = "workflow_acceptance_executability_breakage_engine_tests.rs"]
 mod engine_cases;
+#[cfg(test)]
 #[cfg(unix)]
 #[path = "workflow_acceptance_executability_breakage_io_tests.rs"]
 mod io_cases;
