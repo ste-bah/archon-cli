@@ -40,6 +40,11 @@ pub fn prd_requirement_ids(prd: &str) -> BTreeSet<String> {
     prd_requirement_texts(prd).into_keys().collect()
 }
 
+/// Requirement ids with an active repair route; the coverable-ids step narrows it.
+pub fn routed_requirement_ids(prd: &str) -> BTreeSet<String> {
+    prd_requirement_ids(prd)
+}
+
 fn entries(contract: &AcceptanceContract) -> impl Iterator<Item = &AcceptanceCriterion> {
     contract.acceptance.iter().chain(&contract.supplementary)
 }

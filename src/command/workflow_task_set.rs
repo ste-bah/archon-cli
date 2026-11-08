@@ -260,6 +260,9 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         repository: Some(repository_root.clone()),
         task_root: Some(tasks_root.to_path_buf()),
         repository_commit: None,
+        covered_texts: archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(
+            &prd_text,
+        ),
     };
     let judged = resume.persist.then(|| {
         judge_store::JudgeStore::for_project(

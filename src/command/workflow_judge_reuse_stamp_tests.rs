@@ -82,6 +82,7 @@ fn a_later_stamp_does_not_overwrite_the_digest_of_an_existing_judgment() {
     let input = temp.path().join("input");
     std::fs::write(&input, "judged content").unwrap();
     let roots = super::super::judge::JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(temp.path().to_path_buf()),
         repository: None,
         task_root: Some(temp.path().to_path_buf()),

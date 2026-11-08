@@ -39,6 +39,7 @@ pub(super) fn prefetch_files_cached(
         project: Some(scope.project_root.clone()),
         repository: Some(scope.repository_root.clone()),
         task_root: Some(scope.task_root.clone()),
+        covered_texts: Default::default(),
         repository_commit: scope
             .baseline
             .as_ref()
@@ -85,20 +86,7 @@ pub(crate) fn prefetch_inputs(
 }
 
 #[cfg(test)]
-pub(super) fn author_prompt(
-    scope: &AuthorScope,
-    frozen: &AcceptanceCriterion,
-    notes: &[String],
-    attempt: usize,
-) -> String {
-    author_prompt_with_prefetch(
-        scope,
-        frozen,
-        notes,
-        attempt,
-        &prefetch_files(scope, frozen, notes),
-    )
-}
+pub(super) use super::coverage_repair::author_prompt;
 
 pub(super) fn is_baseline_pass_note(note: &str) -> bool {
     note.contains("criterion already holds on the pre-implementation tree")
@@ -113,14 +101,14 @@ pub(super) fn author_prompt_with_prefetch(
     notes: &[String],
     attempt: usize,
     prefetched_files: &[serde_json::Value],
-) -> String {
+    droppable: &[String],
+) -> Result<String> {
     let baseline_note = notes.iter().find(|note| is_baseline_pass_note(note));
     let baseline_pass = baseline_note.is_some();
-    let current = if baseline_pass {
+    let mut current = if baseline_pass {
         serde_json::json!({
             "id": frozen.id,
             "criterion": frozen.criterion,
-            "covers": frozen.covers,
             "gap_permitted": frozen.gap_permitted,
         })
     } else {
@@ -131,6 +119,7 @@ pub(super) fn author_prompt_with_prefetch(
             "gap_permitted": frozen.gap_permitted,
         })
     };
+    coverage_repair::prompt_coverage(&mut current, frozen, scope, droppable)?;
     let mut prompt = Vec::new();
     if baseline_pass {
         prompt.extend([
@@ -163,7 +152,7 @@ pub(super) fn author_prompt_with_prefetch(
             &scope.repository_root.display().to_string(),
             &scope.project_root.display().to_string(),
         ),
-        "Return one JSON object with id, criterion, check, gap_permitted, judgment. The examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
+        "Return one JSON object with id, criterion, check, covers, gap_permitted, judgment. Keep covers or drop only ids in droppable_covers; keep the entry's own requirement if it has one. Do not add ids. Dropped ids are returned to the acceptance author as uncovered obligations. The examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
         ENTRY_SHAPES.to_string(),
         COMMAND_CWD_EXAMPLES.to_string(),
         "For a command check, choose EXACTLY ONE command form. Block form: the JSON check object holds kind, cwd and \"command_block\": true, with NO \"command\" field, followed by exactly one non-empty fence whose info string is exactly 'check'. Inline form: the JSON check object holds kind, cwd and \"command\" only; command is one short line without quotes or backslashes. Include no command_block and no fence.".to_string(),
@@ -201,7 +190,7 @@ pub(super) fn author_prompt_with_prefetch(
         "Return exactly the entry: for inline form, output only the JSON entry (raw or in one `json` fence); for block form, output the JSON entry (raw or in one `json` fence) followed by exactly one non-empty fence labelled `check`. Emit no prose, explanations, headings or other fences.".to_string(),
         "Do not run commands or write files.".to_string(),
     ]);
-    prompt.join("\n")
+    Ok(prompt.join("\n"))
 }
 
 fn refused_reason(notes: &[String]) -> &'static str {
@@ -422,6 +411,7 @@ pub(super) async fn author_entry(
         notes,
         attempt,
         &prefetch_files(scope, frozen, notes),
+        &[],
     )
     .await
 }
@@ -433,9 +423,11 @@ pub(super) async fn author_entry_with_prefetch(
     notes: &[String],
     attempt: usize,
     prefetched_files: &[serde_json::Value],
+    droppable: &[String],
 ) -> Result<String> {
     let read_roots = scope.read_roots().map_err(|error| anyhow!(error))?;
-    let prompt = author_prompt_with_prefetch(scope, frozen, notes, attempt, prefetched_files);
+    let prompt =
+        author_prompt_with_prefetch(scope, frozen, notes, attempt, prefetched_files, droppable)?;
     let call = WorkflowAgentCall {
         session_id: format!(
             "{ACCEPTANCE_REAUTHOR_AGENT}-{}-{}",

@@ -93,6 +93,14 @@ pub(in crate::command::workflow_task_set) fn stamp_judgment_with_content_digest(
 /// named-file evidence helper supplies the contents included in that prompt.
 pub(crate) const PROMPT_AND_JUDGE_SOURCES: &[(&str, &[u8])] = &[
     (
+        "workflow_acceptance_reauthor_coverage_repair.rs",
+        include_bytes!("workflow_acceptance_reauthor_coverage_repair.rs"),
+    ),
+    (
+        "obligation_ids.rs",
+        include_bytes!("../../crates/archon-workflow/src/obligation_ids.rs"),
+    ),
+    (
         "workflow_acceptance_reauthor_author.rs",
         include_bytes!("workflow_acceptance_reauthor_author.rs"),
     ),
@@ -188,6 +196,7 @@ fn key(
         project: Some(scope.project_root.clone()),
         repository: Some(scope.repository_root.clone()),
         task_root: Some(scope.task_root.clone()),
+        covered_texts: Default::default(),
         repository_commit: scope
             .baseline
             .as_ref()
@@ -331,6 +340,7 @@ pub(crate) fn store(
             project: Some(scope.project_root.clone()),
             repository: Some(scope.repository_root.clone()),
             task_root: Some(scope.task_root.clone()),
+            covered_texts: Default::default(),
             repository_commit: scope
                 .baseline
                 .as_ref()

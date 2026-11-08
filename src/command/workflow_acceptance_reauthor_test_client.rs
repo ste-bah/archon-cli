@@ -30,6 +30,7 @@ pub(crate) struct ScriptedAuthorJudge {
     pub(crate) resolved_agents: Mutex<Vec<String>>,
     /// Every author prompt, in call order: the findings each attempt saw.
     pub(crate) prompts: Mutex<Vec<String>>,
+    pub(crate) judge_prompts: Mutex<Vec<String>>,
     provider: String,
     judge_reply: Option<String>,
     /// The reply to every passability batch (checks shown with their
@@ -56,6 +57,7 @@ impl ScriptedAuthorJudge {
             judged_models: Mutex::new(Vec::new()),
             resolved_agents: Mutex::new(Vec::new()),
             prompts: Mutex::new(Vec::new()),
+            judge_prompts: Mutex::new(Vec::new()),
             provider: SCRIPTED_PROVIDER.into(),
             judge_reply: None,
             evidence_reply: None,
@@ -201,6 +203,7 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
             return Ok(outcome(reply.clone()));
         }
         let prompt = messages[0]["content"].as_str().expect("judge prompt");
+        self.judge_prompts.lock().unwrap().push(prompt.to_string());
         if let Some(stop) = &self.stop {
             let asked: Vec<String> = prompt
                 .rsplit_once("Checks: ")

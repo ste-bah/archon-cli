@@ -16,6 +16,13 @@ pub(crate) struct AuthorScope {
 }
 
 impl AuthorScope {
+    pub(crate) fn covered_texts(
+        &self,
+    ) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+        let text = fs::read_to_string(&self.prd_path)?;
+        Ok(archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(&text))
+    }
+
     /// Resolve the paths the author prompt says it may read.
     pub(crate) fn read_roots(&self) -> Result<Vec<String>, String> {
         for (field, path) in [

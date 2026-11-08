@@ -454,3 +454,25 @@ fn project_file_is_copied(project_root: &Path, relative: &Path) -> bool {
 #[cfg(test)]
 #[path = "workflow_task_set_judge_named_files_budget_tests.rs"]
 pub(crate) mod budget_tests;
+
+pub(super) fn coverage_claim(
+    check: &mut serde_json::Value,
+    criterion: &AcceptanceCriterion,
+    roots: &super::JudgeRoots,
+) {
+    // The requirement ids the check answers for are part of what it
+    // claims: a check covering a requirement it cannot fail on is
+    // refuted like one that cannot fail on its criterion.
+    if !criterion.covers.is_empty() {
+        check["covers"] = serde_json::json!(criterion.covers);
+        let covers_text: BTreeMap<_, _> = criterion
+            .covers
+            .iter()
+            .map(|id| {
+                let text = roots.covered_texts.get(id.trim());
+                (id, text.map(String::as_str).unwrap_or_default())
+            })
+            .collect();
+        check["covers_text"] = serde_json::json!(covers_text);
+    }
+}

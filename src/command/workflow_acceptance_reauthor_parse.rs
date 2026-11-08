@@ -168,10 +168,21 @@ pub(super) fn candidate_entry(
     candidate_entry_with_markers(reply, frozen, &[])
 }
 
+#[cfg(test)]
 pub(super) fn candidate_entry_with_markers(
     reply: &str,
     frozen: &AcceptanceCriterion,
     markers: &[String],
+) -> std::result::Result<AcceptanceCriterion, String> {
+    repair_entry(reply, frozen, markers, &[], &Default::default())
+}
+
+pub(super) fn repair_entry(
+    reply: &str,
+    frozen: &AcceptanceCriterion,
+    markers: &[String],
+    refuted: &[String],
+    routed: &std::collections::BTreeSet<String>,
 ) -> std::result::Result<AcceptanceCriterion, String> {
     use crate::command::workflow_task_set::acceptance_reply_blocks as blocks;
     if blocks::unclosed_block_refusal_with_markers(reply, markers).is_some() {
@@ -182,6 +193,8 @@ pub(super) fn candidate_entry_with_markers(
         blocks::ObjectExtraction::ArrayWrappedEntry(_)
     );
     let result = candidate_entry_with_markers_inner(reply, frozen, markers);
+    let result = result
+        .and_then(|candidate| super::coverage_repair::validate(candidate, frozen, refuted, routed));
     match result {
         Err(refusal) if array_wrapped => {
             const ARRAY_SHAPE: &str = "return the entry object itself, not an array";
@@ -372,18 +385,17 @@ fn candidate_entry_with_markers_inner(
                 frozen.id
             )
         })?;
-    if check == frozen.check {
-        return Err(format!(
-            "check '{}': the reply repeats the check being replaced; change it so it resolves every finding above",
-            frozen.id
-        ));
-    }
+    let covers: Vec<String> = match value.get("covers") {
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid covers: {error}"))?,
+        None => frozen.covers.clone(),
+    };
     Ok(AcceptanceCriterion {
         id: frozen.id.clone(),
         criterion: frozen.criterion.clone(),
         check,
         gap_permitted: frozen.gap_permitted,
-        covers: frozen.covers.clone(),
+        covers,
         judgment: JudgeVerdict {
             verdict: JudgeDecision::Refuted,
             counterexample: String::new(),

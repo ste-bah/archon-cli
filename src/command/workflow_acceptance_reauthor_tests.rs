@@ -287,3 +287,6 @@ async fn a_candidate_past_the_output_limit_goes_back_to_its_author() {
         "{prompts:?}"
     );
 }
+
+#[path = "workflow_acceptance_reauthor_covers_tests.rs"]
+mod covers_tests;

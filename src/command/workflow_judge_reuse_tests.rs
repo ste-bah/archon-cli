@@ -323,6 +323,7 @@ fn incremental_key_binds_effective_named_file_content() {
         cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
     };
     let roots = super::super::judge::JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(temp.path().to_path_buf()),
         repository: None,
         task_root: Some(temp.path().to_path_buf()),

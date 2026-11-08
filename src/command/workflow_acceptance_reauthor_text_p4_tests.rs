@@ -19,7 +19,8 @@ fn P4_14_R4_reauthor_explains_handles_and_build_failure() {
             crate::command::workflow_task_set::executability::CANNOT_FAIL
         )],
     ] {
-        let prompt = author::author_prompt_with_prefetch(&scope, frozen, &notes, 1, &[]);
+        let prompt = author::author_prompt_with_prefetch(&scope, frozen, &notes, 1, &[], &[])
+            .expect("read requirement texts");
         assert!(prompt.contains(S1));
         assert!(prompt.contains("a build failure at or naming a moved input also proves it, while any other build failure leaves the check unproven"));
         assert!(!prompt.contains("tree at unknown"));
@@ -98,7 +99,9 @@ fn P4_22_every_applicable_reason_reaches_the_author() {
         &[seeds["AC-X-001"].clone()],
         1,
         &[],
-    );
+        &[],
+    )
+    .expect("read requirement texts");
     assert!(prompt.contains("the caller's first gate reason"));
     assert!(prompt.contains("the caller's second gate reason"));
     assert!(!prompt.contains("a sibling's reason"));

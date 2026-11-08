@@ -3,6 +3,7 @@ use archon_workflow::task_set_contract::AcceptanceCriterion;
 
 fn roots(temp: &tempfile::TempDir, tasks: &Path) -> super::super::judge::JudgeRoots {
     super::super::judge::JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(temp.path().to_path_buf()),
         repository: None,
         task_root: Some(tasks.to_path_buf()),

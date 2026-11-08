@@ -82,6 +82,7 @@ fn fixture() -> (tempfile::TempDir, JudgeRoots) {
     std::fs::write(&executable, "#!/bin/sh\nexit 1\n").unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
     let roots = JudgeRoots {
+        covered_texts: Default::default(),
         project: Some(root.path().to_path_buf()),
         repository: None,
         task_root: Some(root.path().to_path_buf()),
