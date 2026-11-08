@@ -247,8 +247,11 @@ fn authenticate_reverify_report(
         }
     }
     let has_non_abandoned_activity = later_events.iter().any(|event| {
-        event.kind != WorkflowEventKind::DecompositionReverifyStarted
-            || !abandoned_starts.contains(&event.seq)
+        let round_audit = event.kind == WorkflowEventKind::DecompositionReverifyRound
+            && event.detail["report_id"].as_str() == Some(latest.id.as_str());
+        !round_audit
+            && (event.kind != WorkflowEventKind::DecompositionReverifyStarted
+                || !abandoned_starts.contains(&event.seq))
     });
     if has_non_abandoned_activity {
         if require_last_event {
@@ -341,7 +344,7 @@ fn authenticate_reverify_report(
         }
     } else {
         // Legacy reports rely on the paused fixed-run ordering invariant:
-        // resume_fixed_decomposition_at_binary_revision applies the Resume
+        // resume_guarded_at_binary_revision applies the Resume
         // lifecycle transition (and appends its event) before invoking the
         // executor, so no v2 call record can be created without a later event.
         // workflow_decompose_resume_event_precedes_any_v2_call_record_on_a_paused_fixed_run pins it.

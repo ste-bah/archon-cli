@@ -120,7 +120,7 @@ async function workflow(w) {
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
     if (frozenBodyReusable(frozen, skeleton, subject, changedChecks) && !forceBodySubjects.has(subject.taskId)) continue;
-    unauthored.push([subject, []]);
+    unauthored.push([subject, args.remediationBodyFindings?.[subject.taskId] || []]);
   }
   const chain = { outcome: skeleton, subjects: skeleton.subjects };
   await authorBodies(w, unauthored, bodies, chain);

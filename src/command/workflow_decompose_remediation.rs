@@ -1,6 +1,9 @@
 //! Durable remediation ledger handling for fixed decomposition resumes.
 use anyhow::{Context, Result, anyhow};
 use std::{collections::HashSet, path::Path};
+#[path = "workflow_decompose_remediation_feedback.rs"]
+mod feedback;
+pub(crate) use feedback::prepare_with_feedback;
 
 pub(crate) fn resume_author_scope(
     project_root: &Path,

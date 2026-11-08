@@ -9,11 +9,13 @@ pub(crate) mod recovery;
 pub(crate) use dry_run::dry_run_fixed_decomposition;
 #[path = "workflow_decompose_resume_entry.rs"]
 mod entry;
+#[cfg(test)]
+pub(crate) use entry::resume_fixed_decomposition_at_binary_revision;
 pub(crate) use entry::{
     resume_fixed_decomposition_with_factory, resume_fixed_decomposition_with_factory_and_sink,
 };
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
+pub(crate) async fn resume_guarded_at_binary_revision(
     cwd: &Path,
     run_id: &str,
     yes: bool,
@@ -24,6 +26,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     interactive_owner: Option<&str>,
     cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
     current_binary_revision: &str,
+    expected: Option<&(u64, archon_workflow::RunStatus)>,
 ) -> Result<String> {
     if !yes {
         return Err(anyhow!(
@@ -40,6 +43,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     let execution_lease =
         crate::command::workflow_task_root_reclaim::begin_execution(&store, run_id)?;
     let mut run = store.load_state(run_id)?;
+    crate::command::workflow::workflow_decompose_reverify::rounds::check_control(&run, expected)?;
     if run.status == archon_workflow::RunStatus::Completed {
         return Err(anyhow!(
             "fixed decomposition {run_id} is already completed; start a new decomposition in a fresh task root"
@@ -329,7 +333,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         )?;
     script_arguments =
         super::script_arguments_with_reply_markers(&script_arguments, &reply_leaked_markers);
-    let mut ledger = crate::command::workflow_decompose_remediation::prepare(
+    let mut ledger = crate::command::workflow_decompose_remediation::prepare_with_feedback(
         &store,
         run_id,
         &store.run_dir(run_id),
@@ -337,6 +341,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &current_identity,
         &criteria,
         &prd_requirement_texts,
+        expected.is_some(),
     )?;
     // Issue 387: name any requirement id a changed parser added or removed.
     let inventory = super::super::workflow_decompose_requirement_inventory::check_on_resume(
@@ -442,9 +447,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     execution_lease.record_executor()?;
     upgrade::mark_started(&store, run_id)?;
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());
-    let run = lifecycle
-        .apply(run_id, archon_workflow::LifecycleAction::Resume)
-        .context("applying fixed decomposition resume lifecycle")?;
+    let run = entry::apply_resume(&store, run_id, expected)?;
     if let Err(log_error) = crate::command::workflow_decompose_log::append_fixed_log_marker(
         Path::new(&state.log_path),
         "resume",

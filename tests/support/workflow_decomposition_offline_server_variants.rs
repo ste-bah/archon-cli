@@ -27,6 +27,8 @@ pub const HEREDOC_SCRIPT: &str = "set -eu\npython3 - src/beta.json <<'PY'\nimpor
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
     Golden,
+    /// Repeated malformed body replies exhaust the author no-progress window.
+    StalledBody,
     /// Only the r17 test binary builds it.
     #[allow(dead_code)]
     R17(r17::Cell),
@@ -58,6 +60,9 @@ pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {
         return reauthor_answer(prompt);
     }
     let (role, answer) = scripted_answer(prompt);
+    if variant == Variant::StalledBody && role == "body" {
+        return (role, "not a task body\n".into());
+    }
     if role != "acceptance" {
         return (role, answer);
     }

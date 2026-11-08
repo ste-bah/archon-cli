@@ -37,11 +37,12 @@ mod types;
 pub(super) use types::GateResult;
 use types::{ReverifyReport, SubjectResult};
 
-pub(crate) async fn reverify(
+async fn observe(
     cwd: &Path,
     run_id: &str,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
+    expected: Option<&(u64, RunStatus)>,
 ) -> Result<String> {
     if run_id.trim().is_empty() || run_id.contains('/') || run_id.contains('\\') {
         return Err(anyhow!("invalid workflow run id '{run_id}'"));
@@ -51,6 +52,7 @@ pub(crate) async fn reverify(
     let run_dir = store.run_dir(run_id);
     let _lease = crate::command::workflow_executor_lease::acquire(&run_dir, run_id)?;
     let run = store.load_state(run_id)?;
+    rounds::check_control(&run, expected)?;
     let invocation_generation = run.generation;
     let invocation_status = run.status.clone();
     let state_path = run_dir.join(types::STATE_PATH);
@@ -479,11 +481,12 @@ pub(crate) async fn reverify(
             "reverify recorded operational_failure: {cause}; run reverify again"
         ));
     }
-    let verdicts = heal::verdicts(&report);
-    Ok(format!(
-        "Reverify report: {report_id}\nOutcome: {outcome}\nSubjects: {verdicts}\nResume: archon workflow resume --live --yes {run_id}"
-    ))
+    Ok(rounds::summary(&report, run_id, expected.is_none()))
 }
 
 #[path = "workflow_decompose_reverify_heal.rs"]
 mod heal;
+
+#[path = "workflow_decompose_reverify_rounds.rs"]
+pub(crate) mod rounds;
+pub(crate) use rounds::{remediate, reverify};

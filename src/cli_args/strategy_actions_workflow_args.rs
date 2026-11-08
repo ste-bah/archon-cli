@@ -313,3 +313,12 @@ pub struct WorkflowObserveRunEndArgs {
     /// Workflow run ID
     pub run_id: String,
 }
+
+#[derive(Args, Debug)]
+pub struct WorkflowReverifyArgs {
+    /// Workflow run ID
+    pub run_id: String,
+    /// Repair findings through the live author and gate path, then reverify until accepted
+    #[arg(long)]
+    pub remediate: bool,
+}

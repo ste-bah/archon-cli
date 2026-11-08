@@ -82,6 +82,19 @@ async function frozenBodiesAreSkipped() {
  assert.equal(h.peak(),4);
 }
 
+async function reverifyFindingsReopenOnlyTheNamedBody() {
+ const frozen={acceptance:true,skeleton:true,subjects:SUBJECTS,bodies:SUBJECTS.map(s=>s.fileName)};
+ const h=harness(1,{frozenChain:frozen});
+ const findings=['The body omits REQ-X-001.', 'The focused test does not prove the requirement.'];
+ h.context.args.forceBodySubjects=['TASK-X-1'];
+ h.context.args.remediationBodyFindings={'TASK-X-1':findings};
+ const report=await h.context.workflow(h.w);
+ assert.deepEqual(h.bodyCalls.map(c=>c.taskId),['TASK-X-1']);
+ assert.deepEqual(Array.from(h.context.currentAuthorFindings(h.bodyPrompts[0])),findings);
+ assert.equal(h.landed.length,1,'the repaired body passes through its landing gate');
+ assert.equal(report.status,'accepted');
+}
+
 async function failureSurfacesAfterSiblingsSettle() {
  const h=harness(3,{failing:'TASK-X-2'});
  await assert.rejects(()=>h.context.workflow(h.w),/author of TASK-X-2 exhausted/);
@@ -98,5 +111,5 @@ async function lowestFailingBodyIsRaised() {
  assert.equal(h.active(),0,'no sibling agent abandoned mid-call');
 }
 
-bodyPathsAreRepositoryRootRelative().then(boundedPool).then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(failureSurfacesAfterSiblingsSettle).then(lowestFailingBodyIsRaised)
+bodyPathsAreRepositoryRootRelative().then(boundedPool).then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(reverifyFindingsReopenOnlyTheNamedBody).then(failureSurfacesAfterSiblingsSettle).then(lowestFailingBodyIsRaised)
  .then(()=>console.log('bounded body pool passed')).catch(e=>{console.error(e);process.exitCode=1});

@@ -458,7 +458,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         }
         WorkflowAction::Decompose(WorkflowDecomposeArgs { .. })
         | WorkflowAction::DecompositionIdentity
-        | WorkflowAction::Reverify(WorkflowStatusArgs { .. })
+        | WorkflowAction::Reverify(_)
         | WorkflowAction::ReclaimTaskRoot(WorkflowReclaimTaskRootArgs { .. })
         | WorkflowAction::VerifyFrozenChain(WorkflowVerifyFrozenChainArgs { .. }) => {
             return Err(anyhow!(

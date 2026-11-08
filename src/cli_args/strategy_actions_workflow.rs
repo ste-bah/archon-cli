@@ -23,7 +23,7 @@ pub enum WorkflowAction {
     /// Resume a paused or failed workflow
     Resume(WorkflowResumeArgs),
     /// Re-judge the current bodies of a completed fixed decomposition run
-    Reverify(WorkflowStatusArgs),
+    Reverify(WorkflowReverifyArgs),
     /// Continue a workflow using the high-level recovery/resume surface
     Continue(WorkflowContinueArgs),
     /// Prepare repair from the first failed or blocked stage
@@ -184,12 +184,32 @@ mod reverify_parse_tests {
     use clap::Parser;
 
     #[test]
+    fn workflow_reverify_remediate_is_explicit() {
+        let parsed =
+            Cli::try_parse_from(["archon", "workflow", "reverify", "run-123", "--remediate"]);
+        let parsed = parsed.unwrap();
+        let Some(crate::cli_args::Commands::Workflow {
+            action: super::WorkflowAction::Reverify(args),
+        }) = parsed.command
+        else {
+            panic!("expected reverify action")
+        };
+        assert!(args.remediate);
+        assert_eq!(args.run_id, "run-123");
+    }
+
+    #[test]
     fn workflow_reverify_accepts_a_run_id() {
         let parsed = Cli::try_parse_from(["archon", "workflow", "reverify", "run-123"]);
-        assert!(
-            parsed.is_ok(),
-            "workflow reverify syntax rejected: {parsed:?}"
-        );
+        let parsed = parsed.unwrap();
+        let Some(crate::cli_args::Commands::Workflow {
+            action: super::WorkflowAction::Reverify(args),
+        }) = parsed.command
+        else {
+            panic!("expected reverify action")
+        };
+        assert!(!args.remediate);
+        assert_eq!(args.run_id, "run-123");
     }
 }
 
