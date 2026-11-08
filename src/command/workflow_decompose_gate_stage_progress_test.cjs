@@ -329,3 +329,17 @@ const regressions = [
   }
   process.exitCode = failed ? 1 : 0;
 })();
+
+// Issue 567: a pre-judge syntax refusal has one validator identity beside
+// a sibling's policy defect and after that sibling is repaired.
+{
+  const context = freshContext();
+  const parse = defect('AC-X-001', 'shell_parse', 'check');
+  const sibling = defect('AC-X-002', 'invalid_verifier', 'check');
+  const before = [parse, sibling], after = [parse];
+  assert.equal(context.openFindingKey(before[0]), context.openFindingKey(after[0]));
+  assert(context.gateStageRank(parse) < context.gateStageRank(judged('AC-X-001', 'judge')),
+    'a pre-judge parse refusal must rank below a judged finding');
+  const regression = attempts([[judged('AC-X-001', 'judge')], [parse]]);
+  assert.deepEqual(regression.flags, [true, false], 'regressing to syntax refusal is no progress');
+}

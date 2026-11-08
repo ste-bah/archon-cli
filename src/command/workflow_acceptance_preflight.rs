@@ -2,6 +2,9 @@
 use super::*;
 use crate::command::workflow_task_set_candidate::CandidateDefects;
 use archon_workflow::defect::ValidationDefect;
+use archon_workflow::task_set_contract::AcceptanceCriterion;
+
+pub(crate) const PARSE_LINT_CALL: &str = "host:shell-parse";
 
 pub(super) fn prepare(
     project_root: &Path,
@@ -76,6 +79,7 @@ pub(super) fn prepare(
 
     // Authored verdicts are placeholders. Only check defects, never those
     // placeholder judgments, decide whether the candidate reaches the judge.
+    let parse_defects = parse_checks(&mut contract);
     let policy_defects = rooted_policy_findings(&contract, project_root, tasks_root)?
         .into_iter()
         .filter(|finding| {
@@ -103,6 +107,7 @@ pub(super) fn prepare(
         .collect::<Vec<_>>();
     defects.extend(policy_defects);
     if !defects.is_empty() {
+        defects.extend(parse_defects);
         return CandidateRejected::tag(Err(CandidateDefects(defects).into()));
     }
     Ok(contract)
@@ -135,4 +140,45 @@ pub(super) fn rooted_policy_findings(
             &bound,
         ),
     )
+}
+
+/// Reject text before judging it, retaining independent siblings for judging.
+pub(super) fn parse_checks(contract: &mut AcceptanceContract) -> Vec<ValidationDefect> {
+    let mut rejected = Vec::new();
+    for entry in contract
+        .acceptance
+        .iter_mut()
+        .chain(&mut contract.supplementary)
+    {
+        let Some((_, text)) = executability::executed_text(entry) else {
+            continue;
+        };
+        let Some(error) = archon_workflow::acceptance_check_shell::shell_parse_error(text) else {
+            continue;
+        };
+        entry.judgment.verdict = archon_workflow::task_set_contract::JudgeDecision::Refuted;
+        entry.judgment.counterexample =
+            "none: the host did not ask the judge about this check".into();
+        entry.judgment.reason =
+            archon_workflow::acceptance_check_shell::parse_finding(&entry.id, &error);
+        entry.judgment.host_call_id = PARSE_LINT_CALL.to_string();
+        entry.judgment.sampling = None;
+        rejected.push(parse_defect(entry));
+    }
+    rejected
+}
+
+/// One identity for a parse refusal, before staging and beside judged siblings.
+pub(super) fn parse_defect(entry: &AcceptanceCriterion) -> ValidationDefect {
+    ValidationDefect::new(
+        "shell_parse",
+        &entry.id,
+        "check",
+        entry.judgment.reason.clone(),
+    )
+}
+
+pub(super) fn parse_refusal(entry: &AcceptanceCriterion) -> bool {
+    entry.judgment.verdict == archon_workflow::task_set_contract::JudgeDecision::Refuted
+        && entry.judgment.host_call_id == PARSE_LINT_CALL
 }
