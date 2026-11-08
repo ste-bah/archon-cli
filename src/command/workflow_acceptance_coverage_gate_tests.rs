@@ -8,6 +8,9 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::FrozenTask;
 
+#[path = "workflow_acceptance_coverage_bench_tests.rs"]
+mod bench;
+
 const PRD: &str =
     "# PRD\n\n- REQ-AB-001: raw responses are kept.\n- REQ-AB-002: writes are atomic.\n";
 
