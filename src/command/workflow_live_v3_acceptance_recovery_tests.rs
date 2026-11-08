@@ -112,12 +112,13 @@ async fn a_resumed_run_heals_a_recovery_unfreeze_to_an_accepted_contract() {
 
     // Both the recovered run and a run launched after the recovery can
     // subsequently adopt an ordinary, recorded per-check re-author.
-    let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set_without_cache(
-        run.set.project.path(),
-        &run.set.tasks,
-        &run.set.prd,
-    )
-    .expect("the task set's repository record is believed");
+    let scope =
+        crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set_without_cache(
+            run.set.project.path(),
+            &run.set.tasks,
+            &run.set.prd,
+        )
+        .expect("the task set's repository record is believed");
     let ids = ["AC-F-001".to_string()].into_iter().collect();
     let client = ScriptedAuthorJudge::new(
         |entry, _| {
@@ -185,3 +186,6 @@ mod issue_tests;
 
 #[path = "workflow_live_v3_acceptance_recovery_pending_tests.rs"]
 mod round3_pending;
+
+#[path = "workflow_live_v3_acceptance_recovery_diagnostics_tests.rs"]
+mod input_diagnostics;

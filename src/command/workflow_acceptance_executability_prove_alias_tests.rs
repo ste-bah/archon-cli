@@ -35,6 +35,8 @@ fn repository_alias_diagnostic_keeps_the_named_path_and_site_copy_note_when_move
     let path = "../repository/tests/focused.rs";
     let diagnostics = describe_candidates_with_run_state(
         &[super::mutation::CandidateDiagnostic {
+            message_mention: false,
+            written_ancestor: false,
             path: path.into(),
             move_path: Some("/site/repository/tests/focused.rs".into()),
             move_root: Some("/site/repository".into()),

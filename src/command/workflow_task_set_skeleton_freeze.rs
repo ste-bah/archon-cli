@@ -22,6 +22,29 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     mode: GateMode,
     candidate: Vec<u8>,
 ) -> Result<PreparedSkeletonFreeze> {
+    prepare_with_diagnostics(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        candidate,
+        super::link_diagnostics::child,
+        gate_stamp,
+    )
+}
+
+pub(super) fn prepare_with_diagnostics(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+    diagnostics: fn(&TaskSkeleton, &AcceptanceContract, &Path, &Path),
+    stamp: fn(
+        FreezeGateMode,
+        &[GateFinding],
+    ) -> archon_workflow::task_set_contract::FreezeGateStamp,
+) -> Result<PreparedSkeletonFreeze> {
     let freeze_mode = freeze_mode(mode)?;
     let pin_path = acceptance_pin_path(project_root, tasks_root);
     let original_pin = std::fs::read(&pin_path).with_context(|| {
@@ -114,6 +137,8 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         &skeleton_path,
     ));
 
+    diagnostics(&skeleton, &contract, project_root, tasks_root);
+
     if !defects.is_empty() {
         // Shape and set defects are one complete refusal, including siblings
         // that a first-error shape validator used to hide from the author.
@@ -133,7 +158,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
             crate::command::workflow_task_set_candidate::CandidateDefects(defects).into(),
         ));
     }
-    let stamp = gate_stamp(freeze_mode, &findings);
+    let stamp = stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
     let digest = content_digest(&skeleton_bytes);
     let lock = TaskSkeletonLock {

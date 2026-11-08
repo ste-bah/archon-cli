@@ -104,6 +104,8 @@ fn snapshot_error_author_text_names_the_observed_recreation_and_unsafe_reason() 
     let names = ["data/state.txt".to_string()];
     let state_map = input_states(&result, &markers, &names);
     let candidates = [mutation::CandidateDiagnostic {
+        message_mention: false,
+        written_ancestor: false,
         path: names[0].clone(),
         move_path: Some("project/data/state.txt".into()),
         move_root: Some("project".into()),
@@ -135,6 +137,8 @@ fn snapshot_error_author_text_names_the_observed_recreation_and_unsafe_reason() 
 fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
     let finding = baseline_pass_finding("check-id", "0123456789ab");
     let candidate = super::mutation::CandidateDiagnostic {
+        message_mention: false,
+        written_ancestor: false,
         path: "tests/focused.rs".into(),
         move_path: None,
         move_root: None,
@@ -159,6 +163,8 @@ fn baseline_finding_lists_candidates_and_gives_the_root_repair_route() {
     let recreated = ["output/state.txt".to_string()];
     let diagnostics = describe_candidates_with_run_state(
         &[super::mutation::CandidateDiagnostic {
+            message_mention: false,
+            written_ancestor: false,
             path: recreated[0].clone(),
             move_path: None,
             move_root: None,
@@ -272,6 +278,8 @@ fn literal_file_remedy_requires_every_candidate_to_have_no_movable_file() {
     use mutation::ExclusionReason::*;
 
     let candidate = |exclusion| mutation::CandidateDiagnostic {
+        message_mention: false,
+        written_ancestor: false,
         path: "input".into(),
         move_path: None,
         move_root: None,
@@ -319,24 +327,32 @@ fn each_move_state_has_a_distinct_candidate_diagnostic() {
     let diagnostics = describe_candidates_with_run_state(
         &[
             super::mutation::CandidateDiagnostic {
+                message_mention: false,
+                written_ancestor: false,
                 path: absent.clone(),
                 move_path: None,
                 move_root: None,
                 exclusion: Some(super::mutation::ExclusionReason::MissingAtRoot),
             },
             super::mutation::CandidateDiagnostic {
+                message_mention: false,
+                written_ancestor: false,
                 path: symlink.clone(),
                 move_path: None,
                 move_root: None,
                 exclusion: None,
             },
             super::mutation::CandidateDiagnostic {
+                message_mention: false,
+                written_ancestor: false,
                 path: move_failed.clone(),
                 move_path: None,
                 move_root: None,
                 exclusion: None,
             },
             super::mutation::CandidateDiagnostic {
+                message_mention: false,
+                written_ancestor: false,
                 path: recreated.clone(),
                 move_path: None,
                 move_root: None,

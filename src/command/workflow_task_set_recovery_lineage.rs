@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::task_set_contract::{
-    AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest,
+    AcceptancePin, FreezeGateMode, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest,
 };
 use archon_workflow::task_set_lineage::{
     ChainHistory, ChainProof, LaunchLineage, PinTransition, verify_reached_from,
@@ -16,8 +16,8 @@ use archon_workflow::{PortableAcceptanceIdentityV1, WorkflowStore};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    PreparedAcceptanceFreeze, create_dir_all_durably, sync_parent, validate_destination,
-    validate_existing_parents, write_durably,
+    GateFinding, PreparedAcceptanceFreeze, create_dir_all_durably, sync_parent,
+    validate_destination, validate_existing_parents, write_durably,
 };
 const TRIGGER: &str = "recovery-refreeze:";
 #[path = "workflow_task_set_recovery_runs.rs"]
@@ -51,6 +51,7 @@ struct Completion {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub(super) struct Publication {
     pub(super) files: Vec<(PathBuf, Vec<u8>)>,
     pub(super) expected: (PathBuf, Option<String>),
@@ -226,6 +227,29 @@ impl PreparedAcceptanceFreeze {
     /// Only a persisted launch anchor captured by recovery can authorize a
     /// whole-set re-freeze for that run. Ordinary freezes keep their policy.
     pub(crate) fn record_recovery_refreeze(&mut self) -> Result<()> {
+        self.record_observations(true, super::gate_stamp)
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) fn record_with_observations(
+        &mut self,
+        diagnostics: bool,
+        stamp: fn(
+            FreezeGateMode,
+            &[GateFinding],
+        ) -> archon_workflow::task_set_contract::FreezeGateStamp,
+    ) -> Result<()> {
+        self.record_observations(diagnostics, stamp)
+    }
+
+    fn record_observations(
+        &mut self,
+        diagnostics: bool,
+        stamp: fn(
+            FreezeGateMode,
+            &[GateFinding],
+        ) -> archon_workflow::task_set_contract::FreezeGateStamp,
+    ) -> Result<()> {
         let pin_path = super::acceptance_pin_path(&self.project_root, &self.tasks_root);
         let (mut records, digest) = read(&pin_path)?;
         // A pending record of another task root refuses in `validate`.
@@ -252,7 +276,16 @@ impl PreparedAcceptanceFreeze {
                 &self.contract()?,
                 &self.tasks_root.join(TASK_SKELETON_FILE),
             );
-            let gate = super::gate_stamp(self.pin.acceptance_gate.mode, &findings);
+            if diagnostics {
+                let lines = super::link_diagnostics::emit(
+                    &skeleton,
+                    &self.contract()?,
+                    &self.project_root,
+                    &self.tasks_root,
+                );
+                super::link_diagnostics::persist(&self.tasks_root, &lines);
+            }
+            let gate = stamp(self.pin.acceptance_gate.mode, &findings);
             self.findings.extend(findings);
             let lock = TaskSkeletonLock {
                 algorithm: "blake3".into(),
