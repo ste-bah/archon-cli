@@ -64,6 +64,7 @@ impl Case {
         let run = temp.path().join("run");
         std::fs::create_dir_all(run.join("v2")).unwrap();
         let owns = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: id.into(),
             source_path: format!("{id}.md"),
             files_expected_to_change: files.iter().map(|f| f.to_string()).collect(),

@@ -124,3 +124,36 @@ mod line_count_tests;
 #[cfg(test)]
 #[path = "patch_manifest_tests.rs"]
 mod tests;
+
+/// Read only applied records from the coordinator's manifest directories.
+pub fn applied_manifests(run_root: &Path) -> Vec<PatchManifest> {
+    let mut manifests = Vec::new();
+    let stages = run_root.join("write-coordination").join("stages");
+    for stage in std::fs::read_dir(stages).into_iter().flatten().flatten() {
+        if !stage.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let directory = stage.path().join("manifests");
+        if !directory
+            .symlink_metadata()
+            .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+        {
+            continue;
+        }
+        for file in std::fs::read_dir(directory).into_iter().flatten().flatten() {
+            if !file.file_type().is_ok_and(|kind| kind.is_file()) {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(file.path()) else {
+                continue;
+            };
+            if let Ok(manifest) = serde_json::from_slice::<PatchManifest>(&bytes)
+                && manifest.schema == PATCH_MANIFEST_SCHEMA
+                && manifest.status == ManifestStatus::Applied
+            {
+                manifests.push(manifest);
+            }
+        }
+    }
+    manifests
+}

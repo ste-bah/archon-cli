@@ -143,6 +143,8 @@ fn fixed_body_subject_is_digest_only_in_decomposition_log() {
         serde_json::from_value(record.result.data.clone()).unwrap();
     outcome.publication_receipt.as_mut().unwrap().command_id = "land-task-body".into();
     outcome.subjects = vec![archon_workflow::HostCommandSubject {
+        host_record_digest: None,
+        requirement_states: Default::default(),
         task_id: "TASK-534543524554-010".into(),
         file_name: "task.md".into(),
     }];

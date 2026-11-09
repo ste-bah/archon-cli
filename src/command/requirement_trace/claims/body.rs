@@ -11,7 +11,7 @@ pub(super) fn untestable_claims(body: &str, implements: &[String]) -> Vec<(Strin
     implements.iter().filter(|id| {
         !lines.iter().any(|line| !line.metadata && super::observe::mentions(&line.text, id))
     }).map(|id| (id.clone(), format!(
-        "the body never names {id} outside its implements list, so no file, symbol or command it promises is tied to the claim"
+        "the body never names {id} outside its implements list or host-owned metadata, so no file, symbol or command it promises is tied to the claim"
     ))).collect()
 }
 

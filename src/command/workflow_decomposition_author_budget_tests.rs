@@ -86,6 +86,8 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         let subjects = if request.command_id == "freeze-skeleton" {
             vec![archon_workflow::HostCommandSubject {
+                host_record_digest: None,
+                requirement_states: Default::default(),
                 task_id: "TASK-X-010".into(),
                 file_name: "TASK-X-010.md".into(),
             }]

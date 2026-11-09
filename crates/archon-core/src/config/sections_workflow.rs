@@ -10,6 +10,9 @@ pub use acceptance_execution::*;
 #[path = "sections_repository_audit.rs"]
 mod repository_audit;
 pub use repository_audit::*;
+#[path = "sections_proof.rs"]
+mod proof;
+pub use proof::*;
 
 /// Disposition of decomposition-time correctness gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +32,7 @@ pub enum GateMode {
 pub struct WorkflowRuntimeConfig {
     pub repository_audit: RepositoryAuditConfig,
     pub breaker_calls: BreakerCallLimits,
+    pub proof: ProofConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_execution: Option<AcceptanceExecutionConfig>,
     pub generated: GeneratedWorkflowConfig,

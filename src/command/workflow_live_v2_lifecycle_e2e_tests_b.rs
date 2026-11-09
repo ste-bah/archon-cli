@@ -289,6 +289,7 @@ async fn failed_final_report_emits_host_built_fallback() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-EX-FALLBACK".to_string(),
             source_path: "tasks/TASK-EX-FALLBACK.md".to_string(),
             acceptance_criteria: vec!["A terminal report is persisted.".to_string()],

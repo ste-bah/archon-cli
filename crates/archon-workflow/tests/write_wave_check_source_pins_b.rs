@@ -31,6 +31,7 @@ async fn a_refused_branch_holds_nothing_and_records_no_request() {
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-001".into(),
             source_path: "tasks/TASK-001.md".into(),
             files_forbidden_to_change: vec!["other.txt".into()],

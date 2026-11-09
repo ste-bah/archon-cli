@@ -482,3 +482,10 @@ mod absent_contract_tests;
 
 #[path = "workflow_task_set_skeleton_no_check_tests.rs"]
 mod skeleton_no_check_tests;
+
+#[path = "workflow_task_set_decisions_tests.rs"]
+mod decisions_tests;
+
+#[cfg(unix)]
+#[path = "workflow_freeze_skeleton_live_tests.rs"]
+mod live_skeleton_tests;

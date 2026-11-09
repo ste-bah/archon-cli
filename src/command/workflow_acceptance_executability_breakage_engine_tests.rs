@@ -7,6 +7,8 @@ async fn attribution_shared_outside_and_mixed() {
             f.classes.entries[0].deliverables[0].shared = true;
             f.classes.entries[0].deliverables.push(
                 archon_workflow::v2::requirement_classes::DeliverablePresence {
+                    wiring_root: false,
+                    landing_verified: false,
                     artifact_path: "other".into(),
                     error: None,
                     at_base: true,
@@ -258,6 +260,8 @@ async fn changed_mutant_only_and_current_ownership_recomputed() {
     );
     f.classes.entries[0].deliverables.push(
         archon_workflow::v2::requirement_classes::DeliverablePresence {
+            wiring_root: false,
+            landing_verified: false,
             artifact_path: "other".into(),
             error: None,
             at_base: true,

@@ -114,6 +114,8 @@ pub(super) fn fixture() -> Fixture {
         schema_version: 1,
         acceptance_digest: acceptance_digest.clone(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-H-001".into(),
             file_name: "TASK-H-001.md".into(),
@@ -158,6 +160,7 @@ pub(super) fn fixture() -> Fixture {
         schema_version: "test".into(),
         source_roots: vec![task_root.display().to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-H-001".into(),
             source_path: task_root.join("TASK-H-001.md").display().to_string(),
             implements: vec!["REQ-1".into()],

@@ -292,7 +292,8 @@ fn combined_shape(format: bool, tampered: bool, rebound: bool, changed_shape: bo
             archon_core::config::GateMode::Observe,
             &run.set.contract(),
             None,
-            crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks).unwrap(),
+            crate::command::workflow_task_set::capture_live_contract_digest(&run.set.tasks)
+                .unwrap(),
         )
         .unwrap();
         let result = prepared.record_recovery_refreeze();

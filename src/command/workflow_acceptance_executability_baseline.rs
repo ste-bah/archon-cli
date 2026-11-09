@@ -226,6 +226,42 @@ impl HostProbe {
         std::mem::take(&mut *self.reuse_audit.lock().expect("reuse audit lock"))
     }
 
+    pub(super) fn observed_on_baseline(
+        &self,
+        contract: &AcceptanceContract,
+        id: &str,
+        passed: bool,
+    ) {
+        use archon_workflow::baseline_results::{BaselineOutcome, check_digest};
+        if let Some(entry) = contract
+            .acceptance
+            .iter()
+            .chain(&contract.supplementary)
+            .find(|e| e.id == id)
+        {
+            self.baseline_observations
+                .lock()
+                .expect("baseline observations lock")
+                .insert(
+                    (id.into(), check_digest(&entry.check)),
+                    if passed {
+                        BaselineOutcome::Passed
+                    } else {
+                        BaselineOutcome::Failed
+                    },
+                );
+        }
+    }
+
+    pub(super) fn drain_baseline_observations(&self) -> super::BaselineObservations {
+        std::mem::take(
+            &mut *self
+                .baseline_observations
+                .lock()
+                .expect("baseline observations lock"),
+        )
+    }
+
     fn passed_on_baseline(&self, id: &str) {
         self.baseline_passes
             .lock()

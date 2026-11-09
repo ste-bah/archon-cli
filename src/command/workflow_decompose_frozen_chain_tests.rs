@@ -1,17 +1,14 @@
 //! The launcher's reading of a task root: every combination of frozen
 //! acceptance, frozen skeleton and present bodies, and the rule that a lock
 //! which exists but does not verify is an error rather than `false`.
-
-use std::path::{Path, PathBuf};
-
-use archon_workflow::task_set_contract::{
-    ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
-};
-
 use super::test_support::contract_bytes;
 use super::{
     FrozenChainSnapshot, FrozenStage, frozen_chain_snapshot, verify_frozen_stage_with_recovery,
 };
+use archon_workflow::task_set_contract::{
+    ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
+};
+use std::path::{Path, PathBuf};
 
 #[test]
 fn frozen_override_rechecks_stale_logic_even_when_old_findings_are_open() {
@@ -144,6 +141,8 @@ fn snapshot(fixture: &Fixture) -> anyhow::Result<FrozenChainSnapshot> {
 fn subjects(ids: &[&str]) -> Vec<archon_workflow::HostCommandSubject> {
     ids.iter()
         .map(|id| archon_workflow::HostCommandSubject {
+            host_record_digest: None,
+            requirement_states: Default::default(),
             task_id: (*id).into(),
             file_name: format!("{id}.md"),
         })
@@ -497,3 +496,5 @@ mod verification;
 mod admission;
 #[path = "workflow_decompose_classification_verdict_tests.rs"]
 mod classification_verdict_tests;
+#[path = "workflow_decompose_legacy_bytes_tests.rs"]
+mod legacy_bytes_tests;

@@ -19,6 +19,8 @@ const FILE: &str = "TASK-X-010.md";
 
 fn frozen() -> FrozenTask {
     FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: TASK.into(),
         file_name: FILE.into(),
@@ -82,6 +84,8 @@ fn record(
                     command_id: "land-task-body".into(),
                     stdin: Some(candidate(round)),
                     target: Some(HostCommandSubject {
+                        host_record_digest: None,
+                        requirement_states: Default::default(),
                         task_id: TASK.into(),
                         file_name: FILE.into(),
                     }),
@@ -375,4 +379,31 @@ fn landing_reconcile_restores_origin_main_stamped_ready_receipt() {
     assert_eq!(result.restores.len(), 1, "{:?}", result.lines);
     assert_eq!(result.restores[0].bytes, ORIGIN_READY.as_bytes());
     assert!(result.lines.iter().any(|line| line.contains("SETTLE")));
+}
+
+#[test]
+fn changed_host_states_do_not_restore_a_body_under_an_old_receipt() {
+    let old = landing(
+        "old",
+        "t1",
+        "before",
+        false,
+        &content_digest(&landed("before")),
+    );
+    let mut next = frozen();
+    next.requirement_states.insert(
+        "item".into(),
+        archon_workflow::requirement_state::RequirementDecision::new(
+            archon_workflow::requirement_state::RequirementState::Undecided,
+            "weak_test",
+        ),
+    );
+    next.status = Some("kept".into());
+    let rebuilt = rebuild(&old, &next, Path::new(FILE)).unwrap();
+    assert_ne!(content_digest(&rebuilt), content_digest(&landed("before")));
+    assert!(
+        String::from_utf8(rebuilt)
+            .unwrap()
+            .contains("kept, not rebuilt: item")
+    );
 }

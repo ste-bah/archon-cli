@@ -7,6 +7,8 @@ fn snapshot(body: &str) -> FrozenChainSnapshot {
         acceptance: true,
         skeleton: true,
         subjects: vec![archon_workflow::HostCommandSubject {
+            host_record_digest: None,
+            requirement_states: Default::default(),
             task_id: "TASK-1".into(),
             file_name: "TASK-1.md".into(),
         }],

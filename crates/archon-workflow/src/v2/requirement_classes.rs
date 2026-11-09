@@ -25,6 +25,10 @@ pub enum Fallback {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeliverablePresence {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wiring_root: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub landing_verified: bool,
     pub artifact_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -53,7 +57,7 @@ pub struct RequirementClassification {
     pub baseline_commit: Option<String>,
     pub acceptance_digest: String,
     pub baseline_results_digest: String,
-    pub error: Option<String>,
+    pub error: Option<ClassificationError>,
     pub entries: Vec<RequirementEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_snapshot: Option<crate::base_snapshot::BaseSnapshot>,
@@ -98,12 +102,11 @@ pub fn classify_checked(
                 .filter(|d| d.implements.contains(id))
                 .map(|d| {
                     let result = presence(&d.artifact_path);
-                    let error = result
-                        .as_ref()
-                        .err()
-                        .map(|_| "deliverable_presence_error".into());
+                    let error = result.as_ref().err().cloned();
                     let (at_base, in_checkout) = result.unwrap_or_default();
                     DeliverablePresence {
+                        wiring_root: false,
+                        landing_verified: false,
                         artifact_path: d.artifact_path.clone(),
                         error,
                         at_base,
@@ -182,3 +185,7 @@ pub fn classify_checked(
     }
     entries
 }
+
+#[path = "requirement_classification_error.rs"]
+mod classification_error;
+pub use classification_error::ClassificationError;

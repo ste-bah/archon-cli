@@ -51,6 +51,7 @@ fn universe(tasks: &Path) -> WorkflowV2TaskUniverse {
         schema_version: "v1".into(),
         source_roots: vec![tasks.display().to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-X-001".into(),
             source_path: tasks.join("TASK-X-001.md").display().to_string(),
             ..Default::default()

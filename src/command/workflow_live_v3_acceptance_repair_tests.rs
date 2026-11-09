@@ -79,6 +79,7 @@ fn run_fixture_with_mode_inner(
     let set = frozen_set_in(checks, mode, "");
     std::fs::write(set.project.path().join("present"), "x").unwrap();
     let task = |id: &str, implements: &str| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: set.tasks.join(format!("{id}.md")).display().to_string(),
         implements: vec![implements.into()],

@@ -113,6 +113,8 @@ fn frozen_fixture_with_permitted(
         schema_version: 1,
         acceptance_digest: acceptance_digest.clone(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-EX-001".into(),
             file_name: "TASK-EX-001.md".into(),

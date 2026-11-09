@@ -11,6 +11,7 @@ fn universe(declared: &[&[&str]]) -> WorkflowV2TaskUniverse {
             .iter()
             .enumerate()
             .map(|(at, owns)| WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: format!("TASK-{at}"),
                 source_path: format!("tasks/TASK-{at}.md"),
                 files_expected_to_change: owns.iter().map(|f| f.to_string()).collect(),

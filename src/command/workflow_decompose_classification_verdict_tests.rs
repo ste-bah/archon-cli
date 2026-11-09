@@ -9,6 +9,7 @@ fn s4a_diagnostic_lock_fields_leave_verification_and_trace_verdicts_unchanged() 
 fn s5_snapshot_leaves_verification_and_trace_verdicts_unchanged() {
     use archon_workflow::base_snapshot::{BaseSnapshot, SnapshotEntry};
     let mut snapshot = BaseSnapshot {
+        landing_verified: Default::default(),
         commit: "diagnostic".into(),
         entries: [("path".into(), SnapshotEntry::Absent)].into(),
         digest: String::new(),

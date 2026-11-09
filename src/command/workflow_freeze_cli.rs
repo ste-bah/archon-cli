@@ -13,6 +13,8 @@ use crate::command::workflow_freeze_candidate::{candidate_document, candidate_re
 
 #[path = "workflow_freeze_acceptance_cli.rs"]
 mod acceptance;
+#[path = "workflow_freeze_skeleton_proof.rs"]
+pub(crate) mod skeleton_proof;
 pub(crate) use acceptance::client as reverify_acceptance_client;
 
 pub(super) async fn handle(
@@ -78,9 +80,9 @@ pub(super) async fn handle(
                     gate_envelope.as_deref(),
                     call_id.as_deref(),
                 )?;
-                stage_skeleton(cwd, tasks, prd, config, staged)?;
+                skeleton_cli::stage_skeleton(cwd, tasks, prd, config, env_vars, staged).await?;
             } else {
-                freeze_skeleton(cwd, tasks, prd, config)?;
+                skeleton_cli::freeze_skeleton(cwd, tasks, prd, config, env_vars).await?;
             }
             Ok(true)
         }
@@ -278,85 +280,6 @@ async fn stage_acceptance_candidate(
     write_staged_manifest(cwd, staged, "freeze-acceptance", evaluation, outputs)
 }
 
-fn stage_skeleton(
-    cwd: &Path,
-    tasks: &Path,
-    prd: &Path,
-    config: &ArchonConfig,
-    staged: StagedArgs<'_>,
-) -> Result<()> {
-    let gate = (
-        "freeze-skeleton",
-        crate::command::workflow_gate::GateId::FreezeSkeleton,
-        "skeleton",
-    );
-    let result = (|| {
-        if config.workflow.gate_mode == archon_core::config::GateMode::Off {
-            return Err(anyhow!(
-                "gate_mode=off must return before staged skeleton preparation"
-            ));
-        }
-        let resume = staged_freeze_resume(gate.0, &mut std::io::stderr());
-        let candidate = read_bounded_stdin(
-            archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
-            staged.staging_root,
-        )?;
-        crate::command::workflow_freeze_candidate::record_candidate_extraction(
-            &candidate,
-            &mut std::io::stderr().lock(),
-        )?;
-        let tasks_root = absolute(cwd, tasks);
-        let prd_path = absolute(cwd, prd);
-        if let Some(refused) =
-            defects::refuse_element_shapes(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
-        {
-            return refused;
-        }
-        if let Some((code, reason)) =
-            candidate_refusal::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
-        {
-            return refuse_candidate_artifact(
-                cwd,
-                staged,
-                "freeze-skeleton",
-                crate::command::workflow_gate::GateId::FreezeSkeleton,
-                "skeleton",
-                code,
-                &reason,
-            );
-        }
-        let prepared =
-            match crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate_with_resume(
-                cwd,
-                &tasks_root,
-                &prd_path,
-                config.workflow.gate_mode,
-                candidate_document(&candidate).into_owned(),
-                &resume,
-            ) {
-                Ok(prepared) => prepared,
-                Err(error)
-                    if crate::command::workflow_task_set::CandidateRejected::caused(&error) =>
-                {
-                    return defects::refuse_candidate_error(
-                        cwd,
-                        staged,
-                        "freeze-skeleton",
-                        crate::command::workflow_gate::GateId::FreezeSkeleton,
-                        "skeleton",
-                        &error,
-                    );
-                }
-                Err(error) => {
-                    return report_operational_failure(cwd, staged, "freeze-skeleton", &error);
-                }
-            };
-        let (evaluation, outputs) = prepared.into_staged_parts();
-        write_staged_manifest(cwd, staged, "freeze-skeleton", evaluation, outputs)
-    })();
-    result.map_err(crate::command::workflow_host_fault::child_failure)
-}
-
 /// The staged freeze's budget and progress (Issue 255): the host's wall
 /// clock for the selected capability, counted from here, and a progress
 /// baseline on `stderr` before anything slow (stdin, the judge client, the
@@ -409,47 +332,6 @@ use staged_output::{
     report_operational_failure, write_staged_manifest,
 };
 
-fn freeze_skeleton(cwd: &Path, tasks: &Path, prd: &Path, config: &ArchonConfig) -> Result<()> {
-    if config.workflow.gate_mode == archon_core::config::GateMode::Off {
-        print!("{}", crate::command::workflow_gate::OFF_MESSAGE);
-        return Ok(());
-    }
-    let tasks_root = absolute(cwd, tasks);
-    let prd_path = absolute(cwd, prd);
-    let prepared = crate::command::workflow_task_set::prepare_skeleton_freeze(
-        cwd,
-        &tasks_root,
-        &prd_path,
-        config.workflow.gate_mode,
-    )?;
-    let findings = prepared.findings.clone();
-    let publication_identity = prepared.publication_identity();
-    let mut disposition = crate::command::workflow_gate::run_sync_gate(
-        cwd,
-        config.workflow.gate_mode,
-        crate::command::workflow_gate::GateId::FreezeSkeleton,
-        || {
-            Ok(
-                crate::command::workflow_gate::GateEvaluation::new("", findings)
-                    .with_publication_identity(publication_identity),
-            )
-        },
-    )?;
-    for diagnostic in disposition.diagnostics() {
-        eprintln!("{diagnostic}");
-    }
-    disposition.require_allowed()?;
-    let permit = disposition
-        .take_publication_permit()
-        .ok_or_else(|| anyhow!("skeleton freeze received no publication permit"))?;
-    let result = crate::command::workflow_task_set::publish_skeleton_freeze(prepared, permit)?;
-    println!(
-        "task skeleton frozen: digest={} acceptance_digest={}",
-        result.skeleton_digest, result.acceptance_digest
-    );
-    Ok(())
-}
-
 /// `path` resolved against `cwd`, refused at the command line when it is
 /// empty or names nothing. `flag` names the option in the error. An empty
 /// `--prd ""` used to resolve to `cwd` itself, and the run failed far from
@@ -487,3 +369,6 @@ pub(crate) mod baseline_tests;
 // Issue 360: a resume checks every carried acceptance entry with this
 // build's freeze entry validator before it carries it.
 pub(crate) use defects::{ENTRY_SHAPE, element_shape_defects};
+
+#[path = "workflow_freeze_skeleton_cli.rs"]
+mod skeleton_cli;

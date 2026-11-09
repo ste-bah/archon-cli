@@ -120,6 +120,8 @@ pub(crate) fn freeze_skeleton(project: &Path, tasks: &Path, acceptance_digest: &
         tasks: ids
             .iter()
             .map(|id| FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: (*id).into(),
                 file_name: format!("{id}.md"),

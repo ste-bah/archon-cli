@@ -10,7 +10,7 @@
 //!
 //! | declared `status:` | effect on scheduling |
 //! | --- | --- |
-//! | `done`, `complete`, `completed`, `verified` | [`Complete`]. Never scheduled, on a fresh run or a resume, and counts as a satisfied dependency for everything downstream. The claim is the task file's, so it is surfaced in the run's evidence rather than applied silently. |
+//! | `done`, `kept`, `complete`, `completed`, `verified` | [`Complete`]. Never scheduled, on a fresh run or a resume, and counts as a satisfied dependency for everything downstream. The claim is the task file's, so it is surfaced in the run's evidence rather than applied silently. |
 //! | `blocked` | [`Blocked`]. Scheduled only once every dependency it declares is complete — which is what the word means in these files, and the reason the corpus can be 15/17 `blocked` and still run. A `blocked` task that declares *no* dependency is refused: nothing in the task set can ever unblock it. |
 //! | `ready`, `pending`, `todo`, `open`, `new`, `in_progress`, `in_review`, `needs_review`, `review`, `remediation` | [`Runnable`]. Ordinary work, scheduled when its dependencies are satisfied. `in_review` is deliberately here: review is not completion, so a run that has not itself completed the task must still do it. |
 //! | absent, or an empty string | [`Runnable`]. A file that declares nothing has made no claim to honour. |
@@ -34,7 +34,7 @@
 pub enum WorkflowV2DeclaredStatus {
     /// Ordinary work: scheduled once its dependencies are satisfied.
     Runnable,
-    /// Already finished: never scheduled, and satisfies its dependents.
+    /// No implementation scheduled; satisfies its dependents.
     Complete,
     /// Declared blocked by its author: runnable only behind its declared
     /// dependencies, and refused outright when it declares none.
@@ -54,7 +54,9 @@ pub fn declared_status(raw: Option<&str>) -> Result<WorkflowV2DeclaredStatus, St
     match normalized.as_str() {
         "ready" | "pending" | "todo" | "open" | "new" | "in_progress" | "in_review"
         | "needs_review" | "review" | "remediation" => Ok(WorkflowV2DeclaredStatus::Runnable),
-        "done" | "complete" | "completed" | "verified" => Ok(WorkflowV2DeclaredStatus::Complete),
+        "done" | "kept" | "complete" | "completed" | "verified" => {
+            Ok(WorkflowV2DeclaredStatus::Complete)
+        }
         "blocked" => Ok(WorkflowV2DeclaredStatus::Blocked),
         other => Err(format!(
             "an unrecognised status: '{other}'. Scheduling refuses a status it cannot classify \

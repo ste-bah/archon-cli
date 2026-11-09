@@ -263,6 +263,7 @@ fn a_kill_after_the_commit_point_rolls_forward_at_resume() {
         schema_version: "workflow-v2-task-universe-v1".into(),
         source_roots: vec![scenario.tasks().display().to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-EX-001".into(),
             source_path: scenario
                 .tasks()

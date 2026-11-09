@@ -156,7 +156,13 @@ impl FrozenChainSnapshot {
             "bodies": self.bodies,
         });
         if self.skeleton && !self.tasks.is_empty() {
-            argument["tasks"] = serde_json::json!(self.tasks);
+            let mut tasks = serde_json::to_value(&self.tasks).expect("serializable entries");
+            for task in tasks.as_array_mut().expect("entry array") {
+                task.as_object_mut()
+                    .expect("entry object")
+                    .remove("proven_done");
+            }
+            argument["tasks"] = tasks;
         }
         argument
     }
@@ -354,10 +360,9 @@ fn snapshot_inner(
                 .preserved_digests
                 .push((task.file_name.clone(), content_digest(&bytes)));
         }
-        snapshot.subjects.push(HostCommandSubject {
-            task_id: task.task_id.clone(),
-            file_name: task.file_name.clone(),
-        });
+        snapshot
+            .subjects
+            .push(HostCommandSubject::from_frozen(task));
     }
     snapshot.tasks = skeleton.tasks;
     Ok(snapshot)

@@ -18,10 +18,9 @@
 //! The PRD may have moved since the freeze (it gained the ids): the contract
 //! is then rebound to the PRD as it is now, and the rebind -- from and to
 //! digest -- is written into the lineage link's trigger. An obligation the
-//! moved PRD added that no skeleton task claims is claimed by every task of
-//! the set together, as a recorded shared claim (the reroute rule: a check
-//! no task owns goes to every task), so the skeleton gate judges the set it
-//! would have judged had the PRD said so at the freeze. Whatever a gate
+//! moved PRD added is assigned only to tasks that declare its artifact or
+//! own its covering check. Unowned obligations remain unclaimed so the
+//! skeleton gate can report the ownership gap. Whatever a gate
 //! still refuses stops the republish, and the caller records it by name.
 
 use archon_workflow::task_set_contract::{AcceptanceCriterion, JudgeDecision};
@@ -37,8 +36,7 @@ pub(crate) struct Extension {
     pub(crate) prd_digest: String,
     /// The digest the contract was frozen against.
     pub(crate) frozen_prd_digest: String,
-    /// Obligations of the PRD as it is now that the skeleton's tasks claim
-    /// none of: claimed by every task together.
+    /// Newly introduced obligations to assign to their declared owners.
     pub(crate) new_obligations: BTreeSet<String>,
 }
 
@@ -60,7 +58,7 @@ impl Extension {
         }
         if !self.new_obligations.is_empty() {
             note.push_str(&format!(
-                "; obligations {} are claimed by every task of the set together (a shared claim: no task claimed them)",
+                "; new obligations {} are assigned to declared owners or sent for ownership repair",
                 self.new_obligations
                     .iter()
                     .cloned()
@@ -71,11 +69,48 @@ impl Extension {
         note
     }
 
-    /// Every task claims each new obligation, as a shared claim.
-    pub(super) fn claim_new_obligations(&self, skeleton: &mut TaskSkeleton) {
+    /// Defer only new unowned obligations to the existing skeleton repair route.
+    pub(super) fn take_unowned_findings(
+        &self,
+        findings: &mut Vec<GateFinding>,
+    ) -> Vec<GateFinding> {
+        let mut routed = Vec::new();
+        findings.retain(|finding| {
+            let defer = finding.deterministic_defect.as_ref().is_some_and(|d| {
+                d.code == "unowned_obligation" && self.new_obligations.contains(&d.subject)
+            });
+            if defer {
+                routed.push(finding.clone());
+            }
+            !defer
+        });
+        routed
+    }
+
+    /// Add an obligation only to its declared artifact or covering-check owners.
+    pub(super) fn claim_new_obligations(
+        &self,
+        skeleton: &mut TaskSkeleton,
+        contract: &AcceptanceContract,
+    ) {
         for task in &mut skeleton.tasks {
             for obligation in &self.new_obligations {
-                if !task.implements.contains(obligation) {
+                let owns = task
+                    .deliverable_contracts
+                    .iter()
+                    .any(|d| d.implements.contains(obligation))
+                    || contract
+                        .acceptance
+                        .iter()
+                        .chain(&contract.supplementary)
+                        .any(|check| {
+                            check.covers.contains(obligation)
+                                && archon_workflow::v2::acceptance_stage::coverage::answers_for(
+                                    check,
+                                    &task.implements,
+                                )
+                        });
+                if owns && !task.implements.contains(obligation) {
                     task.implements.push(obligation.clone());
                 }
             }
@@ -199,7 +234,7 @@ fn extend_owned(request: ReauthorRequest<'_>, extension: &Extension) -> Result<R
         repaired,
         Vec::new(),
         Some(extension),
-        &request.ids,
+        request.ids,
     )
 }
 

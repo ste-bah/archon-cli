@@ -115,6 +115,8 @@ pub(in super::super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<Covera
             tasks: claims
                 .iter()
                 .map(|claim| archon_workflow::task_skeleton::FrozenTask {
+                    requirement_states: Default::default(),
+                    proven_done: Default::default(),
                     status: None,
                     task_id: claim.task_id.clone(),
                     file_name: String::new(),

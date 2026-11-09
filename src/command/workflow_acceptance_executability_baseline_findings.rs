@@ -105,6 +105,7 @@ pub async fn cannot_fail_findings(
                 continue;
             }
             silent::clear(probe, &baseline.commit, contract, id);
+            probe.observed_on_baseline(contract, id, passed(result));
             if passed(result) {
                 probe.passed_on_baseline(id);
                 passing.push(id.clone());

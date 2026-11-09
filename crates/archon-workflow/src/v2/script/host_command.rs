@@ -61,6 +61,8 @@ pub fn parse_host_command_request(
                     })
             };
             Some(crate::v2::host_command::HostCommandSubject {
+                host_record_digest: None,
+                requirement_states: Default::default(),
                 task_id: field("taskId")?,
                 file_name: field("fileName")?,
             })

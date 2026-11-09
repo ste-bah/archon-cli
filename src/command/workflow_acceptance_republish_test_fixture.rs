@@ -223,6 +223,8 @@ pub(crate) fn write_chain(
         .iter()
         .enumerate()
         .map(|(index, entry)| FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: format!("TASK-F-{:03}", index + 1),
             file_name: format!("TASK-F-{:03}.md", index + 1),

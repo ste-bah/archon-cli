@@ -73,6 +73,8 @@ pub(super) fn task() -> Value {
         ordering_only: true,
     };
     serde_json::to_value(FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: Some("done".into()),
         task_id: "TASK-X-002".into(),
         file_name: "TASK-X-002.md".into(),

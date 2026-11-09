@@ -356,6 +356,7 @@ fn declaring_universe() -> WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: TASK.into(),
             source_path: format!("tasks/{TASK}.md"),
             files_expected_to_change: vec!["owned.txt".into(), "other.txt".into()],

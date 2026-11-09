@@ -32,6 +32,8 @@ fn skeleton() -> TaskSkeleton {
     use crate::task_skeleton::{ConsumedArtifact, FrozenDependency, FrozenTask};
     use crate::task_universe::WorkflowV2DeliverableContract;
     let task = |id: &str| FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: id.to_string(),
         file_name: format!("{id}.md"),

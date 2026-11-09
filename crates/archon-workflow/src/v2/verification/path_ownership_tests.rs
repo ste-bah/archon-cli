@@ -13,6 +13,7 @@ use crate::v2::WorkflowV2FanoutItem;
 
 fn task(id: &str, expected: &[&str]) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         files_expected_to_change: expected
             .iter()

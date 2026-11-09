@@ -3,6 +3,7 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 
 fn task(id: &str, deps: &[&str]) -> crate::task_universe::WorkflowV2TaskUniverseTask {
     crate::task_universe::WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         aliases: Vec::new(),
         source_path: format!("tasks/{id}.md"),

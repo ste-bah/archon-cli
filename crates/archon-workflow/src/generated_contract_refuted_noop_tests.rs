@@ -16,6 +16,7 @@ use crate::task_universe::{
 /// is doing the work, not the one it sits beside.
 fn inspectable_task(id: &str) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         source_path: format!("/tmp/{id}.md"),
         deliverable_contracts: vec![WorkflowV2DeliverableContract {

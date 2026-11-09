@@ -42,7 +42,14 @@ fn frozen_status_is_stamped_only_when_present() {
 #[test]
 fn stamp_refuses_only_authored_completion_and_preserves_other_values() {
     use super::super::workflow_host_command_binding::stamp_frozen_frontmatter;
-    for status in ["done", "complete", "completed", "verified", "  DONE "] {
+    for status in [
+        "done",
+        "kept",
+        "complete",
+        "completed",
+        "verified",
+        "  DONE ",
+    ] {
         let candidate = format!("```yaml\ntask_id: TASK-X-010\nstatus: '{status}'\n```\n");
         let error = stamp_frozen_frontmatter(&candidate, &frozen_with_owned_fields()).unwrap_err();
         assert!(
@@ -87,7 +94,7 @@ fn stamp_refuses_only_authored_completion_and_preserves_other_values() {
 
 #[tokio::test]
 async fn authored_completion_and_missing_status_return_body_refusals() {
-    for status in ["done", "verified"] {
+    for status in ["done", "kept", "verified"] {
         let candidate = format!(
             "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: {status}\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n"
         );

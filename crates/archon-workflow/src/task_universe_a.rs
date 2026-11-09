@@ -92,6 +92,8 @@ fn normalized_task_alias(value: &str) -> String {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowV2TaskUniverseTask {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub requirement_states: std::collections::BTreeMap<String, String>,
     pub canonical_task_id: String,
     #[serde(default)]
     pub aliases: Vec<String>,

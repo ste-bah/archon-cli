@@ -266,6 +266,7 @@ mod declaration_tests {
         };
         let universe = WorkflowV2TaskUniverse {
             tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "UNIT-1".into(),
                 deliverable_contracts: vec![contract("new.txt"), contract("docs/x.md")],
                 ..Default::default()

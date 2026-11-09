@@ -23,6 +23,7 @@ fn universe(forbidden: &[&str]) -> WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-001".into(),
             source_path: "tasks/TASK-001.md".into(),
             files_forbidden_to_change: forbidden.iter().map(|f| f.to_string()).collect(),

@@ -270,6 +270,7 @@ impl PreparedAcceptanceFreeze {
         if let Some(skeleton) = &skeleton {
             let mut skeleton = skeleton.clone();
             skeleton.acceptance_digest = self.pin.acceptance_digest.clone();
+            archon_workflow::task_skeleton::refresh_done_proofs(&mut skeleton, &contract);
             let bytes = serde_json::to_vec_pretty(&skeleton)?;
             let digest = content_digest(&bytes);
             let findings = super::coverage_gate::skeleton_check_findings(

@@ -55,6 +55,8 @@ fn legacy_body_call_without_target_keeps_its_replay_identity() {
     );
     let mut targeted = same_call;
     targeted.target = Some(archon_workflow::HostCommandSubject {
+        host_record_digest: None,
+        requirement_states: Default::default(),
         task_id: "TASK-X-010".into(),
         file_name: "TASK-X-010.md".into(),
     });
@@ -135,6 +137,8 @@ pub(super) fn seed_frozen_subjects(
         tasks: subjects
             .iter()
             .map(|(task_id, file_name)| FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: (*task_id).into(),
                 file_name: (*file_name).into(),

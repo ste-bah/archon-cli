@@ -28,6 +28,7 @@ fn repository() -> tempfile::TempDir {
 
 fn task(id: &str, declared: &str) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         files_expected_to_change: vec![format!("`{declared}` — the deliverable")],
         ..Default::default()
@@ -205,6 +206,7 @@ fn universe_declaring(entry: &str) -> WorkflowV2TaskUniverse {
         schema_version: "1".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-B".into(),
             files_expected_to_change: vec![entry.to_string()],
             ..Default::default()

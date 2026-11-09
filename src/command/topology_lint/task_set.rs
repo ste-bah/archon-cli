@@ -282,6 +282,8 @@ fn skeleton_from_tasks(
         tasks: tasks
             .iter()
             .map(|task| FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: task.canonical_task_id.clone(),
                 file_name: PathBuf::from(&task.source_path)

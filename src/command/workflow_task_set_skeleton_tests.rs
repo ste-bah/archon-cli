@@ -438,6 +438,8 @@ fn P5_1_freeze_skeleton_reports_missing_constraint_owner() {
         schema_version: 1,
         acceptance_digest: pin.acceptance_digest.clone(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010-body.md".into(),

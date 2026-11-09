@@ -424,6 +424,7 @@ fn attached_findings_carry_universe_task_ids_only() {
         schema_version: "t".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-A".into(),
             aliases: vec!["TA".into()],
             ..Default::default()
@@ -452,6 +453,7 @@ fn attached_findings_carry_universe_task_ids_only() {
 fn a_canonical_id_wins_over_another_tasks_alias() {
     use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
     let task = |id: &str, aliases: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         aliases: aliases.iter().map(|a| a.to_string()).collect(),
         ..Default::default()

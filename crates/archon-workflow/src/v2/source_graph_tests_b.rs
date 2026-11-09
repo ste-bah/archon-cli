@@ -10,6 +10,7 @@ fn required_tools_come_from_the_task_universe_not_the_agent_item() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-120".to_string(),
             aliases: vec!["T120".to_string()],
             source_path: "/tmp/tasks/TASK-TDL-120.md".to_string(),
@@ -393,6 +394,7 @@ fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task()
         universe
             .tasks
             .push(crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: task_id.to_string(),
                 aliases: Vec::new(),
                 source_path: format!("/tmp/tasks/{task_id}.md"),
@@ -405,6 +407,7 @@ fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task()
     universe
         .tasks
         .push(crate::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-130".to_string(),
             aliases: Vec::new(),
             source_path: "/tmp/tasks/TASK-TDL-130.md".to_string(),

@@ -227,6 +227,7 @@ fn a_code_task_declaring_a_run_directory_under_its_task_root_passes_live_wiring(
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TRADING-010".to_string(),
             deliverable_contracts: vec![
                 WorkflowV2DeliverableContract {

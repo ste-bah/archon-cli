@@ -7,6 +7,8 @@ fn all_seventy_invalid_filenames_are_reported_before_any_repair() {
         acceptance_digest: "digest".into(),
         tasks: (1..=70)
             .map(|n| FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: format!("TASK-X-{n:03}"),
                 file_name: format!("bad{n}"),
@@ -40,6 +42,8 @@ fn independent_skeleton_header_and_task_defects_are_reported_together() {
         schema_version: 9,
         acceptance_digest: "wrong".into(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "invalid".into(),
             file_name: "bad".into(),
@@ -97,6 +101,8 @@ fn acceptance_structure_reports_all_independent_entry_defects() {
 fn independent_graph_cycles_are_all_reported() {
     let tasks = (1..=4)
         .map(|n| FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: format!("TASK-X-{n:03}"),
             file_name: format!("TASK-X-{n:03}.md"),
@@ -154,6 +160,7 @@ fn contract_audit_reports_all_path_and_verifier_defects_together() {
         schema_version: "v1".into(),
         source_roots: vec![],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-X-001".into(),
             deliverable_contracts: vec![contract],
             ..Default::default()
@@ -173,6 +180,8 @@ fn contract_audit_reports_all_path_and_verifier_defects_together() {
 fn graph_task(n: u32, depends_on: &[u32], blocks: &[u32]) -> FrozenTask {
     let id = |n: &u32| format!("TASK-X-{n:03}");
     FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: id(&n),
         file_name: format!("{}.md", id(&n)),

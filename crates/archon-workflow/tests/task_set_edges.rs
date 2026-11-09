@@ -15,6 +15,8 @@ fn contract(path: &str) -> WorkflowV2DeliverableContract {
 
 fn task(id: &str) -> FrozenTask {
     FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: id.into(),
         file_name: format!("{id}-body.md"),

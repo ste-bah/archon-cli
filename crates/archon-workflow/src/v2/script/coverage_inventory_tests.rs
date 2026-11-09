@@ -25,6 +25,7 @@ fn project() -> (tempfile::TempDir, WorkflowV2TaskUniverse) {
     )
     .unwrap();
     let task = |id: &str, implements: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         implements: implements.iter().map(|i| i.to_string()).collect(),
         ..Default::default()

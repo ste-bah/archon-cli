@@ -114,3 +114,24 @@ pub(super) fn metadata_strings(metadata: &serde_json::Value, field: &str) -> Vec
         _ => Vec::new(),
     }
 }
+
+pub(super) fn requirement_states(
+    metadata: &serde_json::Value,
+) -> WorkflowResult<std::collections::BTreeMap<String, String>> {
+    let Some(value) = metadata.get("requirement_states") else {
+        return Ok(Default::default());
+    };
+    let states: std::collections::BTreeMap<String, String> = serde_json::from_value(value.clone())
+        .map_err(|e| {
+            WorkflowError::TaskBodyInvalid(format!("unreadable requirement_states: {e}"))
+        })?;
+    if let Some((id, state)) = states
+        .iter()
+        .find(|(_, s)| !matches!(s.as_str(), "done" | "missing" | "undecided" | "inspection"))
+    {
+        return Err(WorkflowError::TaskBodyInvalid(format!(
+            "unknown requirement state {state} for {id}"
+        )));
+    }
+    Ok(states)
+}

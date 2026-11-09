@@ -59,6 +59,8 @@ fn skeleton(owned: &[&str]) -> TaskSkeleton {
         schema_version: 1,
         acceptance_digest: String::new(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-X-001".into(),
             file_name: "TASK-X-001.md".into(),

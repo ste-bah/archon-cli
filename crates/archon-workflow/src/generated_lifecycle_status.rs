@@ -16,8 +16,7 @@ use crate::task_universe::WorkflowV2TaskUniverseTask;
 impl LifecycleContract<'_> {
     /// Whether the task universe declares this canonical task already finished.
     ///
-    /// `done` means done on a resume as well as on a fresh run; nothing else in
-    /// the table implies completion, `in_review` least of all.
+    /// Completion-group declarations protect tasks on a resume and a fresh run.
     pub(super) fn declared_complete(&self, canonical_task_id: &str) -> bool {
         self.task_universe.tasks.iter().any(|task| {
             task.canonical_task_id == canonical_task_id && task.declared_status_is_complete()
@@ -45,14 +44,19 @@ impl LifecycleContract<'_> {
         let complete =
             self.declared_entries(WorkflowV2TaskUniverseTask::declared_status_is_complete);
         let blocked = self.declared_entries(WorkflowV2TaskUniverseTask::declared_status_is_blocked);
-        if complete.is_empty() && blocked.is_empty() {
+        let states = frozen_states(self.task_universe);
+        if complete.is_empty() && blocked.is_empty() && states.is_none() {
             return None;
         }
-        Some(serde_json::json!({
+        let mut notice = serde_json::json!({
             "kind": "declared-task-status",
             "declared_complete_not_scheduled": complete,
             "declared_blocked_behind_dependencies": blocked,
-        }))
+        });
+        if let Some(states) = states {
+            notice["frozen_requirement_states"] = states;
+        }
+        Some(notice)
     }
 
     fn declared_entries(&self, matches: fn(&WorkflowV2TaskUniverseTask) -> bool) -> Vec<Value> {
@@ -68,4 +72,42 @@ impl LifecycleContract<'_> {
             })
             .collect()
     }
+}
+
+fn frozen_states(universe: &crate::task_universe::WorkflowV2TaskUniverse) -> Option<Value> {
+    let mut done = Vec::new();
+    let mut undecided = Vec::new();
+    let mut inspection = Vec::new();
+    let mut kept = Vec::new();
+    let mut present = false;
+    let mut skeletons = std::collections::BTreeMap::new();
+    for task in &universe.tasks {
+        if task.status.as_deref() == Some("kept") {
+            kept.push(task.canonical_task_id.clone());
+        }
+        let root = std::path::Path::new(&task.source_path).parent();
+        let skeleton = skeletons.entry(root).or_insert_with(|| {
+            root.and_then(|p| {
+                std::fs::read(p.join(crate::task_set_contract::TASK_SKELETON_FILE)).ok()
+            })
+            .and_then(|b| serde_json::from_slice::<crate::task_skeleton::TaskSkeleton>(&b).ok())
+        });
+        for (id, state) in &task.requirement_states {
+            present = true;
+            let reason = skeleton
+                .as_ref()
+                .and_then(|s| s.tasks.iter().find(|t| t.task_id == task.canonical_task_id))
+                .and_then(|t| t.requirement_states.get(id))
+                .map(|d| d.reason.as_str())
+                .unwrap_or("record_unavailable");
+            let entry = serde_json::json!({"task":task.canonical_task_id,"id":id,"reason":reason});
+            match state.as_str() {
+                "done" => done.push(entry),
+                "undecided" => undecided.push(entry),
+                "inspection" => inspection.push(entry),
+                _ => {}
+            }
+        }
+    }
+    present.then(|| serde_json::json!({"done":done,"undecided":undecided,"inspection":inspection,"kept":kept}))
 }

@@ -194,6 +194,7 @@ enum IncompleteCause {
     /// a check the host could not prove). Retried by the executor while the
     /// freeze's progress grows, then the run pauses: never a failure.
     Stalled(String),
+    Pending(String),
     /// As `Stalled`, in a freeze that saves nothing for a retry (the unstaged
     /// CLI freeze, Issue 288): nothing was published, and a re-run starts
     /// over.
@@ -225,6 +226,15 @@ impl FreezeIncomplete {
 
     /// A step of the freeze could not complete for `reason`; everything
     /// `progress` counts is saved for the retry.
+    pub(crate) fn pending(reason: impl Into<String>, progress: &FreezeProgress) -> Self {
+        let mut incomplete = Self::stalled(reason, progress);
+        if let IncompleteCause::Stalled(reason) = incomplete.cause {
+            incomplete.cause = IncompleteCause::Pending(reason);
+        }
+        incomplete
+    }
+
+    /// A step stalled; saved progress remains available to the retry.
     pub(crate) fn stalled(reason: impl Into<String>, progress: &FreezeProgress) -> Self {
         Self {
             cause: IncompleteCause::Stalled(reason.into()),
@@ -338,7 +348,9 @@ impl FreezeIncomplete {
     pub(crate) fn deferred(&self) -> &[String] {
         match &self.cause {
             IncompleteCause::Budget { deferred, .. } => deferred,
-            IncompleteCause::Stalled(_) | IncompleteCause::Unsaved(_) => &[],
+            IncompleteCause::Stalled(_)
+            | IncompleteCause::Pending(_)
+            | IncompleteCause::Unsaved(_) => &[],
         }
     }
 
@@ -374,6 +386,10 @@ impl std::fmt::Display for FreezeIncomplete {
                     .unwrap_or_default(),
                 deferred.len(),
                 deferred.join(", ")
+            ),
+            IncompleteCause::Pending(reason) => write!(
+                f,
+                "{FREEZE_INCOMPLETE_RESUMABLE}: {reason}; every result saved so far is kept. Retry the freeze with the same candidate: it continues from the saved results"
             ),
             IncompleteCause::Stalled(reason) => write!(
                 f,

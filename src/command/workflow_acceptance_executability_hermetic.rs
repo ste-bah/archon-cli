@@ -212,7 +212,7 @@ fn task_root_relative_paths(project: &Path, task_root: &Path) -> Result<PathBuf,
 
 #[allow(dead_code)]
 #[path = "workflow_acceptance_executability_breakage.rs"]
-mod breakage;
+pub(crate) mod breakage;
 #[path = "workflow_acceptance_executability_breakage_owner.rs"]
 mod owner;
 #[allow(unused_imports)]
@@ -227,7 +227,7 @@ mod create;
 
 #[allow(dead_code)]
 #[path = "workflow_acceptance_executability_base_copy.rs"]
-mod base_copy;
+pub(crate) mod base_copy;
 #[allow(unused_imports)]
 pub(crate) use base_copy::{BaseCopy, materialise_base_copy};
 

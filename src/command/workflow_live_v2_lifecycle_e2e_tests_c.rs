@@ -182,6 +182,7 @@ pub(super) fn boundary_driver(
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-EX-BOUNDARY".to_string(),
             source_path: "tasks/TASK-EX-BOUNDARY.md".to_string(),
             acceptance_criteria: vec!["Boundary behavior remains semantic.".to_string()],
@@ -293,6 +294,7 @@ pub(super) fn boundary_driver(
 
 pub(super) fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
     let task = |id: &str, criterion: &str| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         source_path: root
             .join("tasks")

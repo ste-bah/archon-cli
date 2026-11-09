@@ -213,7 +213,7 @@ fn absent_program_is_a_host_error() {
     let root = tempfile::tempdir().unwrap();
     let empty = tempfile::tempdir().unwrap();
     let status=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","command::workflow_task_set::executability::hermetic::breakage::tests::io_cases::absent_program_is_a_host_error","--nocapture"]).env(CASE,root.path()).env("PATH",empty.path()).status().unwrap();
-    assert!(status.success());
+    assert!(status.success(), "child process status: {status:?}");
 }
 #[tokio::test]
 async fn fresh_unstable_control_voids_reused_kills() {

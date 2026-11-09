@@ -195,6 +195,26 @@ pub async fn run_check_direct_with_plan(
     mutation_plan: Option<&super::process::MutationPlan>,
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<CheckResult> {
+    run_check_direct_bounded(
+        site,
+        contract,
+        chain_digest,
+        reference,
+        mutation_plan,
+        None,
+        cancel,
+    )
+    .await
+}
+pub async fn run_check_direct_bounded(
+    site: &DirectSite,
+    contract: &AcceptanceContract,
+    chain_digest: &str,
+    reference: &FrozenCommandRef,
+    mutation_plan: Option<&super::process::MutationPlan>,
+    budget: Option<(&Path, u64)>,
+    cancel: Arc<AtomicBool>,
+) -> WorkflowResult<CheckResult> {
     site.validate()?;
     let (_home, environment, withheld) = site.prepare()?;
     let bound: Vec<&str> = environment.keys().map(String::as_str).collect();
@@ -205,6 +225,11 @@ pub async fn run_check_direct_with_plan(
     });
     let mut at = site.command_site(environment, mutation_root);
     at.mutation_plan = mutation_plan;
+    if let Some((root, bytes)) = budget {
+        at.audit_root = Some(root);
+        at.audit_target = site.target.as_deref();
+        at.scratch_bytes = bytes;
+    }
     let result =
         super::observe::execute_check_at(&at, contract, reference, &command, cancel).await?;
     Ok(with_withheld_note(result, &withheld))

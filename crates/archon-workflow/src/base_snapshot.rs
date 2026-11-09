@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaseSnapshot {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub landing_verified: BTreeMap<String, String>,
     pub commit: String,
     pub entries: BTreeMap<String, SnapshotEntry>,
     pub digest: String,
@@ -58,9 +60,12 @@ pub enum SnapshotEntry {
 }
 impl BaseSnapshot {
     pub fn recomputed_digest(&self) -> String {
-        content_digest(
-            &serde_json::to_vec(&(&self.commit, &self.entries)).expect("serializable snapshot"),
-        )
+        let bytes = if self.landing_verified.is_empty() {
+            serde_json::to_vec(&(&self.commit, &self.entries))
+        } else {
+            serde_json::to_vec(&(&self.commit, &self.entries, &self.landing_verified))
+        };
+        content_digest(&bytes.expect("serializable snapshot"))
     }
     pub fn valid_digest(&self) -> bool {
         self.digest == self.recomputed_digest()
@@ -406,6 +411,7 @@ where
         entries.insert(key, entry);
     }
     let mut snapshot = BaseSnapshot {
+        landing_verified: Default::default(),
         commit: tree.base_commit().into(),
         entries,
         digest: String::new(),
@@ -427,4 +433,28 @@ pub fn base_snapshot_excludes(
         policy.combined,
         snapshot,
     )
+}
+
+impl BaseSnapshot {
+    pub fn landing_bytes(&self, repository: &Path, key: &str) -> Result<Vec<u8>, String> {
+        if outside_key(key) {
+            return Err("landing_key_outside".into());
+        }
+        let expected = self
+            .landing_verified
+            .get(key)
+            .ok_or("landing_digest_missing")?;
+        let path = repository.join(key_path(key));
+        if !path
+            .symlink_metadata()
+            .is_ok_and(|m| m.is_file() && !m.file_type().is_symlink())
+        {
+            return Err("landing_not_file".into());
+        }
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        if content_digest(&bytes) != *expected {
+            return Err("control_mismatch".into());
+        }
+        Ok(bytes)
+    }
 }

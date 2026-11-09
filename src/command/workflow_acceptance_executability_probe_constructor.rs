@@ -8,6 +8,11 @@ impl HostProbe {
         resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     ) -> Self {
         let check_cap_secs = probe_check_cap_secs(&site);
+        let copy_parent = if let Site::Scratch(binding) = &site {
+            binding.policy.scratch_parent.clone()
+        } else {
+            std::env::temp_dir()
+        };
         Self {
             project,
             task_root: None,
@@ -22,13 +27,14 @@ impl HostProbe {
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
             baseline_passes: Mutex::new(BTreeSet::new()),
+            baseline_observations: Mutex::new(BTreeMap::new()),
             baseline_failures: Mutex::new(BTreeMap::new()),
             test_inventories: Mutex::new(BTreeMap::new()),
             reuse_audit: Mutex::new(BTreeMap::new()),
             failed_tree: Mutex::new(None),
             #[cfg(test)]
             injected_prove_run: Mutex::new(None),
-            copy_parent: std::env::temp_dir(),
+            copy_parent,
             memo: false,
             resume: crate::command::workflow_freeze_budget::FreezeResume::none(),
             check_cap_secs,
@@ -40,6 +46,15 @@ impl HostProbe {
             #[cfg(test)]
             copies_made: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Give this proof attempt a private parent under the selected site's parent.
+    /// The returned guard keeps its views alive until evidence has been consumed.
+    pub(crate) fn private_parent(&mut self) -> anyhow::Result<tempfile::TempDir> {
+        std::fs::create_dir_all(&self.copy_parent)?;
+        let parent = tempfile::tempdir_in(&self.copy_parent)?;
+        self.copy_parent = parent.path().to_path_buf();
+        Ok(parent)
     }
 
     /// At an acceptance round's own site: its scratch policy, else the live
@@ -189,4 +204,8 @@ impl HostProbe {
             .expect("unproven lock")
             .insert(id.to_string(), (why, cause));
     }
+}
+
+pub(super) fn direct_fallback_note() -> &'static str {
+    "it is proven on the hermetic trees when a pre-implementation tree exists; otherwise unproven"
 }

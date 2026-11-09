@@ -43,6 +43,29 @@ pub(crate) fn materialise_base_copy(
     build_output: &Path,
     transport: Option<&Path>,
 ) -> Result<BaseCopy, Unrun> {
+    materialise_base_copy_with_policy(
+        parent,
+        repository,
+        project,
+        task_root,
+        snapshot,
+        lock_commit,
+        build_output,
+        transport,
+        None,
+    )
+}
+pub(crate) fn materialise_base_copy_with_policy(
+    parent: &Path,
+    repository: &Path,
+    project: &Path,
+    task_root: Option<&Path>,
+    snapshot: &BaseSnapshot,
+    lock_commit: &str,
+    build_output: &Path,
+    transport: Option<&Path>,
+    policy: Option<&archon_workflow::acceptance_scratch::ScratchPolicy>,
+) -> Result<BaseCopy, Unrun> {
     // Every anchored proof uses its own build-output directory.
     let keys = snapshot
         .entries
@@ -69,7 +92,11 @@ pub(crate) fn materialise_base_copy(
     };
     let repository = canonical(repository)?;
     let project = canonical(project)?;
-    let excludes = snapshot_excludes(&repository, &project, repository == project, snapshot);
+    let excludes = policy
+        .map(|p| archon_workflow::base_snapshot::base_snapshot_excludes(p, snapshot))
+        .unwrap_or_else(|| {
+            snapshot_excludes(&repository, &project, repository == project, snapshot)
+        });
     let mut copy = HermeticCopy::create(
         parent,
         &repository,
@@ -102,6 +129,30 @@ pub(crate) fn materialise_base_copy(
             }
         }
     }
+    if !snapshot.landing_verified.is_empty() {
+        let config = tempfile::tempdir_in(parent).map_err(|e| Unrun::unknown(e.to_string()))?;
+        let isolated = super::base_git::IsolatedGit::new(config.path())?;
+        for key in snapshot.landing_verified.keys() {
+            let bytes = snapshot
+                .landing_bytes(&repository, key)
+                .map_err(Unrun::unknown)?;
+            let path = copy.repository.join(key_path(key));
+            std::fs::create_dir_all(
+                path.parent()
+                    .ok_or_else(|| Unrun::unknown("landing parent absent".into()))?,
+            )
+            .map_err(|e| Unrun::unknown(e.to_string()))?;
+            std::fs::write(path, bytes).map_err(|e| Unrun::unknown(e.to_string()))?;
+            isolated.run(&[
+                "-C".as_ref(),
+                copy.repository.as_os_str(),
+                "add".as_ref(),
+                "--force".as_ref(),
+                "--".as_ref(),
+                key.as_ref(),
+            ])?;
+        }
+    }
     let guard = BaseGuard {
         build_output: build_output.to_path_buf(),
         ignore_case: ignore_case(&repository)?,
@@ -130,14 +181,17 @@ pub(super) struct BaseGuard {
     live_repository: PathBuf,
     live_project: PathBuf,
 }
-pub(super) fn output(repository: &Path, args: &[&str]) -> Result<String, Unrun> {
-    let result = archon_shell::spawn::command("git")
+pub(crate) fn query(repository: &Path, args: &[&str]) -> Result<std::process::Output, Unrun> {
+    archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
         .arg("--literal-pathspecs")
         .args(args)
         .output()
-        .map_err(|e| Unrun::error(e.into(), "reading copy evidence".into()))?;
+        .map_err(|e| Unrun::error(e.into(), "reading copy evidence".into()))
+}
+pub(crate) fn output(repository: &Path, args: &[&str]) -> Result<String, Unrun> {
+    let result = query(repository, args)?;
     if !result.status.success() {
         let cause = String::from_utf8_lossy(&result.stderr).trim().to_string();
         return Err(Unrun::unknown(if cause.is_empty() {
@@ -304,6 +358,12 @@ impl BaseGuard {
                 continue;
             }
             let relative = key_path(key);
+            if self.snapshot.landing_verified.contains_key(key) {
+                if copy.repository.join(&relative).symlink_metadata().is_err() {
+                    return Err(refuse(key, "landing file absent"));
+                }
+                continue;
+            }
             match entry {
                 SnapshotEntry::Tracked { object, .. } => {
                     let listed = output(&copy.repository, &["ls-tree", "-z", "HEAD", "--", key])?;

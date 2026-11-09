@@ -8,6 +8,7 @@ fn universe(task_id: &str, paths: &[&str]) -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: task_id.to_string(),
             deliverable_contracts: paths
                 .iter()

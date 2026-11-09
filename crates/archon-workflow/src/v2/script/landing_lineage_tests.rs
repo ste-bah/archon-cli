@@ -7,6 +7,8 @@ fn request(task: &str, body: &str) -> HostCommandRequest {
         command_id: "land".into(),
         stdin: Some(body.into()),
         target: Some(HostCommandSubject {
+            host_record_digest: None,
+            requirement_states: Default::default(),
             task_id: task.into(),
             file_name: format!("{task}.md"),
         }),

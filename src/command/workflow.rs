@@ -51,7 +51,7 @@ mod workflow_decompose_reverify_persistence_tests;
 #[path = "workflow_decompose_reverify_tests.rs"]
 mod workflow_decompose_reverify_tests;
 #[path = "workflow_freeze_cli.rs"]
-mod workflow_freeze_cli;
+pub(crate) mod workflow_freeze_cli;
 pub(crate) use workflow_freeze_cli::{
     entry_defects_with_bindings, install_entry_validator, refusal_text, reverify_acceptance_client,
     skeleton_document,

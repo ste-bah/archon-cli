@@ -43,6 +43,19 @@ pub(crate) async fn run_refs_in_copy(
         timeout_secs: probe.check_bound_secs(),
         output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
     };
+    let budget = if let Site::Scratch(binding) = &probe.site {
+        let (environment, _) = sites::site_environment(probe);
+        site.host = environment;
+        site.policy = Some(
+            archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy),
+        );
+        site.timeout_secs = site.timeout_secs.min(binding.policy.timeout_secs);
+        site.output_bytes = binding.policy.output_bytes;
+        Some((copy.root.as_path(), binding.policy.scratch_bytes))
+    } else {
+        None
+    };
+    let site_time_cap = site.timeout_secs;
     let mut results = Vec::new();
     let mut failure = None;
     for (index, reference) in refs.iter().enumerate() {
@@ -53,7 +66,9 @@ pub(crate) async fn run_refs_in_copy(
                 break;
             }
             Some(CheckAllowance::Run { timeout_secs, cut }) => {
-                site.timeout_secs = timeout_secs.clamp(1, probe.check_bound_secs());
+                site.timeout_secs = timeout_secs
+                    .clamp(1, probe.check_bound_secs())
+                    .min(site_time_cap);
                 cut
             }
             None => false,
@@ -68,12 +83,13 @@ pub(crate) async fn run_refs_in_copy(
                 path: repository.to_owned(),
                 source,
             })?;
-            archon_workflow::acceptance_scratch::run_check_direct_with_plan(
+            archon_workflow::acceptance_scratch::run_check_direct_bounded(
                 &site,
                 contract,
                 digest,
                 reference,
                 hooks.mutation_plans.get(&reference.acceptance_id),
+                budget,
                 cancel.clone(),
             )
             .await

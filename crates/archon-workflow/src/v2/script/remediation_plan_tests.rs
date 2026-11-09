@@ -34,6 +34,7 @@ fn repo() -> tempfile::TempDir {
 
 fn task(id: &str, owns: &[&str], implements: &[&str]) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: owns.iter().map(|f| f.to_string()).collect(),

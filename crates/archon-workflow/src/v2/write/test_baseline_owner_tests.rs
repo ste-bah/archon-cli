@@ -159,6 +159,7 @@ fn a_package_the_workspace_does_not_hold_is_unresolvable() {
 
 fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: files.iter().map(|f| f.to_string()).collect(),

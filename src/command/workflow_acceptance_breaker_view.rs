@@ -121,6 +121,23 @@ pub(crate) fn materialise_view(
     if !status.success() {
         return Err(error("object_reader_failed"));
     }
+    for (key, _) in keys
+        .iter()
+        .filter(|(key, _)| snapshot.landing_verified.contains_key(key) && !exclude.contains(key))
+    {
+        let bytes = snapshot.landing_bytes(repository, key).map_err(error)?;
+        view.file_keys.insert(key.clone());
+        view.files.insert(
+            key.clone(),
+            ViewFile {
+                object: snapshot.landing_verified[key].clone(),
+                bytes,
+            },
+        );
+    }
+    if view.files.values().map(|f| f.bytes.len()).sum::<usize>() > MAX_VIEW_BYTES {
+        return Err(error("view_too_large"));
+    }
     // All bytes and the cap are verified before writing anything to the view.
     std::fs::create_dir(&view.root).map_err(error)?;
     for (key, file) in &view.files {
@@ -146,6 +163,9 @@ fn object_map(
     for (key, kind) in keys {
         if outside_key(key) {
             return Err(error("invalid_view_key"));
+        }
+        if snapshot.landing_verified.contains_key(key) {
+            continue;
         }
         let Some(SnapshotEntry::Tracked {
             object,
@@ -215,5 +235,10 @@ pub(crate) fn view_file_keys(
     Ok(object_map(&isolated, repository, snapshot, keys)?
         .0
         .into_keys()
+        .chain(
+            keys.iter()
+                .filter(|(key, _)| snapshot.landing_verified.contains_key(key))
+                .map(|(key, _)| key.clone()),
+        )
         .collect())
 }

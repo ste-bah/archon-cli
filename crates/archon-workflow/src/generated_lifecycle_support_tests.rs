@@ -5,6 +5,7 @@ fn universe() -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-X-020".to_string(),
             aliases: Vec::new(),
             source_path: "tasks/TASK-X-020.md".to_string(),
@@ -245,6 +246,7 @@ fn fabel_contract() -> LifecycleContract<'static> {
             schema_version: "workflow-v2-task-universe-v1".to_string(),
             source_roots: Vec::new(),
             tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-TDL-010.md".to_string(),

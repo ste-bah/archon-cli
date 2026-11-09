@@ -180,6 +180,7 @@ fn fetch_corrupt_objects_is_typed_separately_and_keeps_stderr() {
         std::fs::write(object_path, b"broken compressed object").unwrap();
         assert!(baseline_available(source.path(), &base).is_ok());
         let evidence = BaseSnapshot {
+            landing_verified: Default::default(),
             commit: base.clone(),
             entries: Default::default(),
             digest: String::new(),

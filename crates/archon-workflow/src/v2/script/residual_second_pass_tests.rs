@@ -308,6 +308,7 @@ fn the_second_pass_is_uncapped_and_never_reads_its_own_rounds() {
         w.universe
             .tasks
             .push(crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: format!("TASK-X{n}"),
                 source_path: "tasks/TASK-B.md".into(),
                 files_expected_to_change: vec![file],

@@ -1,4 +1,4 @@
-//! Diagnostic orchestration; deliberately has no live caller.
+//! Requirement proof orchestration used by freeze decisions.
 use super::super::breaker_view::{BaseView, materialise_view, view_file_keys};
 use super::*;
 use crate::command::workflow_task_set::judge::JUDGE_MODEL_ALIAS;
@@ -38,8 +38,10 @@ pub(crate) struct VerdictRequest<'a> {
     pub call_limits: archon_core::config::BreakerCallLimits,
 }
 pub(crate) struct VerdictReport {
+    pub refusal: Option<&'static str>,
     pub verdicts: ProofVerdicts,
     pub store: Option<PathBuf>,
+    pub runs: Vec<MutantRun>,
 }
 struct Context<'a> {
     pending: Vec<(usize, String, String)>,
@@ -289,6 +291,7 @@ pub(crate) async fn prove_requirements(
         if mutants.is_empty() {
             continue;
         }
+        history::save_pending(&mut ctx, &mut pairs, &mutants);
         let retried: BTreeSet<_> = mutants
             .iter()
             .map(|m| (m.task_id.clone(), m.requirement_id.clone()))
@@ -349,12 +352,17 @@ pub(crate) async fn prove_requirements(
         if pairs.iter().any(|p| {
             p.task_id == entry.task_id
                 && p.id == entry.id
-                && (matches!(p.verdict, Verdict::DoneCandidate | Verdict::WeakTest)
-                    || !p.survivors.is_empty()
-                        && matches!(
-                            p.verdict,
-                            Verdict::UndecidedEquivalence | Verdict::JudgeUnavailable
-                        ))
+                && (matches!(
+                    p.verdict,
+                    Verdict::DoneCandidate
+                        | Verdict::WeakTest
+                        | Verdict::BudgetExhausted
+                        | Verdict::HostUnrun
+                ) || !p.survivors.is_empty()
+                    && matches!(
+                        p.verdict,
+                        Verdict::UndecidedEquivalence | Verdict::JudgeUnavailable
+                    ))
         }) {
             cache::save(
                 probe,
@@ -394,8 +402,10 @@ pub(crate) async fn prove_requirements(
     }
     history::save(&mut ctx);
     VerdictReport {
+        refusal,
         verdicts: ctx.verdicts,
         store: ctx.store,
+        runs: all,
     }
 }
 #[cfg(test)]
@@ -441,3 +451,23 @@ mod history_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_breaker_round_six_tests.rs"]
 mod round_six_tests;
+
+pub(crate) fn evidence_text(
+    report: &VerdictReport,
+    run: &MutantRun,
+) -> Result<(String, Option<String>), String> {
+    store::evidence_text_at(report.store.as_deref(), run)
+}
+pub(crate) fn survivor_patch(report: &VerdictReport, patch: &str) -> Option<String> {
+    match &report.store {
+        None => Some(patch.into()),
+        Some(root) if !archon_workflow::base_snapshot::outside_key(patch) => {
+            std::fs::read_to_string(root.join(archon_workflow::base_snapshot::key_path(patch))).ok()
+        }
+        Some(_) => None,
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_breaker_decision_tests.rs"]
+mod decision_tests;

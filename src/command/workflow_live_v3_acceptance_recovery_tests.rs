@@ -44,6 +44,7 @@ async fn a_resumed_run_heals_a_recovery_unfreeze_to_an_accepted_contract() {
         schema_version: "test".into(),
         source_roots: vec![run.set.tasks.display().to_string()],
         tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             source_path: run.set.tasks.join("TASK-F-001.md").display().to_string(),
             ..Default::default()
         }],

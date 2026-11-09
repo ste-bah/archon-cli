@@ -480,6 +480,7 @@ fn synthetic_universe(tasks: &[(&str, &[&str], &[&str])]) -> WorkflowV2TaskUnive
             .iter()
             .map(
                 |(canonical_task_id, aliases, dependency_ids)| WorkflowV2TaskUniverseTask {
+                    requirement_states: Default::default(),
                     canonical_task_id: (*canonical_task_id).to_string(),
                     aliases: aliases.iter().map(|alias| (*alias).to_string()).collect(),
                     source_path: format!("tasks/{canonical_task_id}.md"),
