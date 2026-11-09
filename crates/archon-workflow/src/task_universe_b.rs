@@ -223,37 +223,40 @@ impl WorkflowV2TaskUniverseTask {
         task_status::declared_status_is_blocked(self.status.as_deref())
     }
 
-    /// The RUNNABLE commands the task's `## Focused Tests` section declares.
+    pub fn freeze_focused_commands(&mut self, root: &Path, toolchain_path: &std::ffi::OsStr) {
+        self.focused_commands = Some(
+            self.focused_tests
+                .iter()
+                .filter_map(|entry| {
+                    focused_commands::focused_test_command_with_path(
+                        entry,
+                        &self.required_tools,
+                        root,
+                        toolchain_path,
+                    )
+                })
+                .collect(),
+        );
+    }
+
+    /// Commands selected while extracting the declarations and retained in
+    /// the frozen record. Reading this list performs no executable lookup.
     ///
-    /// `focused_tests` holds that section's items verbatim, and an item is
-    /// markdown: the command sits in a backticked span, often followed by
-    /// prose saying what it proves. Handing the whole item to a shell would
-    /// hand it a string no shell can run, so the span is the command. Items
-    /// that carry no command at all are dropped, which is why this can be
-    /// shorter than `focused_tests` (and empty while that is not). An item
-    /// that instructs an MCP tool call is never a command; its declaration
-    /// in `required_tools` is the decomposition lint's to enforce, and this
-    /// adds nothing there. An item the shell then finds no program for is
-    /// recorded by the host baseline as a non-command.
+    /// The section items remain available separately for display. A command
+    /// can be a whole item, a leading span, or a span embedded in prose. The
+    /// first program must be declared, executable within the repository, or
+    /// resolved against the site's configured search path at extraction.
+    /// Calls to remote capabilities remain declarations rather than shell
+    /// commands. Later changes to the environment or checkout cannot add or
+    /// remove authorization. A record predating this field has no recorded
+    /// decision and supplies no authorized commands.
     pub fn declared_focused_test_commands(&self) -> Vec<String> {
-        self.focused_tests
-            .iter()
-            .filter_map(|entry| declared_focused_test_command(entry))
-            .collect()
+        self.focused_commands.clone().unwrap_or_default()
     }
 }
 
-/// The command out of one declared focused-test item, or `None` for prose,
-/// a quoted file or status word, tool-call syntax or an MCP tool reference;
-/// see
-/// [`WorkflowV2TaskUniverseTask::declared_focused_test_commands`] and
-/// `focused_commands` for the rule.
-fn declared_focused_test_command(entry: &str) -> Option<String> {
-    focused_commands::focused_test_command(entry)
-}
-
 #[path = "task_universe_focused_commands.rs"]
-pub(crate) mod focused_commands;
+pub mod focused_commands;
 
 pub fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
     let graph = tasks
@@ -355,3 +358,7 @@ mod tests;
 #[cfg(test)]
 #[path = "task_universe_capability_tests.rs"]
 mod capability_and_genericity_tests;
+
+#[cfg(test)]
+#[path = "task_universe_focused_commands_tests.rs"]
+mod focused_commands_tests;

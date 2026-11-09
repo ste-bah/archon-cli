@@ -1,9 +1,7 @@
 //! Operator configuration for host verifiers, independent of observer eligibility.
 
-#[cfg(test)]
 use std::path::Path;
 
-#[cfg(test)]
 use anyhow::Context;
 use anyhow::Result;
 use archon_core::config::{AcceptanceExecutionConfig, ArchonConfig};
@@ -45,6 +43,24 @@ pub(crate) fn validate_persisted(policy: &CheckPolicy) -> Result<()> {
     .map_err(|reason| anyhow::anyhow!("invalid persisted check policy: {reason}"))
 }
 
+/// Capture the command search path through the same layered site policy.
+pub(crate) fn command_site_path(cwd: &Path) -> Result<std::ffi::OsString> {
+    Ok(captured_command_path(load(cwd, None)?.as_ref()))
+}
+
+pub(crate) fn captured_command_path(policy: Option<&CheckPolicy>) -> std::ffi::OsString {
+    policy
+        .cloned()
+        .unwrap_or_else(|| {
+            CheckPolicy::default_for(
+                &archon_workflow::acceptance_check_environment::host_environment(),
+            )
+        })
+        .toolchain_path
+        .unwrap_or_default()
+        .into()
+}
+
 /// CLI uses its already-resolved config, including settings overlays.
 pub(crate) fn for_config_action(
     action: &archon_workflow::CommandAction,
@@ -77,7 +93,6 @@ pub(crate) fn for_new_plan(
 
 /// Unlike other optional workflow knobs, unreadable/malformed policy layers
 /// cannot be skipped: that would silently change which data a verifier gets.
-#[cfg(test)]
 pub(crate) fn load(cwd: &Path, config_path: Option<&Path>) -> Result<Option<CheckPolicy>> {
     use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
     let mut merged = toml::Value::Table(Default::default());

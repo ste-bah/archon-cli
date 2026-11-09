@@ -1,48 +1,8 @@
-//! Which `## Focused Tests` items are shell commands (Obs-119 follow-up).
-//!
-//! A Focused Tests section is markdown written for a reader: commands in
-//! code spans and fenced blocks, and around them prose, fixture names,
-//! status words and tool-call instructions. Every item used to become a
-//! "declared command", so the host baseline ran file extensions, status
-//! words, source file names and `mcp__server__tool` names as shell commands
-//! (exit 127), and the author brief listed them as filters to pass.
-//!
-//! The rule, applied to an item's first code span (or the whole item when it
-//! has none, which is what a fenced-block line is):
-//!
-//! - a statement led by a `NAME=value` assignment is shell, as before;
-//! - an `mcp__<server>__<tool>` word is a tool to CALL, never a command. It
-//!   is not added to the task's `required_tools` here: the decomposition
-//!   lint (`topology_lint::tool_obligations`) already requires every focused
-//!   MCP call to be declared there, so a lint-clean task's focused MCP calls
-//!   are its required tools, and merging at parse would silence that lint
-//!   and could make a "never call ..." line an obligation;
-//! - tool-call syntax, an identifier followed by `(`, is not a command;
-//! - the first word must be a program word: the shell operators `!`, `(`,
-//!   `{`, `[`, `[[` and the builtins `:` and `.`; or `[A-Za-z0-9_+./:@%$-]`
-//!   characters, not starting with an uppercase letter (sentence prose) or
-//!   `-`, not ending in `:` (a `key:` label, as in `enabled: true`), and not
-//!   a bare file name (`notes.rs`, `.ext`: a `.` outside a `./`/`../` path,
-//!   unless every character after the last `.` is a digit, as in
-//!   `python3.11`);
-//! - a single word or a bare path is a command only when it opens the item
-//!   (`` `make` `` or `` `make` must pass ``), never a word quoted inside
-//!   prose (`` status `failed` ``) or a label (`` `notes.rs`: what it
-//!   proves ``).
-//!
-//! Well-formed items (`` `cargo test -p x` ``, fenced command lines) parse
-//! exactly as they did. Known limits: a lowercase prose item with no code
-//! span ("run the suite"), or a leading lone identifier (`` `some_word` is
-//! recorded ``), still reads as a command (the host baseline then records
-//! it as a non-command when the shell finds no such program), and a
-//! program whose name starts with an uppercase letter does not.
-//!
-//! A fenced command a shell would continue onto the next line (an open
-//! quote, a trailing `\`) is one command, joined with its continuation
-//! lines ([`continues`]); it used to be split into one "command" per line.
+//! Focused commands come from declarations and executable availability.
+//! Code spans are read in whole, leading, and embedded positions alike.
+//! Shell assignments and syntax retain their existing command semantics.
+//! Missing executables remain visible through the host execution report.
 
-/// Whether a shell reading `text` would still be inside a quoted string or
-/// a trailing-backslash continuation at its end.
 pub(crate) fn continues(text: &str) -> bool {
     let mut quote: Option<char> = None;
     let mut escaped = false;
@@ -52,7 +12,6 @@ pub(crate) fn continues(text: &str) -> bool {
     for ch in text.chars() {
         let before = std::mem::replace(&mut previous, ch);
         last_escape = false;
-        // An unquoted `#` opening a word comments out the rest of its line.
         if comment {
             comment = ch != '\n';
             continue;
@@ -81,85 +40,168 @@ pub(crate) fn continues(text: &str) -> bool {
     quote.is_some() || (escaped && last_escape)
 }
 
-/// The command out of one declared focused-test item, or `None` when the
-/// item names no shell command.
-pub(crate) fn focused_test_command(entry: &str) -> Option<String> {
-    let (candidate, position) = candidate(entry)?;
-    is_shell_command(&candidate, position).then_some(candidate)
+/// Read the first code span, or the complete unfenced item. A span can occur
+/// anywhere in prose; its leading program must be declared or executable at
+/// the site. No prose vocabulary determines whether a program is runnable.
+#[cfg(test)]
+pub fn focused_test_command(entry: &str) -> Option<String> {
+    focused_test_command_at(entry, &[], std::path::Path::new(""))
 }
 
-/// The item's first code span, or the whole item when it has none, and how
-/// it sits in the item: `Alone` (the item's entire content), `Leading` (no
-/// prose before it, prose after), `Label` (leading, but a `:` follows it,
-/// as in `` `notes.rs`: what it proves ``) or `Embedded` (prose before it).
-fn candidate(entry: &str) -> Option<(String, Position)> {
-    let trimmed = entry.trim();
-    let bare = |text: &str| {
-        text.trim()
-            .trim_matches(|c: char| ".,;:".contains(c))
-            .is_empty()
-    };
-    let (candidate, position) = match trimmed.split_once('`') {
-        Some((before, rest)) => {
-            let span = rest.split('`').next().unwrap_or(rest);
-            let after = rest.get(span.len() + 1..).unwrap_or("");
-            let position = if !bare(before) {
-                Position::Embedded
-            } else if bare(after) {
-                Position::Alone
-            } else if after.trim_start().starts_with(':') {
-                Position::Label
-            } else {
-                Position::Leading
-            };
-            (span, position)
+pub fn focused_test_command_at(
+    entry: &str,
+    declared: &[String],
+    root: &std::path::Path,
+) -> Option<String> {
+    focused_test_command_with_path(entry, declared, root, std::ffi::OsStr::new(""))
+}
+
+pub fn focused_test_command_with_path(
+    entry: &str,
+    declared: &[String],
+    root: &std::path::Path,
+    toolchain_path: &std::ffi::OsStr,
+) -> Option<String> {
+    // Raw shell statements may contain quoted backticks in their output text.
+    let leading = entry.split_whitespace().next()?;
+    if assignment(leading)
+        || matches!(
+            leading,
+            "!" | "(" | "{" | "[" | "[[" | "." | ":" | "for" | "while" | "if" | "case"
+        )
+    {
+        return Some(entry.trim().to_string());
+    }
+    let span = entry.split_once('`');
+    let candidate = span
+        .map_or(entry, |(_, rest)| rest.split('`').next().unwrap_or(rest))
+        .trim();
+    let first = candidate.split_whitespace().next()?;
+    // Unfenced sentence-style items retain their lexical prose distinction.
+    // A declaration can still identify an uppercase program explicitly.
+    if span.is_none()
+        && first.starts_with(char::is_uppercase)
+        && !declared.iter().any(|tool| tool == first)
+        && !assignment(first)
+    {
+        return None;
+    }
+    // A code span must identify a declared or available program.
+    let mut remaining = candidate;
+    let first = loop {
+        let (word, rest) = shell_word(remaining)?;
+        remaining = rest;
+        if word == "!" {
+            continue;
         }
-        None => (trimmed, Position::Alone),
-    };
-    let candidate = candidate.trim();
-    (!candidate.is_empty()).then(|| (candidate.to_string(), position))
+        if assignment(word) {
+            if let Some((_, substitution)) = word.split_once("$(") {
+                break shell_word(substitution)?
+                    .0
+                    .trim_end_matches([')', '\'', '"']);
+            }
+            continue;
+        }
+        break word;
+    }
+    .trim_start_matches('(')
+    .trim_matches(['\'', '"']);
+    if first.is_empty()
+        || mcp_tool_name(first.split('(').next().unwrap_or(first))
+        || tool_call_syntax(first)
+    {
+        return None;
+    }
+    (declared.iter().any(|tool| tool == first) || executable(first, root, toolchain_path))
+        .then(|| candidate.to_string())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Position {
-    Alone,
-    Leading,
-    Label,
-    Embedded,
+fn shell_word(text: &str) -> Option<(&str, &str)> {
+    let text = text.trim_start();
+    if text.is_empty() {
+        return None;
+    }
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, ch) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch.is_whitespace() && quote.is_none() {
+            return Some((&text[..index], &text[index..]));
+        }
+        match (quote, ch) {
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (Some('\''), _) => {}
+            (_, '\\') => escaped = true,
+            (None, '\'' | '"') => quote = Some(ch),
+            _ => {}
+        }
+    }
+    Some((text, ""))
 }
 
-fn is_shell_command(candidate: &str, position: Position) -> bool {
-    // A single word or a bare path is a command when it opens the item
-    // (`` `make` must pass ``), not when prose quotes it (`` status `failed` ``)
-    // or it labels a description (`` `notes.rs`: ... ``).
-    let standalone = matches!(position, Position::Alone | Position::Leading);
-    let mut words = candidate.split_whitespace();
-    let Some(first) = words.next() else {
+fn executable(program: &str, root: &std::path::Path, toolchain_path: &std::ffi::OsStr) -> bool {
+    let path = std::path::Path::new(program);
+    if path.components().count() > 1 || path.is_absolute() {
+        let repository = if root.as_os_str().is_empty() {
+            return false;
+        } else {
+            root.canonicalize()
+        };
+        let file = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root.join(path)
+        };
+        return repository
+            .ok()
+            .zip(file.canonicalize().ok())
+            .is_some_and(|(root, file)| file.starts_with(root) && executable_file(&file));
+    }
+    {
+        std::env::split_paths(toolchain_path).any(|dir| {
+            let dir = if dir.is_absolute() {
+                dir
+            } else if root.as_os_str().is_empty() {
+                return false;
+            } else {
+                root.join(dir)
+            };
+            let file = dir.join(program);
+            if executable_file(&file) {
+                return true;
+            }
+            #[cfg(windows)]
+            if let Some(extensions) = std::env::var_os("PATHEXT") {
+                return extensions
+                    .to_string_lossy()
+                    .split(';')
+                    .any(|suffix| executable_file(&dir.join(format!("{program}{suffix}"))));
+            }
+            false
+        })
+    }
+}
+fn executable_file(path: &std::path::Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
         return false;
     };
-    // An assignment-led statement (`v=/dir`, `d=$(mktemp -d) && ...`,
-    // `RUST_LOG=x cargo test`) is shell: its value cannot be split on
-    // whitespace reliably, so it is not judged further.
-    if assignment(first) {
-        return true;
-    }
-    let has_arguments = words.next().is_some();
-    // Shell operators and the `:` / `.` builtins.
-    if matches!(first, "!" | "(" | "{" | "[" | "[[" | "." | ":") {
-        return has_arguments || (first == ":" && standalone);
-    }
-    // A subshell spelled against its first word: `(cd dir && make)`.
-    let first = first.trim_start_matches('(');
-    if first.is_empty() || mcp_tool_name(first.split('(').next().unwrap_or(first)) {
+    if !metadata.is_file() {
         return false;
     }
-    if tool_call_syntax(first) || !program_word(first) {
-        return false;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
     }
-    has_arguments || standalone
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
-/// `NAME=value`, NAME a shell identifier.
 fn assignment(word: &str) -> bool {
     word.split_once('=').is_some_and(|(name, _)| {
         name.chars()
@@ -169,7 +211,6 @@ fn assignment(word: &str) -> bool {
     })
 }
 
-/// `mcp__<server>__<tool>`, the MCP tool naming the host binds.
 fn mcp_tool_name(word: &str) -> bool {
     word.strip_prefix("mcp__")
         .and_then(|rest| rest.split_once("__"))
@@ -180,7 +221,6 @@ fn mcp_tool_name(word: &str) -> bool {
         })
 }
 
-/// `name(` or `name()`: an identifier immediately followed by a parenthesis.
 fn tool_call_syntax(word: &str) -> bool {
     word.split_once('(').is_some_and(|(name, _)| {
         !name.is_empty()
@@ -190,34 +230,64 @@ fn tool_call_syntax(word: &str) -> bool {
     })
 }
 
-fn program_word(word: &str) -> bool {
-    let Some(first) = word.chars().next() else {
-        return false;
-    };
-    // Sentence prose, an option, or a `key:` label (`enabled: true`).
-    if first.is_ascii_uppercase() || first == '-' || word.ends_with(':') {
-        return false;
-    }
-    if !word
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "_+./:@%$-".contains(c))
-    {
-        return false;
-    }
-    if word.contains('/') {
-        // A path: `./x.sh`, `scripts/check`, `/usr/bin/env`. A leading `.`
-        // must open a relative path.
-        return first != '.' || word.starts_with("./") || word.starts_with("../");
-    }
-    // A bare file name is not a program: `notes.rs`, `.ext`, `a.b_c`.
-    match word.rsplit_once('.') {
-        None => true,
-        Some((stem, suffix)) => {
-            !stem.is_empty() && !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
+/// Find the repository containing the task, then resolve operands from its root.
+pub fn repository_root(source: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(source);
+    for parent in path.ancestors() {
+        let record = parent.join("repository.lock");
+        if !record.exists() {
+            continue;
         }
+        let root = std::fs::read(&record)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|value| {
+                value
+                    .get("repository_root")?
+                    .as_str()
+                    .map(std::path::PathBuf::from)
+            });
+        if let Some(root) = root {
+            return root;
+        }
+        tracing::warn!(record = %record.display(), "recorded repository root is unreadable");
+        return std::path::PathBuf::new();
     }
+    path.ancestors()
+        .find(|parent| parent.join(".git").exists())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
-#[path = "task_universe_focused_commands_tests.rs"]
-mod tests;
+#[path = "task_universe_command_site_tests.rs"]
+pub(crate) mod site_tests;
+
+/// A simple program name suitable for advisory capability comparison.
+/// Assignment prefixes and negation are syntax; repository paths are operands,
+/// not tool capability names. Compound statements need no guessed capability.
+pub fn leading_program(command: &str) -> Option<&str> {
+    let mut words = command.split_whitespace();
+    let first = loop {
+        let word = words.next()?;
+        if word == "!" {
+            continue;
+        }
+        if assignment(word) {
+            // A whitespace split cannot recover a quoted value, substitution,
+            // or compound statement. Do not invent a program from its tail.
+            if word.contains(['(', '\'', '"', ';']) {
+                return None;
+            }
+            continue;
+        }
+        break word;
+    };
+    (!first.is_empty()
+        && !first.starts_with('-')
+        && first
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "_+.-".contains(ch))
+        && !matches!(first, "for" | "while" | "if" | "case" | "."))
+    .then_some(first)
+}

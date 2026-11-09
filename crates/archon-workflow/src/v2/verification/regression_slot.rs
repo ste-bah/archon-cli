@@ -28,7 +28,7 @@ use super::regression_compare::{RegressionFinding, compare};
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::write::test_baseline_run_base::{
-    HostRunVerdict, Tree, host_verdicts, run_base_commit,
+    CommandNotRun, FrozenCommands, HostRunVerdict, Tree, cached, run_base_commit,
 };
 use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResultStore};
 
@@ -90,7 +90,7 @@ pub fn declared_commands(universe: &WorkflowV2TaskUniverse) -> Vec<String> {
     universe
         .tasks
         .iter()
-        .flat_map(|task| &task.focused_tests)
+        .flat_map(|task| task.declared_focused_test_commands())
         .map(|command| command.trim().to_string())
         .filter(|command| !command.is_empty())
         .collect::<std::collections::BTreeSet<_>>()
@@ -98,8 +98,7 @@ pub fn declared_commands(universe: &WorkflowV2TaskUniverse) -> Vec<String> {
         .collect()
 }
 
-/// Every command's verdict at `commit`: plain ones through the run-base
-/// machinery, the rest generically; each cached per (commit, command).
+/// Every frozen command's verdict at `commit`, cached per (commit, command).
 pub(crate) async fn verdicts_at(
     store: &WorkflowV2ResultStore,
     dispatch: &dyn WorkflowAgentDispatch,
@@ -107,10 +106,23 @@ pub(crate) async fn verdicts_at(
     commit: &str,
     commands: &[String],
 ) -> BTreeMap<String, HostRunVerdict> {
-    let mut verdicts = host_verdicts(store, dispatch, root, Tree::RunBase, commit, commands).await;
-    verdicts.extend(
-        super::regression_generic::generic_verdicts(store, dispatch, root, commit, commands).await,
-    );
+    let frozen = FrozenCommands::from_commands(commands);
+    let mut verdicts = super::regression_generic::generic_verdicts(
+        store, dispatch, root, commit, commands, &frozen,
+    )
+    .await;
+    if let Some(base) = run_base_commit(store).filter(|base| base != commit) {
+        verdicts.retain(|command, run| {
+            let lost = !run.per_test_verdict
+                && cached(store, Tree::RunBase, &base, command)
+                    .is_some_and(|base| base.per_test_verdict);
+            if lost {
+                tracing::warn!(%command,
+                    "the runner's output gave no per-test verdict the host can read");
+            }
+            !lost
+        });
+    }
     verdicts
 }
 
@@ -133,6 +145,7 @@ pub async fn prepare_slot(
         return Ok(());
     }
     let Some(universe) = universe else {
+        tracing::warn!(reason = %CommandNotRun::NoUniverse, "regression slot was not checked");
         return Ok(());
     };
     let recorded = store.load_call_record(&call.id)?.is_some();
@@ -179,12 +192,16 @@ async fn check(
         tip: crate::repository_record::git_head(root).ok(),
         ..RegressionSlot::default()
     };
+    if !universe.command_decisions_are_recorded() {
+        slot.unjudged = Some("frozen command decisions are missing".into());
+        return slot;
+    }
     let commands = declared_commands(universe);
     let (Some(base), Some(tip)) = (slot.base.clone(), slot.tip.clone()) else {
         slot.unjudged = Some("the run's base commit or the checkout's HEAD is unreadable".into());
         return slot;
     };
-    if commands.is_empty() || base == tip {
+    if commands.is_empty() {
         return slot;
     }
     let base_runs = verdicts_at(store, dispatch, root, &base, &commands).await;

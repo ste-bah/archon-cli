@@ -58,9 +58,11 @@ mod workflow_live_v2_fixed_persistence;
 mod workflow_live_v2_metadata;
 #[cfg(test)]
 use workflow_live_v2_metadata::GeneratedV2Metadata;
-pub(crate) use workflow_live_v2_metadata::save_fixed_decomposition_metadata;
 use workflow_live_v2_metadata::{
     GENERATED_V2_METADATA_PATH, load_generated_v2_metadata, save_generated_v2_metadata,
+};
+pub(crate) use workflow_live_v2_metadata::{
+    save_fixed_decomposition_metadata, stored_task_universe,
 };
 
 #[derive(Debug, Clone, Default)]

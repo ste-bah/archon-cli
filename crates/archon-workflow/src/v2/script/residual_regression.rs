@@ -99,17 +99,17 @@ fn gap(found: &SlotFinding, universe: &WorkflowV2TaskUniverse, by: &str) -> Resi
     let finding = &found.finding;
     let command = finding.command();
     let what = match finding {
-        RegressionFinding::NewFailure { test, .. } => {
-            format!("`{test}` fails now and did not fail at the run's base commit")
+        RegressionFinding::NewFailure { test, .. } | RegressionFinding::Unknown { test, .. } => {
+            format!("`{test}` fails now without a matching recorded failure identity at the run's base commit")
         }
         RegressionFinding::Vanished { test, .. } => format!(
-            "`{test}` passed at the run's base commit and is no longer reported: it was removed or renamed, and a test that is gone proves nothing passes"
+            "`{test}` passed at the run's base commit and is no longer reported, so its passing evidence is missing"
         ),
         RegressionFinding::Hidden { test, .. } => format!(
             "`{test}` passed at the run's base commit and is ignored now: it was hidden, not fixed"
         ),
         RegressionFinding::NoTipVerdict { .. } => "the command gives no verdict now (a build failure, a timeout, or a runner that did not report every test binary)".to_string(),
-        _ => "the command fails now with failures its runner does not name, which the run's base commit did not".to_string(),
+        _ => "the command fails now with failures its runner does not name, which the run's base commit does not excuse by identity and exit status".to_string(),
     };
     let mut files: Vec<String> = found
         .file
@@ -141,7 +141,11 @@ fn gap(found: &SlotFinding, universe: &WorkflowV2TaskUniverse, by: &str) -> Resi
         unit_tasks: universe
             .tasks
             .iter()
-            .filter(|task| task.focused_tests.iter().any(|c| c.trim() == command))
+            .filter(|task| {
+                task.declared_focused_test_commands()
+                    .iter()
+                    .any(|frozen| frozen.split_whitespace().eq(command.split_whitespace()))
+            })
             .map(|task| task.canonical_task_id.clone())
             .collect(),
         recorded_summary: format!("host regression check before residual pass slot `{by}`"),

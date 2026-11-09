@@ -121,7 +121,8 @@ fn evaluate(
     // a refuted or untestable claim is a finding on its own body.
     let claim_trace = if unreadable == UnreadableInputs::BelongToTheirAuthor {
         let task_dir = super::absolute(cwd, &options.tasks);
-        let (bindings, _) = super::load_bindings_with_findings(&task_dir)?;
+        let site_path = super::check_policy::command_path(options.check_policy.as_ref());
+        let (bindings, _) = super::load_bindings_with_findings_at_path(&task_dir, &site_path)?;
         let trace = super::claims::falsify_claims(&task_dir, bindings)?;
         policy_findings.extend(trace.findings);
         policy_findings.sort_by(|left, right| {

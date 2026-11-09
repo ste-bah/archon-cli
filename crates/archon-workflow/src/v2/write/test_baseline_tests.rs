@@ -123,7 +123,7 @@ pub(in crate::v2::write) fn universe() -> WorkflowV2TaskUniverse {
 /// its runs in `counter`, and fails three tests in three modules.
 fn red_command(counter: &Path) -> String {
     format!(
-        ": cargo test -p app ; echo run >> \"{}\"; printf 'test mine::tests::one ... FAILED\\ntest theirs::tests::two ... FAILED\\ntest nobody::tests::three ... FAILED\\n'; exit 101",
+        r#": cargo test -p app ; echo run >> "{}"; printf 'test mine::tests::one ... FAILED\nthread \047mine::tests::one\047 panicked at src/mine.rs:1:1:\nboom\ntest theirs::tests::two ... FAILED\nthread \047theirs::tests::two\047 panicked at src/theirs.rs:1:1:\nboom\ntest nobody::tests::three ... FAILED\nthread \047nobody::tests::three\047 panicked at src/nobody.rs:1:1:\nboom\n'; exit 101"#,
         counter.display()
     )
 }
@@ -161,6 +161,7 @@ async fn failures_are_owned_by_file_persisted_routed_and_served_from_the_cache_n
     let base = head(&canonical);
     let universe = universe();
     let ctx = WaveBaselineContext {
+        repository_root: &canonical,
         store: &store,
         dispatch: &Host,
         universe: Some(&universe),
@@ -288,6 +289,7 @@ async fn a_timed_out_command_is_recorded_without_a_verdict_and_never_cached_or_o
     let base = head(&canonical);
     let command = ": cargo test -p app ; sleep 30";
     let ctx = WaveBaselineContext {
+        repository_root: &canonical,
         store: &store,
         dispatch: &Host,
         universe: None,

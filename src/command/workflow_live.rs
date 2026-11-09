@@ -73,6 +73,7 @@ pub(crate) use workflow_live_v2::stage_landing_scope;
 pub(crate) use workflow_live_v2::workflow_run_end_snapshot::recover_bound_task_set;
 pub(crate) use workflow_live_v2::{
     execute_fixed_decomposition_v2_run_with_config, reobserve, save_fixed_decomposition_metadata,
+    stored_task_universe,
 };
 // #189 Phase 4: real tool calls from inside a workflow script.
 #[path = "workflow_script_tools.rs"]
@@ -82,7 +83,9 @@ pub(crate) mod workflow_script_tools;
 mod workflow_v2_live_tests;
 
 use workflow_live_config_layers::{live_policy, load_learning_config};
-use workflow_live_planner::{WorkflowScriptPlan, plan_live, render_live_plan};
+#[cfg(test)]
+use workflow_live_planner::plan_live;
+use workflow_live_planner::{WorkflowScriptPlan, plan_live_with_path, render_live_plan};
 use workflow_live_runner::PipelineWorkflowRunner;
 use workflow_live_shape_apply::{apply_generated_shape, live_task_class};
 

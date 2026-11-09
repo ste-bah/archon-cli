@@ -59,14 +59,17 @@ mod unowned_obligations;
 use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 pub(crate) use candidate::evaluate_task_file_candidate;
+pub(crate) use candidate::evaluate_task_file_candidate_at_path;
 pub(crate) use fences::{
     TaskFileAnchor, first_nonblank_line, is_frontmatter_opener, offset_in,
     several_task_files_finding, strip_leading_blank_lines, strip_packaging, subject_task_files,
     task_file_anchor, unwrap_outer_fence,
 };
 pub(crate) use fidelity::{
-    audit_task_file_candidate, evaluate_lint_with_fidelity, evaluate_lint_with_fidelity_resumable,
+    audit_task_file_candidate, evaluate_lint_with_fidelity_at_path,
+    evaluate_lint_with_fidelity_resumable_at_path,
 };
 pub(crate) use fidelity_critic::tag_unusable_critic_reply;
 pub(crate) use fidelity_waivers::{record_waivers, recorded_waivers, waivers_from_flags};
@@ -145,14 +148,15 @@ pub(super) fn chain_read(
 /// the PRD they name, so it takes the task directory rather than the lowered
 /// graph, and it only has anything to say for `--tasks`. It is advisory like the
 /// other three — an unclaimed requirement is reported, never raised.
-fn run_lint_with_mode(
+fn run_lint_with_mode_at_path(
     cwd: &Path,
     source: &LintSource,
     mode: archon_core::config::GateMode,
+    site_path: &std::ffi::OsStr,
 ) -> Result<String> {
     let _read = chain_read(cwd, source)?;
     if let LintSource::TaskFile(path) = source {
-        return Ok(task_file::inspect(cwd, path, mode).report);
+        return Ok(task_file::inspect_at_path(cwd, path, mode, Some(site_path)).report);
     }
     let tasks_root = match source {
         LintSource::TaskFile(path) => absolute(cwd, path).parent().map(Path::to_path_buf),
@@ -188,7 +192,10 @@ fn run_lint_with_mode(
     // whether each task's frontmatter accounts for the commands that task
     // declares it will run. Advisory for the same reason the others are —
     // reported so the author can settle it, never raised.
-    out.push_str(&declarations::section(tasks_root.as_deref()));
+    out.push_str(&declarations::section_at_path(
+        tasks_root.as_deref(),
+        site_path,
+    ));
     // Sixth, and the first section that asks the RUNTIME a question rather than
     // analysing the files itself: will the gate accept what was declared? The
     // decomposition runs this lint over what it wrote, so a contract the
@@ -279,7 +286,8 @@ fn blocking_findings_with_mode(
 
 #[cfg(test)]
 pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
-    run_lint_with_mode(cwd, source, archon_core::config::GateMode::Enforce)
+    let site = crate::command::acceptance_check_policy::command_site_path(cwd)?;
+    run_lint_with_mode_at_path(cwd, source, archon_core::config::GateMode::Enforce, &site)
 }
 
 #[cfg(test)]
@@ -288,203 +296,10 @@ pub(crate) fn blocking_findings(cwd: &Path, source: &LintSource) -> Vec<String> 
         .unwrap_or_else(|error| vec![error.to_string()])
 }
 
-pub(crate) fn evaluate_lint(
-    cwd: &Path,
-    source: &LintSource,
-    mode: archon_core::config::GateMode,
-) -> Result<crate::command::workflow_gate::GateEvaluation> {
-    let _read = chain_read(cwd, source)?;
-    preflight::operational_input(cwd, source)?;
-    let mut fault_classes = Vec::new();
-    let graph_error = if matches!(source, LintSource::Tasks(_)) {
-        load_graph(cwd, source).err().map(|error| {
-            let text = crate::command::workflow_host_fault::diagnostic(&error);
-            fault_classes.push(crate::command::workflow_host_fault::classify(&error));
-            format!(
-                "task graph could not be lowered: {text}; correct the named depends_on/blocks declaration or task status, then re-run `workflow lint --tasks <DIR>`"
-            )
-        })
-    } else {
-        None
-    };
-    let report = run_lint_with_mode(cwd, source, mode)?;
-    let gate_id = match source {
-        LintSource::TaskFile(_) => crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
-        _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
-    };
-    let source_path = match source {
-        LintSource::TaskFile(path) | LintSource::Tasks(path) | LintSource::Spec(path) => {
-            Some(absolute(cwd, path))
-        }
-        LintSource::Graph(_) => None,
-    };
-    let subject = describe(source);
-    let mut deterministic = std::collections::BTreeMap::new();
-    let mut contract_defects = Vec::new();
-    let (base_findings, inherited_findings) = match source {
-        LintSource::TaskFile(path) => {
-            let lint = task_file::inspect(cwd, path, mode);
-            deterministic = lint.deterministic;
-            (lint.blockers, lint.inherited_blockers)
-        }
-        _ => {
-            let root = match source {
-                LintSource::Tasks(path) => Some(absolute(cwd, path)),
-                LintSource::Spec(_) | LintSource::Graph(_) | LintSource::TaskFile(_) => None,
-            };
-            // Kept with their identities, never re-derived from message text.
-            contract_defects = contracts::blocking_defects(root.as_deref());
-            let mut blockers = Vec::new();
-            let mut inherited = std::collections::BTreeSet::new();
-            if let Some(root) = root.as_deref() {
-                let lint = task_set::inspect(cwd, root, mode)?;
-                blockers.extend(lint.blockers);
-                deterministic = lint.deterministic;
-                inherited = lint.inherited_blockers;
-            }
-            blockers.extend(
-                declarations::tasks_without_a_runnable_test(root.as_deref())
-                    .into_iter()
-                    .map(|task| declarations::missing_runnable_test_finding(&task)),
-            );
-            (blockers, inherited)
-        }
-    };
-    let default_scope = match source {
-        LintSource::TaskFile(_) => archon_workflow::RemediationScope::Body,
-        _ => archon_workflow::RemediationScope::Skeleton,
-    };
-    let mut findings = base_findings
-        .into_iter()
-        .map(|text| {
-            let remediation_scope = if inherited_findings.contains(&text) {
-                archon_workflow::RemediationScope::InheritedPredecessor
-            } else {
-                default_scope
-            };
-            let finding_subject = crate::command::workflow_gate::finding_subject(&text, &subject);
-            let identity = deterministic
-                .get_mut(&text)
-                .and_then(|identities| identities.pop_front());
-            let mut finding = crate::command::workflow_gate::GateFinding::new(
-                gate_id,
-                text,
-                finding_subject,
-                source_path.clone(),
-                remediation_scope,
-            );
-            finding.deterministic_defect = identity;
-            let root = source_path.as_deref().map(|path| match source {
-                LintSource::TaskFile(_) => path.parent().unwrap_or(cwd),
-                _ => path,
-            });
-            finding_scope::route(&mut finding, root);
-            finding
-        })
-        .collect::<Vec<_>>();
-    let path = source_path.as_deref();
-    let gate = (gate_id, subject.as_str(), path, default_scope);
-    findings.extend(contracts::gate_findings(contract_defects, gate));
-    let coverage_root = match source {
-        LintSource::TaskFile(_) => None,
-        LintSource::Tasks(path) => Some(absolute(cwd, path)),
-        LintSource::Spec(_) | LintSource::Graph(_) => None,
-    };
-    let mut repository_error = None;
-    if let Some(root) = coverage_root.as_deref() {
-        findings.extend(tool_obligations::set_findings(cwd, root));
-        findings.extend(scope_declarations::set_findings(root));
-        match prd_tool_coverage::set_findings(cwd, root) {
-            Ok(tools) => findings.extend(tools),
-            Err(error) => {
-                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
-                repository_error = Some(format!(
-                    "prd tool coverage failed: {}",
-                    crate::command::workflow_host_fault::diagnostic(&error)
-                ));
-            }
-        }
-        match repository_claims::set_findings(cwd, root) {
-            Ok(claims) => findings.extend(claims),
-            Err(error) => {
-                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
-                let text = format!(
-                    "repository claim check failed: {}",
-                    crate::command::workflow_host_fault::diagnostic(&error)
-                );
-                repository_error = Some(
-                    repository_error.map_or(text.clone(), |existing| format!("{existing}; {text}")),
-                );
-            }
-        }
-        match owner_coverage::set_findings(root) {
-            Ok(owners) => findings.extend(owners),
-            Err(error) => {
-                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
-                let text = format!(
-                    "repository owner coverage failed: {}",
-                    crate::command::workflow_host_fault::diagnostic(&error)
-                );
-                repository_error = Some(match repository_error {
-                    Some(existing) => format!("{existing}; {text}"),
-                    None => text,
-                });
-            }
-        }
-        match focused_test_files::set_findings(root) {
-            Ok(owned) => findings.extend(owned),
-            Err(error) => {
-                fault_classes.push(crate::command::workflow_host_fault::classify(&error));
-                let text = format!(
-                    "focused test file ownership failed: {}",
-                    crate::command::workflow_host_fault::diagnostic(&error)
-                );
-                repository_error = Some(match repository_error {
-                    Some(existing) => format!("{existing}; {text}"),
-                    None => text,
-                });
-            }
-        }
-    }
-    findings.extend(
-        coverage::policy_findings(coverage_root.as_deref())
-            .into_iter()
-            .map(|finding| {
-                let mut gate = crate::command::workflow_gate::GateFinding::new(
-                    gate_id,
-                    finding.text,
-                    finding.subject,
-                    Some(finding.source_path),
-                    finding.remediation_scope,
-                );
-                if let Some(identity) = finding.identity {
-                    gate = gate.with_defect(identity);
-                }
-                gate
-            }),
-    );
-    coverage::deduplicate(&mut findings);
-    let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);
-    let operational = match (graph_error, repository_error) {
-        (Some(graph), Some(repository)) => Some(format!("{graph}; {repository}")),
-        (graph, repository) => graph.or(repository),
-    };
-    Ok(match operational {
-        Some(error) => evaluation
-            .with_operational_error(error)
-            .with_operational_error_kind(
-                if fault_classes
-                    .iter()
-                    .all(|class| *class == crate::command::workflow_host_fault::Class::Transient)
-                {
-                    "transient_host_fault"
-                } else {
-                    "permanent_host_fault"
-                },
-            ),
-        None => evaluation,
-    })
-}
+mod evaluation;
+#[cfg(test)]
+pub(crate) use evaluation::evaluate_lint;
+pub(crate) use evaluation::evaluate_lint_with_path;
 
 #[cfg(test)]
 mod tests;

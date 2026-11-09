@@ -215,5 +215,60 @@ pub(super) fn load_generated_v2_metadata(
         path: path.clone(),
         source: err,
     })?;
-    serde_json::from_str(&raw).map(Some).map_err(Into::into)
+    let mut value: serde_json::Value = serde_json::from_str(&raw)?;
+    let root = store
+        .load_state(run_id)
+        .ok()
+        .and_then(|run| run.spec.target_repository_root);
+    if migrate_focused_decisions(&mut value, root.as_deref().map(std::path::Path::new))? {
+        store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &value)?;
+        tracing::info!(%run_id, "persisted frozen command decision migration");
+    }
+    serde_json::from_value(value).map(Some).map_err(Into::into)
 }
+
+pub(crate) fn stored_task_universe(
+    store: &WorkflowStore,
+    run_id: &str,
+) -> archon_workflow::WorkflowResult<Option<WorkflowV2TaskUniverse>> {
+    Ok(load_generated_v2_metadata(store, run_id)?.and_then(|metadata| metadata.task_universe))
+}
+
+fn migrate_focused_decisions(
+    value: &mut serde_json::Value,
+    root: Option<&std::path::Path>,
+) -> archon_workflow::WorkflowResult<bool> {
+    let Some(raw) = value.get("task_universe").filter(|v| !v.is_null()) else {
+        return Ok(false);
+    };
+    let mut universe: WorkflowV2TaskUniverse = serde_json::from_value(raw.clone())?;
+    if universe.command_decisions_are_recorded() {
+        return Ok(false);
+    }
+    let policy: Option<archon_workflow::acceptance_check_environment::CheckPolicy> = value
+        .get("check_environment_policy")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .flatten();
+    let bound = universe
+        .tasks
+        .first()
+        .map(|t| archon_workflow::task_universe::focused_commands::repository_root(&t.source_path));
+    let root = root
+        .or(bound.as_deref())
+        .filter(|r| !r.as_os_str().is_empty())
+        .ok_or_else(|| {
+            WorkflowError::SpecInvalid(
+                "legacy command migration requires the bound repository".into(),
+            )
+        })?;
+    let path = crate::command::acceptance_check_policy::captured_command_path(policy.as_ref());
+    let migrated = universe.migrate_command_decisions(root, &path);
+    value["task_universe"] = serde_json::to_value(universe)?;
+    Ok(migrated)
+}
+
+#[cfg(test)]
+#[path = "workflow_live_v2_metadata_migration_tests.rs"]
+mod migration_tests;

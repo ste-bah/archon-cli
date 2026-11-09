@@ -54,6 +54,7 @@ fn a_rounds_gap_recorded_again_in_other_words_is_planned_as_new() {
     let w = package_world();
     let (_, first) = first_round(&w, "medium");
     w.save(&round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -226,6 +227,7 @@ fn once_a_third_pass_round_runs_later_evidence_never_moves_the_plan() {
     w.save(&record(fix, WorkflowV2Status::Accepted, &tasks, &[]));
     pause();
     let verify = round_verdict(
+        &w,
         &round,
         "verification-wave-review-verify-residual-8",
         3,
@@ -330,6 +332,7 @@ fn a_refused_round_retried_by_the_next_pass_resolves_its_gap() {
     ));
     pause();
     let verify2 = round_verdict(
+        &w,
         &retry,
         "verification-wave-review-verify-residual-6",
         2,

@@ -1,0 +1,36 @@
+{
+  "recorded_at": "2026-11-08T16:46:18.692512+00:00",
+  "cwd": "/private/tmp/s8-formatter-recording",
+  "runs": [
+    {
+      "argv": [
+        "gofmt",
+        "-l",
+        "src/a.go"
+      ],
+      "exit_code": 0,
+      "version": "go version go1.26.5 darwin/arm64",
+      "input_path": "src/a.go",
+      "input_text": "package sample\nfunc sum(a,b int)int{return a+b}\n",
+      "version_argv": [
+        "go",
+        "version"
+      ]
+    },
+    {
+      "argv": [
+        "rustfmt",
+        "--check",
+        "src/d.rs"
+      ],
+      "exit_code": 1,
+      "version": "rustfmt 1.9.0",
+      "input_path": "src/d.rs",
+      "input_text": "fn value()->u8{1}\n",
+      "version_argv": [
+        "rustfmt",
+        "--version"
+      ]
+    }
+  ]
+}

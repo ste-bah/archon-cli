@@ -36,10 +36,23 @@ pub(super) fn outside_declarations_reason(task_id: &str) -> String {
 /// Parsing belongs to the mechanical gate: never pile claim findings onto an
 /// unreadable candidate. Use the same declarations/forbidden-file reader as
 /// the trace; repository observables remain the whole set's responsibility.
+#[cfg(test)]
 pub(crate) fn body_claim_findings(root: &Path, path: &Path, body: &str) -> Vec<GateFinding> {
-    let Ok(binding) =
-        archon_knowledge::traceability::tasks::parse_task_binding(body, &path.to_string_lossy())
-    else {
+    let site = crate::command::requirement_trace::check_policy::command_path(None);
+    body_claim_findings_at_path(root, path, body, &site)
+}
+
+pub(crate) fn body_claim_findings_at_path(
+    root: &Path,
+    path: &Path,
+    body: &str,
+    site_path: &std::ffi::OsStr,
+) -> Vec<GateFinding> {
+    let Ok(binding) = archon_knowledge::traceability::tasks::parse_task_binding_with_path(
+        body,
+        &path.to_string_lossy(),
+        site_path,
+    ) else {
         return Vec::new();
     };
     let root = crate::command::topology_lint::scope_declarations::repository_root(

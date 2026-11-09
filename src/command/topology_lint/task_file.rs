@@ -7,7 +7,7 @@ use archon_workflow::task_set_contract::{
     AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, validate_acceptance_bundle,
 };
 use archon_workflow::task_skeleton::{compare_frozen_task, validate_full_chain};
-use archon_workflow::task_universe::parsing::parse_task_file;
+use archon_workflow::task_universe::parsing::parse_task_file_with_path;
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_contracts};
 
@@ -64,37 +64,28 @@ pub(super) struct TaskFileLint {
         BTreeMap<String, VecDeque<archon_workflow::defect::DeterministicDefect>>,
 }
 
-pub(super) fn inspect(
-    cwd: &Path,
-    path: &Path,
-    mode: archon_core::config::GateMode,
-) -> TaskFileLint {
-    let path = absolute(cwd, path);
-    match std::fs::read_to_string(&path) {
-        Ok(raw) => inspect_raw(cwd, &path, &raw, mode),
-        Err(error) => {
-            let report = format!("# topology lint — task file {}\n", shown(&path));
-            let (mut blockers, mut identities) = (Vec::new(), Identities::new());
-            block(
-                &mut blockers,
-                &mut identities,
-                format!(
-                    "{}: unreadable: {error}; restore the TASK file and re-run `workflow lint --task-file {}`",
-                    shown(&path),
-                    shown(&path)
-                ),
-                DeterministicDefect::new("unreadable_task_file", "task_file", "file"),
-            );
-            finish(report, blockers, BTreeSet::new(), identities)
-        }
-    }
-}
+#[path = "task_file_read.rs"]
+mod read;
+#[cfg(test)]
+pub(super) use read::inspect;
+pub(super) use read::inspect_at_path;
 
+#[cfg(test)]
 pub(super) fn inspect_raw(
     cwd: &Path,
     path: &Path,
     raw: &str,
     mode: archon_core::config::GateMode,
+) -> TaskFileLint {
+    inspect_raw_at_path(cwd, path, raw, mode, None)
+}
+
+pub(super) fn inspect_raw_at_path(
+    cwd: &Path,
+    path: &Path,
+    raw: &str,
+    mode: archon_core::config::GateMode,
+    site_path: Option<&std::ffi::OsStr>,
 ) -> TaskFileLint {
     let path = absolute(cwd, path);
     let mut report = format!("# topology lint — task file {}\n", shown(&path));
@@ -119,7 +110,15 @@ pub(super) fn inspect_raw(
             return finish(report, blockers, inherited_blockers, deterministic);
         }
     };
-    let task = match parse_task_file(&path, raw) {
+    let site = site_path
+        .map(|path| Ok(path.to_owned()))
+        .unwrap_or_else(|| crate::command::acceptance_check_policy::command_site_path(cwd));
+    let task = match site
+        .map_err(|error| error.to_string())
+        .and_then(|site_path| {
+            parse_task_file_with_path(&path, raw, Some(&site_path))
+                .map_err(|error| error.to_string())
+        }) {
         Ok(task) => task,
         Err(error) => {
             // The parser stops at its first error: one parse-stage defect.

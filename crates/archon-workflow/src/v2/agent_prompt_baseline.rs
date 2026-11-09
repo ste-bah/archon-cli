@@ -1,10 +1,7 @@
 //! The `## Baseline Tests` section of a verifier's prompt (Obs-31).
 //!
-//! Rendered from the stamp `verification::baseline_rule` put on the item, in
-//! the same words the coder was given, with the rule the host will enforce
-//! on the verifier's report: a red test in the task's declared filter refuses
-//! acceptance unless it is on the other-owner or leave-alone list, and
-//! "pre-existing" is not a reason. Empty for an item without a stamp.
+//! The host record and the identity conditions for a pre_existing claim.
+//! Empty for an item without a stamp.
 
 use serde_json::Value;
 
@@ -26,21 +23,19 @@ pub(crate) fn baseline_tests_prompt_section(input: &Value) -> String {
         format!("on the base commit {sha} before any task changed the tree")
     };
     let mut text = format!(
-        "## Baseline Tests\n\
-         The host ran this task's declared focused test commands {when}. Rule: the task is \
-         NOT accepted while any test in its declared filter fails, unless that test is listed \
-         below as owned by another task or as one to leave alone. \"Pre-existing\" is not an \
-         acceptable reason to accept a red test, and a `pre_existing: true` command record is \
-         honoured only when every test its output names is on those lists; the host re-reads your commands_run output for failing test ids and file locations its readers recognise; \
-         a failure it cannot read is judged on your report and the evidence you quote. The host refuses an accepted verdict that leaves any other test red. The lists below ARE that record, complete and \
-         already resolved — there is nothing to look up. The host's own copy is written to \
-         `{root}/` under the run directory, which is its bookkeeping and not a place to search: \
-         it accumulates every run ever kept on this machine, and a recursive search of it has \
-         run for tens of minutes before being killed.\n",
-        root = crate::v2::write::test_baseline::ROOT_DIR
+        "## Baseline Tests\nThe host ran this task's declared focused test commands {when}.\n"
     );
+    text.push_str("- Make every listed Must pass test pass.\n");
+    text.push_str("- A pre_existing claim requires a stored host tip run.\n");
+    text.push_str("- Every red identity in that run must occur in the base set.\n");
+    text.push_str("- Base and tip exit codes must match.\n");
+    text.push_str("- A red command without a usable identity blocks.\n");
+    text.push_str("- The host refuses an accepted verdict that leaves any other test red.\n");
+    text.push_str("- Keep every base-passing test visible at tip.\n");
+    text.push_str("- Do not disable or delete tests.\n");
+    text.push_str("- Do not search previous run directories.\n");
     if stamp.must_pass.is_empty() {
-        text.push_str("- Must pass (red on the base commit, this task's to fix): none recorded; every red test in the filter is this task's.\n");
+        text.push_str("- Must pass (red on the base commit, this task's to fix): none recorded.\n");
     } else {
         text.push_str(&format!(
             "- Must pass (red on the base commit, this task's to fix): {}\n",
@@ -54,30 +49,29 @@ pub(crate) fn baseline_tests_prompt_section(input: &Value) -> String {
             .map(|t| format!("{} (owned by {})", t.test_id, t.owner_task))
             .collect();
         text.push_str(&format!(
-            "- Owned by another task (may stay red; record as pre_existing with this list as the evidence): {}\n",
+            "- Owned by another task (may stay red with host identity evidence): {}\n",
             listed.join(", ")
         ));
     }
     if !stamp.ignored.is_empty() {
         text.push_str(&format!(
-            "- To leave alone (may stay red): {}\n",
+            "- To leave alone (may stay red with host identity evidence): {}\n",
             stamp.ignored.join(", ")
         ));
     }
     for pre in &stamp.pre_existing_diagnostics {
         text.push_str(&format!(
-            "- `{}` already fails on the base commit for error diagnostics in {} file(s) outside \
-             this task's target_files: {}. Record it as pre_existing with those locations as \
-             the evidence; the host re-reads your commands_run output for failing test ids and file locations its readers recognise; \
-             a failure it cannot read is judged on your report and the evidence you quote. A diagnostic in any other file is this task's failure.\n",
+            "- `{}`: base failure recorded; files: {}.\n",
             pre.command,
-            pre.files.len(),
             pre.files.join(", ")
         ));
     }
+    if !stamp.pre_existing_diagnostics.is_empty() {
+        text.push_str("- A diagnostic in any other file is this task's failure.\n");
+    }
     if !stamp.unbaselined_commands.is_empty() {
         text.push_str(&format!(
-            "- Declared commands the host could not baseline (no exemption applies to their failures): {}\n",
+            "- Declared commands with no proof in this baseline record: {}\n",
             stamp
                 .unbaselined_commands
                 .iter()
@@ -117,20 +111,34 @@ mod tests {
         });
         let text = baseline_tests_prompt_section(&input);
         assert!(text.starts_with("## Baseline Tests\nThe host ran this task's declared focused test commands on the base commit abcdef012345 "), "{text}");
-        assert!(text.contains("the task is NOT accepted while any test in its declared filter fails, unless that test is listed below as owned by another task or as one to leave alone. \"Pre-existing\" is not an acceptable reason"), "{text}");
+        assert!(
+            text.contains("- A pre_existing claim requires a stored host tip run.\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- Every red identity in that run must occur in the base set.\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- Base and tip exit codes must match.\n"),
+            "{text}"
+        );
+        assert!(!text.contains("your commands_run output"), "{text}");
         assert!(
             text.contains(
                 "- Must pass (red on the base commit, this task's to fix): grant::tests::mine\n"
             ),
             "{text}"
         );
-        assert!(text.contains("- Owned by another task (may stay red; record as pre_existing with this list as the evidence): plan::tests::theirs (owned by TASK-B)\n"), "{text}");
+        assert!(text.contains("- Owned by another task (may stay red with host identity evidence): plan::tests::theirs (owned by TASK-B)\n"), "{text}");
         assert!(
-            text.contains("- To leave alone (may stay red): gate::frozen\n"),
+            text.contains(
+                "- To leave alone (may stay red with host identity evidence): gate::frozen\n"
+            ),
             "{text}"
         );
-        assert!(text.contains("- Declared commands the host could not baseline (no exemption applies to their failures): `cargo test -p engine slow`\n"), "{text}");
-        assert!(text.contains("- `cargo clippy -p engine -- -D warnings` already fails on the base commit for error diagnostics in 2 file(s) outside this task's target_files: crates/engine/src/gate.rs, crates/other/src/lib.rs. Record it as pre_existing with those locations as the evidence;"), "{text}");
+        assert!(text.contains("- Declared commands with no proof in this baseline record: `cargo test -p engine slow`\n"), "{text}");
+        assert!(text.contains("- `cargo clippy -p engine -- -D warnings`: base failure recorded; files: crates/engine/src/gate.rs, crates/other/src/lib.rs."), "{text}");
     }
 
     #[test]
@@ -149,12 +157,12 @@ mod tests {
             text.starts_with(
                 "## Baseline Tests\nThe host ran this task's declared focused test commands on \
                  the verification base commit fedcba987654, the current head of the checkout \
-                 you run in, after every earlier task's work landed. Rule:"
+                 you run in, after every earlier task's work landed.\n"
             ),
             "{text}"
         );
         assert!(!text.contains("before any task changed the tree"), "{text}");
-        assert!(text.contains("- Owned by another task (may stay red; record as pre_existing with this list as the evidence): plan::tests::theirs (owned by TASK-B)\n"), "{text}");
+        assert!(text.contains("- Owned by another task (may stay red with host identity evidence): plan::tests::theirs (owned by TASK-B)\n"), "{text}");
     }
 }
 

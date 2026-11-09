@@ -31,3 +31,10 @@ pub(super) fn from_config(
 ) -> anyhow::Result<Option<archon_workflow::acceptance_check_environment::CheckPolicy>> {
     crate::command::acceptance_check_policy::from_config(config)
 }
+
+/// Use the already-resolved launch policy; absent policy captures the default site once.
+pub(super) fn command_path(
+    policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
+) -> std::ffi::OsString {
+    crate::command::acceptance_check_policy::captured_command_path(policy)
+}

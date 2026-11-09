@@ -28,7 +28,9 @@ mod body;
 mod check;
 mod index;
 mod observe;
+#[cfg(test)]
 pub(crate) use body::body_claim_findings;
+pub(crate) use body::body_claim_findings_at_path;
 use body::untestable_claims;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,7 +38,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use archon_knowledge::traceability::TaskBinding;
-use archon_knowledge::traceability::tasks::KNOWN_RUNNERS;
 use archon_workflow::repository_record::read_repository_record;
 
 use super::verdict::TracePolicyFinding;
@@ -132,14 +133,29 @@ pub(super) fn falsify_claims(task_dir: &Path, bindings: Vec<TaskBinding>) -> Res
     })
 }
 
-fn task_inputs(root: &Path, binding: TaskBinding, raw: String) -> TaskInputs {
+fn task_inputs(root: &Path, mut binding: TaskBinding, raw: String) -> TaskInputs {
     let path = Path::new(&binding.source_path);
-    let universe = archon_workflow::task_universe::parsing::parse_task_file(path, &raw);
+    let mut universe = archon_workflow::task_universe::parsing::parse_task_file(path, &raw);
+    if let Ok(task) = &mut universe {
+        task.focused_commands = Some(
+            binding
+                .focused_tests
+                .iter()
+                .filter_map(|entry| match entry {
+                    archon_knowledge::traceability::tasks::FocusedTestEntry::Command(command) => {
+                        Some(command.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+    }
     let unread = universe.as_ref().err().map(ToString::to_string);
     let universe = universe.ok();
     let mut declared: Vec<String> = binding.path_scopes.clone();
     let mut forbidden_bullets = Vec::new();
     if let Some(task) = &universe {
+        binding.use_focused_commands(&task.declared_focused_test_commands());
         declared.extend(
             task.deliverable_contracts
                 .iter()
@@ -177,12 +193,28 @@ fn task_inputs(root: &Path, binding: TaskBinding, raw: String) -> TaskInputs {
     }
 }
 
-fn runner_check(tools: &[String]) -> impl Fn(&str) -> bool + '_ {
-    move |first: &str| KNOWN_RUNNERS.contains(&first) || tools.iter().any(|tool| tool == first)
+fn runner_check(binding: &TaskBinding) -> impl Fn(&str) -> bool + '_ {
+    |command| {
+        binding.focused_tests.iter().any(|entry| {
+            let archon_knowledge::traceability::tasks::FocusedTestEntry::Command(frozen) = entry
+            else {
+                return false;
+            };
+            (frozen.split_whitespace().eq(command.split_whitespace())
+                || archon_workflow::task_universe::focused_commands::leading_program(frozen)
+                    == Some(command))
+                && archon_workflow::verifier_strength::verifier_strength_defect(
+                    Some(frozen),
+                    None,
+                    None,
+                )
+                .is_none()
+        })
+    }
 }
 
 fn test_claim(index: &EvidenceIndex, task: &TaskInputs, requirement: &str) -> ClaimResult {
-    let runners = runner_check(&task.binding.required_tools);
+    let runners = runner_check(&task.binding);
     let scope = TaskScope {
         task_id: &task.binding.task_id,
         changeable: &task.changeable,

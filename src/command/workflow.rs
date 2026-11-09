@@ -92,25 +92,7 @@ impl CommandHandler for WorkflowHandler {
             ));
         }
         if args.first().is_some_and(|first| first == "lint") {
-            let source = workflow_cli_lint::lint_source_from_slash_args(&args[1..])?;
-            let mode = ctx.gate_mode.unwrap_or_default();
-            let gate_id = match source {
-                crate::command::topology_lint::LintSource::TaskFile(_) => {
-                    crate::command::workflow_gate::GateId::WorkflowLintTaskFile
-                }
-                _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
-            };
-            let disposition =
-                crate::command::workflow_gate::run_sync_gate(&cwd, mode, gate_id, || {
-                    crate::command::topology_lint::evaluate_lint(&cwd, &source, mode)
-                })?;
-            ctx.emit(TuiEvent::TextDelta(disposition.report().to_string()));
-            for diagnostic in disposition.diagnostics() {
-                ctx.emit(TuiEvent::TextDelta(format!("{diagnostic}\n")));
-            }
-            disposition.require_allowed()?;
-            ctx.emit(TuiEvent::SlashCommandComplete);
-            return Ok(());
+            return workflow_cli_lint::handle_lint_context(ctx, &cwd, &args[1..]);
         }
         let command = WorkflowCommand::parse(args)?;
         if should_spawn_live(&command.action)

@@ -28,7 +28,9 @@ fn has_runnable_test(raw: &str) -> bool {
         .find_map(|line| line.trim().strip_prefix("task_id:"))
         .map(str::trim)
         .unwrap_or("TASK-X-010");
-    let task = parse_task_file(&PathBuf::from(format!("{id}.md")), raw).unwrap();
+    let mut task = parse_task_file(&PathBuf::from(format!("{id}.md")), raw).unwrap();
+    let site = command_site();
+    task.freeze_focused_commands(Path::new(""), &std::env::join_paths([site.path()]).unwrap());
     task_has_runnable_test(&task)
 }
 
@@ -43,7 +45,8 @@ fn lint(files: &[String]) -> String {
         .zip(files)
         .map(|(path, contents)| (path.as_path(), Some(contents.clone())))
         .collect();
-    checked_files(&read)
+    let site = command_site();
+    checked_files_with_path(&read, Some(&std::env::join_paths([site.path()]).unwrap()))
 }
 
 /// The live case: a task declaring no tools while running cargo. The host
@@ -68,7 +71,10 @@ fn a_declared_runner_is_not_reported() {
         "[]",
         "## Focused Tests\n\n- `cargo test -p thing`\n",
     )]);
-    assert!(out.contains("every runner and environment key"), "{out}");
+    assert!(
+        out.contains("every compared leading word and environment key"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -80,7 +86,7 @@ fn only_the_runtime_focused_command_supplies_capability_declarations() {
         "## Focused Tests\n\n- `cargo test -p thing` documents `pytest tests/x.py` and `$UNDECLARED_TOKEN`\n",
     )]);
     assert!(
-        out.contains("every runner and environment key"),
+        out.contains("every compared leading word and environment key"),
         "the prose spans are not commands: {out}"
     );
     assert!(!out.contains("pytest"), "{out}");
@@ -98,7 +104,7 @@ fn a_non_runner_first_token_is_not_a_missing_tool() {
         "## Focused Tests\n\n- see `data list --json` output\n",
     )]);
     assert!(
-        !out.contains("without declaring it in `required_tools`"),
+        !out.contains("absent from `required_tools`"),
         "a described CLI fragment is not an invocation: {out}"
     );
 }
@@ -149,7 +155,7 @@ fn commands_outside_focused_tests_are_ignored() {
         "## Notes\n\n- historically we ran `cargo bench`\n\n## Focused Tests\n\n- none yet\n",
     )]);
     assert!(
-        !out.contains("without declaring it in `required_tools`"),
+        !out.contains("absent from `required_tools`"),
         "a command quoted outside Focused Tests is not a declaration of intent: {out}"
     );
 }
@@ -304,7 +310,8 @@ fn focused_subsections_reach_lint_without_sibling_commands() {
         "[]",
         "## Focused Tests\n### Tool calls\n- `mcp__example__fetch` with `{}`\n### Build\n```sh\ncargo build\ncargo nextest run\n```\n#### Content\n- `grep -q expected result.txt`\n## Other\n```sh\nexit 99\n```\n- `wrong_command`\n",
     );
-    let task = parse_task_file(&PathBuf::from("TASK-X-010.md"), &raw).unwrap();
+    let mut task = parse_task_file(&PathBuf::from("TASK-X-010.md"), &raw).unwrap();
+    task.freeze_focused_commands(Path::new(""), std::ffi::OsStr::new(""));
     assert!(task_has_runnable_test(&task));
     let commands = task.declared_focused_test_commands();
     for expected in [
@@ -336,4 +343,56 @@ fn section_reads_a_task_corpus_from_disk() {
     for task in ["TASK-SYN-010", "TASK-SYN-020"] {
         assert!(out.contains(task), "{task} was not read: {out}");
     }
+}
+
+#[test]
+fn syntax_and_path_prefixes_never_hide_environment_references() {
+    for command in [
+        "KEY=$UNDECLARED_VALUE test -f x",
+        "! test -f $UNDECLARED_VALUE",
+        "MODE=$UNDECLARED_VALUE git diff --check",
+        "TMP=$(mktemp -d $UNDECLARED_VALUE)",
+        "OUT=\"$(git trading $UNDECLARED_VALUE)\"",
+    ] {
+        let out = lint(&[task(
+            "TASK-X-001",
+            "[]",
+            "[]",
+            &format!("## Focused Tests\n- `{command}`\n"),
+        )]);
+        assert!(out.contains("UNDECLARED_VALUE"), "{out}");
+        assert!(!out.contains("word(s) `!`"), "{out}");
+        assert!(!out.contains("word(s) `MODE="), "{out}");
+        assert!(!out.contains("`-d`"), "{out}");
+        assert!(!out.contains("`trading`"), "{out}");
+    }
+}
+
+pub(super) fn command_site() -> tempfile::TempDir {
+    let site = tempfile::tempdir().unwrap();
+    for program in [
+        "cargo",
+        "env",
+        "cd",
+        "pushd",
+        "node",
+        "npx",
+        "test",
+        "python3",
+        "grep",
+        "sh",
+        "mkdir",
+        "git",
+        "mktemp",
+        "custom-check",
+    ] {
+        let file = site.path().join(program);
+        std::fs::write(&file, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    site
 }

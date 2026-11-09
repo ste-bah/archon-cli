@@ -76,6 +76,11 @@ fn regression_fixture() -> support::Fixture {
     let base = git(&f.repo, &["rev-parse", "HEAD"]);
     let universe = f.universe.as_mut().unwrap();
     universe.tasks[1].focused_tests = vec![CHECK.into()];
+    let site_path =
+        std::env::join_paths([archon_shell::resolve_posix_shell().parent().unwrap()]).unwrap();
+    for task in &mut universe.tasks {
+        task.freeze_focused_commands(&f.repo, &site_path);
+    }
     // The run is bound to the base, as the live host records it.
     let run = f.v2.root().parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&run).unwrap();

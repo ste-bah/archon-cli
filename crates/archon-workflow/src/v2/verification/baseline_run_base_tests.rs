@@ -25,6 +25,10 @@ use crate::v2::{
     WorkflowV2Status,
 };
 
+#[cfg(unix)]
+#[path = "baseline_run_base_host_identity_tests.rs"]
+mod host_identity;
+
 const ITEM: &str = "verification-wave-review-verify-c-residual-1-0";
 const LIB: &str = "cargo test -p app --lib";
 const OLD: &str = "shared::tests::old";
@@ -37,6 +41,8 @@ fn universe(own: &[&str]) -> WorkflowV2TaskUniverse {
         tasks: vec![WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-A".into(),
             source_path: "tasks/TASK-A.md".into(),
+            focused_commands: Some(vec![LIB.into(), "cargo test -p app --test it".into()]),
+            focused_tests: vec![LIB.into(), "cargo test -p app --test it".into()],
             files_expected_to_change: own.iter().map(|f| f.to_string()).collect(),
             ..Default::default()
         }],
@@ -193,11 +199,8 @@ async fn an_unowned_test_failing_the_same_way_since_the_run_began_refuses_nothin
     let listed = &data(&outcome)[UNOWNED_RED_DATA_KEY][0];
     assert_eq!(listed["test_id"], OLD);
     assert_eq!(listed["file"], "src/shared_tests.rs");
-    // The test's file and its parent module's (its panic is in its own).
-    assert_eq!(
-        listed["files"],
-        json!(["src/shared_tests.rs", "src/shared.rs"])
-    );
+    // Only the explicit failure location is implicated; no module parent is inferred.
+    assert_eq!(listed["files"], json!(["src/shared_tests.rs"]));
     let gap = &outcome.result.as_ref().unwrap().residual_gaps[0];
     assert_eq!(gap.severity.as_deref(), Some("medium"));
     assert!(

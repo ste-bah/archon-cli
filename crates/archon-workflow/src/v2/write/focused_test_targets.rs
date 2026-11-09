@@ -30,10 +30,7 @@
 //! (a trailing test-function name simply fails to match and the module
 //! part is tried next), and at each length two shapes are tried in order:
 //!
-//! 1. the EXACT walk from the src root, by the same machinery that owns a
-//!    failing test ([`super::test_baseline_owner`]): `a/b/c.rs`,
-//!    `a/b/c/mod.rs`, the `#[path]` sibling `a/b_tests.rs` for a `tests`
-//!    segment;
+//! 1. the EXACT walk from the selected source root, following module declarations;
 //! 2. the SUFFIX search: every module file in the src tree whose module
 //!    path ends with those segments (`…/a/b/c.rs`, `…/a/b/c/mod.rs`, and
 //!    `…/a/b_tests.rs` read as `…::a::b::tests`). Exactly one hit resolves;
@@ -258,14 +255,14 @@ pub(super) fn resolution(repo_root: &Path, command: &str) -> Resolution {
     let (filter, per_package): (String, Vec<Resolution>) = match selection(command) {
         Selection::Module(segments) => {
             let modules: Vec<&str> = segments.iter().map(String::as_str).collect();
-            let per_package = test_baseline_owner::package_source_roots(repo_root, command)
+            let per_package = packages::package_source_roots(repo_root, command)
                 .iter()
                 .map(|src| super::focused_test_resolve::resolve_module(repo_root, src, &modules))
                 .collect();
             (segments.join("::"), per_package)
         }
         Selection::IntegrationTest(name) => {
-            let per_package = test_baseline_owner::package_dirs_for(repo_root, command)
+            let per_package = packages::package_dirs_for(repo_root, command)
                 .iter()
                 .map(|dir| {
                     let tests = if dir.is_empty() {
@@ -429,3 +426,6 @@ pub(super) fn stamp_result(result: &mut crate::WorkflowV2Result, targets: &Focus
 #[cfg(test)]
 #[path = "focused_test_targets_tests.rs"]
 mod tests;
+
+#[path = "focused_test_targets_packages.rs"]
+mod packages;

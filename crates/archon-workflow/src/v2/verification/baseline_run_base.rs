@@ -27,9 +27,9 @@
 //!   targets, the round's granted residual files.
 //!
 //! A `pre_existing` claim on a runner command is PROVEN only when the host's
-//! own judged-tree run of that command failed, and every test it names
-//! failing is excused or on the stamp's exempt lists; never from a typed
-//! list alone. Every other shape keeps the rule exactly as it was: a test in
+//! own judged-tree run of that command failed, every named failure keeps
+//! its base signature, and every name is excused or on the stamp's exempt
+//! lists; never from a typed list alone. Every other shape keeps the rule exactly as it was: a test in
 //! scope, a test green at the run base (a new failure), a test failing
 //! differently, a command the host could not run or that never reached a
 //! test summary, and every claim on any other command.
@@ -50,9 +50,10 @@ use super::unowned_paths::BranchScope;
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::write::test_baseline_owner::{Ownership, ownership};
-use crate::v2::write::test_baseline_owner_at::{parent_module_file_at, test_file_at};
+use crate::v2::write::test_baseline_owner_at::test_file_at;
 use crate::v2::write::test_baseline_run_base::{
-    HostRunVerdict, MAX_COMMANDS_PER_BRANCH, Tree, host_runnable, host_verdicts, run_base_commit,
+    FrozenCommands, HostRunVerdict, MAX_COMMANDS_PER_BRANCH, Tree, host_runnable, host_verdicts,
+    run_base_commit,
 };
 use crate::v2::{
     WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2HostCall,
@@ -85,6 +86,10 @@ pub struct BaseRedTest {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BranchJudgement {
     pub excused: Vec<BaseRedTest>,
+    /// Observed at the judged tree but absent from both base result sets.
+    pub unknown: Vec<String>,
+    /// Commands with named failures whose base results remain unknown.
+    pub unknown_commands: Vec<String>,
     /// Runner commands whose `pre_existing` claim the host's own run proved.
     pub proven: Vec<String>,
     /// Runner commands over the bound, never run.
@@ -107,8 +112,8 @@ pub struct RunBaseRedContext<'a> {
     pub judged_commit: Option<&'a str>,
 }
 
-/// The failed plain test-runner commands of a verifier's report.
-fn runner_commands(result: &WorkflowV2Result) -> Vec<String> {
+/// Failed test commands from the verifier's report that are frozen declarations.
+fn runner_commands(result: &WorkflowV2Result, frozen: &FrozenCommands) -> Vec<String> {
     let mut commands: Vec<String> = Vec::new();
     for command in result
         .commands_run
@@ -117,7 +122,7 @@ fn runner_commands(result: &WorkflowV2Result) -> Vec<String> {
         .filter(|c| c.status == WorkflowV2CommandStatus::Failed)
         .filter(|c| !super::baseline_demo::is_baseline_demonstration(result, c))
         .map(|c| c.command.trim().to_string())
-        .filter(|c| host_runnable(c))
+        .filter(|c| host_runnable(c, frozen))
     {
         if !commands.contains(&command) {
             commands.push(command);
@@ -126,8 +131,7 @@ fn runner_commands(result: &WorkflowV2Result) -> Vec<String> {
     commands
 }
 
-/// The tests the runner lines of every failed command the host does not run
-/// (a pipe, an environment prefix, another tool) name failing.
+/// Test failures named in reports of failed commands that the host did not run.
 fn unrun_named(result: &WorkflowV2Result, commands: &[String]) -> Vec<String> {
     result
         .commands_run
@@ -163,6 +167,7 @@ pub async fn excuse_run_base_red_tests(
     scope_by_item: &BTreeMap<String, BranchScope>,
 ) -> ExcusedRedTests {
     let mut judged = ExcusedRedTests::new();
+    let frozen = FrozenCommands::from_universe(ctx.universe);
     let (Some(universe), Some(base), Some(commit)) =
         (ctx.universe, run_base_commit(ctx.store), ctx.judged_commit)
     else {
@@ -179,7 +184,7 @@ pub async fn excuse_run_base_red_tests(
         else {
             continue;
         };
-        let mut commands = runner_commands(result);
+        let mut commands = runner_commands(result, &frozen);
         // Nothing to excuse and no runner claim to prove: nothing is run.
         let claims = result
             .commands_run
@@ -204,8 +209,26 @@ pub async fn excuse_run_base_red_tests(
         return judged;
     }
     let root = ctx.repository_root;
-    let on_judged = host_verdicts(ctx.store, ctx.dispatch, root, Tree::Judged, commit, &all).await;
-    let at_base = host_verdicts(ctx.store, ctx.dispatch, root, Tree::RunBase, &base, &all).await;
+    let on_judged = host_verdicts(
+        ctx.store,
+        ctx.dispatch,
+        root,
+        Tree::Judged,
+        commit,
+        &all,
+        &frozen,
+    )
+    .await;
+    let at_base = host_verdicts(
+        ctx.store,
+        ctx.dispatch,
+        root,
+        Tree::RunBase,
+        &base,
+        &all,
+        &frozen,
+    )
+    .await;
     let granted = granted_files(ctx.call);
     for (outcome, stamp, commands) in pending {
         let Some(result) = outcome.result.as_ref() else {
@@ -221,7 +244,15 @@ pub async fn excuse_run_base_red_tests(
             tasks: &stamp.tasks,
             targets: &targets,
         };
-        let red = red_tests(result, stamp, &[]);
+        let mut red = red_tests(result, stamp, &[]);
+        red.extend(
+            commands
+                .iter()
+                .filter_map(|command| on_judged.get(command))
+                .flat_map(|run| run.failing_tests.iter().cloned()),
+        );
+        red.sort();
+        red.dedup();
         let entry = judged.entry(outcome.item_id.clone()).or_default();
         // A runner the host did not run could name the same test failing
         // another way: with any over the bound, nothing is excused.
@@ -231,28 +262,93 @@ pub async fn excuse_run_base_red_tests(
                 &red, &unrun, &commands, &on_judged, &at_base, root, commit, &scope,
             );
         }
+        if entry.not_run.is_empty() {
+            entry.unknown = red
+                .iter()
+                .filter(|id| {
+                    !unrun_named(result, &commands).contains(id)
+                        && commands
+                            .iter()
+                            .filter(|command| {
+                                on_judged
+                                    .get(*command)
+                                    .is_some_and(|run| run.failing_tests.contains(id))
+                            })
+                            .all(|command| {
+                                at_base.get(command).is_some_and(|run| {
+                                    !run.passed_tests.contains(id)
+                                        && !run.failing_tests.contains(id)
+                                })
+                            })
+                        && commands.iter().any(|command| {
+                            on_judged
+                                .get(command)
+                                .is_some_and(|run| run.failing_tests.contains(id))
+                        })
+                })
+                .cloned()
+                .collect();
+        }
         let ids: Vec<&str> = entry.excused.iter().map(|t| t.test_id.as_str()).collect();
-        entry.proven = commands
-            .iter()
-            .filter(|command| {
-                on_judged.get(*command).is_some_and(|run| {
-                    // Every failure the runner counted has a name the host
-                    // read: a doc test or any failure no name explains
-                    // leaves the claim unproven.
-                    run.exit_code != Some(0)
-                        && !run.failing_tests.is_empty()
-                        && run.failed_count == Some(run.failing_tests.len())
+        for command in &commands {
+            if let Some(run) = on_judged.get(command) {
+                let named = run.exit_code != Some(0)
+                    && !run.failing_tests.is_empty()
+                    && run
+                        .failed_count
+                        .is_none_or(|count| count <= run.failing_tests.len());
+                let diagnostics_proven = at_base.get(command).is_some_and(|base| {
+                    run.failing_tests.is_empty()
+                        && base.exit_code == run.exit_code
+                        && run.exit_code != Some(0)
+                        && crate::v2::write::test_baseline_parse::identity_subset(
+                            base.signatures.get("").map(String::as_str),
+                            run.signatures.get("").map(String::as_str),
+                        )
+                        && run
+                            .failure_files
+                            .get("")
+                            .is_some_and(|files| files.iter().all(|file| !scope.writes(file)))
+                });
+                let same_identity = at_base.get(command).is_some_and(|base| {
+                    base.exit_code == run.exit_code
+                        && crate::v2::write::test_baseline_parse::identity_subset(
+                            base.signatures.get("").map(String::as_str),
+                            run.signatures.get("").map(String::as_str),
+                        )
+                        && run.failing_tests.iter().all(|test| {
+                            base.failing_tests.contains(test)
+                                && crate::v2::write::test_baseline_parse::identity_subset(
+                                    base.signatures.get(test).map(String::as_str),
+                                    run.signatures.get(test).map(String::as_str),
+                                )
+                        })
+                });
+                let proven = diagnostics_proven
+                    || named
+                        && same_identity
                         && run
                             .failing_tests
                             .iter()
-                            .all(|t| ids.contains(&t.as_str()) || stamp.exempt(t))
-                })
-            })
-            .cloned()
-            .collect();
+                            .all(|t| ids.contains(&t.as_str()) || stamp.exempt(t));
+                if proven {
+                    entry.proven.push(command.clone());
+                } else if named
+                    && run.failing_tests.iter().any(|t| entry.unknown.contains(t))
+                    && run.failing_tests.iter().all(|t| {
+                        ids.contains(&t.as_str()) || stamp.exempt(t) || entry.unknown.contains(t)
+                    })
+                {
+                    entry.unknown_commands.push(command.clone());
+                }
+            }
+        }
     }
     judged.retain(|_, entry| {
-        !(entry.excused.is_empty() && entry.proven.is_empty() && entry.not_run.is_empty())
+        !(entry.excused.is_empty()
+            && entry.unknown.is_empty()
+            && entry.proven.is_empty()
+            && entry.not_run.is_empty())
     });
     judged
 }
@@ -331,22 +427,23 @@ fn excused_by(
 ) -> Option<BaseRedTest> {
     let (now, then) = (on_judged.get(command)?, at_base.get(command)?);
     let signature = now.signatures.get(test_id)?;
-    let same = !signature.is_empty()
+    let same = now.exit_code == then.exit_code
         && then.failing_tests.iter().any(|t| t == test_id)
-        && then.signatures.get(test_id) == Some(signature);
+        && crate::v2::write::test_baseline_parse::identity_subset(
+            then.signatures.get(test_id).map(String::as_str),
+            Some(signature),
+        );
     if !same {
         return None;
     }
-    let file = test_file_at(root, Some(commit), command, test_id)?;
+    let file = test_file_at(root, Some(commit), command, test_id)
+        .or_else(|| now.failure_files.get(test_id)?.first().cloned())?;
     let located = now.failure_files.get(test_id).cloned().unwrap_or_default();
     if scope.writes(&file) || located.iter().any(|path| scope.writes(path)) {
         return None;
     }
     let mut files = vec![file.clone()];
-    for extra in parent_module_file_at(root, Some(commit), command, test_id)
-        .into_iter()
-        .chain(located)
-    {
+    for extra in located {
         if !files.contains(&extra) {
             files.push(extra);
         }

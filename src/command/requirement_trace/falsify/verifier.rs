@@ -67,12 +67,12 @@ pub(super) enum Ran {
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 const DISK_INTERVAL: Duration = Duration::from_secs(5);
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
     run_with_policy(cwd, argv, timeout, None)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(super) fn run_with_policy(
     cwd: &Path,
     argv: &[String],

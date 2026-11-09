@@ -51,7 +51,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::v2::write::test_baseline::{all_records, routed_findings_for_task};
-use crate::v2::write::test_baseline_parse::{diagnostic_files, failing_tests};
+use crate::v2::write::test_baseline_parse::{diagnostic_files_for, failing_tests};
 use crate::v2::{
     BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2Evidence, WorkflowV2EvidenceKind,
     WorkflowV2FanoutItem, WorkflowV2ResultStore, WorkflowV2Status,
@@ -67,9 +67,8 @@ pub const BASELINE_TESTS_INPUT_KEY: &str = "baseline_tests";
 /// Gap id when a red test the task answers for survives an accepted verdict.
 pub const BASELINE_RED_TEST_GAP_ID: &str = "baseline_red_test_verification";
 
-/// Gap id when a declared command is excused because its filter matched zero
-/// tests: the verdict stands, the stale declaration stays visible. Never the
-/// demotion's id — nothing here lowers a status.
+/// Gap id for a stale declaration whose filter matched zero tests.
+/// An unproven claim is refused separately.
 pub const BASELINE_ZERO_MATCH_DECLARATION_GAP_ID: &str = "baseline_zero_match_declaration";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,13 +77,14 @@ pub struct OtherOwnerTest {
     pub owner_task: String,
 }
 
-/// A declared command red on the base commit only for error diagnostics in
-/// files outside the task's target set (Issue-64). A `pre_existing` claim on
-/// it is honoured when every location the verifier's own output names is in
-/// `files`; a diagnostic anywhere else — the task's own files — is not
-/// pre-existing and refuses the claim.
+/// A base failure with recorded identities and out-of-scope diagnostic files.
+/// Only the stored host tip evidence can discharge its claim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreExistingCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<(Option<i32>, String)>,
+    #[serde(default, skip_serializing_if = "path_is_empty")]
+    pub repository_root: std::path::PathBuf,
     pub command: String,
     /// Repo-relative, sorted.
     pub files: Vec<String>,
@@ -126,19 +126,20 @@ pub struct BaselineStamp {
 }
 
 impl BaselineStamp {
-    /// Whether `test_id` may stay red under an accepted verdict.
+    /// Whether the stamp lists `test_id` as another owner's or ignored test.
+    /// Host identity proof is required separately.
     pub fn exempt(&self, test_id: &str) -> bool {
         self.other_owner.iter().any(|t| t.test_id == test_id)
             || self.ignored.iter().any(|t| t == test_id)
     }
 
-    /// Whether a failed declared `command` whose verifier output is
-    /// `output_summary` fails for the out-of-scope diagnostics the baseline
-    /// recorded (Issue-64): the command was baselined as such, and every
-    /// `--> path` / `Diff in path` location the output names is one of the
-    /// recorded files. An output naming no location is taken at the
-    /// baseline's word; one naming any other file is not.
-    pub fn pre_existing_diagnostics_cover(&self, command: &str, output_summary: &str) -> bool {
+    /// Compare stored host tip output against the recorded base markers and status.
+    pub fn pre_existing_diagnostics_cover(
+        &self,
+        command: &str,
+        stored_tip_output: &str,
+        exit_code: Option<i32>,
+    ) -> bool {
         let Some(entry) = self.pre_existing_diagnostics.iter().find(|entry| {
             crate::context::command_matches_declared_focused_test(
                 command,
@@ -147,14 +148,26 @@ impl BaselineStamp {
         }) else {
             return false;
         };
-        diagnostic_files(output_summary, std::path::Path::new(""))
-            .iter()
-            .all(|located| {
-                entry
-                    .files
-                    .iter()
-                    .any(|file| located == file || located.ends_with(&format!("/{file}")))
-            })
+        let located = diagnostic_files_for(stored_tip_output, &entry.repository_root, command);
+        let identity = |text: &str| {
+            super::super::write::test_baseline_parse::failure_identity(text, &entry.repository_root)
+        };
+        let same_identity = entry.identity.as_ref().is_some_and(|(exit, output)| {
+            *exit == exit_code
+                && super::super::write::test_baseline_parse::identity_subset(
+                    identity(output).as_deref(),
+                    identity(stored_tip_output).as_deref(),
+                )
+        });
+        if !same_identity {
+            return false;
+        }
+        located.iter().all(|located| {
+            entry
+                .files
+                .iter()
+                .any(|file| located == file || located.ends_with(&format!("/{file}")))
+        })
     }
 
     /// The task's baseline, assembled from the records of every branch that
@@ -206,6 +219,8 @@ impl BaselineStamp {
                     {
                         stamp.pre_existing_diagnostics.push(PreExistingCommand {
                             command: pre.command.clone(),
+                            identity: pre.identity.clone(),
+                            repository_root: pre.repository_root.clone(),
                             files: pre.files.clone(),
                         });
                     }
@@ -292,10 +307,8 @@ pub fn baseline_by_item(items: &[WorkflowV2FanoutItem]) -> BTreeMap<String, Base
         .collect()
 }
 
-/// Demote every accepted outcome whose own report shows a red test the task
-/// answers for, or a pre-existing claim on a declared command that names no
-/// exempt test. A claim on a command that matched zero tests is the one
-/// exception: it is recorded as a stale declaration and the verdict stands.
+/// Demote accepted outcomes with unexcused red tests or claims lacking host proof.
+/// Zero-match declarations remain visible even when the claim blocks.
 pub fn enforce_baseline_tests(
     outcomes: &mut [WorkflowV2BranchOutcome],
     by_item: &BTreeMap<String, BaselineStamp>,
@@ -346,8 +359,8 @@ pub fn enforce_baseline_tests_excusing(
         }
         if !unproven.is_empty() {
             reasons.push(format!(
-                "declared command(s) failed under a pre_existing claim whose output names no test on \
-                 the other-owner list, so the claim is not accepted: {}",
+                "declared command(s) failed under a pre_existing claim that the host could not prove \
+                 from stored tip/base identities and matching exit status: {}",
                 unproven.join("; ")
             ));
         }
@@ -419,26 +432,20 @@ fn typed_failed_names(data: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Issue-78: the verdict stands, but the stale declaration is never silent —
-/// a `review` gap under its own id, evidence naming the excused command(s),
-/// and a typed list in `data` so a later reader can correct the declaration
-/// that matched nothing. Neither status is touched here.
+/// Record the stale declaration independently of whether host evidence excuses the claim.
 fn record_zero_match_declaration(result: &mut crate::WorkflowV2Result, commands: &[String]) {
     let listed = commands.join("; ");
     result.residual_gaps.push(crate::WorkflowV2ResidualGap {
         id: BASELINE_ZERO_MATCH_DECLARATION_GAP_ID.to_string(),
         description: format!(
-            "{} declared test command(s) failed under an attributed pre-existing claim, and the \
-             declared filter resolved to no tests at all: {listed}; there is no red test for the \
-             claim to name, so the verdict stands — the declaration is stale and must be \
-             corrected so the command runs what it names",
+            "{} declared test command(s) reported zero matched tests under a pre_existing claim: {listed}; correct the declaration so it runs the intended tests. Host evidence is required to excuse a failed command.",
             commands.len()
         ),
         severity: Some("review".to_string()),
     });
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Review,
-        "declared test command matched zero tests under an attributed pre-existing claim; verdict kept, stale declaration recorded for review",
+        "declared test command reported zero matched tests; stale declaration recorded for review",
     ));
     let mut data = result.data.as_object().cloned().unwrap_or_default();
     data.insert(
@@ -454,3 +461,11 @@ mod tests;
 #[cfg(test)]
 #[path = "baseline_rule_verification_tests.rs"]
 mod verification_tests;
+
+#[cfg(test)]
+#[path = "baseline_identity_tests.rs"]
+mod identity_tests;
+
+fn path_is_empty(path: &std::path::Path) -> bool {
+    path.as_os_str().is_empty()
+}

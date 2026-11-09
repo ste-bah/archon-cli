@@ -16,6 +16,18 @@ fn universe(commands: &[&str]) -> WorkflowV2TaskUniverse {
             canonical_task_id: "TASK-S".into(),
             source_path: "tasks/TASK-S.md".into(),
             files_expected_to_change: vec!["src/shared_tests.rs".into()],
+            focused_commands: Some(
+                commands
+                    .iter()
+                    .filter_map(|c| {
+                        crate::task_universe::focused_commands::focused_test_command_at(
+                            c,
+                            &["cargo".into(), "echo".into(), "false".into()],
+                            std::path::Path::new(""),
+                        )
+                    })
+                    .collect(),
+            ),
             focused_tests: commands.iter().map(|c| c.to_string()).collect(),
             ..Default::default()
         }],
@@ -57,7 +69,7 @@ async fn a_test_failing_only_at_the_tip_blocks_and_one_failing_at_both_is_listed
     let clause = &verdict.blocking[0];
     assert!(
         clause.contains("shared::tests::new")
-            && clause.contains("did not fail at the run base")
+            && clause.contains("no matching failure identity was recorded")
             && clause.contains("declared by TASK-S")
             && clause.contains("harness cap exhausted"),
         "{clause}"
@@ -146,8 +158,10 @@ fn the_declared_commands_are_every_deduplicated_one() {
         "cargo test -p app; rm -rf x",
     ]);
     let commands = declared_test_commands(&universe(&declared));
-    assert_eq!(commands.len(), 43);
-    assert!(commands.iter().any(|c| c == "mcp__tool__check()"));
+    assert_eq!(commands.len(), 42);
+    assert!(!commands.iter().any(|c| c == "mcp__tool__check()"));
+    assert!(commands.iter().any(|c| c == "cargo test -p app; rm -rf x"));
+    assert!(many.iter().all(|command| commands.contains(command)));
     assert!(commands.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
@@ -182,15 +196,12 @@ async fn a_command_with_no_verdict_at_either_tree_blocks() {
             .any(|b| b.contains("gave no verdict at the final tip")),
         "{verdict:#?}"
     );
-    // Batch O2: a declared command of another runner is compared, never a
-    // NOT-COMPARED note. Failing at the base and the tip alike and naming no
-    // test (m3), it is labelled NOT JUDGEABLE -- never read as pre-existing
-    // or passed -- and blocks nothing of its own.
+    // A silent red has no identity evidence and must block even with the same exit status.
     assert!(
         verdict
-            .notes
+            .blocking
             .iter()
-            .any(|n| n.starts_with("NOT JUDGEABLE") && n.contains("false")),
+            .any(|n| n.contains("false") && n.contains("identity")),
         "{verdict:#?}"
     );
     assert!(
@@ -218,6 +229,8 @@ async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
     let store = WorkflowV2ResultStore::new(dir.path().join("run/v2"));
     bind_run(&store, &base);
     let verdict_at = |commit: &str, passed: &[&str], ignored: &[&str]| HostRunVerdict {
+        verbatim: true,
+        per_test_verdict: true,
         command: LIB.into(),
         commit: commit.into(),
         exit_code: Some(0),
@@ -274,6 +287,8 @@ async fn every_test_gone_from_a_tip_that_passes_nothing_blocks() {
     let store = WorkflowV2ResultStore::new(dir.path().join("run/v2"));
     bind_run(&store, &base);
     let verdict_at = |commit: &str, passed: &[&str]| HostRunVerdict {
+        verbatim: true,
+        per_test_verdict: true,
         command: LIB.into(),
         commit: commit.into(),
         exit_code: Some(0),
@@ -359,8 +374,8 @@ async fn a_high_gaps_owed_command_runs_at_the_tip() {
             "failing_tests": ["shared::tests::old"], "cached": false}]}))
     .unwrap();
     crate::v2::write::test_baseline::save_record(&store, &record);
-    // No task declares any command: only the gap's owed one runs.
-    let universe = universe(&[]);
+    // The owed command must also be authorized by a frozen declaration.
+    let universe = universe(&[LIB]);
     regression_verdict(&RegressionGate {
         store: &store,
         dispatch: &cargo,
@@ -372,4 +387,23 @@ async fn a_high_gaps_owed_command_runs_at_the_tip() {
     let tip = head(&repo);
     let verdict = cached(&store, Tree::RunBase, &tip, LIB).expect("the tip verdict");
     assert_eq!(verdict.failing_tests, ["shared::tests::old"]);
+}
+
+#[tokio::test]
+async fn missing_frozen_decisions_cannot_turn_a_recorded_command_into_an_empty_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, _, host, counter) = world(dir.path());
+    let store = WorkflowV2ResultStore::new(dir.path().join("run/v2"));
+    let mut universe = universe(&[LIB]);
+    universe.tasks[0].focused_commands = None;
+    let verdict = regression_verdict(&RegressionGate {
+        store: &store,
+        dispatch: &host,
+        universe: Some(&universe),
+        repository_root: &repo,
+    })
+    .await;
+    assert_eq!(verdict.blocking.len(), 1);
+    assert!(verdict.blocking[0].contains("frozen command decisions are missing"));
+    assert_eq!(runs(&counter), 0);
 }

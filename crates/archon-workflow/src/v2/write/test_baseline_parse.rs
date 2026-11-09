@@ -11,6 +11,7 @@
 pub(crate) const TAIL_LINES: usize = 40;
 
 /// Whether `command` is one whose output [`failing_tests`] can read by name.
+#[cfg(test)]
 pub(crate) fn is_cargo_test_command(command: &str) -> bool {
     let lower = command.to_ascii_lowercase();
     lower.contains("cargo test") || lower.contains("cargo nextest")
@@ -195,44 +196,27 @@ pub(crate) fn diagnostic_files(output: &str, worktree: &std::path::Path) -> Vec<
         roots
     };
     let mut files: Vec<String> = Vec::new();
-    let mut in_error = false;
-    for raw in output.lines() {
-        let line = raw.trim_end_matches('\r');
-        if let Some(header) = diagnostic_header(line) {
-            in_error = header == "error";
-            continue;
+    let located = crate::located_diagnostics::located_lines(output);
+    for diagnostic in &located {
+        if diagnostic.kind == crate::located_diagnostics::Kind::Error {
+            if let Some(relative) = relative_to(&diagnostic.path, &roots) {
+                files.push(relative);
+            }
         }
-        let located = if let Some(rest) = line.trim_start().strip_prefix("--> ") {
-            in_error.then(|| strip_line_col(rest.trim()))
-        } else {
-            line.strip_prefix("Diff in ")
-                .map(|rest| strip_line_col(rest.trim().trim_end_matches(':')))
-        };
-        let Some(Some(path)) = located else {
-            continue;
-        };
-        if let Some(relative) = relative_to(&path, &roots)
-            && !files.contains(&relative)
+    }
+    for line in output.lines() {
+        if let Some(path) = line
+            .strip_prefix("Diff in ")
+            .and_then(|rest| strip_line_col(rest.trim().trim_end_matches(':')))
         {
-            files.push(relative);
+            if let Some(relative) = relative_to(&path, &roots) {
+                files.push(relative);
+            }
         }
     }
     files.sort();
+    files.dedup();
     files
-}
-
-/// `error`, `warning`, `note` or `help` when `line` opens a diagnostic:
-/// `error[E0433]: …`, `error: …`, `warning: …`.
-fn diagnostic_header(line: &str) -> Option<&'static str> {
-    let line = line.trim_start();
-    for level in ["error", "warning", "note", "help"] {
-        if let Some(rest) = line.strip_prefix(level)
-            && (rest.starts_with(':') || rest.starts_with('['))
-        {
-            return Some(level);
-        }
-    }
-    None
 }
 
 /// `path:line:col` or `path:line` → `path`; a bare path is returned as is.
@@ -258,7 +242,8 @@ fn relative_to(path: &str, roots: &[std::path::PathBuf]) -> Option<String> {
             archon_write_plan::lexical_path::under_root(&unified, &root.to_string_lossy())
         });
     }
-    Some(unified.trim_start_matches("./").to_string())
+    (!unified.split('/').any(|part| part == ".."))
+        .then(|| unified.trim_start_matches("./").to_string())
 }
 
 /// The last [`TAIL_LINES`] lines of `output`, trimmed of trailing whitespace.
@@ -291,6 +276,206 @@ pub(crate) fn cargo_package(command: &str) -> Option<String> {
     None
 }
 
+/// Whether every started test binary printed a readable summary. This records
+/// only observed test ids: a fail-fast stop can leave later binaries unstarted,
+/// so matching summaries do not establish a complete test inventory.
+pub(crate) fn harness_reported(output: &str) -> bool {
+    let lines: Vec<&str> = output.lines().map(str::trim_start).collect();
+    if lines.iter().any(|line| line.starts_with("Summary [")) {
+        return true;
+    }
+    let headers = lines
+        .iter()
+        .filter(|line| {
+            line.strip_prefix("running ")
+                .and_then(|rest| {
+                    rest.strip_suffix(" tests")
+                        .or_else(|| rest.strip_suffix(" test"))
+                })
+                .is_some_and(|n| n.parse::<usize>().is_ok())
+        })
+        .count();
+    let results = lines
+        .iter()
+        .filter(|line| line.starts_with("test result: "))
+        .count();
+    results > 0 && results == headers
+}
+
+/// The failures the harness counted: the `N failed` of every libtest
+/// `test result:` line summed, or nextest's `Summary` count. `None` when a
+/// summary line carries no count the host can read.
+pub(crate) fn failed_count(output: &str) -> Option<usize> {
+    let summaries: Vec<&str> = output
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| line.starts_with("test result: ") || line.starts_with("Summary ["))
+        .collect();
+    if summaries.is_empty() {
+        return None;
+    }
+    let mut total = 0usize;
+    for line in summaries {
+        let words: Vec<&str> = line
+            .split(|c: char| c.is_whitespace() || c == ';' || c == ',')
+            .filter(|w| !w.is_empty())
+            .collect();
+        let count = words
+            .windows(2)
+            .find(|pair| pair[1] == "failed")
+            .and_then(|pair| pair[0].parse::<usize>().ok());
+        match count {
+            Some(count) => total += count,
+            // A summary with no failure count (all passed on nextest).
+            None if !line.contains("failed") => {}
+            None => return None,
+        }
+    }
+    Some(total)
+}
+
 #[cfg(test)]
 #[path = "test_baseline_parse_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "test_baseline_parse_rule_tests.rs"]
+mod rule_tests;
+
+/// Failure markers with unstable run details masked; absent markers prove nothing.
+pub(crate) fn failure_identity(output: &str, root: &std::path::Path) -> Option<String> {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    // Aggregate counts alone do not identify the failure that produced them.
+    static AGGREGATE: LazyLock<Regex> = LazyLock::new(|| {
+        let count = r"\d+\s+(?:passed|failed|skipped|ignored|errors?|warnings?|measured|total|filtered\s+out)";
+        let counts = format!(r"{count}(?:\s*[,;]\s*{count})*");
+        let elapsed = r"(?:\s+in\s+\d+(?:\.\d+)?\s*(?:ns|[uµμ]s|ms|s|seconds?))?";
+        let field = r"(?:failures?|errors?|skipped)\s*=\s*\d+";
+        let aborted = r"(?:error:\s*)?aborting\s+due\s+to\s+\d+\s+previous\s+errors?(?:;\s*\d+\s+warnings?\s+emitted)?";
+        Regex::new(&format!(r"(?ix)^(?:{aborted}|{counts}{elapsed}|(?:tests?(?:\s+(?:suites?|run))?|summary)\s*:\s*{counts}{elapsed}|FAILED\s*\({field}(?:,\s*{field})*\)|(?:FAIL|FAILED|FAILURE)[.!]?)$"))
+            .expect("static pattern")
+    });
+    let root_pattern = identity_root_pattern(root);
+    let located: std::collections::BTreeSet<usize> =
+        crate::located_diagnostics::located_lines(output)
+            .into_iter()
+            .filter(|site| site.kind == crate::located_diagnostics::Kind::Error)
+            .map(|site| site.output_line)
+            .collect();
+    let lines: std::collections::BTreeSet<String> = output
+        .lines()
+        .enumerate()
+        .filter(|(index, line)| {
+            located.contains(index)
+                || (crate::failure_evidence::is_failure_line(line)
+                    && failed_count(line).is_none()
+                    && !AGGREGATE.is_match(line.trim()))
+        })
+        .map(|(index, line)| {
+            // Preserve the parser's error role when locations are stored without their header.
+            let line =
+                if located.contains(&index) && !crate::failure_evidence::is_failure_line(line) {
+                    format!("error: {}", line.trim())
+                } else {
+                    line.to_string()
+                };
+            let paths = root_pattern.as_ref().map_or_else(
+                || line.clone(),
+                |pattern| pattern.replace_all(&line, "${before}<root>/").into_owned(),
+            );
+            mask_run_values(&paths).trim().to_string()
+        })
+        .collect();
+    (!lines.is_empty()).then(|| lines.into_iter().collect::<Vec<_>>().join("\n"))
+}
+
+/// Run values are whole tokens; identifier, parameter and path fragments stay intact.
+pub(crate) fn mask_run_values(text: &str) -> String {
+    use std::sync::LazyLock;
+    static VALUES: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r"\b(?:[0-9]+(?:\.[0-9]+)?\s*(?:ns|[uµμ]s|ms|s|m|h))+\b|\b0[xX][0-9a-fA-F]+\b",
+        )
+        .expect("static pattern")
+    });
+    VALUES
+        .replace_all(text, |captures: &regex::Captures<'_>| {
+            let value = captures.get(0).expect("whole match");
+            let prefix = &text[..value.start()];
+            let suffix = &text[value.end()..];
+            let before = prefix
+                .rsplit_once(char::is_whitespace)
+                .map_or(prefix, |(_, tail)| tail);
+            let after = suffix
+                .split_once(char::is_whitespace)
+                .map_or(suffix, |(head, _)| head);
+            if before.chars().all(|ch| matches!(ch, '(' | '\'' | '"'))
+                && after
+                    .chars()
+                    .all(|ch| matches!(ch, ')' | '\'' | '"' | ',' | ';' | '.'))
+            {
+                "<value>".to_string()
+            } else {
+                value.as_str().to_string()
+            }
+        })
+        .into_owned()
+}
+
+/// Mask only a complete repository prefix, retaining the remaining path.
+pub(crate) fn identity_root_pattern(root: &std::path::Path) -> Option<regex::Regex> {
+    if root.as_os_str().is_empty() {
+        return None;
+    }
+    let mut roots = vec![root.to_path_buf()];
+    if let Ok(canonical) = std::fs::canonicalize(root)
+        && !roots.contains(&canonical)
+    {
+        roots.push(canonical);
+    }
+    let mut spellings = std::collections::BTreeSet::new();
+    for root in roots {
+        let raw = root.to_string_lossy();
+        let portable = archon_write_plan::lexical_path::portable(&raw);
+        for spelling in [raw.as_ref(), portable.as_str()] {
+            spellings.insert(regex::escape(spelling.trim_end_matches(['/', '\\'])));
+        }
+    }
+    let prefixes = spellings.into_iter().collect::<Vec<_>>().join("|");
+    Some(
+        regex::Regex::new(&format!(r#"(?P<before>^|[\s"'(=:])(?:{prefixes})[/\\]"#))
+            .expect("escaped root pattern"),
+    )
+}
+
+/// Every observed red marker must be present in the recorded base set.
+pub(crate) fn identity_subset(base: Option<&str>, tip: Option<&str>) -> bool {
+    base.zip(tip).is_some_and(|(base, tip)| {
+        !tip.trim().is_empty() && tip.lines().all(|line| base.lines().any(|old| old == line))
+    })
+}
+
+/// Unlocated file tokens count only when the declaration names that file.
+pub(crate) fn diagnostic_files_for(
+    output: &str,
+    root: &std::path::Path,
+    command: &str,
+) -> Vec<String> {
+    let mut files = diagnostic_files(output, root);
+    if files.is_empty() {
+        for line in output.lines().map(str::trim) {
+            if command
+                .split_whitespace()
+                .any(|word| word.trim_matches(['\'', '"']) == line)
+                && let Some(path) = relative_to(line, &[root.to_path_buf()])
+                && root.join(&path).is_file()
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}

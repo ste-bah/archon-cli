@@ -143,6 +143,7 @@ fn an_accepted_verifiers_routed_red_test_weighs_against_its_owner_and_is_planned
     ));
     pause();
     let verify = round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,

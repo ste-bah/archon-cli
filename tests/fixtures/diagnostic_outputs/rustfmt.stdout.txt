@@ -1,0 +1,6 @@
+Diff in /private/tmp/s8-formatter-recording/src/d.rs:1:
+-fn value()->u8{1}
++fn value() -> u8 {
++    1
++}
+ 

@@ -26,7 +26,11 @@ const RED: &str = "test theirs::tests::two ... FAILED\n";
 /// which it fails a test in TASK-B's file: the shape of a regression other
 /// tasks' commits landed after this task's base.
 fn command() -> String {
-    format!(": cargo test -p app ; if [ -f src/broken ]; then printf '{RED}'; exit 101; fi; exit 0")
+    format!(
+        r": cargo test -p app ; if [ -f src/broken ]; then printf '{RED}thread \047theirs::tests::two\047 panicked at src/theirs.rs:1:1:
+boom
+'; exit 101; fi; exit 0"
+    )
 }
 
 fn commit_regression(canonical: &Path) {
@@ -72,10 +76,14 @@ fn universe_declaring(commands: &[&str]) -> crate::task_universe::WorkflowV2Task
         .iter_mut()
         .find(|task| task.canonical_task_id == "TASK-A")
         .expect("TASK-A");
+    task.required_tools.push(":".into());
     task.focused_tests = commands
         .iter()
         .map(|command| format!("`{command}` proves the filter still passes"))
         .collect();
+    task.required_tools
+        .extend(["cargo".into(), "sh".into(), "test".into()]);
+    task.freeze_focused_commands(Path::new(""), std::ffi::OsStr::new(""));
     universe
 }
 
@@ -125,6 +133,7 @@ async fn establish_wave_under_a_verification_stage_persists_beside_the_implement
     let command = command();
     let impl_base = head(&canonical);
     let ctx = WaveBaselineContext {
+        repository_root: &canonical,
         store: &store,
         dispatch: &Host,
         universe: Some(&universe),
@@ -178,6 +187,7 @@ async fn the_verifier_is_restamped_at_the_verification_base_and_its_accepted_ver
     let impl_base = head(&canonical);
     establish_wave(
         &WaveBaselineContext {
+            repository_root: &canonical,
             store: &store,
             dispatch: &Host,
             universe: Some(&universe),
@@ -236,7 +246,10 @@ async fn the_verifier_is_restamped_at_the_verification_base_and_its_accepted_ver
     );
     // The same red test in the verifier's own report no longer demotes.
     let mut kept = vec![verifier_outcome(&command)];
-    enforce_baseline_tests(&mut kept, &baseline_by_item(&items));
+    let mut without_proof = kept.clone();
+    enforce_baseline_tests(&mut without_proof, &baseline_by_item(&items));
+    assert_eq!(without_proof[0].status, WorkflowV2Status::NeedsReview);
+    enforce_with_proven_command(&mut kept, &items, &command);
     assert_eq!(kept[0].status, WorkflowV2Status::Accepted, "{:?}", kept[0]);
     // ...and the regression is queued for the task that owns the file.
     let routed = routed_findings_for_task(&store, "TASK-B");
@@ -332,6 +345,7 @@ async fn an_item_with_no_commands_anywhere_leaves_the_implementation_stamp_alone
     let impl_base = head(&canonical);
     establish_wave(
         &WaveBaselineContext {
+            repository_root: &canonical,
             store: &store,
             dispatch: &Host,
             universe: Some(&universe),
@@ -370,6 +384,7 @@ async fn an_empty_focused_verification_is_still_restamped_at_the_verification_ba
     let impl_base = head(&canonical);
     establish_wave(
         &WaveBaselineContext {
+            repository_root: &canonical,
             store: &store,
             dispatch: &Host,
             universe: Some(&universe),
@@ -424,6 +439,29 @@ async fn an_empty_focused_verification_is_still_restamped_at_the_verification_ba
     );
     // The verdict the old stamp demoted now survives.
     let mut kept = vec![verifier_outcome(&command)];
-    enforce_baseline_tests(&mut kept, &baseline_by_item(&items));
+    let mut without_proof = kept.clone();
+    enforce_baseline_tests(&mut without_proof, &baseline_by_item(&items));
+    assert_eq!(without_proof[0].status, WorkflowV2Status::NeedsReview);
+    enforce_with_proven_command(&mut kept, &items, &command);
     assert_eq!(kept[0].status, WorkflowV2Status::Accepted, "{:?}", kept[0]);
+}
+
+// Restamping is tested here; host identity comparison is exercised separately.
+fn enforce_with_proven_command(
+    outcomes: &mut [WorkflowV2BranchOutcome],
+    items: &[WorkflowV2FanoutItem],
+    command: &str,
+) {
+    let proof = std::collections::BTreeMap::from([(
+        ITEM.to_string(),
+        crate::v2::verification::baseline_run_base::BranchJudgement {
+            proven: vec![command.to_string()],
+            ..Default::default()
+        },
+    )]);
+    crate::v2::verification::baseline_rule::enforce_baseline_tests_excusing(
+        outcomes,
+        &baseline_by_item(items),
+        &proof,
+    );
 }

@@ -80,6 +80,7 @@ pub async fn establish_verification_baseline(
     if !requests.is_empty() {
         establish_wave(
             &WaveBaselineContext {
+                repository_root: ctx.repository_root,
                 store: ctx.store,
                 dispatch: ctx.dispatch,
                 universe: ctx.universe,

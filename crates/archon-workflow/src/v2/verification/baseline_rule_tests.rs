@@ -5,7 +5,7 @@ use serde_json::json;
 use super::{
     BASELINE_RED_TEST_GAP_ID, BASELINE_TESTS_INPUT_KEY, BASELINE_ZERO_MATCH_DECLARATION_GAP_ID,
     BaselineStamp, OtherOwnerTest, baseline_by_item, enforce_baseline_tests,
-    stamp_baseline_tests_input, stamped,
+    enforce_baseline_tests_excusing, stamp_baseline_tests_input, stamped,
 };
 use crate::WorkflowV2Result;
 use crate::v2::write::test_baseline::{
@@ -119,7 +119,14 @@ fn a_red_test_on_the_other_owner_or_ignore_list_keeps_the_verdict() {
         )],
         json!({}),
     )];
-    enforce_baseline_tests(&mut outcomes, &by_item());
+    let proof = BTreeMap::from([(
+        "verify-1-check".into(),
+        super::super::baseline_run_base::BranchJudgement {
+            proven: vec!["cargo test -p engine grant".into()],
+            ..Default::default()
+        },
+    )]);
+    enforce_baseline_tests_excusing(&mut outcomes, &by_item(), &proof);
     assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
     assert!(
         outcomes[0]
@@ -185,7 +192,7 @@ fn gap_ids(outcome: &WorkflowV2BranchOutcome) -> Vec<String> {
 }
 
 #[test]
-fn an_evidenced_pre_existing_claim_on_a_zero_match_declared_command_keeps_the_verdict() {
+fn a_red_zero_match_claim_without_host_identity_blocks_and_reports_the_declaration() {
     let mut outcomes = vec![accepted_outcome(
         vec![command(
             "cargo test -p engine grant",
@@ -197,12 +204,12 @@ fn an_evidenced_pre_existing_claim_on_a_zero_match_declared_command_keeps_the_ve
     )];
     enforce_baseline_tests(&mut outcomes, &by_item());
     let ids = gap_ids(&outcomes[0]);
-    assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
-    assert_eq!(outcomes[0].failure_kind, None);
+    assert_eq!(outcomes[0].status, WorkflowV2Status::NeedsReview);
+    assert_eq!(outcomes[0].failure_kind, Some(BranchFailureKind::Semantic));
     let result = outcomes[0].result.as_ref().unwrap();
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
     assert!(
-        !ids.iter().any(|id| id == BASELINE_RED_TEST_GAP_ID),
+        ids.iter().any(|id| id == BASELINE_RED_TEST_GAP_ID),
         "{ids:?}"
     );
     let gap = result
@@ -220,7 +227,7 @@ fn an_evidenced_pre_existing_claim_on_a_zero_match_declared_command_keeps_the_ve
         json!(["cargo test -p engine grant"])
     );
     assert!(
-        result.data.get("verification_failure_class").is_none(),
+        result.data.get("verification_failure_class").is_some(),
         "{:?}",
         result.data
     );
@@ -323,7 +330,10 @@ fn an_excused_zero_match_command_does_not_mask_a_genuinely_red_unowned_test() {
     );
     let data = &outcomes[0].result.as_ref().unwrap().data;
     assert_eq!(data["baseline_red_tests"], json!(["grant::tests::mine"]));
-    assert_eq!(data["baseline_unproven_pre_existing"], json!([]));
+    assert_eq!(
+        data["baseline_unproven_pre_existing"],
+        json!(["cargo test -p engine grant"])
+    );
     assert_eq!(
         data["baseline_zero_match_declarations"],
         json!(["cargo test -p engine grant"])
@@ -368,6 +378,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, branch: &str, base: &str, 
             base_commit: base.into(),
             canonical_task_ids: vec![task.into()],
             commands: vec![CommandBaseline {
+                failure_files: Default::default(),
                 command: "cargo test -p engine grant".into(),
                 base_commit: base.into(),
                 exit_code: Some(101),

@@ -1,10 +1,40 @@
 //! Issue-118: the host runs a verifier's runner command itself -- at the
 //! run's base commit in a throwaway worktree, and on the judged tree in
-//! place -- caches only completed runs, and runs nothing but a plain runner.
+//! place -- caches only completed runs, and runs only frozen declarations.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::{Tree, host_runnable, host_verdicts, panic_files, run_base_commit, signature};
+use super::{
+    FrozenCommands, Tree, host_verdicts as run_host_verdicts, panic_files, run_base_commit,
+    signature, signature_at,
+};
+fn host_runnable(command: &str) -> bool {
+    super::host_runnable(
+        command,
+        &FrozenCommands::from_commands(&[
+            "cargo test -p archon-trading --lib".into(),
+            "cargo nextest run -p app --lib pine".into(),
+            "cargo test -q -p app --features=x --test it name -- --exact --test-threads 2".into(),
+        ]),
+    )
+}
+async fn host_verdicts(
+    store: &WorkflowV2ResultStore,
+    host: &FakeCargo,
+    root: &Path,
+    tree: Tree,
+    commit: &str,
+    commands: &[String],
+) -> std::collections::BTreeMap<String, super::HostRunVerdict> {
+    let frozen = FrozenCommands::from_commands(
+        &commands
+            .iter()
+            .filter(|s| !s.contains(';'))
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    run_host_verdicts(store, host, root, tree, commit, commands, &frozen).await
+}
 use crate::agent_dispatch_port::{HostCommandEnv, WorkflowAgentDispatch};
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::{WorkflowV2AgentAdapter, WorkflowV2CallExecution, WorkflowV2ResultStore};
@@ -112,7 +142,7 @@ pub(crate) fn world(dir: &Path) -> (PathBuf, String, FakeCargo, PathBuf) {
     std::fs::create_dir_all(&bin).unwrap();
     let counter = dir.join("runs");
     let script = format!(
-        "#!/bin/sh\necho \"run $*\" >> \"{}\"\necho '     Running unittests src/lib.rs (target/debug/deps/app-0)'\n\
+        "#!/bin/sh\necho \"run $*\" >> \"{}\"\necho 'running 2 tests'\n\
          if [ -f src/no_summary ]; then echo 'error[E0425]: cannot find value'; exit 101; fi\n\
          fail=0\nmsg='old broke'\n[ -f src/old_changed ] && msg='old broke differently'\n\
          case \"$*\" in *--test*) [ -f src/other_changed ] && msg='old broke in the other binary';; esac\n\
@@ -122,7 +152,7 @@ pub(crate) fn world(dir: &Path) -> (PathBuf, String, FakeCargo, PathBuf) {
          echo \"$msg in $PWD/x\"; fail=$((fail+1)); fi\n\
          if [ -f src/new_red ]; then echo 'test shared::tests::new ... FAILED'; \
          echo \"thread 'shared::tests::new' (8) panicked at src/shared_tests.rs:9:5:\"; \
-         echo 'new broke'; fail=$((fail+1)); fi\n\
+         echo 'new broke'; fail=$((fail+1)); else echo 'test shared::tests::new ... ok'; fi\n\
          if [ $fail -gt 0 ]; then echo \"test result: FAILED. 1 passed; $fail failed\"; exit 101; fi\n\
          echo 'test result: ok. 2 passed'; exit 0\n",
         counter.display()
@@ -167,7 +197,7 @@ pub(crate) fn bind_run(store: &WorkflowV2ResultStore, head: &str) {
 }
 
 #[test]
-fn only_a_plain_runner_invocation_is_host_runnable() {
+fn only_the_listed_frozen_invocations_are_host_runnable() {
     assert!(host_runnable("cargo test -p archon-trading --lib"));
     assert!(host_runnable("cargo nextest run -p app --lib pine"));
     assert!(host_runnable(
@@ -206,7 +236,12 @@ fn a_signature_is_the_panic_location_and_message_with_paths_normalised() {
     let a = "thread 'a::t::x' (12) panicked at src/a/t.rs:9:5:\nboom in /tmp/one/x\n";
     let b = "thread 'a::t::x' (99) panicked at src/a/t.rs:9:5:\nboom in /var/two/y\n";
     let c = "thread 'a::t::x' (12) panicked at src/a/t.rs:9:5:\nbang\n";
-    assert_eq!(signature(a, "a::t::x"), signature(b, "a::t::x"));
+    assert_ne!(signature(a, "a::t::x"), signature(b, "a::t::x"));
+    let same = a.replace("/tmp/one", "/var/two");
+    assert_eq!(
+        signature_at(a, "a::t::x", Path::new("/tmp/one")),
+        signature_at(&same, "a::t::x", Path::new("/var/two"))
+    );
     assert_ne!(signature(a, "a::t::x"), signature(c, "a::t::x"));
     assert_eq!(signature(a, "a::t::other"), "");
     let temp = tempfile::tempdir().unwrap();
@@ -249,8 +284,9 @@ async fn both_trees_are_run_once_the_base_in_a_removed_worktree_and_cached() {
     assert!(
         std::fs::read_to_string(&counter)
             .unwrap()
-            .contains("--no-fail-fast"),
-        "the host always runs every test binary"
+            .lines()
+            .all(|line| line == format!("run {}", command.strip_prefix("cargo ").unwrap())),
+        "the host runs the frozen text verbatim"
     );
     assert_eq!(
         at_base[&command].failing_tests,
@@ -290,7 +326,7 @@ async fn both_trees_are_run_once_the_base_in_a_removed_worktree_and_cached() {
 }
 
 #[tokio::test]
-async fn no_verdict_without_a_test_summary_a_readable_base_or_the_judged_head() {
+async fn completed_exit_is_cached_without_inventing_per_test_evidence() {
     let _clock = crate::v2::write::test_baseline_run_base::tests::freeze_runner_clock();
     let temp = tempfile::tempdir().unwrap();
     let (repo, base, host, counter) = world(temp.path());
@@ -309,17 +345,28 @@ async fn no_verdict_without_a_test_summary_a_readable_base_or_the_judged_head() 
             .is_empty()
     );
     assert_eq!(runs(&counter), 0);
-    // A build that fails before any test: no verdict, and never cached.
+    // A completed failure is reusable exit/identity evidence, never a per-test verdict.
     commit_files(&repo, &["src/no_summary"], "breaks the build");
     let now = head(&repo);
     for _ in 0..2 {
+        let runs = host_verdicts(&store, &host, &repo, Tree::Judged, &now, &command).await;
+        let run = &runs[&command[0]];
+        assert_eq!(run.exit_code, Some(101));
+        assert!(!run.per_test_verdict);
+        assert!(run.failing_tests.is_empty());
+        assert!(run.signatures.get("").is_some_and(|s| !s.is_empty()));
         assert!(
-            host_verdicts(&store, &host, &repo, Tree::Judged, &now, &command)
-                .await
-                .is_empty()
+            super::cached_per_test(
+                &store,
+                Tree::Judged,
+                &now,
+                &command[0],
+                &FrozenCommands::from_commands(&command)
+            )
+            .is_none()
         );
     }
-    assert_eq!(runs(&counter), 2, "run again each time, never cached");
+    assert_eq!(runs(&counter), 1, "the completed failure is reused");
 }
 
 #[test]
@@ -333,28 +380,41 @@ fn a_tests_file_is_resolved_at_the_commit_that_was_judged_not_the_tree_now() {
         "a later task moves the module",
     );
     let at = super::super::test_baseline_owner_at::test_file_at;
-    let id = "shared::tests::old";
+    let id = "src/shared_tests.rs::old";
+    assert_eq!(
+        at(
+            &repo,
+            Some(&base),
+            "cargo test -p app",
+            "shared::tests::old"
+        ),
+        None
+    );
     assert_eq!(
         at(&repo, Some(&base), "cargo test -p app", id).as_deref(),
         Some("src/shared_tests.rs")
     );
+    std::fs::remove_file(repo.join("src/shared_tests.rs")).unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-qm", "remove old file"]);
+    assert_eq!(at(&repo, Some(&head(&repo)), "cargo test -p app", id), None);
     assert_eq!(
-        at(&repo, Some(&head(&repo)), "cargo test -p app", id).as_deref(),
-        Some("src/shared/tests.rs")
-    );
-    let parent = super::super::test_baseline_owner_at::parent_module_file_at;
-    assert_eq!(
-        parent(&repo, Some(&base), "cargo test -p app", id).as_deref(),
-        Some("src/shared.rs")
+        at(
+            &repo,
+            Some(&base),
+            "cargo test -p app",
+            "src/shared/tests.rs::old"
+        ),
+        None
     );
 }
 
 #[test]
-fn a_run_is_a_verdict_only_when_every_test_binary_reported() {
-    use super::args::{complete_run, harness_reported};
-    let one = "     Running unittests src/lib.rs (t/a)\ntest result: FAILED. 1 failed\n";
+fn a_run_is_a_verdict_only_when_every_started_test_binary_reported() {
+    use super::harness_reported;
+    let one = "running 1 tests\ntest result: FAILED. 1 failed\n";
     assert!(harness_reported(one));
-    let stopped = format!("{one}     Running tests/it.rs (t/b)\n");
+    let stopped = format!("{one}running 1 tests\n");
     assert!(
         !harness_reported(&stopped),
         "cargo stopped at the first failing binary"
@@ -365,23 +425,12 @@ fn a_run_is_a_verdict_only_when_every_test_binary_reported() {
     assert!(harness_reported(
         "     Summary [   1.0s] 3 tests run: 2 passed, 1 failed\n"
     ));
-    assert_eq!(
-        complete_run("cargo test -p app --lib"),
-        "cargo test -p app --lib --no-fail-fast"
-    );
-    assert_eq!(
-        complete_run("cargo test -q -p app -v --lib"),
-        "cargo test -p app --lib --no-fail-fast",
-        "quiet and verbose runs print other headers"
-    );
-    assert_eq!(
-        complete_run("cargo test -p app -- --exact x"),
-        "cargo test -p app --no-fail-fast -- --exact x"
-    );
-    assert_eq!(
-        complete_run("cargo nextest run --no-fail-fast"),
-        "cargo nextest run --no-fail-fast"
-    );
+    for output in [
+        "running 0 tests\ntest result: ok. 0 passed; 0 failed\n",
+        "running 1 tests\n.\ntest result: ok. 1 passed; 0 failed\n",
+    ] {
+        assert!(harness_reported(output));
+    }
 }
 
 #[test]
@@ -403,7 +452,7 @@ fn an_assertions_left_and_right_are_part_of_its_signature() {
 
 #[test]
 fn the_failure_count_is_summed_over_every_summary_line() {
-    use super::args::failed_count;
+    use super::failed_count;
     let out =
         "test result: FAILED. 3 passed; 2 failed; 0 ignored\ntest result: ok. 1 passed; 0 failed\n";
     assert_eq!(failed_count(out), Some(2));

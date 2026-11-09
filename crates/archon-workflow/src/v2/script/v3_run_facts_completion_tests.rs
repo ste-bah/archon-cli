@@ -9,6 +9,7 @@ fn universe() -> WorkflowV2TaskUniverse {
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: files.iter().map(|f| format!("`{f}` -- the lane")).collect(),
+        focused_commands: Some(vec![format!("cargo test {id}")]),
         focused_tests: vec![format!("cargo test {id}")],
         ..Default::default()
     };

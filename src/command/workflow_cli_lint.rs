@@ -87,6 +87,8 @@ pub(super) async fn run_cli_lint(
     flags: FidelityFlags,
 ) -> Result<()> {
     let mode = config.workflow.gate_mode;
+    let policy = crate::command::acceptance_check_policy::from_config(config)?;
+    let site_path = crate::command::acceptance_check_policy::captured_command_path(policy.as_ref());
     let gate_id = match source {
         LintSource::TaskFile(_) => crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
         _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
@@ -131,8 +133,8 @@ pub(super) async fn run_cli_lint(
             .map_err(anyhow::Error::new)
             .context("building the obligation fidelity critic client");
         Some(
-            crate::command::topology_lint::evaluate_lint_with_fidelity(
-                cwd, &source, mode, client, &waivers,
+            crate::command::topology_lint::evaluate_lint_with_fidelity_at_path(
+                cwd, &source, mode, client, &waivers, &site_path,
             )
             .await?,
         )
@@ -142,11 +144,54 @@ pub(super) async fn run_cli_lint(
     let disposition =
         crate::command::workflow_gate::run_sync_gate(cwd, mode, gate_id, || match evaluation {
             Some(evaluation) => Ok(evaluation),
-            None => crate::command::topology_lint::evaluate_lint(cwd, &source, mode),
+            None => crate::command::topology_lint::evaluate_lint_with_path(
+                cwd, &source, mode, &site_path,
+            ),
         })?;
     print!("{}", disposition.report());
     for diagnostic in disposition.diagnostics() {
         eprintln!("{diagnostic}");
     }
     disposition.require_allowed()
+}
+
+pub(super) fn evaluate_lint_for_context(
+    cwd: &Path,
+    source: &LintSource,
+    mode: archon_core::config::GateMode,
+    config: Option<&ArchonConfig>,
+) -> Result<crate::command::workflow_gate::GateEvaluation> {
+    let site = match config {
+        Some(config) => {
+            let policy = crate::command::acceptance_check_policy::from_config(config)?;
+            crate::command::acceptance_check_policy::captured_command_path(policy.as_ref())
+        }
+        None => crate::command::acceptance_check_policy::command_site_path(cwd)?,
+    };
+    crate::command::topology_lint::evaluate_lint_with_path(cwd, source, mode, &site)
+}
+
+pub(super) fn handle_lint_context(
+    ctx: &mut super::CommandContext,
+    cwd: &Path,
+    args: &[String],
+) -> Result<()> {
+    let source = lint_source_from_slash_args(args)?;
+    let mode = ctx.gate_mode.unwrap_or_default();
+    let gate_id = match source {
+        crate::command::topology_lint::LintSource::TaskFile(_) => {
+            crate::command::workflow_gate::GateId::WorkflowLintTaskFile
+        }
+        _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
+    };
+    let disposition = crate::command::workflow_gate::run_sync_gate(&cwd, mode, gate_id, || {
+        evaluate_lint_for_context(&cwd, &source, mode, ctx.workflow_config.as_ref())
+    })?;
+    ctx.emit(super::TuiEvent::TextDelta(disposition.report().to_string()));
+    for diagnostic in disposition.diagnostics() {
+        ctx.emit(super::TuiEvent::TextDelta(format!("{diagnostic}\n")));
+    }
+    disposition.require_allowed()?;
+    ctx.emit(super::TuiEvent::SlashCommandComplete);
+    return Ok(());
 }

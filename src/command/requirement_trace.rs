@@ -33,7 +33,9 @@
 //! happens on every path out of a mutation.
 
 mod claims;
+#[cfg(test)]
 pub(crate) use claims::body_claim_findings;
+pub(crate) use claims::body_claim_findings_at_path;
 mod evaluation;
 mod evidence;
 mod falsify;
@@ -246,7 +248,8 @@ fn build_report_with_input_findings(
     prd_findings.dedup();
 
     let task_dir = absolute(cwd, &options.tasks);
-    let (bindings, input_findings) = load_bindings_with_findings(&task_dir)?;
+    let site_path = check_policy::command_path(options.check_policy.as_ref());
+    let (bindings, input_findings) = load_bindings_with_findings_at_path(&task_dir, &site_path)?;
     let mut coverage = coverage::check_coverage(&obligations, &bindings);
     // Constraint ownership is repaired by task-set-lint, once per id.
     coverage.unclaimed.retain(|id| !constraints.contains(id));
@@ -421,67 +424,12 @@ fn build_row(
     Ok(row)
 }
 
-/// Read every `TASK-*.md` in a directory.
-///
-/// A file that fails to parse aborts with its own name in the message. A task
-/// set that cannot be read in full cannot answer "is every requirement
-/// claimed", and answering it anyway from a partial read is how an unclaimed
-/// requirement disappears.
+mod bindings;
 #[cfg(test)]
-fn load_bindings(dir: &Path) -> Result<Vec<TaskBinding>> {
-    let (bindings, findings) = load_bindings_with_findings(dir)?;
-    if findings.is_empty() {
-        return Ok(bindings);
-    }
-    Err(anyhow!(
-        "traceability input error:\n  {}",
-        findings.join("\n  ")
-    ))
-}
-
-fn load_bindings_with_findings(dir: &Path) -> Result<(Vec<TaskBinding>, Vec<String>)> {
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("reading task directory {}", dir.display()))?;
-    let mut paths: Vec<PathBuf> = Vec::new();
-    for entry in entries {
-        let path = entry?.path();
-        let is_task = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("TASK-") && name.ends_with(".md"));
-        if is_task {
-            paths.push(path);
-        }
-    }
-    paths.sort();
-
-    if paths.is_empty() {
-        return Ok((
-            Vec::new(),
-            vec![format!(
-                "task directory {} contains zero TASK-*.md files; add the decomposed TASK files or correct --tasks to the directory that contains them",
-                dir.display()
-            )],
-        ));
-    }
-
-    let mut bindings = Vec::with_capacity(paths.len());
-    let mut findings = Vec::new();
-    for path in paths {
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading task file {}", path.display()))?;
-        let source = path.display().to_string().replace('\\', "/");
-        match tasks::parse_task_binding(&raw, &source) {
-            Ok(binding) => bindings.push(binding),
-            Err(error) => findings.push(format!(
-                "{error}; rewrite the named YAML field exactly as shown, then re-run the same trace command"
-            )),
-        }
-    }
-    findings.sort();
-    findings.dedup();
-    Ok((bindings, findings))
-}
+use bindings::load_bindings;
+#[cfg(test)]
+use bindings::load_bindings_with_findings;
+use bindings::load_bindings_with_findings_at_path;
 
 fn absolute(cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {

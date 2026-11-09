@@ -33,7 +33,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use archon_workflow::repository_record::{RepositoryTree, read_repository_record};
-use archon_workflow::task_universe::{parsing::parse_task_file, task_files_under};
+use archon_workflow::task_universe::{parsing::parse_task_file_with_path, task_files_under};
 
 use crate::command::workflow_gate::{GateFinding, GateId};
 
@@ -359,7 +359,16 @@ fn covered(required: &Required, owned: &BTreeSet<String>) -> bool {
 
 /// The set gate's findings: one BODY finding per (task, uncovered file).
 /// Empty for a task set without a repository record.
+#[cfg(test)]
 pub(super) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
+    let site = crate::command::acceptance_check_policy::command_site_path(root)?;
+    set_findings_at_path(root, &site)
+}
+
+pub(super) fn set_findings_at_path(
+    root: &Path,
+    site_path: &std::ffi::OsStr,
+) -> Result<Vec<GateFinding>> {
     let Some(record) = read_repository_record(root)? else {
         return Ok(Vec::new());
     };
@@ -379,7 +388,7 @@ pub(super) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
     for path in files {
         let raw = std::fs::read_to_string(&path)
             .with_context(|| format!("reading task file {}", path.display()))?;
-        let task = match parse_task_file(&path, &raw) {
+        let task = match parse_task_file_with_path(&path, &raw, Some(&site_path)) {
             Ok(task) => task,
             Err(error) => {
                 findings.push(GateFinding::new(

@@ -72,6 +72,13 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
         ));
     }
     for pre in &record.pre_existing {
+        if pre.files.is_empty() {
+            text.push_str(&format!(
+                "- `{}`: base failure recorded; no file was resolved (pre-existing, unattributed at base); the tip still requires host identity proof.\n",
+                pre.command
+            ));
+            continue;
+        }
         let files: Vec<String> = pre
             .files
             .iter()
@@ -82,8 +89,7 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
             .collect();
         text.push_str(&format!(
             "- `{}` already fails at the base commit in {} file(s) outside your target_files: \
-             {}; do not fix them — they are reported as pre-existing; you are held only to \
-             diagnostics in your own files.\n",
+             {}.\n",
             pre.command,
             pre.files.len(),
             files.join(", ")
@@ -121,12 +127,16 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
          acceptable reason, and neither is disabling or deleting the test.\n",
     );
     if !record.pre_existing.is_empty() {
+        text.push_str("- A pre_existing claim requires a stored host tip run.\n");
+        text.push_str("- Every red identity in that run must occur in the base set.\n");
+        text.push_str("- Base and tip exit codes must match.\n");
+        text.push_str("- A red command without a usable identity blocks.\n");
         text.push_str(
-            "A declared command listed above as already failing outside your target_files is \
-             not yours to make pass: do not edit those files (a write there is refused and \
-             would be dropped from your patch); a diagnostic in one of your own files is still \
-             yours. If a change there is genuinely required, record it in residual_gaps naming \
-             the file and its owner task.\n",
+            "- A write outside granted scope is refused and would be dropped from your patch.\n",
+        );
+        text.push_str("- Fix diagnostics in your own files.\n");
+        text.push_str(
+            "- If another task must change a file, record the file and owner in residual_gaps.\n",
         );
     }
     text
