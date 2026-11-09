@@ -82,7 +82,12 @@ fn evaluate(
         ));
     }
     if options.falsify {
-        falsify::execute_plans_with_policy(cwd, &mut report, options.check_policy.as_ref());
+        falsify::execute_plans_with_policy(
+            cwd,
+            &mut report,
+            options.check_policy.as_ref(),
+            &options.verify_limits,
+        )?;
     }
     if let Some(store_path) = &options.persist {
         persist(cwd, store_path, &report)?;

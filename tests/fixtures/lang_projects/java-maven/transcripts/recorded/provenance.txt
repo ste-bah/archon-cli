@@ -1,0 +1,7 @@
+openjdk version "27.0.1.0.2" 2026-10-21
+OpenJDK Runtime Environment Homebrew (build 27.0.1.0.2)
+OpenJDK 64-Bit Server VM Homebrew (build 27.0.1.0.2, mixed mode, sharing)
+Apache Maven 3.10.0 (c43a36b8d67be7e0805a411bc0898af1a51f5472)
+Gradle 9.8.2
+Sat Nov  7 10:36:21 UTC 2026
+Darwin arm64

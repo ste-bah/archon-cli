@@ -136,7 +136,7 @@ fn frozen_check(
         .map_or(String::new(), |commit| format!(" at commit {commit}"));
     let how = if execution.mode == "scratch" {
         format!(
-            "in a hermetic scratch: a fresh clone of the repository{at} (committed state only: an uncommitted edit is not in it), the project's input data copied beside it, the command fed to `sh -s`, a private HOME, TMPDIR, CARGO_HOME and CARGO_TARGET_DIR, and only these host settings: {}",
+            "in a hermetic scratch: a fresh clone of the repository{at} (committed state only: an uncommitted edit is not in it), the project's input data copied beside it, the command executed with private home, temporary and build-output directories, and only these host settings: {}",
             execution.environment
         )
     } else {
@@ -147,7 +147,7 @@ fn frozen_check(
     };
     let entry = match &criterion.check {
         AcceptanceCheck::Command { command, cwd } => format!(
-            "kind command, run from the {} -- reproduce it from YOUR checkout, never by running in the live project or repository path; the exact command, verbatim:\n{command}",
+            "kind command, executed by a POSIX shell from the {} -- reproduce it from YOUR checkout, never by running in the live project or repository path; the exact command, verbatim:\n{command}",
             match cwd {
                 TrustedCwd::RepoRoot => "repository root",
                 TrustedCwd::ProjectRoot =>
@@ -165,3 +165,11 @@ fn frozen_check(
         id = criterion.id,
     )
 }
+
+#[cfg(test)]
+#[path = "workflow_live_v3_acceptance_output_agnostic_proof_tests.rs"]
+mod agnostic_proof_tests;
+
+#[cfg(test)]
+#[path = "workflow_agnostic_proof_tests.rs"]
+mod body_agnostic_proof_tests;

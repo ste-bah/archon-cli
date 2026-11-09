@@ -1,0 +1,23 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------------< example:java-proof >-------------------------
+[INFO] Building java-proof 1.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[WARNING] Could not transfer metadata /.meta/prefixes.txt from/to central (https://repo.maven.apache.org/maven2): repo.maven.apache.org: nodename nor servname provided, or not known
+Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-resources-plugin/3.5.0/maven-resources-plugin-3.5.0.pom
+[INFO] ------------------------------------------------------------------------
+[ERROR] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.293 s
+[INFO] Finished at: 2026-11-07T10:20:34Z
+[INFO] ------------------------------------------------------------------------
+[ERROR] Plugin org.apache.maven.plugins:maven-resources-plugin:3.5.0 or one of its dependencies could not be resolved:
+[ERROR] 	The following artifacts could not be resolved: org.apache.maven.plugins:maven-resources-plugin:pom:3.5.0 (absent): Could not transfer artifact org.apache.maven.plugins:maven-resources-plugin:pom:3.5.0 from/to central (https://repo.maven.apache.org/maven2): repo.maven.apache.org
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/PluginResolutionException

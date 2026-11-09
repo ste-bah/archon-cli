@@ -14,6 +14,7 @@ impl TraceOptions {
             persist: None,
             falsify: false,
             check_policy: None,
+            verify_limits: Default::default(),
             json: false,
             limit_per_scope: 3,
             max_scopes: 8,

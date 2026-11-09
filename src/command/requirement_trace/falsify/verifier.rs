@@ -1,65 +1,19 @@
-//! Vetting a declared verifier, and running it without a shell.
+//! Vet and run a declared verifier without changing its meaning.
 //!
-//! # What this refuses to run, and why the list is short
-//!
-//! A non-functional rule forbids whole-workspace test runs; the one that prompted it
-//! exhausted a 466 GB disk twice. So a declared command that is workspace-wide
-//! is refused rather than trimmed — rewriting someone's `cargo test --workspace`
-//! into `cargo test -p something` would run a *different* verifier from the one
-//! the plan names, and the plan's criterion is about the command it names.
-//!
-//! The second refusal is quieter and matters as much: commands are run as an
-//! argv, never through a shell. A declared verifier containing a pipe, a
-//! redirect or an `&&` does not mean what it says when its tokens are handed
-//! straight to `CreateProcess`, so it is refused instead of being run with its
-//! meaning silently changed.
-//!
-//! # Why the child is polled rather than waited on
-//!
-//! `std::process` has no timeout. A verifier that hangs while a mutation is in
-//! the working tree is the worst state this code can reach, so the child is
-//! polled to a deadline and killed. Its pipes are drained by two threads for the
-//! whole time: with `Stdio::piped()` and no reader, a chatty build fills the
-//! pipe buffer and blocks forever, which is a deadlock the deadline would never
-//! see because the deadline is not what the child is waiting on.
-//!
-//! Killing the child does not kill its grandchildren. `cargo` spawns `rustc` and
-//! test binaries, and on Windows those survive their parent. The restore still
-//! runs; if a surviving compiler holds the file open, the write fails and
-//! [`super::guard::MutationGuard`] says so rather than reporting a clean run.
-
+//! A broad run once exhausted a 466 GB disk twice. Configured refusal tokens
+//! bound breadth; time and free-space budgets bound every admitted command.
+//! Pipes are drained concurrently so output cannot deadlock the deadline.
 use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use super::limits::{DiskFloor, VerifyLimits, disk_floor, watched};
+use super::process_tree::Tree;
 use archon_knowledge::traceability::RefusedToRun;
 
-/// Tokens that make a command workspace-wide whatever else it says.
-const WORKSPACE_WIDE_TOKENS: &[&str] = &["--workspace", "--all"];
-
-/// Flags that scope a cargo test invocation to something smaller than
-/// everything. An explicit list rather than a heuristic, for the same reason
-/// `KNOWN_RUNNERS` is one: extend it when a real task declares a real narrowing
-/// flag that is missing, do not replace it with a guess.
-const NARROWING_FLAGS: &[&str] = &[
-    "-p",
-    "--package",
-    "--bin",
-    "--lib",
-    "--test",
-    "--bench",
-    "--example",
-    "--doc",
-];
-
-/// Cargo subcommands that build and run the world when nothing narrows them.
-const UNSCOPED_CARGO_SUBCOMMANDS: &[&str] = &["test", "bench", "nextest"];
-
-/// Characters that only mean anything to a shell.
 const SHELL_METACHARACTERS: &[char] = &['&', '|', ';', '<', '>', '$', '`', '\n', '\r'];
 
-/// Split a declared command into an argv, or refuse it.
-pub(super) fn vet(command: &str) -> std::result::Result<Vec<String>, RefusedToRun> {
+pub(super) fn vet(command: &str, limits: &VerifyLimits) -> Result<Vec<String>, RefusedToRun> {
     if let Some(found) = command.chars().find(|c| SHELL_METACHARACTERS.contains(c)) {
         return Err(RefusedToRun::NotDirectlyExecutable {
             command: command.to_string(),
@@ -70,40 +24,26 @@ pub(super) fn vet(command: &str) -> std::result::Result<Vec<String>, RefusedToRu
     if argv.is_empty() {
         return Err(RefusedToRun::NotDirectlyExecutable {
             command: command.to_string(),
-            reason: "it is empty".to_string(),
+            reason: "it is empty".into(),
         });
     }
-
-    if let Some(token) = argv
-        .iter()
-        .find(|token| WORKSPACE_WIDE_TOKENS.contains(&token.as_str()))
-    {
+    if let Some(token) = limits.refuse_tokens.iter().find(|token| {
+        argv.iter().any(|word| {
+            word == *token
+                || word
+                    .strip_prefix(token.as_str())
+                    .is_some_and(|rest| rest.starts_with('='))
+        })
+    }) {
         return Err(RefusedToRun::WorkspaceWideCommand {
-            command: command.to_string(),
+            command: command.into(),
             token: token.clone(),
         });
     }
-
-    // `cargo test` with nothing narrowing it is workspace-wide in effect even
-    // though it never says so, which is exactly the shape that rule is about.
-    let unscoped_cargo = argv[0] == "cargo"
-        && argv
-            .get(1)
-            .is_some_and(|sub| UNSCOPED_CARGO_SUBCOMMANDS.contains(&sub.as_str()))
-        && !argv
-            .iter()
-            .any(|token| NARROWING_FLAGS.contains(&token.as_str()));
-    if unscoped_cargo {
-        return Err(RefusedToRun::WorkspaceWideCommand {
-            command: command.to_string(),
-            token: "no --package/--bin/--test scope".to_string(),
-        });
-    }
-
     Ok(argv)
 }
 
-/// What one verifier invocation did.
+#[derive(Debug)]
 pub(super) enum Ran {
     Finished {
         code: Option<i32>,
@@ -111,18 +51,21 @@ pub(super) enum Ran {
         output: String,
         note: Option<String>,
     },
-    /// Killed at the deadline. Not a failure — an absence of an answer.
+    Interrupted {
+        signal: i32,
+    },
     TimedOut {
         seconds: u64,
     },
+    DiskFloor(DiskFloor),
+    DiskFloorBeforeLaunch(DiskFloor),
     NotLaunchable {
         reason: String,
     },
 }
 
-/// How often the child is checked. Short enough that the deadline is honoured
-/// promptly, long enough that polling costs nothing next to a compile.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
+const DISK_INTERVAL: Duration = Duration::from_secs(5);
 
 #[cfg(test)]
 pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
@@ -136,106 +79,162 @@ pub(super) fn run_with_policy(
     timeout: Duration,
     policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
 ) -> Ran {
-    let environment =
-        match archon_workflow::acceptance_check_environment::CommandEnvironment::capture(policy) {
-            Ok(environment) => environment.with_remedy("Name the needed variables in [workflow.acceptance_execution] environment_allowlist in the operator configuration consumed by requirements trace, then retry --falsify"),
-            Err(reason) => return Ran::NotLaunchable { reason },
-        };
-    run_in_environment(cwd, argv, timeout, &environment)
+    let environment = match archon_workflow::acceptance_check_environment::CommandEnvironment::capture(policy) {
+        Ok(environment) => environment.with_remedy("Name the needed variables in [workflow.acceptance_execution] environment_allowlist in the operator configuration consumed by requirements trace, then retry --falsify"),
+        Err(reason) => return Ran::NotLaunchable { reason: format!("`{}`: {reason}", argv.join(" ")) },
+    };
+    let limits = VerifyLimits {
+        timeout,
+        ..VerifyLimits::for_test()
+    };
+    run_in_environment(cwd, argv, &limits, &environment)
 }
 
 pub(super) fn run_in_environment(
     cwd: &Path,
     argv: &[String],
-    timeout: Duration,
+    limits: &VerifyLimits,
     environment: &archon_workflow::acceptance_check_environment::CommandEnvironment,
 ) -> Ran {
-    let mut process = environment.command(&argv[0]);
+    let result = invoke(cwd, argv, limits, environment);
+    result.unwrap_or_else(|error| Ran::NotLaunchable {
+        reason: format!("`{}`: {error}", argv.join(" ")),
+    })
+}
+
+fn invoke(
+    cwd: &Path,
+    argv: &[String],
+    limits: &VerifyLimits,
+    environment: &archon_workflow::acceptance_check_environment::CommandEnvironment,
+) -> std::io::Result<Ran> {
+    let program = argv
+        .first()
+        .ok_or_else(|| std::io::Error::other("empty verifier argument list"))?;
+    let mut process = environment.command(program);
     process
         .args(&argv[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let spawned =
-        archon_shell::read_boundary::prepare_spawn(&process).and_then(|()| process.spawn());
-    let mut child = match spawned {
-        Ok(child) => child,
-        Err(err) => {
-            return Ran::NotLaunchable {
-                reason: format!("could not start `{}`: {err}", argv.join(" ")),
-            };
+    let paths = watched(cwd);
+    if let Some(floor) = disk_floor(&paths, limits)? {
+        return Ok(Ran::DiskFloorBeforeLaunch(floor));
+    }
+    let mut signals = super::signals::Monitor::new()?;
+    Tree::prepare(&mut process)?;
+    archon_shell::read_boundary::prepare_spawn(&process)?;
+    let mut child = process.spawn()?;
+    let mut tree = match Tree::adopt(&mut child) {
+        Ok(tree) => tree,
+        Err(error) => {
+            Tree::abort(&mut child);
+            let _ = child.wait();
+            return Err(error);
         }
     };
-
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let out_reader = std::thread::spawn(move || drain(stdout));
     let err_reader = std::thread::spawn(move || drain(stderr));
-
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Err(err) => {
-                let _ = child.kill();
-                return Ran::NotLaunchable {
-                    reason: format!("waiting on `{}`: {err}", argv[0]),
-                };
+    let started = Instant::now();
+    let mut disk_checked = started;
+    let stopped = (|| -> std::io::Result<Option<Ran>> {
+        loop {
+            if let Some(signal) = signals.pending() {
+                return Ok(Some(Ran::Interrupted { signal }));
             }
-            Ok(None) => {}
+            if tree.exited(&mut child)? {
+                return Ok(None);
+            }
+            if started.elapsed() >= limits.timeout {
+                return Ok(Some(Ran::TimedOut {
+                    seconds: limits.timeout.as_secs(),
+                }));
+            }
+            if disk_checked.elapsed() >= DISK_INTERVAL {
+                if let Some(floor) = disk_floor(&paths, limits)? {
+                    return Ok(Some(Ran::DiskFloor(floor)));
+                }
+                disk_checked = Instant::now();
+            }
+            tree.scan()?;
+            std::thread::sleep(POLL_INTERVAL);
         }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            break None;
-        }
-        std::thread::sleep(POLL_INTERVAL);
-    };
-
-    let stdout = out_reader.join().unwrap_or_default();
-    let stderr = err_reader.join().unwrap_or_default();
-
-    let note = status
-        .as_ref()
-        .filter(|status| !status.success())
-        .and_then(|_| environment.note(&[stdout.as_bytes(), stderr.as_bytes()]));
-    let mut output = stdout;
-    output.push_str(&stderr);
-
-    match status {
-        None => Ran::TimedOut {
-            seconds: timeout.as_secs(),
-        },
-        Some(status) => Ran::Finished {
-            code: status.code(),
-            success: matches!(
-                archon_workflow::acceptance_check_crash::classify_execution(
-                    &argv.join(" "),
-                    status.code(),
-                    &stderr,
-                    &[]
-                ),
-                archon_workflow::acceptance_check_crash::CheckRunClass::Passed
-            ),
-            output,
-            note,
-        },
+    })();
+    // Tear down descendants even when the leader finished normally, before
+    // reaping releases its identity and before joining the pipe readers.
+    let cleanup = tree.kill();
+    if cleanup.is_err() {
+        Tree::abort(&mut child);
     }
+    let status = child.wait();
+    tree.reaped();
+    let restored = signals.restore();
+    // Include signals delivered after leader exit and during restoration.
+    if let Some(signal) = signals.pending() {
+        if let Err(error) = cleanup {
+            eprintln!("interrupted verifier teardown failed: {error}");
+        }
+        if let Err(error) = restored {
+            eprintln!("interrupted verifier handler restoration failed: {error}");
+        }
+        if !out_reader.is_finished() || !err_reader.is_finished() {
+            eprintln!("interrupted verifier output readers still running; detaching");
+        }
+        return Ok(Ran::Interrupted { signal });
+    }
+    cleanup?;
+    restored?;
+    let status = status?;
+    let stdout = out_reader
+        .join()
+        .map_err(|_| std::io::Error::other("output reader thread failed"))??;
+    let stderr = err_reader
+        .join()
+        .map_err(|_| std::io::Error::other("error reader thread failed"))??;
+    if let Some(stopped) = stopped? {
+        return Ok(stopped);
+    }
+    let note = (!status.success())
+        .then(|| environment.note(&[stdout.as_bytes(), stderr.as_bytes()]))
+        .flatten();
+    let success = matches!(
+        archon_workflow::acceptance_check_crash::classify_execution(
+            &argv.join(" "),
+            status.code(),
+            &stderr,
+            &[]
+        ),
+        archon_workflow::acceptance_check_crash::CheckRunClass::Passed
+    );
+    Ok(Ran::Finished {
+        code: status.code(),
+        success,
+        output: stdout + stderr.as_str(),
+        note,
+    })
 }
 
-/// Read a pipe to EOF. Lossy on purpose: compiler output is not guaranteed
-/// UTF-8, and the only thing done with it is a substring search for a build
-/// marker, which a replacement character cannot fake.
-fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> String {
-    let Some(mut pipe) = pipe else {
-        return String::new();
-    };
+fn drain<R: std::io::Read>(pipe: Option<R>) -> std::io::Result<String> {
     let mut raw = Vec::new();
-    let _ = pipe.read_to_end(&mut raw);
-    String::from_utf8_lossy(&raw).into_owned()
+    if let Some(mut pipe) = pipe {
+        pipe.read_to_end(&mut raw)?;
+    }
+    Ok(String::from_utf8_lossy(&raw).into_owned())
 }
 
 #[cfg(test)]
+#[path = "verifier_agnostic_proof_tests.rs"]
+mod agnostic_proof_tests;
+#[cfg(test)]
 #[path = "verifier_environment_tests.rs"]
 mod environment_tests;
+#[cfg(test)]
+#[path = "verifier_limits_tests.rs"]
+mod limits_tests;
+
+#[cfg(all(test, unix))]
+#[path = "verifier_signal_tests.rs"]
+mod signal_tests;

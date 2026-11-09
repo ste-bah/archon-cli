@@ -1,0 +1,8 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.jetbrains.kotlin.org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/opt/homebrew/Cellar/gradle/9.8.2/libexec/lib/kotlin-compiler-embeddable-2.4.10.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+src/main/kotlin/example/Calculator.kt:2:32: error: unresolved reference 'missing'.
+fun add(a: Int, b: Int): Int = missing
+                               ^^^^^^^

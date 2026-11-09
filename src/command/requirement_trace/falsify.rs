@@ -42,10 +42,14 @@
 //! is not re-run is the half that byte equality already settles.
 
 mod guard;
+mod limits;
+mod process_tree;
+mod signals;
+pub(crate) use limits::VerifyLimits;
+pub(crate) use signals::Interrupted;
 mod verifier;
 
 use std::path::Path;
-use std::time::Duration;
 
 use archon_knowledge::traceability::anchors::file_hash;
 use archon_knowledge::traceability::falsification::mutate;
@@ -55,15 +59,6 @@ use archon_knowledge::traceability::{
     FalsificationOutcome, FalsificationPlan, Inconclusive, RefusedToRun, TraceReport,
 };
 
-/// How long one verifier run may take before it is killed.
-///
-/// Finite because a verifier that hangs with a mutation in the tree is the worst
-/// state this code can be in, and generous because the only commands that get
-/// this far are single-package runs that `vet` already scoped. A kill is an
-/// `Inconclusive`, never a failure: a command that did not answer has not
-/// answered, and treating silence as a kill would promote on a hang.
-const VERIFIER_TIMEOUT: Duration = Duration::from_secs(900);
-
 /// Run every plan in the report and fold the results back into the levels.
 ///
 /// Progress goes to stderr because the report goes to stdout: this can take
@@ -71,14 +66,15 @@ const VERIFIER_TIMEOUT: Duration = Duration::from_secs(900);
 /// what is being mutated while it happens.
 #[cfg(test)]
 pub(crate) fn execute_plans(cwd: &Path, report: &mut TraceReport) {
-    execute_plans_with_policy(cwd, report, None);
+    execute_plans_with_policy(cwd, report, None, &VerifyLimits::for_test()).unwrap();
 }
 
 pub(crate) fn execute_plans_with_policy(
     cwd: &Path,
     report: &mut TraceReport,
     policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
-) {
+    limits: &VerifyLimits,
+) -> Result<(), Interrupted> {
     for row in &mut report.rows {
         for verdict in &mut row.anchors {
             let Ok(plan) = verdict.falsification.clone() else {
@@ -88,14 +84,19 @@ pub(crate) fn execute_plans_with_policy(
                 "falsify {}: breaking {}:{}-{}, then `{}`",
                 plan.requirement_id, plan.file_path, plan.line_start, plan.line_end, plan.command
             );
-            let outcome = attempt_with_policy(cwd, &plan, policy)
-                .unwrap_or_else(FalsificationOutcome::Refused);
+            let outcome = match attempt_with_policy(cwd, &plan, policy, limits) {
+                Ok(outcome) => outcome,
+                Err(AttemptError::Refused(reason)) => FalsificationOutcome::Refused(reason),
+                Err(AttemptError::Interrupted(interruption)) => return Err(interruption),
+                Err(AttemptError::Signal(_)) => unreachable!("monitor converts pending signals"),
+            };
             eprintln!("  {}", outcome.describe());
             verdict.level = outcome.level_after(verdict.level);
             verdict.falsification_outcome = Some(outcome);
         }
         row.level = strongest_level(&row.anchors);
     }
+    Ok(())
 }
 
 /// One experiment. `Err` is a refusal made before anything was written.
@@ -104,27 +105,81 @@ fn attempt(
     cwd: &Path,
     plan: &FalsificationPlan,
 ) -> std::result::Result<FalsificationOutcome, RefusedToRun> {
-    attempt_with_policy(cwd, plan, None)
+    attempt_with_policy(cwd, plan, None, &VerifyLimits::for_test()).map_err(|error| match error {
+        AttemptError::Refused(reason) => reason,
+        AttemptError::Interrupted(interruption) => panic!("{interruption}"),
+        AttemptError::Signal(_) => unreachable!("monitor converts pending signals"),
+    })
+}
+
+#[derive(Debug)]
+enum AttemptError {
+    Refused(RefusedToRun),
+    Interrupted(Interrupted),
+    Signal(i32),
+}
+
+impl From<RefusedToRun> for AttemptError {
+    fn from(reason: RefusedToRun) -> Self {
+        Self::Refused(reason)
+    }
 }
 
 fn attempt_with_policy(
     cwd: &Path,
     plan: &FalsificationPlan,
     policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
-) -> std::result::Result<FalsificationOutcome, RefusedToRun> {
+    limits: &VerifyLimits,
+) -> std::result::Result<FalsificationOutcome, AttemptError> {
+    let mut monitor = match signals::Monitor::new() {
+        Ok(monitor) => monitor,
+        Err(error) => return Ok(handler_failure(&plan.command, "registration", error)),
+    };
+    let result = attempt_monitored(cwd, plan, policy, limits);
+    let restored = monitor.restore();
+    if let Some(signal) = monitor.pending().or_else(|| match &result {
+        Err(AttemptError::Signal(signal)) => Some(*signal),
+        _ => None,
+    }) {
+        if let Err(error) = restored {
+            eprintln!("interrupted verifier handler restoration failed: {error}");
+        }
+        return Err(AttemptError::Interrupted(
+            monitor.interruption(signal, limits.reraise_default),
+        ));
+    }
+    if let Err(error) = restored {
+        return Ok(handler_failure(&plan.command, "restoration", error));
+    }
+    result
+}
+
+fn handler_failure(command: &str, operation: &str, error: std::io::Error) -> FalsificationOutcome {
+    FalsificationOutcome::Inconclusive(Inconclusive::VerifierNotLaunchable {
+        reason: format!("interrupt handler {operation} for `{command}`: {error}"),
+    })
+}
+
+fn attempt_monitored(
+    cwd: &Path,
+    plan: &FalsificationPlan,
+    policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
+    limits: &VerifyLimits,
+) -> std::result::Result<FalsificationOutcome, AttemptError> {
     let language = mutate::language_for_path(&plan.file_path).ok_or_else(no_mutation(plan))?;
     let replacement = plan
         .mutation
         .replacement_for(language)
         .ok_or_else(no_mutation(plan))?;
-    let argv = verifier::vet(&plan.command)?;
+    let argv = verifier::vet(&plan.command, limits)?;
 
     let path = cwd.join(&plan.file_path);
     let backup = guard::backup_path(&path);
     if backup.exists() {
         return Err(RefusedToRun::UnreconciledBackup {
             backup_path: backup.display().to_string(),
-        });
+        }
+        .into());
     }
 
     let original = std::fs::read(&path).map_err(|err| RefusedToRun::FileUnreadable {
@@ -136,7 +191,8 @@ fn attempt_with_policy(
     if file_hash(&original) != plan.expected_file_hash {
         return Err(RefusedToRun::FileChangedSincePlan {
             file_path: plan.file_path.clone(),
-        });
+        }
+        .into());
     }
     let text = String::from_utf8(original.clone()).map_err(|_| RefusedToRun::UnusableRange {
         file_path: plan.file_path.clone(),
@@ -154,9 +210,14 @@ fn attempt_with_policy(
     // Output text never decides whether a failure is an environment problem.
     let environment = match archon_workflow::acceptance_check_environment::CommandEnvironment::capture(policy) {
         Ok(environment) => environment.with_remedy("Ask the operator to allowlist needed names in [workflow.acceptance_execution] environment_allowlist in the configuration consumed by requirements trace"),
-        Err(reason) => return Ok(FalsificationOutcome::Inconclusive(Inconclusive::VerifierNotLaunchable { reason })),
+        Err(reason) => return Ok(FalsificationOutcome::Inconclusive(Inconclusive::VerifierNotLaunchable { reason: format!("`{}`: {reason}", plan.command) })),
     };
-    match verifier::run_in_environment(cwd, &argv, VERIFIER_TIMEOUT, &environment) {
+    match verifier::run_in_environment(cwd, &argv, limits, &environment) {
+        verifier::Ran::Interrupted { signal } => return Err(AttemptError::Signal(signal)),
+        verifier::Ran::DiskFloorBeforeLaunch(floor) => return Err(floor.refusal().into()),
+        verifier::Ran::DiskFloor(floor) => {
+            return Ok(FalsificationOutcome::Inconclusive(floor.inconclusive()));
+        }
         verifier::Ran::NotLaunchable { reason } => {
             return Ok(FalsificationOutcome::Inconclusive(
                 Inconclusive::VerifierNotLaunchable { reason },
@@ -177,7 +238,8 @@ fn attempt_with_policy(
                 command: plan.command.clone(),
                 exit_code: code,
                 note,
-            });
+            }
+            .into());
         }
         verifier::Ran::Finished { .. } => {}
     }
@@ -191,13 +253,16 @@ fn attempt_with_policy(
                 reason: format!("could not install the mutation: {err}"),
             }
         })?;
-    let mutated = verifier::run_in_environment(cwd, &argv, VERIFIER_TIMEOUT, &environment);
+    let mutated = verifier::run_in_environment(cwd, &argv, limits, &environment);
     // Explicit, so the restore happens before the outcome is reported rather
     // than at the end of the enclosing scope. `Drop` remains the net.
     if let Err(err) = installed.restore() {
         eprintln!("  restore of {} failed: {err}", plan.file_path);
     }
 
+    if let verifier::Ran::Interrupted { signal } = mutated {
+        return Err(AttemptError::Signal(signal));
+    }
     Ok(classify(language, mutated))
 }
 
@@ -219,6 +284,12 @@ fn classify(language: &str, ran: verifier::Ran) -> FalsificationOutcome {
 
 fn classify_result(language: &str, ran: verifier::Ran) -> FalsificationOutcome {
     match ran {
+        verifier::Ran::Interrupted { .. } => {
+            unreachable!("interruption handled before classification")
+        }
+        verifier::Ran::DiskFloor(floor) | verifier::Ran::DiskFloorBeforeLaunch(floor) => {
+            FalsificationOutcome::Inconclusive(floor.inconclusive())
+        }
         verifier::Ran::NotLaunchable { reason } => {
             FalsificationOutcome::Inconclusive(Inconclusive::VerifierNotLaunchable { reason })
         }

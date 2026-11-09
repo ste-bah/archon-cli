@@ -31,9 +31,8 @@ pub(crate) fn baseline_tests_prompt_section(input: &Value) -> String {
          NOT accepted while any test in its declared filter fails, unless that test is listed \
          below as owned by another task or as one to leave alone. \"Pre-existing\" is not an \
          acceptable reason to accept a red test, and a `pre_existing: true` command record is \
-         honoured only when every test its output names is on those lists; the host re-reads \
-         your commands_run output for `test <name> ... FAILED` lines and refuses an accepted \
-         verdict that leaves any other test red. The lists below ARE that record, complete and \
+         honoured only when every test its output names is on those lists; the host re-reads your commands_run output for failing test ids and file locations its readers recognise; \
+         a failure it cannot read is judged on your report and the evidence you quote. The host refuses an accepted verdict that leaves any other test red. The lists below ARE that record, complete and \
          already resolved — there is nothing to look up. The host's own copy is written to \
          `{root}/` under the run directory, which is its bookkeeping and not a place to search: \
          it accumulates every run ever kept on this machine, and a recursive search of it has \
@@ -69,9 +68,8 @@ pub(crate) fn baseline_tests_prompt_section(input: &Value) -> String {
         text.push_str(&format!(
             "- `{}` already fails on the base commit for error diagnostics in {} file(s) outside \
              this task's target_files: {}. Record it as pre_existing with those locations as \
-             the evidence; the host re-reads your output for `--> path` locations and honours \
-             the claim only while every location is in this list — a diagnostic in any other \
-             file is this task's failure.\n",
+             the evidence; the host re-reads your commands_run output for failing test ids and file locations its readers recognise; \
+             a failure it cannot read is judged on your report and the evidence you quote. A diagnostic in any other file is this task's failure.\n",
             pre.command,
             pre.files.len(),
             pre.files.join(", ")
@@ -159,3 +157,7 @@ mod tests {
         assert!(text.contains("- Owned by another task (may stay red; record as pre_existing with this list as the evidence): plan::tests::theirs (owned by TASK-B)\n"), "{text}");
     }
 }
+
+#[cfg(test)]
+#[path = "agent_prompt_baseline_agnostic_proof_tests.rs"]
+mod agnostic_proof_tests;

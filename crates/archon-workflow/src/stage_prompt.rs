@@ -91,103 +91,26 @@ fn list_contains_ci(value: Option<&Value>, needle: &str) -> bool {
     })
 }
 
-const BASH_EXECUTION_GUIDANCE: &str = "For verification, focused-test, lint, build, or check stages, you MUST invoke Bash at least once before returning. If the stage input contains `verify_command`, run that exact command from `target_repository_root` instead of inventing a replacement. Do not set a Bash `timeout` field and do not wrap commands with shell-level `timeout`/`gtimeout` unless the workflow stage explicitly provides a timeout; rely on the configured `tools.bash_timeout`. Report exact commands, working directory, exit status, and pass/fail output. If Bash is unavailable or the command cannot be executed, return `status: failed` with the concrete execution failure. Do not return `status: blocked` merely because a command is expensive; run the focused command or report the concrete execution failure. Do not mark timed-out commands as completed or verified.";
+const BASH_EXECUTION_GUIDANCE: &str = concat!(
+    "For verification, focused-test, lint, build, or check stages, you MUST invoke Bash at least once before returning.\n",
+    "If a `verify_command` is provided, use `target_repository_root` as its working directory.\n",
+    "Do not set a Bash `timeout` field and do not wrap commands with shell-level `timeout`/`gtimeout` unless the workflow stage explicitly provides a timeout; rely on the configured `tools.bash_timeout`.\n",
+    "Report exact commands, working directory, exit status, and pass/fail output.\n",
+    "If Bash is unavailable or the command cannot be executed, return `status: failed` with the concrete execution failure.\n",
+    "Do not return `status: blocked` merely because a command is expensive.\n",
+    "Do not mark timed-out commands as completed or verified.",
+);
 
 fn command_execution_guidance() -> String {
-    format!(
-        "{BASH_EXECUTION_GUIDANCE}\n\n{FOCUSED_VERIFICATION_GUIDANCE}\n\n{}",
-        cargo_command_policy_guidance()
-    )
+    format!("{BASH_EXECUTION_GUIDANCE}\n\n{FOCUSED_VERIFICATION_GUIDANCE}")
 }
 
 const FOCUSED_VERIFICATION_GUIDANCE: &str = concat!(
     "Focused verification selection:\n",
-    "- For every language/build system, narrow at the test file, target, module, package, class, or test-id level before invoking the test runner.\n",
-    "- Avoid broad project/package filters that still compile or run unrelated suites before filtering. Examples to avoid when a narrower target is knowable: `cargo test -p <large-package> <filter>`, whole-repo `pytest`, root `npm test`, root `gradle test`, or all-module Maven/Gradle runs.\n",
-    "- Prefer exact commands such as Cargo `cargo test -p <pkg> --test <target> <filter>`, pytest `pytest path/to/test.py::test_name`, Gradle `./gradlew :module:test --tests ClassName.testName`, Maven `mvn -pl module -Dtest=ClassName#testName test`, npm/pnpm test-file or test-name filters, Go `go test ./pkg -run TestName`, or dotnet `dotnet test --filter Name~TestName`.\n",
-    "- Use cheap source inspection (`rg`, `ls`, manifest/build files) to identify exact targets before running Bash. If the exact target cannot be determined, report the reason and choose the narrowest command available.\n",
+    "- Run declared `verify_command` and Focused Tests commands exactly as declared; never widen a declared command.\n",
+    "- When no command is declared, choose the narrowest available test file, target, module, package, class, or test id; report the reason if the exact target cannot be determined.\n",
+    "- Never override environment variables the host sets for build output or job limits.\n",
 );
-
-fn cargo_command_policy_guidance() -> String {
-    let profile = CargoHostProfile::detect();
-    format!(
-        "Cargo command policy for this host ({}):\n- Prefer exact package + test-target commands over workspace-wide commands.\n- Intermediate workflow test stages must not run `cargo check --workspace --tests` unless the stage or user explicitly requires it; reserve broad workspace checks for final quality gates.\n- {}\n- If upstream artifacts list stale Cargo commands that conflict with this host policy, adapt the commands and report the adaptation.",
-        profile.label(),
-        profile.jobs_guidance()
-    )
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CargoHostProfile {
-    Macos,
-    Wsl2,
-    NativeLinux,
-    Windows,
-    Other,
-}
-
-impl CargoHostProfile {
-    fn detect() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::Macos
-        } else if cfg!(target_os = "windows") {
-            Self::Windows
-        } else if cfg!(target_os = "linux") {
-            if linux_is_wsl2() {
-                Self::Wsl2
-            } else {
-                Self::NativeLinux
-            }
-        } else {
-            Self::Other
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Macos => "macOS",
-            Self::Wsl2 => "WSL2",
-            Self::NativeLinux => "native Linux",
-            Self::Windows => "native Windows",
-            Self::Other => "unknown platform",
-        }
-    }
-
-    fn jobs_guidance(self) -> &'static str {
-        match self {
-            Self::Macos => {
-                "Native macOS: do not add `-j1` or `--jobs 1` merely because repository docs mention WSL2. Omit Cargo job flags by default, or use an explicit configured job cap when the stage/user asks for one."
-            }
-            Self::NativeLinux => {
-                "Native Linux: do not add `-j1` or `--jobs 1` merely because repository docs mention WSL2. Omit Cargo job flags by default, or use an explicit configured job cap when the stage/user asks for one."
-            }
-            Self::Windows => {
-                "Native Windows: do not add `-j1` or `--jobs 1` merely because repository docs mention WSL2. Omit Cargo job flags by default, or use an explicit configured job cap when the stage/user asks for one."
-            }
-            Self::Wsl2 => {
-                "WSL2 or low-memory host: use `-j1`/`--jobs 1` and keep test threads bounded, for example `-- --test-threads=2`, unless the stage/user explicitly supplies a different safe cap."
-            }
-            Self::Other => {
-                "Unknown host: prefer focused commands and do not hard-code `-j1`/`--jobs 1` unless the stage/user explicitly identifies the current host as WSL2 or low-memory."
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn linux_is_wsl2() -> bool {
-    std::fs::read_to_string("/proc/version")
-        .map(|version| {
-            let version = version.to_ascii_lowercase();
-            version.contains("microsoft") || version.contains("wsl")
-        })
-        .unwrap_or(false)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn linux_is_wsl2() -> bool {
-    false
-}
 
 pub fn harness_planner_prompt(
     task: &str,
@@ -257,3 +180,11 @@ pub fn harness_repair_prompt(
 }
 
 const HARNESS_REPAIR_DECOMPOSED_RULES: &str = "- Decomposed PRD/task-directory implementation orchestration is generated by Archon's deterministic scaffold when an authoritative task universe is available. Do not repair such work into provider-authored stage trains, one-shot implementation fanout, fixed remediation passes, YAML control, or direct multi-task w.implementation.\n- If repairing a dependency-aware script, preserve JavaScript-owned state: taskUniverse, canonicalTaskUniverse, remainingItems, completedIds, dependencyIteration, implementationWaveIndex, readyItems, readyNoopItems, readyImplementationItems, implementationEvidence, verificationEvidence, reviewEvidence, artifactEvidence, repairAttempts, and finalEvidenceRepairAttempts.\n- Inventory must use `work_type`: `implementation` requires repo-owned implementation target files and focused verification; task docs/context/progress/report/artifact paths are evidence refs, not implementation write targets. `verified_noop` requires concrete no-op proof and proof refs. Normalize aliases such as proof_references/proof_refs/noopProofRefs into noop_proof_refs before validation. Split grouped items by dependency readiness; no item may depend on a canonical task it also claims. Add represented verified_noop prerequisites when implementation is already complete. Verify no-op proof inside the dependency-ready loop with `noop-proof-verification-` before unblocking dependents. If bounded no-op proof repair refutes a claim, reclassify that canonical task into implementation once and schedule it through the normal implementation lifecycle; never block merely because the inherited no-op claim was false. If inventory-owned residual gaps explicitly contradict a no-op item's task or declared artifact contract, classify it as implementation work before no-op proof.\n- Repairable inventory/data/evidence gaps must run through bounded JS-owned repair/investigation calls before terminal stop: inventory-shape-repair, task-universe-reconcile, dependency-graph-repair, target-file-discovery, verification-requirements-discovery, artifact-requirements-discovery, provider-environment-discovery, and evidence-repair. A dependency deadlock must attempt dependency-graph-repair-deadlock before blocked-dependency-deadlock. Blocked/needs_review reports must include repair_attempts[].\n- Route non-accepted/non-noop implementation branch outcomes from `wave.outcomes` into `w.reduce(\"remediation-inventory-\" + currentImplementationWaveIndex, ...)`. The reducer source may be direct `wave.outcomes` or a variable assigned from `wave.outcomes` that excludes statuses `accepted` and `noop`; do not use unrelated sources.\n- Treat accepted/noop implementation or remediation outcomes as candidates only. Run linked focused verification before adding task IDs to completedIds, shrink `remainingItems` only via verified completed canonical IDs, and stop visibly only after repair/investigation exhaustion, deadlock, loop exhaustion, unresolved review, failed verification, missing artifacts, or runtime/safety failure.\n- Run final-evidence-reconciliation, completion-claim-repair, and artifact-existence-investigation before final acceptance. Run adversarial review as real read-only worker/reducer calls. Do not use local-only adversarial qualityGate calls. Do not use w.humanGate in generated decomposed PRD workflows.";
+
+#[cfg(test)]
+#[path = "stage_prompt_agnostic_proof_tests.rs"]
+mod agnostic_proof_tests;
+
+#[cfg(test)]
+#[path = "stage_prompt_policy_tests.rs"]
+mod policy_tests;

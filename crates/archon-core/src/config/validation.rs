@@ -135,6 +135,8 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         ));
     }
 
+    super::sections_verify::validate(&config.workflow.verify)?;
+
     // Issue 282: refused at load, by name, before any run captures the policy.
     if let Some(acceptance) = &config.workflow.acceptance_execution {
         for name in &acceptance.environment_allowlist {

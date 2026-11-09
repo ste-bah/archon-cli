@@ -1,0 +1,6 @@
+src/main/java/example/Calculator.java:3: error: cannot find symbol
+ public static int add(int a, int b) { return missing; }
+                                              ^
+  symbol:   variable missing
+  location: class Calculator
+1 error

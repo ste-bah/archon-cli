@@ -1,0 +1,12 @@
+{
+  "kind": "real recording",
+  "command": [
+    "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home/bin/javac",
+    "-d",
+    "classes",
+    "src/main/java/example/Calculator.java"
+  ],
+  "version": "javac 27.0.1.0.2",
+  "exit_code": 1,
+  "input": "package example;\npublic final class Calculator {\n public static int add(int a, int b) { return missing; }\n}\n"
+}

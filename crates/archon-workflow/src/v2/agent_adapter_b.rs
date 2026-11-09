@@ -81,7 +81,7 @@ fn output_excerpt(output: &str) -> String {
 /// rather than a const because `concat!` accepts only literals.
 macro_rules! test_filter_rule {
     () => {
-        "- TEST COMMANDS: pass ONE filter per invocation. Most runners (cargo included) reject or silently ignore multiple positional filters, so a combined command can exit 0 while the filters you named matched nothing — that is not evidence and the host demotes it. Run each filter as its own command and check each reported a non-zero match count.\n"
+        "- TEST COMMANDS: pass ONE filter per invocation. Runners may reject or silently ignore multiple positional filters, so a combined command can exit 0 while the filters you named matched nothing — that is not evidence and the host demotes it. Run each filter as its own command and check each reported a non-zero match count.\n"
     };
 }
 
@@ -134,7 +134,7 @@ pub(super) const IMPLEMENTATION_RULES: &str = concat!(
     test_filter_rule!(),
     "- Accepted/noop results must include concrete evidence: files/artifacts, commands_run, task_coverage, and residual_gaps when relevant.\n",
     "- Repository source edits must stay under repository_root and declared target_files; workflow/project artifacts must be written under project_artifact_root when provided and listed in artifacts.\n",
-    "- FILE SIZE: a source file that would exceed the repository's per-file line cap is REJECTED and none of your patch is credited. Do not grow a file past the cap. You also own the module directory of each declared target (declaring `a/b.rs` owns `a/b/`), so when a target is at or near the cap, SPLIT it: move cohesive sections into new files under that module directory and re-export them from the original. Splitting is expected and in scope — silently growing the file until the gate rejects the whole patch is not.\n",
+    "- FILE SIZE: a source file that would exceed the repository's per-file line cap is REJECTED and none of your patch is credited. Do not grow a file past the cap. You own the directories in target_ownership_scopes; when a target nears the cap, split it into new files there; splitting is expected.\n",
     "- If a write branch is genuinely already complete with no patch, return top-level \"status\":\"noop\", \"idempotent_noop\":true, commands_run evidence, and accepted/noop task_coverage evidence.\n",
     "- If no edits are required because the work is already complete, status must be noop and task_coverage must include typed evidence; declared project artifacts also require existing artifact evidence.\n",
     "- Status accepted with no files_changed is invalid unless concrete project artifact evidence was written under project_artifact_root."

@@ -1,0 +1,16 @@
+{
+  "kind": "real recording",
+  "command": [
+    "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home/bin/java",
+    "-cp",
+    "/opt/homebrew/Cellar/gradle/9.8.2/libexec/lib/*",
+    "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
+    "-no-stdlib",
+    "-no-reflect",
+    "-d",
+    "classes",
+    "src/main/kotlin/example/Calculator.kt"
+  ],
+  "input": "package example\nfun add(a: Int, b: Int): Int = missing\n",
+  "exit_code": 1
+}

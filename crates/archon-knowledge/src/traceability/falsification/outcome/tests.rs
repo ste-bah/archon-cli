@@ -92,7 +92,8 @@ fn refusals_name_the_specific_absent_fact() {
         token: "--workspace".into(),
     };
     assert!(
-        wide.describe().contains("the scoped-verifier rule forbids"),
+        wide.describe()
+            .contains("which [workflow.verify] refuse_tokens lists"),
         "{}",
         wide.describe()
     );
@@ -123,4 +124,21 @@ fn a_language_with_no_marker_list_gets_no_verdict() {
     // Not a guess: an unlisted language is unclassifiable, which is a refusal
     // to promote rather than a default.
     assert!(build_failure_markers("cobol").is_none());
+}
+
+#[test]
+fn host_fault_wording_covers_both_launch_and_running_failures() {
+    for reason in [
+        "program unavailable",
+        "free-space check failed during execution",
+        "verification interrupted by a termination signal",
+    ] {
+        let outcome = Inconclusive::VerifierNotLaunchable {
+            reason: reason.into(),
+        };
+        assert_eq!(
+            outcome.describe(),
+            format!("verification could not be completed: {reason}")
+        );
+    }
 }

@@ -1826,3 +1826,9 @@ arguments_preview_chars = 500
 # Optional exact resolved-model prices in USD per million input/output tokens:
 # [llm.model_prices]
 # "configured-model-id" = [2.0, 4.0]
+
+# Missing sections use these shipped defaults; configured arrays replace them.
+[workflow.verify]
+refuse_tokens = ["--workspace", "--all"]
+timeout_secs = 900
+min_free_disk_mib = 10240

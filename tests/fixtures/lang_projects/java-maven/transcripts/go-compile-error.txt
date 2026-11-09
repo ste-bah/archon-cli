@@ -1,0 +1,4 @@
+FAIL	example/proof [build failed]
+FAIL
+# example/proof
+./broken.go:2:25: undefined: missing
