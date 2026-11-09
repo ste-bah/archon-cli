@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod embedded_defaults;
+mod sections_verify;
+pub use sections_verify::VerifyConfig;
 mod generated_shape;
 mod generated_tuning;
 /// `[guard]` — advisories that nudge the model without vetoing it (#200).

@@ -44,6 +44,8 @@ impl CommandHandler for RequirementsHandler {
             .as_ref()
             .ok_or_else(|| anyhow!("requirements requires resolved operator configuration"))?;
         options.embedding = config.memory.open_spec().embedding;
+        options.verify_limits = (&config.workflow.verify).into();
+        options.verify_limits.reraise_default = false;
         options.check_policy = super::check_policy::from_config(config)?;
         let mode = ctx.gate_mode.unwrap_or_default();
         let disposition = crate::command::workflow_gate::run_sync_gate(

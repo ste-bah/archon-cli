@@ -27,6 +27,8 @@ pub enum GateMode {
 #[serde(default)]
 #[derive(Default)]
 pub struct WorkflowRuntimeConfig {
+    #[serde(default = "super::super::VerifyConfig::default")]
+    pub verify: super::super::VerifyConfig,
     pub repository_audit: RepositoryAuditConfig,
     pub breaker_calls: BreakerCallLimits,
     #[serde(default, skip_serializing_if = "Option::is_none")]

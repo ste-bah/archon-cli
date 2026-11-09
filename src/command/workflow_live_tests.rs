@@ -305,7 +305,7 @@ fn live_prompt_does_not_add_item_contract_to_plain_stage() {
 }
 
 #[test]
-fn command_stage_prompt_includes_platform_cargo_policy() {
+fn command_stage_prompt_preserves_declared_command_policy() {
     let req = StageRunRequest {
         stage_id: "wave5_tests".into(),
         stage_kind: StageKind::Agent,
@@ -314,15 +314,23 @@ fn command_stage_prompt_includes_platform_cargo_policy() {
     };
     let prompt = workflow_prompt(&req);
 
-    assert!(prompt.contains("Cargo command policy for this host"));
-    assert!(prompt.contains("Prefer exact package + test-target commands"));
-    assert!(prompt.contains("reserve broad workspace checks for final quality gates"));
-    assert!(prompt.contains("adapt the commands and report the adaptation"));
+    assert_eq!(
+        prompt
+            .matches("Run declared `verify_command` and Focused Tests commands exactly as declared")
+            .count(),
+        1
+    );
+    assert!(prompt.contains(
+        "If a `verify_command` is provided, use `target_repository_root` as its working directory"
+    ));
+    assert!(prompt.contains("Focused Tests commands exactly as declared"));
+    assert!(prompt.contains("never widen a declared command"));
+    assert!(!prompt.contains("adapt the commands"));
 }
 
 #[cfg(target_os = "macos")]
 #[test]
-fn command_stage_prompt_does_not_treat_wsl_jobs_as_macos_default() {
+fn command_stage_prompt_leaves_host_job_limits_intact() {
     let req = StageRunRequest {
         stage_id: "focused_tests".into(),
         stage_kind: StageKind::Agent,
@@ -331,8 +339,8 @@ fn command_stage_prompt_does_not_treat_wsl_jobs_as_macos_default() {
     };
     let prompt = workflow_prompt(&req);
 
-    assert!(prompt.contains("Cargo command policy for this host (macOS)"));
-    assert!(prompt.contains("Native macOS: do not add `-j1` or `--jobs 1`"));
+    assert!(prompt.contains("Never override environment variables the host sets"));
+    assert!(!prompt.contains("--jobs 1"));
 }
 
 #[test]

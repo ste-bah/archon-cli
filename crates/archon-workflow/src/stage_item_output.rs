@@ -252,7 +252,7 @@ fn candidate_documents(body: &str) -> Vec<&str> {
 
 fn item_output_repair_prompt(request: &StageRunRequest, invalid_output: &str) -> String {
     format!(
-        "The previous response for workflow stage '{}' was invalid for this stage contract. This stage declares `outputs: [items]`, but the response did not contain a parseable JSON/YAML object with top-level `items` or `completed_items`.\n\nReturn ONLY one JSON object or YAML document now, with no markdown fences and no prose before or after it.\n\nRequired work shape:\n{{\"items\":[{{\"id\":\"stable-id\",\"task\":\"concise concrete task\",\"evidence\":\"specific evidence from the current stage investigation\",\"target_files\":[\"repository/relative/path.rs\"]}}]}}\n\nRequired no-work proof shape:\n{{\"items\":[],\"completed_items\":[{{\"task_ids\":[\"T001\"],\"status\":\"already_implemented\",\"verified\":true,\"evidence\":[{{\"path\":\"path/to/evidence\",\"summary\":\"why no edit is needed\"}}]}}]}}\n\nRules:\n- Use the task/source evidence already inspected in this workflow stage.\n- Do not ask what to do next.\n- Do not return restored-context summaries.\n- Do not return only `idempotent_noop` or status prose.\n- Do not run broad recursive reads or greps just to repair formatting; only use another tool if it is narrowly necessary to fill a concrete missing field.\n- If and only if the evidence proves there is no downstream implementation work, return `items: []` with matching `completed_items` proof.\n\nPrevious invalid response excerpt:\n{}\n\nStage task:\n{}",
+        "The previous response for workflow stage '{}' was invalid for this stage contract. This stage declares `outputs: [items]`, but the response did not contain a parseable JSON/YAML object with top-level `items` or `completed_items`.\n\nReturn ONLY one JSON object or YAML document now, with no markdown fences and no prose before or after it.\n\nRequired work shape:\n{{\"items\":[{{\"id\":\"stable-id\",\"task\":\"concise concrete task\",\"evidence\":\"specific evidence from the current stage investigation\",\"target_files\":[\"repository/relative/file\"]}}]}}\n\nRequired no-work proof shape:\n{{\"items\":[],\"completed_items\":[{{\"task_ids\":[\"T001\"],\"status\":\"already_implemented\",\"verified\":true,\"evidence\":[{{\"path\":\"path/to/evidence\",\"summary\":\"why no edit is needed\"}}]}}]}}\n\nRules:\n- Use the task/source evidence already inspected in this workflow stage.\n- Do not ask what to do next.\n- Do not return restored-context summaries.\n- Do not return only `idempotent_noop` or status prose.\n- Do not run broad recursive reads or greps just to repair formatting; only use another tool if it is narrowly necessary to fill a concrete missing field.\n- If and only if the evidence proves there is no downstream implementation work, return `items: []` with matching `completed_items` proof.\n\nPrevious invalid response excerpt:\n{}\n\nStage task:\n{}",
         request.stage_id,
         truncate_for_repair_prompt(invalid_output, 2_000),
         request.task
@@ -269,3 +269,7 @@ fn truncate_for_repair_prompt(value: &str, max_chars: usize) -> String {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "stage_item_output_agnostic_proof_tests.rs"]
+mod agnostic_proof_tests;

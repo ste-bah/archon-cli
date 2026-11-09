@@ -1,0 +1,29 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+> Task :compileTestJava
+> Task :processTestResources NO-SOURCE
+> Task :testClasses
+
+> Task :test FAILED
+
+CalculatorTest > failing() FAILED
+    org.opentest4j.AssertionFailedError at CalculatorTest.java:6
+
+CalculatorTest > passing() PASSED
+
+2 tests completed, 1 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests. See the report at: file:///private/tmp/claude-501/-Volumes-Externalwork/117d7bc7-a4ef-4fc4-8f14-14cb5fdefd48/scratchpad/javarec/java-gradle/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 4s
+3 actionable tasks: 3 executed
+exit=1

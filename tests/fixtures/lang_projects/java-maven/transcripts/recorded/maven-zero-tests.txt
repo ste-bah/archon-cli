@@ -1,0 +1,31 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------------< example:java-proof >-------------------------
+[INFO] Building java-proof 1.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] Loaded 24401 auto-discovered prefixes for remote repository central (prefixes-central.txt)
+[INFO] Loaded 64 auto-discovered prefixes for remote repository apache.snapshots (prefixes-apache.snapshots.txt)
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ java-proof ---
+[INFO] skip non existing resourceDirectory /private/tmp/claude-501/-Volumes-Externalwork/117d7bc7-a4ef-4fc4-8f14-14cb5fdefd48/scratchpad/javarec/java-maven-zero/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ java-proof ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 1 source file with javac [debug release 17] to target/classes
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ java-proof ---
+[INFO] skip non existing resourceDirectory /private/tmp/claude-501/-Volumes-Externalwork/117d7bc7-a4ef-4fc4-8f14-14cb5fdefd48/scratchpad/javarec/java-maven-zero/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ java-proof ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 1 source file with javac [debug release 17] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.2.5:test (default-test) @ java-proof ---
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.957 s
+[INFO] Finished at: 2026-11-07T10:36:05Z
+[INFO] ------------------------------------------------------------------------
+exit=0

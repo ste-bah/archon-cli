@@ -377,6 +377,7 @@ dependencies = [
  "cozo-ce",
  "dirs",
  "fd-lock",
+ "fs2",
  "futures-util",
  "globset",
  "hex",

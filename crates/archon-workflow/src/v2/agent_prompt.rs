@@ -477,3 +477,7 @@ fn push_unique_universe(universes: &mut Vec<serde_json::Value>, universe: serde_
 #[cfg(test)]
 #[path = "agent_prompt_contract_tests.rs"]
 mod contract_tests;
+
+#[cfg(test)]
+#[path = "agent_prompt_agnostic_proof_tests.rs"]
+mod agnostic_proof_tests;

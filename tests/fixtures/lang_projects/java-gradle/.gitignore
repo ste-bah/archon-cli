@@ -1,0 +1,7 @@
+!build/
+build/*
+!build/test-results/
+build/test-results/*
+!build/test-results/test/
+build/test-results/test/*
+!build/test-results/test/TEST-*.xml

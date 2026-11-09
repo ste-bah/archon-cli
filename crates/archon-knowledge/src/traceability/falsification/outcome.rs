@@ -122,7 +122,13 @@ pub enum Inconclusive {
     /// The mutated run was killed at the deadline. A verifier that never
     /// finishes has not failed; it has not answered.
     TimedOut { seconds: u64 },
-    /// The verifier process could not be started at all.
+    /// Available space crossed the configured floor while the verifier ran.
+    DiskFloor {
+        path: String,
+        free_mib: u64,
+        floor_mib: u64,
+    },
+    /// A host error prevented completing the verifier.
     VerifierNotLaunchable { reason: String },
 }
 
@@ -138,11 +144,18 @@ impl Inconclusive {
                 "the mutated run failed and `{language}` has no recorded build-failure marker, \
                  so a failing test and a failing build cannot be told apart"
             ),
+            Inconclusive::DiskFloor {
+                path,
+                free_mib,
+                floor_mib,
+            } => format!(
+                "verification stopped: {path} has {free_mib} MiB free, below the {floor_mib} MiB floor; this gives no verdict"
+            ),
             Inconclusive::TimedOut { seconds } => {
-                format!("the mutated run was killed after {seconds}s without answering")
+                format!("the verifier was stopped after {seconds}s without answering")
             }
             Inconclusive::VerifierNotLaunchable { reason } => {
-                format!("the verifier could not be launched: {reason}")
+                format!("verification could not be completed: {reason}")
             }
         }
     }
@@ -163,9 +176,14 @@ pub enum RefusedToRun {
     /// Cleanliness could not be established — no repository, no `git`, or an
     /// error from it. Unknown is treated as dirty.
     CleanlinessUnknown { file_path: String, reason: String },
-    /// The declared verifier is a workspace-wide run. A non-functional rule forbids it, and it
-    /// has exhausted the disk it was run on twice.
+    /// The declared verifier contains a configured refusal token.
     WorkspaceWideCommand { command: String, token: String },
+    /// Available space was below the configured floor before launch.
+    DiskFloor {
+        path: String,
+        free_mib: u64,
+        floor_mib: u64,
+    },
     /// The command needs a shell to mean what it says (a pipe, a redirect, a
     /// `&&`). It is run as an argv, never through a shell, so this is a refusal
     /// rather than a quoting problem to solve.
@@ -208,8 +226,14 @@ impl RefusedToRun {
                  treated as dirty"
             ),
             RefusedToRun::WorkspaceWideCommand { command, token } => format!(
-                "`{command}` is a workspace-wide run (`{token}`), which the scoped-verifier rule forbids; \
-                 declare a scoped verifier in `## Focused Tests`"
+                "`{command}` is refused because it contains `{token}`, which [workflow.verify] refuse_tokens lists"
+            ),
+            RefusedToRun::DiskFloor {
+                path,
+                free_mib,
+                floor_mib,
+            } => format!(
+                "the experiment was refused before mutation: {path} has {free_mib} MiB free, below the {floor_mib} MiB floor"
             ),
             RefusedToRun::NotDirectlyExecutable { command, reason } => format!(
                 "`{command}` needs a shell to mean what it says ({reason}); verifiers are run \

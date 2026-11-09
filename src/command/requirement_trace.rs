@@ -88,6 +88,7 @@ pub(crate) struct TraceOptions {
     /// the rest of this struct can still be described as read-only. Off unless
     /// a person typed `--falsify`; see [`falsify`] for what "off" has to mean.
     pub(crate) falsify: bool,
+    pub(crate) verify_limits: falsify::VerifyLimits,
     pub(crate) check_policy: Option<archon_workflow::acceptance_check_environment::CheckPolicy>,
     /// Emit the report model as JSON rather than text.
     pub(crate) json: bool,
@@ -131,7 +132,7 @@ pub(crate) fn handle_requirements_command(
         gate_envelope,
         call_id,
     } = action;
-    let options = TraceOptions {
+    let mut options = TraceOptions {
         prd: prd.clone(),
         tasks: tasks.clone(),
         graph: graph.clone(),
@@ -140,6 +141,7 @@ pub(crate) fn handle_requirements_command(
         persist: persist.clone(),
         falsify: *falsify,
         check_policy: check_policy::from_config(config)?,
+        verify_limits: (&config.workflow.verify).into(),
         json: *json,
         limit_per_scope: *limit_per_scope,
         max_scopes: *max_scopes,
@@ -147,6 +149,7 @@ pub(crate) fn handle_requirements_command(
         // uses, so the query embedder cannot drift from the index's.
         embedding: config.memory.open_spec().embedding,
     };
+    options.verify_limits.reraise_default = true;
     let mode = config.workflow.gate_mode;
     if gate_envelope.is_some() || call_id.is_some() {
         return staged::handle(
@@ -187,7 +190,12 @@ pub(crate) fn run_trace(cwd: &Path, options: &TraceOptions) -> Result<TraceVerdi
     // established rather than the one it started from.
     if task_population_complete {
         if options.falsify {
-            falsify::execute_plans_with_policy(cwd, &mut report, options.check_policy.as_ref());
+            falsify::execute_plans_with_policy(
+                cwd,
+                &mut report,
+                options.check_policy.as_ref(),
+                &options.verify_limits,
+            )?;
         }
         if let Some(store_path) = &options.persist {
             persist(cwd, store_path, &report)?;
