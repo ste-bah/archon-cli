@@ -253,7 +253,7 @@ SUP-REQ-DL-133 crates/archon-trading/tests/registry_migration_v1.rs"#
         .map(|row| {
             let (check, path) = row.split_once(' ').unwrap();
             let expected = if Path::new(path).has_root() {
-                PathBuf::from(path)
+                Path::new(path).components().collect()
             } else {
                 path.split('/')
                     .fold(root.to_path_buf(), |base, part| base.join(part))
@@ -261,6 +261,71 @@ SUP-REQ-DL-133 crates/archon-trading/tests/registry_migration_v1.rs"#
             (check.to_string(), expected)
         })
         .collect();
-    paths.sort();
+    sort(&mut paths);
     paths
+}
+
+// Compare path components, including roots, rather than rendered separators.
+pub(super) fn sort(paths: &mut [(String, PathBuf)]) {
+    paths.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.components().cmp(right.1.components()))
+    });
+}
+
+#[test]
+fn escaped_expression_fragments_are_not_rooted_reads() {
+    let repo = repository();
+    let root = repo.path();
+    for command in [
+        r#"inspect 'manifest(generated_at)\["rules"\]'"#,
+        r#"inspect 'adjustment \\n policy recorded'"#,
+    ] {
+        let c = contract(command);
+        let reads = input_discovery_for_check(&c.acceptance[0], root, root, None);
+        assert!(
+            reads.absolute_reads.is_empty(),
+            "{command}: {:?}",
+            reads.absolute_reads
+        );
+        assert!(
+            reads.unconfirmed_reads.is_empty(),
+            "{command}: {:?}",
+            reads.unconfirmed_reads
+        );
+        let d = discover(&skeleton("owned.json"), &c, root, Some(root), root);
+        assert!(d.unconfirmed.is_empty(), "{command}: {d:?}");
+        assert!(d.outside.is_empty(), "{command}: {d:?}");
+        assert!(d.unowned.is_empty(), "{command}: {d:?}");
+    }
+}
+
+#[test]
+fn rooted_operands_keep_component_identity() {
+    let repo = repository();
+    let root = repo.path();
+    let c = contract("inspect '/@version'");
+    let d = discover(&skeleton("owned.json"), &c, root, Some(root), root);
+    assert_eq!(
+        d.unconfirmed,
+        [("AC-X-001".into(), absolute(root, "/@version"))]
+    );
+    assert_eq!(
+        d.unconfirmed[0].1.components().collect::<Vec<_>>(),
+        Path::new("/@version").components().collect::<Vec<_>>()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn complete_rooted_backslash_operand_is_still_observed() {
+    let repo = repository();
+    let root = repo.path();
+    let c = contract(r"inspect '\inputs\value.json'");
+    let d = discover(&skeleton("owned.json"), &c, root, Some(root), root);
+    assert_eq!(
+        d.unconfirmed,
+        [("AC-X-001".into(), PathBuf::from(r"\inputs\value.json"))]
+    );
 }
