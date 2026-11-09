@@ -2,6 +2,8 @@
 //! dispatch, and what the final gate concludes.
 
 use super::*;
+#[path = "residual_judged_tree_tests.rs"]
+mod judged_tree;
 use crate::task_universe::WorkflowV2TaskUniverseTask;
 use crate::v2::result_store::WorkflowV2DispatchedItem;
 use crate::v2::{
@@ -31,7 +33,9 @@ impl World {
     }
 
     pub(super) fn save(&self, record: &WorkflowV2CallRecord) {
-        self.store.save_call_record(record).unwrap();
+        self.store
+            .save_call_record(&judged_tree::record(self, record))
+            .unwrap();
         self.store.note_session_call(&record.call.id);
     }
 }

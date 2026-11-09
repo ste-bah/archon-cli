@@ -95,6 +95,17 @@ pub(super) async fn run_live_action_with_policy(
             .collect(),
         workspace_boundary_supported,
     };
+    let command_site_path = check_policy
+        .as_ref()
+        .and_then(|policy| policy.as_ref())
+        .cloned()
+        .unwrap_or_else(|| {
+            archon_workflow::acceptance_check_environment::CheckPolicy::default_for(
+                &archon_workflow::acceptance_check_environment::host_environment(),
+            )
+        })
+        .toolchain_path
+        .unwrap_or_default();
     let capped_live_plan = |task: &str| {
         let llm = llm.clone();
         let ui_sink = ui_sink.clone();
@@ -105,15 +116,17 @@ pub(super) async fn run_live_action_with_policy(
         let generated_config = &generated_config;
         let learning = &learning;
         let check_policy = &check_policy;
+        let command_site_path = &command_site_path;
         let tuning_decisions = &tuning_decisions;
         async move {
-            let mut plan = plan_live(
+            let mut plan = plan_live_with_path(
                 store,
                 &task,
                 llm,
                 ui_sink.clone(),
                 generated_config,
                 learning,
+                Some(std::ffi::OsStr::new(command_site_path)),
             )
             .await?;
             cap_live_plan_parallelism(&mut plan, runner, policy);

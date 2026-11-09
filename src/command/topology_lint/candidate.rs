@@ -4,18 +4,30 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+#[cfg(test)]
 pub(crate) fn evaluate_task_file_candidate(
     cwd: &Path,
     path: &Path,
     candidate: &[u8],
     mode: archon_core::config::GateMode,
 ) -> Result<crate::command::workflow_gate::GateEvaluation> {
+    let site = crate::command::acceptance_check_policy::command_site_path(cwd)?;
+    evaluate_task_file_candidate_at_path(cwd, path, candidate, mode, &site)
+}
+
+pub(crate) fn evaluate_task_file_candidate_at_path(
+    cwd: &Path,
+    path: &Path,
+    candidate: &[u8],
+    mode: archon_core::config::GateMode,
+    site_path: &std::ffi::OsStr,
+) -> Result<crate::command::workflow_gate::GateEvaluation> {
     let path = super::absolute(cwd, path);
     let _read = super::chain_read(cwd, &super::LintSource::TaskFile(path.clone()))?;
     super::preflight::task_file_freeze(cwd, &path)?;
     let raw = std::str::from_utf8(candidate)
         .context("candidate TASK body is not UTF-8; return one complete UTF-8 TASK file")?;
-    let mut lint = super::task_file::inspect_raw(cwd, &path, raw, mode);
+    let mut lint = super::task_file::inspect_raw_at_path(cwd, &path, raw, mode, Some(site_path));
     let subject = format!("task file {}", path.display());
     let mut findings: Vec<_> = lint
         .blockers

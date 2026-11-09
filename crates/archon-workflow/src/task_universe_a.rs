@@ -8,6 +8,25 @@ pub struct WorkflowV2TaskUniverse {
 }
 
 impl WorkflowV2TaskUniverse {
+    /// Fill legacy decisions exactly once, using the captured site policy.
+    pub fn migrate_command_decisions(&mut self, root: &Path, path: &std::ffi::OsStr) -> bool {
+        let mut migrated = false;
+        for task in &mut self.tasks {
+            if task.focused_commands.is_none() {
+                task.freeze_focused_commands(root, path);
+                migrated = true;
+                tracing::info!(task = %task.canonical_task_id, "migrated frozen command decisions");
+            }
+        }
+        migrated
+    }
+
+    pub fn command_decisions_are_recorded(&self) -> bool {
+        self.tasks
+            .iter()
+            .all(|task| task.focused_tests.is_empty() || task.focused_commands.is_some())
+    }
+
     pub fn resolve_canonical_task_id(&self, input: &str) -> WorkflowResult<String> {
         let wanted = normalized_task_alias(input);
         if wanted.is_empty() {
@@ -125,6 +144,9 @@ pub struct WorkflowV2TaskUniverseTask {
     /// Declared `## Focused Tests` commands, verbatim; see `parsing` for why.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub focused_tests: Vec<String>,
+    /// Command decisions retained with the extracted declarations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused_commands: Option<Vec<String>>,
     /// Per-task adversarial checks declared under an `## Adversarial Review
     /// Notes` heading in the TASK file. Consumed ONLY by the per-task
     /// `adversarial-review` stage: they are the task author's own falsification
@@ -154,6 +176,13 @@ pub struct WorkflowV2TaskUniverseTask {
 
 pub fn extract_task_universe_for_generated_run(
     task: &str,
+) -> WorkflowResult<Option<WorkflowV2TaskUniverse>> {
+    extract_task_universe_for_generated_run_with_path(task, None)
+}
+
+pub fn extract_task_universe_for_generated_run_with_path(
+    task: &str,
+    toolchain_path: Option<&std::ffi::OsStr>,
 ) -> WorkflowResult<Option<WorkflowV2TaskUniverse>> {
     if !requires_authoritative_task_universe(task) {
         return Ok(None);
@@ -193,7 +222,7 @@ pub fn extract_task_universe_for_generated_run(
                 path: path.clone(),
                 source: err,
             })?;
-            let mut parsed = parse_task_file(&path, &raw)?;
+            let mut parsed = parsing::parse_task_file_with_path(&path, &raw, toolchain_path)?;
             merge_project_capabilities(&mut parsed, &path)?;
             raw_tasks.insert(parsed.canonical_task_id.clone(), parsed);
         }
@@ -391,3 +420,7 @@ fn task_ids_from_text(raw: &str) -> Vec<String> {
             .collect(),
     )
 }
+
+#[cfg(all(test, unix))]
+#[path = "task_universe_migration_tests.rs"]
+mod migration_tests;

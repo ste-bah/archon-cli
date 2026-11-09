@@ -44,9 +44,7 @@ pub(super) fn resolve_module(repo_root: &Path, src: &str, modules: &[&str]) -> R
     Resolution::None
 }
 
-/// The file the whole of `prefix` reaches from the src root, by the same
-/// three shapes [`super::test_baseline_owner::resolve_under`] walks: `a/b.rs`,
-/// `a/b/mod.rs`, and for a `tests` leaf the `#[path]` sibling `a_tests.rs`.
+/// Resolve an exact module prefix within the selected source directory.
 fn exact_at(repo_root: &Path, src: &str, prefix: &[&str]) -> Option<String> {
     let joined = prefix.join("/");
     let mut candidates = vec![

@@ -1,0 +1,26 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______________________________ test_add[1-2-3] ________________________________
+
+a = 1, b = 2, c = 3
+
+    @pytest.mark.parametrize('a,b,c', [(1,2,3),(2,3,5)])
+    def test_add(a,b,c):
+>       assert a+b != c
+E       assert (1 + 2) != 3
+
+/private/tmp/s8b-r6-recorded/base/test_cases.py:4: AssertionError
+_______________________________ test_add[2-3-5] ________________________________
+
+a = 2, b = 3, c = 5
+
+    @pytest.mark.parametrize('a,b,c', [(1,2,3),(2,3,5)])
+    def test_add(a,b,c):
+>       assert a+b != c
+E       assert (2 + 3) != 5
+
+/private/tmp/s8b-r6-recorded/base/test_cases.py:4: AssertionError
+=========================== short test summary info ============================
+FAILED ../../../../../../../private/tmp/s8b-r6-recorded/base/test_cases.py::test_add[1-2-3]
+FAILED ../../../../../../../private/tmp/s8b-r6-recorded/base/test_cases.py::test_add[2-3-5]
+2 failed in 0.03s

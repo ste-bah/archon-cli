@@ -1,6 +1,6 @@
 //! Obs-119 follow-up: only shell commands are declared focused-test
 //! commands; an MCP tool an item instructs is not one.
-use super::*;
+use super::focused_commands::*;
 
 #[test]
 fn prose_words_files_tool_calls_and_mcp_tools_are_not_commands() {
@@ -45,6 +45,22 @@ fn well_formed_commands_parse_exactly_as_before() {
             "cargo test -p a --lib store::tests",
         ),
         ("`make`", "make"),
+        ("! check the output", "! check the output"),
+        ("check the output.txt", "check the output.txt"),
+        ("`check --one` documents `other --two`", "check --one"),
+        ("`check the output`", "check the output"),
+        (
+            "`check --one` — exercises the declared output",
+            "check --one",
+        ),
+        (
+            "`check --two` – exercises the declared output",
+            "check --two",
+        ),
+        (
+            "`check --three` - exercises the declared output",
+            "check --three",
+        ),
         ("`make` must pass", "make"),
         ("`./scripts/check.sh` exits 0", "./scripts/check.sh"),
         ("`./scripts/check.sh`", "./scripts/check.sh"),
@@ -79,7 +95,22 @@ fn well_formed_commands_parse_exactly_as_before() {
         (". ./env.sh && make", ". ./env.sh && make"),
     ] {
         assert_eq!(
-            focused_test_command(entry).as_deref(),
+            focused_test_command_at(
+                entry,
+                &[
+                    "check".into(),
+                    "cargo".into(),
+                    "make".into(),
+                    "git".into(),
+                    "cd".into(),
+                    ":".into(),
+                    "./scripts/check.sh".into(),
+                    "python3.11".into(),
+                    "pytest".into()
+                ],
+                std::path::Path::new("")
+            )
+            .as_deref(),
             Some(command),
             "{entry}"
         );
@@ -115,7 +146,9 @@ fn a_task_files_focused_tests_parse_into_commands_and_required_tools() {
                - `validation_report.rs`: fixture asserts status `failed`\n\
                - `cargo test -p a --test b`\n";
     let path = std::path::Path::new("/tasks/TASK-X-001.md");
-    let task = crate::task_universe::parsing::parse_task_file(path, raw).expect("parses");
+    let mut task = crate::task_universe::parsing::parse_task_file(path, raw).expect("parses");
+    let (_site, path) = super::focused_commands::site_tests::command_site();
+    task.freeze_focused_commands(std::path::Path::new(""), &path);
     assert_eq!(
         task.declared_focused_test_commands(),
         [
@@ -128,4 +161,63 @@ fn a_task_files_focused_tests_parse_into_commands_and_required_tools() {
         ]
     );
     assert!(task.required_tools.is_empty(), "{:?}", task.required_tools);
+}
+
+#[test]
+fn argument_bearing_fragments_in_prose_are_not_invocations() {
+    for entry in [
+        "see `data list --json` output",
+        "CLI parse tests for `data list --json`.",
+        "`data list --json` shows the registered dataset",
+        "`data list --json` displays the registered dataset",
+        "`data list --json` illustrates the output shape",
+        "verify the parser handles the migration",
+        "check the report reads well",
+        "none yet",
+    ] {
+        assert_eq!(focused_test_command(entry), None, "{entry}");
+    }
+}
+
+#[test]
+fn an_explicit_site_path_wins_over_repository_configuration_at_freeze() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join(".git")).unwrap();
+    let configured = tempfile::tempdir().unwrap();
+    let supplied = tempfile::tempdir().unwrap();
+    for (dir, program) in [
+        (configured.path(), "configured-check"),
+        (supplied.path(), "supplied-check"),
+    ] {
+        let file = dir.join(program);
+        std::fs::write(&file, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    std::fs::write(
+        root.path().join("config.toml"),
+        format!(
+            "[workflow.acceptance_execution]\ntoolchain_path = {:?}\n",
+            configured.path().to_string_lossy()
+        ),
+    )
+    .unwrap();
+    let raw = "```yaml\ntask_id: TASK-X-001\ntitle: t\ncomplexity: low\nstatus: ready\nimplements: []\ndepends_on: []\nblocks: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n## Focused Tests\n- `configured-check --one`\n- `supplied-check --two`\n";
+    let path = root.path().join("TASK-X-001.md");
+    let supplied_path = std::env::join_paths([supplied.path()]).unwrap();
+    let task =
+        crate::task_universe::parsing::parse_task_file_with_path(&path, raw, Some(&supplied_path))
+            .unwrap();
+    assert_eq!(
+        task.declared_focused_test_commands(),
+        ["supplied-check --two"]
+    );
+    std::fs::remove_file(supplied.path().join("supplied-check")).unwrap();
+    assert_eq!(
+        task.declared_focused_test_commands(),
+        ["supplied-check --two"]
+    );
 }

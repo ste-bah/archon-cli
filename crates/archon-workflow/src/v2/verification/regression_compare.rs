@@ -8,13 +8,13 @@
 //! them:
 //!
 //! - no verdict at the tip (whatever the base gave) -- blocks;
-//! - failures the runner counted but did not name at the tip, more than the
-//!   base had -- blocks; as many or fewer -- pre-existing;
+//! - unnamed tip failures block unless base identities and exit status cover them;
 //! - a base verdict cached before passed ids were kept -- a warning;
 //! - a test that passed at the base and is ignored at the tip (hidden), or
-//!   is no longer reported at all (vanished) -- blocks;
+//!   is absent from the tip run (vanished) -- blocks;
 //! - a test failing at the tip: failing at the base too -- pre-existing;
-//!   else (or the base gave no verdict) -- a NEW failure, which blocks.
+//!   passed at the base -- a new failure; unseen at the base -- unknown and blocking.
+//! An observed base pass omitted at tip remains a blocking deletion.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -36,8 +36,8 @@ pub enum RegressionFinding {
     UnnamedPreExisting {
         command: String,
     },
-    /// m3: failing at the base and the tip alike -- the same exit code --
-    /// naming no test at either: nothing shows whether the run regressed it.
+    /// Neither run names a test and at least one has no failure identity.
+    /// The host cannot establish whether this is the same failure.
     NotJudgeable {
         command: String,
         exit_code: Option<i32>,
@@ -56,11 +56,15 @@ pub enum RegressionFinding {
     PreExisting {
         command: String,
         test: String,
-        moved: bool,
+    },
+    Unknown {
+        command: String,
+        test: String,
     },
     NewFailure {
         command: String,
         test: String,
+        /// Retained for stored findings written before unknown reds had their own kind.
         base_had: bool,
     },
 }
@@ -70,10 +74,7 @@ impl RegressionFinding {
     pub fn blocks(&self) -> bool {
         !matches!(
             self,
-            Self::UnnamedPreExisting { .. }
-                | Self::NotJudgeable { .. }
-                | Self::OldBaseCache { .. }
-                | Self::PreExisting { .. }
+            Self::UnnamedPreExisting { .. } | Self::OldBaseCache { .. } | Self::PreExisting { .. }
         )
     }
 
@@ -87,6 +88,7 @@ impl RegressionFinding {
             | Self::Hidden { command, .. }
             | Self::Vanished { command, .. }
             | Self::PreExisting { command, .. }
+            | Self::Unknown { command, .. }
             | Self::NewFailure { command, .. } => command,
         }
     }
@@ -97,6 +99,7 @@ impl RegressionFinding {
             Self::Hidden { test, .. }
             | Self::Vanished { test, .. }
             | Self::PreExisting { test, .. }
+            | Self::Unknown { test, .. }
             | Self::NewFailure { test, .. } => Some(test),
             _ => None,
         }
@@ -124,23 +127,21 @@ pub(crate) fn compare(
         };
         let tip_unnamed = unnamed(at_tip);
         if tip_unnamed > 0 {
-            out.push(match at_base {
-                Some(base)
-                    if names_nothing(base)
-                        && names_nothing(at_tip)
-                        && base.exit_code == at_tip.exit_code =>
-                {
-                    F::NotJudgeable {
-                        command: command.clone(),
-                        exit_code: at_tip.exit_code,
-                    }
+            let same = at_base.is_some_and(|base| {
+                base.exit_code == at_tip.exit_code
+                    && super::super::write::test_baseline_parse::identity_subset(
+                        base.signatures.get("").map(String::as_str),
+                        at_tip.signatures.get("").map(String::as_str),
+                    )
+            });
+            out.push(if same {
+                F::UnnamedPreExisting {
+                    command: command.clone(),
                 }
-                Some(base) if unnamed(base) >= tip_unnamed => F::UnnamedPreExisting {
+            } else {
+                F::UnnamedNew {
                     command: command.clone(),
-                },
-                _ => F::UnnamedNew {
-                    command: command.clone(),
-                },
+                }
             });
         }
         if at_base.is_some_and(|run| !run.ids_kept) {
@@ -171,14 +172,27 @@ pub(crate) fn compare(
             .map(|run| run.failing_tests.iter().collect())
             .unwrap_or_default();
         for test in &at_tip.failing_tests {
-            if before.contains(test) {
-                let moved = at_base
+            if before.contains(test)
+                && at_base.is_some_and(|base| base.exit_code == at_tip.exit_code)
+                && at_base
                     .and_then(|run| run.signatures.get(test))
-                    .is_some_and(|sig| at_tip.signatures.get(test) != Some(sig));
+                    .is_some_and(|sig| {
+                        super::super::write::test_baseline_parse::identity_subset(
+                            Some(sig),
+                            at_tip.signatures.get(test).map(String::as_str),
+                        )
+                    })
+            {
                 out.push(F::PreExisting {
                     command: command.clone(),
                     test: test.clone(),
-                    moved,
+                });
+            } else if !before.contains(test)
+                && !at_base.is_some_and(|base| base.passed_tests.contains(test))
+            {
+                out.push(F::Unknown {
+                    command: command.clone(),
+                    test: test.clone(),
                 });
             } else {
                 out.push(F::NewFailure {
@@ -192,14 +206,6 @@ pub(crate) fn compare(
     out
 }
 
-/// A failing run that named no test at all: none failed, passed or ignored.
-fn names_nothing(run: &HostRunVerdict) -> bool {
-    run.exit_code != Some(0)
-        && run.failing_tests.is_empty()
-        && run.passed_tests.is_empty()
-        && run.ignored_tests.is_empty()
-}
-
 /// Failures the runner counted but did not name (one, for a failing run
 /// that named and counted nothing).
 fn unnamed(run: &HostRunVerdict) -> usize {
@@ -211,3 +217,11 @@ fn unnamed(run: &HostRunVerdict) -> usize {
         counted.saturating_sub(named)
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "regression_fail_fast_tests.rs"]
+mod regression_fail_fast_tests;
+
+#[cfg(test)]
+#[path = "regression_domain_tests.rs"]
+mod domain_tests;

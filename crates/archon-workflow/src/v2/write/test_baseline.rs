@@ -77,6 +77,8 @@ pub(crate) struct CommandBaseline {
     /// Test ids the runner reported failed; empty for a passing command and
     /// for one whose output names no test.
     pub failing_tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub failure_files: std::collections::BTreeMap<String, Vec<String>>,
     /// Test ids the runner reported PASSED, by name (Issue-121 follow-up):
     /// what "answered" is proven from, so a test renamed away or marked
     /// `#[ignore]` inside a command that still exits 0 answers nothing.
@@ -199,6 +201,10 @@ pub(crate) struct IgnoredFailure {
 /// claim on the command whose diagnostics stay within these files.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PreExistingDiagnostics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<(Option<i32>, String)>,
+    #[serde(default, skip_serializing_if = "path_is_empty")]
+    pub repository_root: PathBuf,
     pub command: String,
     /// Repo-relative, sorted.
     pub files: Vec<String>,
@@ -465,3 +471,7 @@ pub(super) mod tests;
 #[cfg(test)]
 #[path = "test_baseline_verification_tests.rs"]
 mod verification_tests;
+
+fn path_is_empty(path: &std::path::Path) -> bool {
+    path.as_os_str().is_empty()
+}

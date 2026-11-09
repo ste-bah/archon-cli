@@ -1,0 +1,26 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+________________________________ test_hex[0x1] _________________________________
+
+value = 0
+
+    @pytest.mark.parametrize("value", [0, 0], ids=["0x1", "0x2"])
+    def test_hex(value):
+>       assert value
+E       assert 0
+
+test_hex.py:4: AssertionError
+________________________________ test_hex[0x2] _________________________________
+
+value = 0
+
+    @pytest.mark.parametrize("value", [0, 0], ids=["0x1", "0x2"])
+    def test_hex(value):
+>       assert value
+E       assert 0
+
+test_hex.py:4: AssertionError
+=========================== short test summary info ============================
+FAILED test_hex.py::test_hex[0x1] - assert 0
+FAILED test_hex.py::test_hex[0x2] - assert 0
+2 failed in 0.04s

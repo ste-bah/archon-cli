@@ -19,6 +19,7 @@ fn a_resume_that_skips_an_attempted_second_pass_round_still_weighs_its_verifier(
     ));
     std::thread::sleep(std::time::Duration::from_millis(5));
     let verify1 = round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -37,6 +38,7 @@ fn a_resume_that_skips_an_attempted_second_pass_round_still_weighs_its_verifier(
     std::thread::sleep(std::time::Duration::from_millis(5));
     // Its verifier accepted but recorded the gap it was asked to fix again.
     w.save(&round_verdict(
+        &w,
         &round,
         "verification-wave-review-verify-residual-6",
         2,

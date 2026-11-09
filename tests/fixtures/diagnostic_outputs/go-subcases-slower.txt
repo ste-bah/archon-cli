@@ -1,0 +1,11 @@
+=== RUN   TestParse
+=== RUN   TestParse/case_1
+    cases_test.go:6: bad value
+=== RUN   TestParse/case_2
+    cases_test.go:6: bad value
+--- FAIL: TestParse (0.10s)
+    --- FAIL: TestParse/case_1 (0.05s)
+    --- FAIL: TestParse/case_2 (0.05s)
+FAIL
+FAIL	command-line-arguments	0.407s
+FAIL

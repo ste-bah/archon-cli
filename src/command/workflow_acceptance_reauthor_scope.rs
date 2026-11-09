@@ -23,6 +23,20 @@ impl AuthorScope {
         Ok(archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(&text))
     }
 
+    /// Reuse the run's captured decisions without inspecting executable availability.
+    pub(crate) fn use_run_decisions(
+        &mut self,
+        store: &archon_workflow::WorkflowStore,
+        run_id: &str,
+    ) -> Result<(), String> {
+        if let Some(universe) = crate::command::workflow_live::stored_task_universe(store, run_id)
+            .map_err(|error| error.to_string())?
+        {
+            self.task_universe = universe;
+        }
+        Ok(())
+    }
+
     /// Resolve the paths the author prompt says it may read.
     pub(crate) fn read_roots(&self) -> Result<Vec<String>, String> {
         for (field, path) in [

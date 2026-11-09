@@ -60,35 +60,22 @@ pub(super) struct FidelityAudit {
     pub(super) findings: Vec<FidelityFinding>,
 }
 
-/// The ordinary lint plus the fidelity section. A client that could not be
-/// built, or an audit that could not complete, is an operational error on the
-/// evaluation rather than an absent section: the set gate must never read a
-/// provider outage as a pass.
-pub(crate) async fn evaluate_lint_with_fidelity(
-    cwd: &Path,
-    source: &LintSource,
-    mode: archon_core::config::GateMode,
-    client: Result<Arc<dyn WorkflowLlmClient>>,
-    waivers: &[ObligationWaiver],
-) -> Result<GateEvaluation> {
-    let resume = FreezeResume::none();
-    evaluate_lint_with_fidelity_resumable(cwd, source, mode, client, waivers, &resume).await
-}
+#[path = "fidelity_entry.rs"]
+mod entry;
+pub(crate) use entry::evaluate_lint_with_fidelity_at_path;
+#[cfg(test)]
+pub(crate) use entry::{evaluate_lint_with_fidelity, evaluate_lint_with_fidelity_resumable};
 
-/// [`evaluate_lint_with_fidelity`] under `resume`'s budget (Issue 259): the
-/// staged set gate's. When the budget runs out before every call batch has
-/// a verdict the result is an error carrying [`LintIncomplete`], never an
-/// evaluation: the batches answered so far are saved, and a retry of the
-/// same call continues from them.
-pub(crate) async fn evaluate_lint_with_fidelity_resumable(
+pub(crate) async fn evaluate_lint_with_fidelity_resumable_at_path(
     cwd: &Path,
     source: &LintSource,
     mode: archon_core::config::GateMode,
     client: Result<Arc<dyn WorkflowLlmClient>>,
     waivers: &[ObligationWaiver],
     resume: &FreezeResume,
+    site_path: &std::ffi::OsStr,
 ) -> Result<GateEvaluation> {
-    let mut evaluation = super::evaluate_lint(cwd, source, mode)?;
+    let mut evaluation = super::evaluate_lint_with_path(cwd, source, mode, site_path)?;
     let LintSource::Tasks(path) = source else {
         return Err(anyhow!(
             "obligation fidelity is only defined for --tasks <DIR>: it reads every task body that claims a PRD obligation"
@@ -189,7 +176,7 @@ pub(super) struct AuditScope<'a> {
 }
 
 /// The set gate's audit with no budget: what the staged gate runs, less its
-/// clock. Production goes through [`evaluate_lint_with_fidelity_resumable`].
+/// clock. Production goes through [`evaluate_lint_with_fidelity_resumable_at_path`].
 #[cfg(test)]
 pub(super) async fn audit(
     cwd: &Path,

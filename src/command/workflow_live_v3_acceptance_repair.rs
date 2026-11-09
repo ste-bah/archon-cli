@@ -123,7 +123,7 @@ pub(super) async fn republish(
         None => probe,
     };
     // Each gate republishes under the mode its stage was frozen in.
-    let scope = repair_author_scope(
+    let mut scope = repair_author_scope(
         &context.project,
         &context.task_root,
         &context.repository,
@@ -134,6 +134,12 @@ pub(super) async fn republish(
             .as_ref()
             .is_some_and(|binding| binding.policy.build_cache.is_some()),
     )?;
+    scope
+        .use_run_decisions(
+            &archon_workflow::WorkflowStore::project(&context.project),
+            &context.run_id,
+        )
+        .map_err(anyhow::Error::msg)?;
     reauthor_and_republish(
         llm,
         ReauthorRequest {

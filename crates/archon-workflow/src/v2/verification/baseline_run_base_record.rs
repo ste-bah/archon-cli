@@ -11,6 +11,18 @@ use crate::v2::WorkflowV2Result;
 /// a digest of the tests it names, and its text opens with them, so the same
 /// tests red again read as the same gap and different ones never do.
 pub(crate) fn record_unowned_red_tests(result: &mut WorkflowV2Result, judged: &BranchJudgement) {
+    if !judged.unknown.is_empty() {
+        let mut data = result.data.as_object().cloned().unwrap_or_default();
+        data.insert(
+            "baseline_unknown_commands".into(),
+            serde_json::json!(judged.unknown_commands),
+        );
+        data.insert(
+            "baseline_unknown_tests".into(),
+            serde_json::json!(judged.unknown),
+        );
+        result.data = Value::Object(data);
+    }
     if !judged.not_run.is_empty() {
         let mut data = result.data.as_object().cloned().unwrap_or_default();
         data.insert(

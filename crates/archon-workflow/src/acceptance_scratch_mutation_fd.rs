@@ -1,5 +1,7 @@
 //! Race-resistant host-side movement of mutation inputs.
-use std::path::{Component, Path, PathBuf};
+#[cfg(unix)]
+use std::path::Component;
+use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 #[path = "acceptance_scratch_mutation_fd_windows.rs"]

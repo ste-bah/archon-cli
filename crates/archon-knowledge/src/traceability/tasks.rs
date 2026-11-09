@@ -1,15 +1,8 @@
 //! Reading the binding a task declares: which requirements it claims, which
 //! paths it will touch, and which verifier commands it names.
 //!
-//! # Why a narrow reader rather than the workflow task parser
-//!
-//! `WorkflowV2TaskUniverseTask` parses these same files, and reads none of the
-//! three fields this module needs: `implements` is not in `REQUIRED_TASK_KEYS`,
-//! `## Focused Tests` is explicitly discarded, and `files_expected_to_change`
-//! is read as prose bullets rather than paths. This reader is deliberately
-//! narrow — three fields, documented grammar, fails closed on anything it does
-//! not recognise — and it does not duplicate scheduling, dependency or contract
-//! semantics, which stay where they are.
+//! This reader builds traceability bindings; scheduling and contract semantics
+//! remain in the task universe. Both readers share the command grammar.
 //!
 //! # The grammar it accepts, and what it refuses
 //!
@@ -29,6 +22,8 @@ use crate::errors::{KnowledgeError, Result};
 
 use self::sections::{headings_match, section_bullets};
 
+#[path = "../../../archon-workflow/src/task_universe_focused_commands.rs"]
+pub mod focused_commands;
 mod sections;
 
 /// Where a verifier command was declared.
@@ -59,73 +54,11 @@ pub struct VerifierCommand {
 /// task, reported here rather than papered over.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FocusedTestEntry {
-    /// A backticked span whose first token is a known runner.
+    /// A shell command declared by the shared command grammar.
     Command(String),
     /// Everything else: a description of a test, not an invocation of one.
     Prose(String),
 }
-
-/// The runners a backticked span must start with to count as a command.
-///
-/// An explicit list, not a heuristic. A backticked `data list --json` inside a
-/// focused-test bullet is a CLI fragment being described, not a command being
-/// declared, and the difference is exactly whether the first token is something
-/// a shell can execute. Extend this list when a real task declares a real
-/// runner that is missing; do not replace it with a guess.
-///
-/// A task's own `required_tools:` extends it for that task — see
-/// [`classify_focused_test`]. That is what keeps this list from having to
-/// anticipate every tool a generated spec might legitimately invoke.
-/// First tokens that mean "a shell will execute this".
-///
-/// Shared with the topology lint so the two readers of a `## Focused Tests`
-/// section cannot drift: they were byte-identical copies, and widening one
-/// alone left the task universe recording no focused tests while the lint
-/// accepted them.
-///
-/// The POSIX entries matter because a PRD may require portable checks that
-/// invoke no toolchain. Listing only toolchains classified every such bullet as
-/// prose, so the universe declared no focused tests, the v3 author brief said
-/// "no task declares any focused test", and the authored workflow passed none.
-pub const KNOWN_RUNNERS: &[&str] = &[
-    // Language toolchains and shells.
-    "archon",
-    "bash",
-    "cargo",
-    "deno",
-    "go",
-    "gradle",
-    "just",
-    "make",
-    "mvn",
-    "node",
-    "npm",
-    "pnpm",
-    "pytest",
-    "python",
-    "python3",
-    "sh",
-    "tox",
-    "yarn",
-    // Portable POSIX checks.
-    "awk",
-    "cmp",
-    "diff",
-    "find",
-    "grep",
-    "head",
-    "jq",
-    "od",
-    "printf",
-    "sed",
-    "sha256sum",
-    "shasum",
-    "stat",
-    "tail",
-    "test",
-    "wc",
-    "[",
-];
 
 /// What one task file declares, as far as traceability is concerned.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,11 +75,6 @@ pub struct TaskBinding {
     pub path_scopes: Vec<String>,
     /// Tools the task declared it needs, from `required_tools:`.
     ///
-    /// Load-bearing for classification, not documentation: a first token the
-    /// task itself declared as a required tool is an invocation it intends to
-    /// run, which is the same evidence [`KNOWN_RUNNERS`] supplies for the
-    /// common runners. `serde(default)` so bindings written before this field
-    /// still deserialise.
     #[serde(default)]
     pub required_tools: Vec<String>,
     /// Every `## Focused Tests` bullet, classified.
@@ -157,6 +85,25 @@ pub struct TaskBinding {
 
 impl TaskBinding {
     /// Focused-test bullets that are descriptions rather than commands.
+    /// Replace executable decisions with the authoritative captured list.
+    pub fn use_focused_commands(&mut self, commands: &[String]) {
+        self.focused_tests.retain(|entry| match entry {
+            FocusedTestEntry::Command(_) => false,
+            FocusedTestEntry::Prose(text) => !commands
+                .iter()
+                .any(|command| text.trim() == command || text.contains(&format!("`{command}`"))),
+        });
+        self.focused_tests
+            .extend(commands.iter().cloned().map(FocusedTestEntry::Command));
+        self.verifier_commands
+            .retain(|entry| entry.origin != VerifierOrigin::FocusedTests);
+        self.verifier_commands
+            .extend(commands.iter().map(|command| VerifierCommand {
+                command: command.clone(),
+                origin: VerifierOrigin::FocusedTests,
+            }));
+    }
+
     pub fn prose_focused_tests(&self) -> Vec<&str> {
         self.focused_tests
             .iter()
@@ -187,17 +134,22 @@ fn task_id_from_source_path(source_path: &str) -> Option<String> {
         .then_some(candidate)
 }
 
-fn backtick_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"`([^`]+)`").expect("backtick regex is a literal"))
-}
-
 /// Parse one task file.
 ///
 /// Errors when `task_id:` is absent or `implements:` is present in a shape this
 /// reader does not accept. Absent `implements:` is *not* an error — a task
 /// written before D5 claims nothing, and that is a true statement about it.
 pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
+    // A caller with a captured site supplies its search path explicitly.
+    // Without one, only declarations and bound repository paths participate.
+    parse_task_binding_with_path(raw, source_path, std::ffi::OsStr::new(""))
+}
+
+pub fn parse_task_binding_with_path(
+    raw: &str,
+    source_path: &str,
+    toolchain_path: &std::ffi::OsStr,
+) -> Result<TaskBinding> {
     let mut binding = TaskBinding {
         source_path: source_path.to_string(),
         ..TaskBinding::default()
@@ -225,8 +177,7 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
             ))
         })?;
     }
-    // Malformed required_tools remains lenient: losing classification precision
-    // must not hide the requirement claims this reader exists to expose.
+    // Malformed capability metadata must not discard the requirement claims.
     binding.required_tools = field("required_tools")
         .and_then(parse_string_sequence)
         .unwrap_or_default();
@@ -253,7 +204,8 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
     }
 
     binding.path_scopes = collect_path_scopes(raw);
-    binding.focused_tests = collect_focused_tests(raw, &binding.required_tools);
+    binding.focused_tests =
+        collect_focused_tests(raw, &binding.required_tools, source_path, toolchain_path);
     for entry in &binding.focused_tests {
         if let FocusedTestEntry::Command(command) = entry {
             let declared = VerifierCommand {
@@ -332,13 +284,44 @@ fn collect_path_scopes(raw: &str) -> Vec<String> {
     scopes
 }
 
-fn collect_focused_tests(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry> {
+fn collect_focused_tests(
+    raw: &str,
+    declared_tools: &[String],
+    source: &str,
+    toolchain_path: &std::ffi::OsStr,
+) -> Vec<FocusedTestEntry> {
+    let raw = focused_section(raw);
+    let raw = raw.as_str();
     let mut entries: Vec<FocusedTestEntry> = section_bullets(raw, "focused tests")
         .into_iter()
-        .map(|bullet| classify_focused_test(&bullet, declared_tools))
+        .map(|bullet| classify_focused_test(&bullet, declared_tools, source, toolchain_path))
         .collect();
-    entries.extend(fenced_commands(raw, declared_tools));
+    entries.extend(fenced_commands(raw, declared_tools, source, toolchain_path));
     entries
+}
+
+fn focused_section(raw: &str) -> String {
+    let mut depth = None;
+    let mut fenced = false;
+    let mut flattened = String::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            fenced = !fenced;
+        }
+        if !fenced && trimmed.starts_with('#') {
+            let level = trimmed.chars().take_while(|c| *c == '#').count();
+            if depth.is_some_and(|parent| level > parent) {
+                flattened.push('\n');
+                continue;
+            }
+            depth = headings_match(trimmed.trim_start_matches('#').trim(), "focused tests")
+                .then_some(level);
+        }
+        flattened.push_str(line);
+        flattened.push('\n');
+    }
+    flattened
 }
 
 /// Commands written inside a fenced block under `## Focused Tests`.
@@ -354,75 +337,97 @@ fn collect_focused_tests(raw: &str, declared_tools: &[String]) -> Vec<FocusedTes
 /// Only lines whose first token is a runner count, so prose inside the block —
 /// comments, headings, continuation text — is ignored rather than misread as a
 /// command.
-fn fenced_commands(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry> {
+fn fenced_commands(
+    raw: &str,
+    tools: &[String],
+    source: &str,
+    toolchain_path: &std::ffi::OsStr,
+) -> Vec<FocusedTestEntry> {
     let mut commands = Vec::new();
     let mut inside_section = false;
     let mut inside_fence = false;
+    let mut pending: Option<String> = None;
+    let mut section_depth = 0;
     for line in raw.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
             // A fence only matters within the section; closing one outside it
             // must not flip the flag on.
+            if let Some(command) = pending.take() {
+                if let Some(command) = focused_commands::focused_test_command_with_path(
+                    &command,
+                    tools,
+                    &focused_commands::repository_root(source),
+                    toolchain_path,
+                ) {
+                    commands.push(FocusedTestEntry::Command(normalize_command(&command)));
+                }
+            }
             if inside_section {
                 inside_fence = !inside_fence;
             }
             continue;
         }
         if !inside_fence && let Some(rest) = trimmed.strip_prefix('#') {
+            let depth = trimmed.chars().take_while(|c| *c == '#').count();
+            if inside_section && depth > section_depth {
+                continue;
+            }
             inside_section = headings_match(rest.trim_start_matches('#').trim(), "focused tests");
+            section_depth = depth;
             continue;
         }
         if !inside_section || !inside_fence {
             continue;
         }
-        let command = normalize_command(trimmed);
-        let Some(first) = command.trim_start_matches('!').split_whitespace().next() else {
-            continue;
+        let command = match pending.take() {
+            Some(mut command) => {
+                command.push('\n');
+                command.push_str(line);
+                command
+            }
+            None if trimmed.is_empty() || trimmed.starts_with('#') => continue,
+            None => trimmed.to_string(),
         };
-        if is_runner(first, declared_tools) {
-            commands.push(FocusedTestEntry::Command(command));
+        if focused_commands::continues(&command) {
+            pending = Some(command);
+        } else if let Some(command) = focused_commands::focused_test_command_with_path(
+            &command,
+            tools,
+            &focused_commands::repository_root(source),
+            toolchain_path,
+        ) {
+            commands.push(FocusedTestEntry::Command(normalize_command(&command)));
         }
+    }
+    if let Some(command) = pending.and_then(|command| {
+        focused_commands::focused_test_command_with_path(
+            &command,
+            tools,
+            &focused_commands::repository_root(source),
+            toolchain_path,
+        )
+    }) {
+        commands.push(FocusedTestEntry::Command(normalize_command(&command)));
     }
     commands
 }
 
-/// A first token that means "a shell will execute this", for this task.
-fn is_runner(first: &str, declared_tools: &[String]) -> bool {
-    KNOWN_RUNNERS.contains(&first)
-        || declared_tools
-            .iter()
-            .any(|tool| tool.trim().eq_ignore_ascii_case(first))
-}
-
-/// Classify one bullet against the common runners *and* the tools this task
-/// declared.
-///
-/// The declared-tools half is what stops a correct spec being read as prose.
-/// Observed live: five specs ran `lizard -l rust -C 15 -L 50 -a 5 …` to enforce
-/// the function-length and cyclomatic-complexity budgets their own acceptance
-/// criteria set, and every one of them declared `required_tools: [cargo, bash,
-/// lizard]`. `lizard` is not a common runner, so those five entries classified
-/// as prose and the complexity budget went unverified — while the file-size
-/// budget, which happened to run through `bash`, was enforced. The task had
-/// already said what it needed; nothing was reading it.
-///
-/// Extending per task rather than by growing [`KNOWN_RUNNERS`] is the point.
-/// The list cannot anticipate every tool a generated spec may legitimately
-/// invoke, and a spec naming a tool it also declares is exactly the evidence
-/// that the span is an invocation rather than a described CLI fragment. It also
-/// keeps tool names out of this engine, which must stay ignorant of any
-/// particular project's toolchain.
-fn classify_focused_test(bullet: &str, declared_tools: &[String]) -> FocusedTestEntry {
-    for caps in backtick_re().captures_iter(bullet) {
-        let span = normalize_command(&caps[1]);
-        let Some(first) = span.trim_start_matches('!').split_whitespace().next() else {
-            continue;
-        };
-        if is_runner(first, declared_tools) {
-            return FocusedTestEntry::Command(span);
-        }
+fn classify_focused_test(
+    bullet: &str,
+    tools: &[String],
+    source: &str,
+    toolchain_path: &std::ffi::OsStr,
+) -> FocusedTestEntry {
+    match focused_commands::focused_test_command_with_path(
+        bullet,
+        tools,
+        &focused_commands::repository_root(source),
+        toolchain_path,
+    ) {
+        Some(command) => FocusedTestEntry::Command(normalize_command(&command)),
+        None => FocusedTestEntry::Prose(bullet.trim().to_string()),
     }
-    FocusedTestEntry::Prose(bullet.trim().to_string())
 }
 
 /// Collapse internal whitespace so a declared command and a recorded one can be

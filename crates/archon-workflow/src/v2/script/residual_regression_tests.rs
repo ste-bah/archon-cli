@@ -46,6 +46,7 @@ fn universe() -> WorkflowV2TaskUniverse {
         source_roots: vec![],
         tasks: vec![WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-A".into(),
+            focused_commands: Some(vec![LIB.into()]),
             focused_tests: vec![LIB.into()],
             ..Default::default()
         }],
@@ -101,4 +102,36 @@ fn a_check_that_could_not_judge_the_tree_is_surfaced_as_a_gap() {
     assert_eq!(gaps[0].id, format!("{REGRESSION_GAP_ID}@unjudged"));
     assert!(gaps[0].description.contains("unreadable"), "{gaps:#?}");
     assert!(is_regression_gap(&gaps[0]));
+}
+
+#[test]
+fn an_unknown_unlocated_tip_red_routes_to_its_frozen_command_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let mut universe = universe();
+    universe.tasks[0].focused_tests = vec![format!("`{LIB}`")];
+    let red = gap(
+        &SlotFinding {
+            finding: RegressionFinding::Unknown {
+                command: LIB.into(),
+                test: "new::red".into(),
+            },
+            file: None,
+            failure_files: vec![],
+        },
+        &universe,
+        "slot",
+    );
+    assert!(red.description.contains("new::red"));
+    assert_eq!(red.unit_tasks, BTreeSet::from(["TASK-A".into()]));
+    let mut reported = vec![];
+    let rounds = regression_rounds(
+        vec![red],
+        &universe,
+        root.path(),
+        |round| round,
+        &mut reported,
+    );
+    assert!(reported.is_empty());
+    assert_eq!(rounds.len(), 1);
+    assert_eq!(rounds[0].tasks, BTreeSet::from(["TASK-A".into()]));
 }

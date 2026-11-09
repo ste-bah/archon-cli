@@ -69,6 +69,10 @@ fn fixture() -> Fixture {
         source_roots: Vec::new(),
         tasks: vec![task("TASK-A", A), task("TASK-B", B)],
     });
+    for task in &mut f.universe.as_mut().unwrap().tasks {
+        task.required_tools = vec!["cargo".into()];
+        task.freeze_focused_commands(&f.repo, std::ffi::OsStr::new(""));
+    }
     f
 }
 

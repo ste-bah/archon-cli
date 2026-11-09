@@ -19,10 +19,8 @@ use super::test_baseline::{
     RoutedFailure, SCHEMA_VERSION, cache_command_for, cached_command_for, route_finding,
     routed_findings_for_task, save_record,
 };
-use super::test_baseline_owner::{Ownership, ownership, test_file};
-use super::test_baseline_parse::{
-    diagnostic_files, failing_tests, is_cargo_test_command, passed_tests, tail,
-};
+use super::test_baseline_owner::{Ownership, ownership};
+use super::test_baseline_parse::{diagnostic_files_for, failing_tests, passed_tests, tail};
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::WorkflowV2ResultStore;
@@ -41,6 +39,7 @@ pub(super) struct BranchBaselineRequest {
 }
 
 pub(super) struct WaveBaselineContext<'a> {
+    pub(super) repository_root: &'a std::path::Path,
     pub(super) store: &'a WorkflowV2ResultStore,
     pub(super) dispatch: &'a dyn WorkflowAgentDispatch,
     pub(super) universe: Option<&'a WorkflowV2TaskUniverse>,
@@ -120,11 +119,7 @@ async fn verdicts_for(
                 Some(ctx.store.run_root()),
             )
             .await;
-            let (failing, passed_ids) = if is_cargo_test_command(&command) {
-                (failing_tests(&run.output), passed_tests(&run.output))
-            } else {
-                (Vec::new(), Vec::new())
-            };
+            let (failing, passed_ids) = (failing_tests(&run.output), passed_tests(&run.output));
             let passed = matches!(
                 crate::acceptance_check_crash::classify_execution(
                     &command,
@@ -137,10 +132,10 @@ async fn verdicts_for(
                 && run.error.is_none();
             // A failure no test name explains is attributed by the files its
             // error diagnostics point at (Issue-64).
-            let diagnostics = if passed || !failing.is_empty() {
+            let diagnostics = if passed {
                 Vec::new()
             } else {
-                diagnostic_files(&run.output, &worktree)
+                diagnostic_files_for(&run.output, &worktree, &command)
             };
             let verdict = CommandBaseline {
                 command: command.clone(),
@@ -159,6 +154,11 @@ async fn verdicts_for(
                     Vec::new()
                 } else {
                     let mut evidence = tail(&run.output);
+                    if let Some(identity) =
+                        super::test_baseline_parse::failure_identity(&run.output, &worktree)
+                    {
+                        evidence.push(identity);
+                    }
                     evidence.extend(
                         run.output
                             .lines()
@@ -173,6 +173,15 @@ async fn verdicts_for(
                     );
                     evidence
                 },
+                failure_files: failing
+                    .iter()
+                    .map(|id| {
+                        (
+                            id.clone(),
+                            super::test_baseline_run_base::panic_files(&run.output, id, &worktree),
+                        )
+                    })
+                    .collect(),
                 failing_tests: failing,
                 passed_tests: passed_ids,
                 passed_ids_kept: true,
@@ -242,12 +251,18 @@ fn classify(
             continue;
         }
         if verdict.failed_unattributed() {
-            // A failure with no name and a real exit is the task's to clear
-            // — unless its diagnostics point only at files outside the
-            // task's scope (Issue-64); a missing verdict (timeout, could
-            // not start) is recorded only.
+            // A named file in scope creates an obligation. An unattributed
+            // base failure is recorded as pre-existing; an absent exit
+            // status is recorded without assigning an obligation.
             if verdict.exit_code.is_some() {
-                place_diagnostics(&mut record, request, ctx.universe, command, verdict);
+                place_diagnostics(
+                    &mut record,
+                    request,
+                    ctx.universe,
+                    command,
+                    verdict,
+                    ctx.repository_root,
+                );
             }
             continue;
         }
@@ -260,6 +275,11 @@ fn classify(
                 command,
                 test_id,
                 taken,
+                verdict
+                    .failure_files
+                    .get(test_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
             );
         }
     }
@@ -269,23 +289,37 @@ fn classify(
 /// A failed command that names no test: its error diagnostics, attributed
 /// by file. A file in the task's scope is the task's obligation; the rest
 /// are recorded as pre-existing and out of scope, never as obligations.
-/// No location at all: the whole failure is the task's, as before.
+/// No location at all: recorded as pre-existing and unattributed.
 fn place_diagnostics(
     record: &mut BranchBaseline,
     request: &BranchBaselineRequest,
     universe: Option<&WorkflowV2TaskUniverse>,
     command: &str,
     verdict: &CommandBaseline,
+    repository_root: &std::path::Path,
 ) {
+    let repository_root = repository_root.to_path_buf();
     if verdict.diagnostic_files.is_empty() {
-        record.obligations.push(BaselineObligation {
-            test_id: None,
-            file: None,
+        record.pre_existing.push(PreExistingDiagnostics {
+            identity: super::test_baseline_parse::failure_identity(
+                &verdict.tail.join("\n"),
+                &request.worktree,
+            )
+            .map(|identity| (verdict.exit_code, identity)),
+            repository_root: repository_root.clone(),
             command: command.to_string(),
+            files: Vec::new(),
+            owners: Vec::new(),
         });
         return;
     }
     let mut outside = PreExistingDiagnostics {
+        identity: super::test_baseline_parse::failure_identity(
+            &verdict.tail.join("\n"),
+            &request.worktree,
+        )
+        .map(|identity| (verdict.exit_code, identity)),
+        repository_root: repository_root.clone(),
         command: command.to_string(),
         files: Vec::new(),
         owners: Vec::new(),
@@ -317,11 +351,18 @@ fn place(
     command: &str,
     test_id: &str,
     taken: &mut BTreeMap<String, String>,
+    verdict_files: &[String],
 ) {
     // No file: nobody's. There is nothing to widen the scope to and no way
     // for the coder to know what to change, so it is listed to ignore rather
     // than made this task's (Issue-73).
-    let Some(file) = test_file(&request.worktree, command, test_id) else {
+    let Some(file) = super::test_baseline_owner_at::test_file_at(
+        &request.worktree,
+        Some(&record.base_commit),
+        command,
+        test_id,
+    )
+    .or_else(|| verdict_files.first().cloned()) else {
         record.ignored.push(IgnoredFailure {
             test_id: test_id.to_string(),
             file: None,
@@ -436,3 +477,7 @@ fn inherited_for(
 #[cfg(test)]
 #[path = "test_baseline_wave_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "test_baseline_wave_rule_tests.rs"]
+mod rule_tests;

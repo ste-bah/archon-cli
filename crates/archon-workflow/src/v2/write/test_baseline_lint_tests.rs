@@ -59,6 +59,7 @@ async fn out_of_scope_diagnostics_are_pre_existing_and_an_in_scope_one_is_still_
     let base = head(&canonical);
     let universe = universe();
     let ctx = WaveBaselineContext {
+        repository_root: &canonical,
         store: &store,
         dispatch: &Host,
         universe: Some(&universe),
@@ -104,20 +105,22 @@ async fn out_of_scope_diagnostics_are_pre_existing_and_an_in_scope_one_is_still_
     assert!(
         text.contains(&format!(
             "- `{outside}` already fails at the base commit in 2 file(s) outside your \
-             target_files: src/nobody.rs (unowned), src/theirs.rs (owned by TASK-B); do not fix \
-             them — they are reported as pre-existing; you are held only to diagnostics in your \
-             own files.\n"
+             target_files: src/nobody.rs (unowned), src/theirs.rs (owned by TASK-B).\n"
         )),
         "{text}"
     );
     assert!(
-        text.contains("a write there is refused and would be dropped from your patch"),
+        text.contains(
+            "A write outside granted scope is refused and would be dropped from your patch"
+        ),
         "{text}"
     );
 
-    // The verifier's stamp carries the command and its files; a pre_existing
-    // claim whose output locates only those files keeps the verdict, one
-    // that locates the task's own file does not.
+    assert_eq!(record.pre_existing[0].repository_root, canonical);
+    assert_ne!(record.pre_existing[0].repository_root, ws);
+    // The stamp carries the command and its files. Keeping a pre_existing
+    // claim also requires the host's stored tip/base identity and exit proof;
+    // the verifier's summary does not supply that proof.
     let stamp = BaselineStamp::for_tasks(&store, &["TASK-A".to_string()]).expect("stamp");
     assert_eq!(stamp.pre_existing_diagnostics.len(), 1);
     assert_eq!(stamp.pre_existing_diagnostics[0].command, outside);
@@ -132,7 +135,36 @@ async fn out_of_scope_diagnostics_are_pre_existing_and_an_in_scope_one_is_still_
         "error: unused import: `x0`\n --> src/theirs.rs:1:5\nerror: unused import: `x1`\n \
          --> src/nobody.rs:2:5\nfails identically on the base commit",
     )];
-    enforce_baseline_tests(&mut kept, &by_item);
+    let mut frozen = universe.clone();
+    frozen.tasks[0].focused_tests = vec![outside.clone()];
+    frozen.tasks[0].freeze_focused_commands(&canonical, std::ffi::OsStr::new(""));
+    super::super::test_baseline_run_base::tests::bind_run(&store, &base);
+    let call = crate::v2::WorkflowV2HostCall {
+        id: "verify".into(),
+        method: crate::v2::WorkflowV2HostMethod::Parallel,
+        write_mode: None,
+        options: Default::default(),
+    };
+    let host_proof = crate::v2::verification::baseline_run_base::excuse_run_base_red_tests(
+        &crate::v2::verification::baseline_run_base::RunBaseRedContext {
+            store: &store,
+            dispatch: &Host,
+            universe: Some(&frozen),
+            repository_root: &canonical,
+            call: &call,
+            judged_commit: Some(&base),
+        },
+        &kept,
+        &by_item,
+        &BTreeMap::new(),
+    )
+    .await;
+    assert_eq!(host_proof["verify-1-check"].proven, [outside.clone()]);
+    crate::v2::verification::baseline_rule::enforce_baseline_tests_excusing(
+        &mut kept,
+        &by_item,
+        &host_proof,
+    );
     assert_eq!(
         kept[0].status,
         WorkflowV2Status::Accepted,
@@ -144,7 +176,7 @@ async fn out_of_scope_diagnostics_are_pre_existing_and_an_in_scope_one_is_still_
         "fails identically on the base commit",
     )];
     enforce_baseline_tests(&mut bare, &by_item);
-    assert_eq!(bare[0].status, WorkflowV2Status::Accepted);
+    assert_eq!(bare[0].status, WorkflowV2Status::NeedsReview);
     let mut blamed = vec![verifier_outcome(
         &outside,
         "error: unused import: `x0`\n --> src/theirs.rs:1:5\nerror[E0308]: mismatched types\n \
@@ -198,7 +230,7 @@ async fn out_of_scope_diagnostics_are_pre_existing_and_an_in_scope_one_is_still_
         "{text}"
     );
 
-    // A failure with no location at all is the task's, as before.
+    // A base failure with no resolved file is pre-existing and unattributed.
     let located_nowhere = format!(": {LINT} ; echo 'linker failed'; exit 1");
     let ctx = WaveBaselineContext {
         stage_id: "agents-7",
@@ -215,7 +247,8 @@ async fn out_of_scope_diagnostics_are_pre_existing_and_an_in_scope_one_is_still_
         )],
     )
     .await;
-    assert_eq!(records[0].obligations.len(), 1);
-    assert_eq!(records[0].obligations[0].file, None);
-    assert!(records[0].pre_existing.is_empty());
+    assert!(records[0].obligations.is_empty());
+    assert_eq!(records[0].pre_existing.len(), 1);
+    assert!(records[0].pre_existing[0].files.is_empty());
+    assert!(preamble(&records[0]).contains("base failure recorded; no file was resolved"));
 }

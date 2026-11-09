@@ -32,8 +32,10 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::WorkflowV2ResultStore;
 use crate::v2::verification::baseline_run_base::grouped_names;
 use crate::v2::write::test_baseline_owner::{Ownership, ownership};
-use crate::v2::write::test_baseline_owner_at::{parent_module_file_at, test_file_at};
-use crate::v2::write::test_baseline_run_base::{Tree, cached, host_runnable};
+use crate::v2::write::test_baseline_owner_at::test_file_at;
+use crate::v2::write::test_baseline_run_base::{
+    FrozenCommands, Tree, cached_per_test as cached, host_runnable,
+};
 
 /// The gap owed for `judge`, the latest verifier of the first-pass round
 /// `own`, when the host refused it over red tests outside `own`'s scope.
@@ -64,6 +66,7 @@ pub(super) fn refused_red_tests(
         .collect();
     tests.sort();
     tests.dedup();
+    let frozen = FrozenCommands::from_universe(Some(universe));
     let mut commands: Vec<String> = views
         .iter()
         .filter_map(|view| {
@@ -74,7 +77,7 @@ pub(super) fn refused_red_tests(
         .filter(|command| command.get("status").and_then(Value::as_str) == Some("failed"))
         .filter_map(|command| command.get("command").and_then(Value::as_str))
         .map(str::trim)
-        .filter(|command| host_runnable(command))
+        .filter(|command| host_runnable(command, &frozen))
         .map(str::to_string)
         .collect();
     commands.sort();
@@ -86,10 +89,18 @@ pub(super) fn refused_red_tests(
     let mut listed: Vec<String> = Vec::new();
     let mut files: BTreeSet<String> = BTreeSet::new();
     for test in &tests {
-        let Some((command, file)) = commands
-            .iter()
-            .find_map(|command| test_file_at(root, at, command, test).map(|file| (command, file)))
-        else {
+        let Some((command, file)) = commands.iter().find_map(|command| {
+            test_file_at(root, at, command, test)
+                .or_else(|| {
+                    at.and_then(|commit| cached(store, Tree::Judged, commit, command, &frozen))?
+                        .failure_files
+                        .get(test)?
+                        .first()
+                        .cloned()
+                })
+                .map(|file| (command, file))
+        }) else {
+            listed.push(test.clone());
             continue;
         };
         if ownership(Some(universe), &tasks, &granted, &file) == Ownership::Current {
@@ -97,9 +108,10 @@ pub(super) fn refused_red_tests(
         }
         listed.push(test.clone());
         files.insert(file);
-        files.extend(parent_module_file_at(root, at, command, test));
         // Every file the host's own judged run saw the test fail in.
-        if let Some(run) = at.and_then(|commit| cached(store, Tree::Judged, commit, command)) {
+        if let Some(run) =
+            at.and_then(|commit| cached(store, Tree::Judged, commit, command, &frozen))
+        {
             files.extend(run.failure_files.get(test).cloned().unwrap_or_default());
         }
     }
@@ -111,7 +123,7 @@ pub(super) fn refused_red_tests(
         id: format!("{REFUSED_RED_GAP_ID}@{}", judge.call.id),
         severity: ResidualSeverity::Medium,
         description: format!(
-            "host refused `{}` over red tests outside its round's scope; make them pass: {}",
+            "host refused `{}` over red tests without a demonstrated resolution in its round; make them pass: {}",
             judge.call.id,
             grouped_names(&listed)
         ),

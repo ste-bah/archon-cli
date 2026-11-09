@@ -196,7 +196,15 @@ pub(super) fn spans(line: &str, runners: &dyn Fn(&str) -> bool) -> Vec<Span> {
 pub(super) fn classify(span: &str, runners: &dyn Fn(&str) -> bool) -> Option<Span> {
     let first = span.split_whitespace().next().unwrap_or_default();
     if span.contains(char::is_whitespace) {
-        return runners(first).then(|| Span::Command(span.to_string()));
+        let declared = runners(span) || runners(first);
+        return (declared
+            && archon_workflow::verifier_strength::verifier_strength_defect(
+                Some(span),
+                None,
+                None,
+            )
+            .is_none())
+        .then(|| Span::Command(span.to_string()));
     }
     if span.contains(['<', '>', '{', '}', '*', '$', '=', '|', '?', '"', '\'']) {
         return None;

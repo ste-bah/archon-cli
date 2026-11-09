@@ -36,9 +36,7 @@ use super::workflow_live_repository::{RepositoryBinding, resolve_target_reposito
 use super::workflow_live_retry;
 use super::workflow_live_runner::tier_model_alias;
 use archon_workflow::stage_prompt::{harness_planner_prompt, harness_repair_prompt};
-use archon_workflow::task_universe::{
-    WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
-};
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::decomposed_prd_plan::{
     decomposed_prd_prompt_slots, decomposed_prd_scaffold,
 };

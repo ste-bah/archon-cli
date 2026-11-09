@@ -1,6 +1,10 @@
 use std::path::Path;
 
-use super::{Ownership, ownership, test_file};
+use super::{Ownership, ownership};
+fn test_file(root: &Path, command: &str, id: &str) -> Option<String> {
+    let commit = super::super::test_baseline_run_base::tests::head(root);
+    super::super::test_baseline_owner_at::test_file_at(root, Some(&commit), command, id)
+}
 use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -10,7 +14,7 @@ fn write(root: &Path, rel: &str, body: &str) {
 }
 
 /// A workspace with a root package `app` (`src/`) and one member crate
-/// `engine` under `crates/`, laid out the way this module walks it.
+/// `engine` under `crates/`, used by the explicit-path cases.
 fn workspace() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -35,54 +39,99 @@ fn workspace() -> tempfile::TempDir {
     write(root, "crates/engine/tests/gates.rs", "");
     write(root, "crates/engine/tests/wide/main.rs", "");
     write(root, "crates/engine/tests/wide/cases.rs", "");
+    for args in [
+        &["init", "-q"][..],
+        &["config", "user.name", "t"],
+        &["config", "user.email", "t@example.invalid"],
+        &["add", "."],
+        &["commit", "-qm", "fixture"],
+    ] {
+        crate::write_coordinator::worktree_isolation::run_git(args, root).unwrap();
+    }
     temp
 }
 
 #[test]
-fn a_sibling_tests_file_wins_over_the_module_that_declares_it() {
+fn a_sibling_tests_file_needs_an_explicit_path() {
     let ws = workspace();
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test -p engine grant",
+            "crates/engine/src/grant_tests.rs::case"
+        ),
+        Some("crates/engine/src/grant_tests.rs".into())
+    );
     assert_eq!(
         test_file(
             ws.path(),
             "cargo test -p engine grant",
             "grant::tests::widens"
         ),
-        Some("crates/engine/src/grant_tests.rs".into())
+        None
     );
 }
 
 #[test]
-fn an_inline_tests_module_resolves_to_the_declaring_file() {
+fn an_inline_tests_module_needs_an_explicit_path() {
     let ws = workspace();
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test -p engine",
+            "crates/engine/src/plan/inline.rs::case"
+        ),
+        Some("crates/engine/src/plan/inline.rs".into())
+    );
     assert_eq!(
         test_file(
             ws.path(),
             "cargo test -p engine",
             "plan::inline::tests::parses"
         ),
-        Some("crates/engine/src/plan/inline.rs".into())
+        None
+    );
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test -p engine",
+            "crates/engine/src/plan/mod.rs::case"
+        ),
+        Some("crates/engine/src/plan/mod.rs".into())
     );
     assert_eq!(
         test_file(ws.path(), "cargo test -p engine", "plan::tests::orders"),
-        Some("crates/engine/src/plan/mod.rs".into())
+        None
     );
 }
 
 #[test]
-fn the_root_package_resolves_under_src_and_a_bare_test_reaches_no_file() {
+fn an_explicit_root_file_resolves_and_bare_modules_do_not() {
     let ws = workspace();
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test --bin app command",
+            "src/command/run.rs::case"
+        ),
+        Some("src/command/run.rs".into())
+    );
     assert_eq!(
         test_file(
             ws.path(),
             "cargo test --bin app command",
             "command::run::tests::starts"
         ),
-        Some("src/command/run.rs".into())
+        None
     );
     // An inline `tests` module at the crate root is the root file's.
     assert_eq!(
-        test_file(ws.path(), "cargo test -p app", "tests::smoke"),
+        test_file(ws.path(), "cargo test -p app", "src/main.rs::case"),
         Some("src/main.rs".into())
+    );
+    assert_eq!(
+        test_file(ws.path(), "cargo test -p app", "tests::smoke"),
+        None
     );
     // A bare id carries no module path — what an integration binary
     // reports — and never claims the crate root (Issue-73).
@@ -90,34 +139,57 @@ fn the_root_package_resolves_under_src_and_a_bare_test_reaches_no_file() {
 }
 
 #[test]
-fn an_integration_test_failure_belongs_to_its_test_file_never_to_the_crate_root() {
+fn an_explicit_integration_path_resolves_without_inventing_a_root() {
     let ws = workspace();
     for command in [
         "cargo nextest run -p engine --test gates",
         "cargo test -p engine --test=gates",
     ] {
         assert_eq!(
-            test_file(ws.path(), command, "current_artifact_integrity_is_required"),
+            test_file(
+                ws.path(),
+                command,
+                "crates/engine/tests/gates.rs::current_artifact_integrity_is_required"
+            ),
             Some("crates/engine/tests/gates.rs".into()),
             "{command}"
         );
+        assert_eq!(
+            test_file(ws.path(), command, "current_artifact_integrity_is_required"),
+            None,
+            "{command}"
+        );
     }
-    // A submodule of the target wins when the id's segments reach one; the
-    // target's own entry file answers otherwise.
+    // Explicit paths name files; target selectors do not supply a missing path.
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test -p engine --test wide",
+            "crates/engine/tests/wide/cases.rs::case"
+        ),
+        Some("crates/engine/tests/wide/cases.rs".into())
+    );
     assert_eq!(
         test_file(
             ws.path(),
             "cargo test -p engine --test wide",
             "cases::tests::widens"
         ),
-        Some("crates/engine/tests/wide/cases.rs".into())
+        None
+    );
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test -p engine --test wide",
+            "crates/engine/tests/wide/main.rs::case"
+        ),
+        Some("crates/engine/tests/wide/main.rs".into())
     );
     assert_eq!(
         test_file(ws.path(), "cargo test -p engine --test wide", "smoke"),
-        Some("crates/engine/tests/wide/main.rs".into())
+        None
     );
-    // An integration target with no file resolves to nothing: never `src`,
-    // and never the package root.
+    // Unlocated IDs never invent a target or package root.
     assert_eq!(
         test_file(ws.path(), "cargo test -p engine --test ghost", "smoke"),
         None
@@ -133,13 +205,21 @@ fn an_integration_test_failure_belongs_to_its_test_file_never_to_the_crate_root(
 }
 
 #[test]
-fn a_command_naming_no_package_resolves_only_when_one_package_holds_the_file() {
+fn an_explicit_path_does_not_require_a_package_selection() {
     let ws = workspace();
     assert_eq!(
-        test_file(ws.path(), "cargo test grant", "grant::tests::widens"),
+        test_file(
+            ws.path(),
+            "cargo test grant",
+            "crates/engine/src/grant_tests.rs::case"
+        ),
         Some("crates/engine/src/grant_tests.rs".into())
     );
-    // A root-level test exists in BOTH packages: ambiguous.
+    assert_eq!(
+        test_file(ws.path(), "cargo test grant", "grant::tests::widens"),
+        None
+    );
+    // A bare module ID supplies no explicit file path.
     assert_eq!(test_file(ws.path(), "cargo test", "tests::smoke"), None);
     // A module path that reaches no file is unresolved, not the crate root.
     assert_eq!(
@@ -149,7 +229,7 @@ fn a_command_naming_no_package_resolves_only_when_one_package_holds_the_file() {
 }
 
 #[test]
-fn a_package_the_workspace_does_not_hold_is_unresolvable() {
+fn a_command_cannot_resolve_an_unlocated_module_id() {
     let ws = workspace();
     assert_eq!(
         test_file(ws.path(), "cargo test -p ghost", "grant::tests::widens"),

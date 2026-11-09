@@ -78,6 +78,14 @@ pub(super) const REQUIRED_TASK_KEYS: &[&str] = &[
 ];
 
 pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskUniverseTask> {
+    parse_task_file_with_path(path, raw, None)
+}
+
+pub fn parse_task_file_with_path(
+    path: &Path,
+    raw: &str,
+    toolchain_path: Option<&std::ffi::OsStr>,
+) -> WorkflowResult<WorkflowV2TaskUniverseTask> {
     let path_task_id = task_id_from_task_path(path).ok_or_else(|| {
         WorkflowError::TaskBodyInvalid(format!(
             "generated decomposed PRD workflow could not parse canonical task_id from {}",
@@ -139,7 +147,7 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
             .collect(),
     );
 
-    Ok(WorkflowV2TaskUniverseTask {
+    let mut task = WorkflowV2TaskUniverseTask {
         canonical_task_id,
         aliases: Vec::new(),
         source_path: path.display().to_string(),
@@ -168,6 +176,7 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
         // Verified by the task author, who could run them. The script author
         // agent has no shell, so any filter it invents instead is a guess.
         focused_tests: declared_focused_tests(raw),
+        focused_commands: None,
         // Additive: the per-task adversarial reviewer reads these verbatim.
         adversarial_review_notes: declared_task_section_items(raw, "adversarial review notes"),
         files_expected_to_change: declared_task_section_items(raw, "files expected to change"),
@@ -177,7 +186,13 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
         required_env_keys: sorted_unique(metadata_strings(&metadata, "required_env_keys")),
         required_tools: sorted_unique(metadata_strings(&metadata, "required_tools")),
         deliverable_contracts,
-    })
+    };
+    let root = super::focused_commands::repository_root(&task.source_path);
+    if let Some(path) = toolchain_path {
+        task.freeze_focused_commands(&root, path);
+    }
+
+    Ok(task)
 }
 
 /// Extract and parse the file's YAML block. Errors rather than returning an
@@ -329,6 +344,12 @@ mod tests;
 #[path = "task_universe_list_items.rs"]
 mod list_items;
 use list_items::{declared_focused_tests, declared_task_section_items, heading_near_misses};
+
+/// Read focused-test items without imposing metadata schema requirements.
+/// Corpus diagnostics use the same section grammar as parsed tasks.
+pub fn declared_focused_test_items(raw: &str) -> Vec<String> {
+    declared_focused_tests(raw)
+}
 
 /// Every section this parser reads out of a task file's prose.
 ///

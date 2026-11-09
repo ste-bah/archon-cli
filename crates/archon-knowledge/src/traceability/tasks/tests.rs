@@ -2,6 +2,11 @@ use super::*;
 
 mod yaml_tests;
 
+fn parse_task_binding(raw: &str, source: &str) -> Result<TaskBinding> {
+    let (_site, path) = focused_commands::site_tests::command_site();
+    super::parse_task_binding_with_path(raw, source, &path)
+}
+
 const TASK: &str = concat!(
     "# TASK-TDL-080 — Coverage Matrix Command\n",
     "\n",
@@ -119,8 +124,7 @@ fn focused_tests_separate_commands_from_descriptions() {
         b.focused_tests,
         vec![
             FocusedTestEntry::Prose("Coverage matrix generation test.".into()),
-            // A backticked CLI fragment is a description, not an invocation:
-            // `data` is not a runner.
+            // An embedded code span is a description rather than an invocation.
             FocusedTestEntry::Prose("CLI parse tests for `data list --json`.".into()),
             FocusedTestEntry::Command("cargo test -p archon-trading coverage".into()),
         ]
@@ -222,10 +226,9 @@ required_tools: [lizard]
     );
 }
 
-/// An unknown tool that the task never declared stays prose — the classifier
-/// must not become a heuristic that accepts any first word.
+/// Command classification does not depend on capability declarations.
 #[test]
-fn an_undeclared_unknown_runner_is_still_prose() {
+fn an_undeclared_command_is_still_an_invocation() {
     let raw = "\
 # TASK-Z
 
@@ -237,13 +240,18 @@ required_tools: [cargo]
 
 ## Focused Tests
 
-- `lizard -l rust src/a.rs`
+- `git diff --check`
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-Z-001.md").expect("parses");
+    let binding = parse_task_binding_with_path(
+        raw,
+        "tasks/TASK-Z-001.md",
+        &std::env::var_os("PATH").unwrap(),
+    )
+    .expect("parses");
     assert_eq!(
-        binding.prose_focused_tests().len(),
-        1,
-        "a tool the task never declared is not evidence of an invocation"
+        binding.focused_tests,
+        vec![FocusedTestEntry::Command("git diff --check".into())],
+        "a program resolved by the site requires no task capability declaration"
     );
 }
 
@@ -419,73 +427,4 @@ fn noncanonical_or_filename_mismatched_task_ids_fail_closed() {
 
 /// A portable POSIX check is a declared focused test, not prose.
 ///
-/// `KNOWN_RUNNERS` listed only language toolchains, so a task whose PRD requires
-/// portable checks had every bullet classified as prose. The task universe then
-/// recorded no focused tests, the v3 author brief said "no task declares any
-/// focused test", and the authored workflow passed no focusedTests at all —
-/// observed on run wf-eb79b47d, whose own residual gap named the brief line.
-#[test]
-fn posix_checks_are_declared_focused_tests_not_prose() {
-    let body = "\
-# TASK-X-010
-
-## Focused Tests
-
-- `test -s src/alpha.txt`
-- `grep -qx 'alpha ready' src/alpha.txt`
-- `! grep -q 'CANARY' src/alpha.txt`
-";
-    let commands: Vec<String> = super::collect_focused_tests(body, &[])
-        .into_iter()
-        .filter_map(|entry| match entry {
-            super::FocusedTestEntry::Command(command) => Some(command),
-            super::FocusedTestEntry::Prose(_) => None,
-        })
-        .collect();
-    assert_eq!(
-        commands.len(),
-        3,
-        "every portable check must be recorded as a command: {commands:?}"
-    );
-    assert!(
-        commands.iter().any(|c| c.starts_with("test ")),
-        "{commands:?}"
-    );
-}
-
-/// Prose about a command is still prose.
-#[test]
-fn a_backticked_cli_fragment_in_prose_is_still_not_a_command() {
-    let body = "\
-# TASK-X-010
-
-## Focused Tests
-
-- the operator runs `data list --json` and eyeballs it
-";
-    let commands: Vec<String> = super::collect_focused_tests(body, &[])
-        .into_iter()
-        .filter_map(|entry| match entry {
-            super::FocusedTestEntry::Command(command) => Some(command),
-            super::FocusedTestEntry::Prose(_) => None,
-        })
-        .collect();
-    assert!(commands.is_empty(), "{commands:?}");
-}
-
-/// Diagnostic: parse a real task file and print what it declares.
-///
-/// ARCHON_TASK_FILE=<path> cargo test -p archon-knowledge --lib \
-///   focused_tests_declared_by_a_real_task_file -- --ignored --nocapture
-#[test]
-#[ignore = "diagnostic; requires ARCHON_TASK_FILE"]
-fn focused_tests_declared_by_a_real_task_file() {
-    let path = std::env::var("ARCHON_TASK_FILE").expect("set ARCHON_TASK_FILE");
-    let raw = std::fs::read_to_string(&path).expect("read task file");
-    for entry in super::collect_focused_tests(&raw, &[]) {
-        match entry {
-            super::FocusedTestEntry::Command(c) => println!("COMMAND: {c}"),
-            super::FocusedTestEntry::Prose(p) => println!("prose  : {}", &p[..p.len().min(70)]),
-        }
-    }
-}
+mod focused_command_tests;

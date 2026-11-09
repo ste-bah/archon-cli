@@ -7,7 +7,10 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use super::tests::{accepted_outcome, command};
-use super::{BaselineStamp, enforce_baseline_tests, stamp_baseline_tests_input_at, stamped};
+use super::{
+    BaselineStamp, enforce_baseline_tests, enforce_baseline_tests_excusing,
+    stamp_baseline_tests_input_at, stamped,
+};
 use crate::v2::write::test_baseline::{
     BaselineObligation, BranchBaseline, CommandBaseline, RoutedFailure, SCHEMA_VERSION, save_record,
 };
@@ -33,6 +36,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, base: &str, own: &[&str], 
             base_commit: base.into(),
             canonical_task_ids: vec!["TASK-A".into()],
             commands: vec![CommandBaseline {
+                failure_files: Default::default(),
                 command: COMMAND.into(),
                 base_commit: base.into(),
                 exit_code: Some(if own.is_empty() && theirs.is_empty() {
@@ -148,7 +152,17 @@ fn a_red_test_owned_by_another_task_at_the_verification_base_is_exempt_and_does_
         )],
         json!({}),
     )];
-    enforce_baseline_tests(&mut outcomes, &by_item);
+    let mut without_proof = outcomes.clone();
+    enforce_baseline_tests(&mut without_proof, &by_item);
+    assert_eq!(without_proof[0].status, WorkflowV2Status::NeedsReview);
+    let proof = BTreeMap::from([(
+        "verify-1-check".to_string(),
+        super::super::baseline_run_base::BranchJudgement {
+            proven: vec![COMMAND.to_string()],
+            ..Default::default()
+        },
+    )]);
+    enforce_baseline_tests_excusing(&mut outcomes, &by_item, &proof);
     assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
     assert!(
         outcomes[0]
@@ -252,7 +266,7 @@ fn the_stamp_records_which_task_is_under_verification() {
 }
 
 #[test]
-fn typed_failing_names_all_routed_to_another_task_prove_the_claim_the_prose_cannot() {
+fn typed_failing_names_and_ownership_cannot_replace_stored_host_identity_evidence() {
     // The premise: the host's parser reads nothing out of that summary.
     assert!(
         crate::v2::write::test_baseline_parse::failing_tests(PROSE).is_empty(),
@@ -268,10 +282,10 @@ fn typed_failing_names_all_routed_to_another_task_prove_the_claim_the_prose_cann
             "stooq::tests::second"
         ])),
     );
-    assert_eq!(outcome.status, WorkflowV2Status::Accepted);
+    assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
     let result = outcome.result.as_ref().unwrap();
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert!(result.residual_gaps.is_empty(), "{result:?}");
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(!result.residual_gaps.is_empty(), "{result:?}");
 }
 
 #[test]

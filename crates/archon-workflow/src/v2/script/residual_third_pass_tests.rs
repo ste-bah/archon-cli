@@ -62,6 +62,7 @@ pub(super) fn refused_second_pass(
     ));
     pause();
     let verify1 = round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -232,6 +233,7 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
     ));
     pause();
     let verify3 = round_verdict(
+        &w,
         &round,
         "verification-wave-review-verify-residual-8",
         3,
@@ -252,6 +254,7 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
     ));
     pause();
     let verify4 = round_verdict(
+        &w,
         &again,
         "verification-wave-review-verify-residual-11",
         3,
@@ -279,6 +282,7 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
     // asks its slot) blocks: no later pass planned it.
     pause();
     let late = round_verdict(
+        &w,
         &round,
         "verification-wave-review-verify-residual-9",
         3,

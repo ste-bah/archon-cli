@@ -1,21 +1,9 @@
-//! Batch O2 (CUT-11a): a declared test command that is not a plain cargo
-//! runner invocation, compared anyway.
-//!
-//! The run-base machinery (`write::test_baseline_run_base`) runs only an
-//! allow-listed `cargo test` / `cargo nextest run`, because it also runs
-//! commands an AGENT reported. A task's DECLARED focused-test command is the
-//! task set's own -- the baseline wave already runs it, as declared, in the
-//! POSIX shell of a branch worktree (`test_baseline_wave`) -- so the
-//! regression check runs it the same way: once at the run base and once at
-//! the tip, each in a throwaway detached worktree of its commit (never the
-//! live checkout), under the project-input tripwire, cached per (commit,
-//! command) so a resume never re-runs it. Its outcome is compared
-//! generically: the exit code, and the test ids its output names in the
-//! libtest shape when it names any. A run that timed out, could not start
-//! or tripped the tripwire is no verdict.
-//!
-//! Before this a non-cargo project could never go green on its own tests:
-//! the gate recorded every such command as "NOT COMPARED".
+//! Compare frozen commands verbatim by exit status and readable per-test verdicts.
+//! Each command runs in an isolated copy at the recorded commit, under
+//! the existing input tripwire. An absent exit status, launch failure, timeout,
+//! or tripwire failure gives no verdict and excuses nothing. Completed exit
+//! verdicts are distinct from readable per-test results. Cached entries that
+//! do not attest verbatim execution are rerun rather than reused as evidence.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -25,11 +13,11 @@ use crate::v2::WorkflowV2ResultStore;
 use crate::v2::write::test_baseline_parse::{failing_tests, ignored_tests, passed_tests};
 use crate::v2::write::test_baseline_run::run_in_worktree;
 use crate::v2::write::test_baseline_run_base::{
-    HostRunVerdict, Tree, cache, cached, host_runnable,
+    HostRunVerdict, Tree, add_worktree, cache, cached, remove_worktree,
 };
 
-/// Each declared command of `commands` that is NOT plain (`host_runnable`)
-/// at `commit`, from the cache or run once in a throwaway worktree. A
+/// Each frozen command at `commit`, from the cache or run once in a
+/// throwaway worktree. A
 /// command without a verdict is absent from the map.
 pub(crate) async fn generic_verdicts(
     store: &WorkflowV2ResultStore,
@@ -37,15 +25,23 @@ pub(crate) async fn generic_verdicts(
     repository_root: &Path,
     commit: &str,
     commands: &[String],
+    frozen: &crate::v2::write::test_baseline_run_base::FrozenCommands,
 ) -> BTreeMap<String, HostRunVerdict> {
     let mut verdicts = BTreeMap::new();
     let mut pending = Vec::new();
-    for command in commands.iter().filter(|command| !host_runnable(command)) {
-        match cached(store, Tree::RunBase, commit, command) {
-            Some(hit) => {
-                verdicts.insert(command.clone(), hit);
+    for reported in commands {
+        let command = match frozen.command(reported) {
+            Ok(command) => command,
+            Err(reason) => {
+                tracing::debug!(%reported, %reason, "command was not run");
+                continue;
             }
-            None => pending.push(command.clone()),
+        };
+        match cached(store, Tree::RunBase, commit, command).filter(|run| run.verbatim) {
+            Some(hit) => {
+                verdicts.insert(reported.clone(), hit);
+            }
+            None => pending.push((reported.clone(), command.to_string())),
         }
     }
     if pending.is_empty() || commit.starts_with('-') {
@@ -59,10 +55,35 @@ pub(crate) async fn generic_verdicts(
     if !add_worktree(repository_root, &scratch, commit) {
         return verdicts;
     }
-    for command in pending {
+    for (reported, command) in pending {
         let run = run_in_worktree(dispatch, &scratch, &command, Some(store.run_root())).await;
-        if run.error.is_some() || run.timed_out || run.exit_code.is_none() {
+        if run.error.is_some()
+            || run.timed_out
+            || run.exit_code.is_none()
+            || crate::acceptance_check_shell_unset::never_pass(
+                &command,
+                run.exit_code.unwrap_or(-1),
+                &run.output,
+            )
+        {
+            tracing::warn!(%command, error = ?run.error, timed_out = run.timed_out, exit_code = ?run.exit_code, "the host run did not produce a usable completion verdict");
             continue;
+        }
+        let mut signatures: BTreeMap<String, String> = failing_tests(&run.output)
+            .into_iter()
+            .map(|id| {
+                let signature = crate::v2::write::test_baseline_run_base::signature_at(
+                    &run.output,
+                    &id,
+                    &scratch,
+                );
+                (id, signature)
+            })
+            .collect();
+        if let Some(identity) =
+            crate::v2::write::test_baseline_parse::failure_identity(&run.output, &scratch)
+        {
+            signatures.insert(String::new(), identity);
         }
         let verdict = HostRunVerdict {
             command: command.clone(),
@@ -72,10 +93,25 @@ pub(crate) async fn generic_verdicts(
             passed_tests: passed_tests(&run.output),
             ignored_tests: ignored_tests(&run.output),
             ids_kept: true,
-            ..HostRunVerdict::default()
+            isolated: true,
+            verbatim: true,
+            per_test_verdict: crate::v2::write::test_baseline_parse::harness_reported(&run.output),
+            failed_count: crate::v2::write::test_baseline_parse::failed_count(&run.output),
+            signatures,
+            failure_files: failing_tests(&run.output)
+                .into_iter()
+                .map(|id| {
+                    let files = crate::v2::write::test_baseline_run_base::panic_files(
+                        &run.output,
+                        &id,
+                        &scratch,
+                    );
+                    (id, files)
+                })
+                .collect(),
         };
         cache(store, Tree::RunBase, &verdict);
-        verdicts.insert(command, verdict);
+        verdicts.insert(reported, verdict);
     }
     remove_worktree(repository_root, &scratch);
     verdicts
@@ -87,50 +123,6 @@ fn sanitize(text: &str) -> String {
         .collect()
 }
 
-fn git(root: &Path, args: &[&std::ffi::OsStr]) -> bool {
-    archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .is_ok_and(|output| output.status.success())
-}
-
-fn add_worktree(root: &Path, worktree: &Path, commit: &str) -> bool {
-    remove_worktree(root, worktree);
-    if let Some(parent) = worktree.parent()
-        && std::fs::create_dir_all(parent).is_err()
-    {
-        return false;
-    }
-    git(
-        root,
-        &[
-            "worktree".as_ref(),
-            "add".as_ref(),
-            "--force".as_ref(),
-            "--detach".as_ref(),
-            worktree.as_os_str(),
-            commit.as_ref(),
-        ],
-    )
-}
-
-/// Removes only this worktree (and its leftover directory, the host's own
-/// scratch).
-fn remove_worktree(root: &Path, worktree: &Path) {
-    if worktree.exists() {
-        let _ = git(
-            root,
-            &[
-                "worktree".as_ref(),
-                "remove".as_ref(),
-                "--force".as_ref(),
-                worktree.as_os_str(),
-            ],
-        );
-    }
-    if worktree.exists() {
-        let _ = std::fs::remove_dir_all(worktree);
-    }
-}
+#[cfg(all(test, unix))]
+#[path = "regression_generic_tests.rs"]
+mod tests;

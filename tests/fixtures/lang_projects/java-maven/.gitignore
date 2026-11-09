@@ -1,0 +1,4 @@
+target/*
+!target/surefire-reports/
+target/surefire-reports/*
+!target/surefire-reports/TEST-*.xml

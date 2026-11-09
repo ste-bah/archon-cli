@@ -27,7 +27,7 @@
 //! - failing at both is PRE-EXISTING: listed prominently, never blocking;
 //! - a command with no verdict at the tip blocks, whatever the base gave,
 //!   and failures the harness counted but did not name at the tip block
-//!   unless the base counted as many unnamed;
+//!   unless base identities and exit status excuse every unnamed failure;
 //! - a test that passed at the base and is ignored at the tip blocks (it was
 //!   hidden, not fixed), and so does one no longer reported at all (Batch O:
 //!   a deleted test used to pass the gate as "maybe renamed"; a renamed test
@@ -53,7 +53,7 @@ use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::WorkflowV2ResultStore;
 use crate::v2::write::test_baseline_run_base::{
-    HostRunVerdict, Tree, host_verdicts, run_base_commit,
+    CommandNotRun, FrozenCommands, HostRunVerdict, Tree, host_verdicts, run_base_commit,
 };
 
 /// What the regression check found: blocking clauses and notes.
@@ -81,8 +81,15 @@ pub fn declared_test_commands(universe: &WorkflowV2TaskUniverse) -> Vec<String> 
 pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict {
     let mut verdict = RegressionVerdict::default();
     let Some(universe) = gate.universe else {
+        verdict.notes.push(CommandNotRun::NoUniverse.to_string());
         return verdict;
     };
+    if !universe.command_decisions_are_recorded() {
+        verdict.blocking.push(
+            "regression gate cannot judge the run: frozen command decisions are missing".into(),
+        );
+        return verdict;
+    }
     // Every command a HIGH gap owes a test in runs at the tip too, before
     // anything returns: the residual gate judges those gaps on it
     // (`residual_gate_tip`), so none blocks unjudged.
@@ -104,13 +111,6 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
         ));
         return verdict;
     };
-    if tip == base {
-        verdict.notes.push(
-            "regression gate: nothing landed since the run's base commit, so nothing regressed"
-                .to_string(),
-        );
-        return verdict;
-    }
     let at = |sha: &str| sha.chars().take(9).collect::<String>();
     let root = gate.repository_root;
     let base_runs = verdicts_at(gate.store, gate.dispatch, root, &base, &commands).await;
@@ -138,12 +138,12 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
             F::UnnamedPreExisting { command } => verdict.notes.push(format!(
                 "PRE-EXISTING: `{command}` fails at the run base {base_at} and at the final tip {tip_at} with failures its runner does not name"
             )),
-            F::NotJudgeable { command, exit_code } => verdict.notes.push(format!(
-                "NOT JUDGEABLE: `{command}` fails identically at the run base {base_at} and at the final tip {tip_at} (exit {}) and names no test at either, so the host cannot tell whether the run regressed it",
+            F::NotJudgeable { command, exit_code } => verdict.blocking.push(format!(
+                "NOT JUDGEABLE: `{command}` fails at the run base {base_at} and at the final tip {tip_at} (tip exit {}) and names no test at either; a failure identity is missing, so the host cannot tell whether these are the same failure",
                 exit_code.map_or_else(|| "none".to_string(), |code| code.to_string())
             )),
             F::UnnamedNew { command } => verdict.blocking.push(format!(
-                "regression gate: `{command}` fails at the final tip {tip_at} with failures its runner does not name, which the run base {base_at} did not; {late}"
+                "regression gate: `{command}` fails at the final tip {tip_at} with failures its runner does not name, which the run base {base_at} does not excuse by identity and exit status; {late}"
             )),
             F::OldBaseCache { command } => verdict.notes.push(format!(
                 "warning: `{command}`'s base verdict was cached before passed ids were kept, so a test hidden at the final tip {tip_at} is not detected for it"
@@ -153,16 +153,17 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
                 owner_of(command, test)
             )),
             F::Vanished { command, test } => verdict.blocking.push(format!(
-                "regression: `{test}` (`{command}`) passed at the run base {base_at} and is not reported at the final tip {tip_at}: it was removed or renamed, and a test that is gone proves nothing passes; {}; {late}",
+                "regression: `{test}` (`{command}`) passed at the run base {base_at} and is not reported at the final tip {tip_at}, so its passing evidence is missing; {}; {late}",
                 owner_of(command, test)
             )),
             F::PreExisting {
                 command,
                 test,
-                moved,
             } => verdict.notes.push(format!(
-                "PRE-EXISTING: `{test}` (`{command}`) fails at the run base {base_at} and at the final tip {tip_at}{}",
-                if *moved { ", with a different failure" } else { "" }
+                "PRE-EXISTING: `{test}` (`{command}`) fails at the run base {base_at} and at the final tip {tip_at} with a matching failure identity"
+            )),
+            F::Unknown { command, test } => verdict.blocking.push(format!(
+                "regression: `{test}` (`{command}`) is red at the final tip without a matching base failure; {}; {late}", owner_of(command, test)
             )),
             F::NewFailure {
                 command,
@@ -170,7 +171,7 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
                 base_had,
             } => {
                 let why = if *base_had {
-                    format!("did not fail at the run base {base_at}")
+                    format!("no matching failure identity was recorded at the run base {base_at}")
                 } else {
                     format!("the run base {base_at} gave no verdict to show it already failed")
                 };
@@ -188,8 +189,11 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
 /// recorded HIGH gap owes a test in (`residual_plan::tip_owed_commands`);
 /// returns the commands.
 pub async fn run_owed_at_tip(gate: &RegressionGate<'_>) -> Vec<String> {
-    let owed =
-        crate::v2::script::residual_plan::tip_owed_commands(gate.store, Some(gate.repository_root));
+    let owed = crate::v2::script::residual_plan::tip_owed_commands(
+        gate.store,
+        Some(gate.repository_root),
+        gate.universe,
+    );
     if !owed.is_empty()
         && let Ok(tip) = crate::repository_record::git_head(gate.repository_root)
     {
@@ -200,6 +204,7 @@ pub async fn run_owed_at_tip(gate: &RegressionGate<'_>) -> Vec<String> {
             Tree::RunBase,
             &tip,
             &owed,
+            &FrozenCommands::from_universe(gate.universe),
         )
         .await;
     }

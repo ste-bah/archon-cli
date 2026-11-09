@@ -13,19 +13,15 @@
 //! the command itself:
 //!
 //! - at the run's base commit -- the checkout's `HEAD` the run's first
-//!   `repository_bound` event recorded -- in a throwaway detached worktree;
-//! - on the JUDGED tree -- the checkout the verifier ran in, in place, and
+//!   `repository_bound` event recorded -- in an isolated committed-tree copy;
+//! - on the JUDGED tree -- an isolated copy of the recorded commit, and
 //!   only while its `HEAD` is still the commit the verifier judged.
 //!
-//! Each run yields the failing tests its runner named and, per test, its
-//! failure SIGNATURE: the panic location and first message line, with
-//! absolute paths and temporary names normalised. Only a plain test-runner
-//! invocation is run (`cargo test ...` / `cargo nextest run ...`, plain
-//! words, known options only: `args`), always with `--no-fail-fast`. A run
-//! whose harness did not report a verdict for every test binary (a build
-//! failure, a timeout, a kill) is no verdict: it is never cached and excuses
-//! nothing. Verdicts are cached per (tree kind, commit,
-//! command) under `baseline-tests/run-base/`.
+//! Commands run verbatim only when authorized by the frozen declarations.
+//! Completed output supplies observed test ids and normalized failure
+//! signatures. A readable summary cannot prove that unobserved tests ran;
+//! those remain unknown. Only isolated judged runs are reused from cache.
+//! Unreadable output, launch errors, and timeouts yield no per-test verdict.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -45,9 +41,9 @@ pub(crate) const MAX_COMMANDS_PER_BRANCH: usize = 4;
 /// Which tree a verdict describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tree {
-    /// The run's base commit, in a throwaway detached worktree.
+    /// The run's base commit, in an isolated committed-tree copy.
     RunBase,
-    /// The verifier's own checkout, in place, at the commit it judged.
+    /// An isolated copy at the commit the verifier judged.
     Judged,
 }
 
@@ -90,6 +86,16 @@ pub(crate) struct HostRunVerdict {
     /// entry, whose empty lists say nothing).
     #[serde(default)]
     pub ids_kept: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub verbatim: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub per_test_verdict: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub isolated: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// The run's base commit: the `HEAD` its first `repository_bound` event
@@ -141,10 +147,62 @@ pub(crate) fn cached(
     commit: &str,
     command: &str,
 ) -> Option<HostRunVerdict> {
-    let bytes = std::fs::read(verdict_path(store, tree, commit, command)).ok()?;
-    serde_json::from_slice::<HostRunVerdict>(&bytes)
-        .ok()
-        .filter(|verdict| verdict.commit == commit && verdict.command == command)
+    let path = verdict_path(store, tree, commit, command);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "cached verdict could not be read");
+            return None;
+        }
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "cached verdict could not be decoded");
+            return None;
+        }
+    };
+    if value
+        .get("identity_digits_preserved")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        tracing::info!(%command, "cached verdict does not attest digit-preserving identity evidence");
+        return None;
+    }
+    let mut verdict: HostRunVerdict = match serde_json::from_value(value) {
+        Ok(verdict) => verdict,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "cached verdict could not be decoded");
+            return None;
+        }
+    };
+    if tree == Tree::Judged && !verdict.isolated {
+        tracing::debug!(%command, "stored verdict does not record isolated execution");
+        return None;
+    }
+    if !verdict.verbatim {
+        tracing::debug!(%command, "stored verdict does not record verbatim execution");
+        return None;
+    }
+    if let Some(stored) = verdict.signatures.remove("")
+        && let Some(identity) = super::test_baseline_parse::failure_identity(&stored, Path::new(""))
+    {
+        verdict.signatures.insert(String::new(), identity);
+    }
+    (verdict.commit == commit && verdict.command == command).then_some(verdict)
+}
+
+pub(crate) fn cached_per_test(
+    store: &WorkflowV2ResultStore,
+    tree: Tree,
+    commit: &str,
+    command: &str,
+    frozen: &FrozenCommands,
+) -> Option<HostRunVerdict> {
+    let command = frozen.command(command).ok()?;
+    cached(store, tree, commit, command).filter(|verdict| verdict.per_test_verdict)
 }
 
 pub(crate) fn cache(store: &WorkflowV2ResultStore, tree: Tree, verdict: &HostRunVerdict) {
@@ -152,7 +210,9 @@ pub(crate) fn cache(store: &WorkflowV2ResultStore, tree: Tree, verdict: &HostRun
     let write = || -> std::io::Result<()> {
         std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(verdict)?)?;
+        let mut value = serde_json::to_value(verdict)?;
+        value["identity_digits_preserved"] = serde_json::Value::Bool(true);
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&value)?)?;
         std::fs::rename(&tmp, &path)
     };
     if let Err(error) = write() {
@@ -161,9 +221,8 @@ pub(crate) fn cache(store: &WorkflowV2ResultStore, tree: Tree, verdict: &HostRun
 }
 
 /// Each host-runnable command of `commands` on `tree` at `commit`, from the
-/// cache or run once. `Tree::Judged` runs in `repository_root` itself and
-/// only while its `HEAD` is `commit`; `Tree::RunBase` runs in a throwaway
-/// detached worktree removed afterwards. A command without a verdict is
+/// cache or run once. Both trees run in isolated committed-tree copies.
+/// The judged revision is checked against the live head before copying. A command without a verdict is
 /// absent from the map.
 pub(crate) async fn host_verdicts(
     store: &WorkflowV2ResultStore,
@@ -172,15 +231,23 @@ pub(crate) async fn host_verdicts(
     tree: Tree,
     commit: &str,
     commands: &[String],
+    frozen: &FrozenCommands,
 ) -> BTreeMap<String, HostRunVerdict> {
     let mut verdicts = BTreeMap::new();
     let mut pending = Vec::new();
-    for command in commands.iter().filter(|command| host_runnable(command)) {
-        match cached(store, tree, commit, command) {
-            Some(hit) => {
-                verdicts.insert(command.clone(), hit);
+    for reported in commands {
+        let command = match frozen.command(reported) {
+            Ok(command) => command,
+            Err(reason) => {
+                tracing::debug!(%reported, %reason, "command was not run");
+                continue;
             }
-            None => pending.push(command.clone()),
+        };
+        match cached(store, tree, commit, command).filter(|run| run.verbatim) {
+            Some(hit) => {
+                verdicts.insert(reported.clone(), hit);
+            }
+            None => pending.push((reported.clone(), command.to_string())),
         }
     }
     if pending.is_empty() {
@@ -191,81 +258,100 @@ pub(crate) async fn host_verdicts(
         "run-base-{}",
         super::sanitize_v2_path_segment(&sha)
     ));
-    let workdir = match tree {
-        Tree::Judged => {
-            let head = crate::repository_record::git_head(repository_root).ok();
-            if head.as_deref() != Some(commit) {
-                return verdicts;
-            }
-            repository_root.to_path_buf()
-        }
-        Tree::RunBase => {
-            if !add_worktree(repository_root, &scratch, commit) {
-                return verdicts;
-            }
-            scratch.clone()
-        }
-    };
-    for command in pending {
+    if tree == Tree::Judged
+        && crate::repository_record::git_head(repository_root)
+            .ok()
+            .as_deref()
+            != Some(commit)
+    {
+        return verdicts;
+    }
+    if !add_worktree(repository_root, &scratch, commit) {
+        return verdicts;
+    }
+    let workdir = scratch.clone();
+    for (reported, command) in pending {
         let run = super::test_baseline_run::run_in_worktree(
             dispatch,
             &workdir,
-            &complete_run(&command),
+            &command,
             Some(store.run_root()),
         )
         .await;
         if run.error.is_some()
             || run.timed_out
-            || !harness_reported(&run.output)
+            || run.exit_code.is_none()
             || crate::acceptance_check_shell_unset::never_pass(
                 &command,
                 run.exit_code.unwrap_or(-1),
                 &run.output,
             )
         {
+            tracing::warn!(%command, error = ?run.error, timed_out = run.timed_out, exit_code = ?run.exit_code, "the host run did not produce a usable completion verdict");
             continue;
         }
         let failing = failing_tests(&run.output);
+        let mut signatures: BTreeMap<String, String> = failing
+            .iter()
+            .map(|id| (id.clone(), panics::signature_at(&run.output, id, &workdir)))
+            .collect();
+        if let Some(identity) = super::test_baseline_parse::failure_identity(&run.output, &workdir)
+        {
+            signatures.insert(String::new(), identity);
+        }
+        let mut failure_files: BTreeMap<String, Vec<String>> = failing
+            .iter()
+            .map(|id| (id.clone(), panic_files(&run.output, id, &workdir)))
+            .collect();
+        failure_files.insert(
+            String::new(),
+            super::test_baseline_parse::diagnostic_files_for(&run.output, &workdir, &command),
+        );
         let verdict = HostRunVerdict {
             command: command.clone(),
             commit: commit.to_string(),
             exit_code: run.exit_code,
-            signatures: failing
-                .iter()
-                .map(|id| (id.clone(), signature(&run.output, id)))
-                .collect(),
-            failure_files: failing
-                .iter()
-                .map(|id| (id.clone(), panic_files(&run.output, id, &workdir)))
-                .collect(),
+            signatures,
+            failure_files,
             failing_tests: failing,
             failed_count: failed_count(&run.output),
             passed_tests: super::test_baseline_parse::passed_tests(&run.output),
             ignored_tests: super::test_baseline_parse::ignored_tests(&run.output),
             ids_kept: true,
+            verbatim: true,
+            per_test_verdict: harness_reported(&run.output),
+            isolated: true,
         };
         cache(store, tree, &verdict);
-        verdicts.insert(command, verdict);
+        verdicts.insert(reported, verdict);
     }
-    if tree == Tree::RunBase {
-        remove_worktree(repository_root, &scratch);
-    }
+    remove_worktree(repository_root, &scratch);
     verdicts
 }
 
-#[path = "test_baseline_run_base_args.rs"]
-mod args;
-pub(crate) use args::host_runnable;
-use args::{complete_run, failed_count, harness_reported};
+#[path = "test_baseline_frozen.rs"]
+mod frozen;
+use super::test_baseline_parse::{failed_count, harness_reported};
+pub(crate) use frozen::{CommandNotRun, FrozenCommands, host_runnable};
 
 #[path = "test_baseline_run_base_git.rs"]
 mod git;
-use git::{add_worktree, remove_worktree};
+pub(in crate::v2) use git::{add_worktree, remove_worktree};
 
 #[path = "test_baseline_run_base_panics.rs"]
 mod panics;
-pub(crate) use panics::{panic_files, signature};
+#[cfg(test)]
+pub(crate) use panics::signature;
+pub(crate) use panics::{panic_files, signature_at};
 
 #[cfg(test)]
 #[path = "test_baseline_run_base_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "test_baseline_host_rule_tests.rs"]
+mod rule_tests;
+
+#[cfg(all(test, unix))]
+#[path = "test_baseline_isolated_tests.rs"]
+mod isolated_tests;

@@ -25,10 +25,6 @@
 //!
 //! Nothing here knows a PRD, a language or a domain: ids, texts and paths
 //! come from the PRD, the task set and the run.
-
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
-
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_LOCK_FILE, AcceptanceCheck, AcceptanceContract, AcceptanceCriterion, GapPolicy,
     JudgeDecision, JudgeVerdict, PrdIdentity, REQUIRED_RESIDUAL_GAP_FIELDS, TrustedCwd,
@@ -38,6 +34,8 @@ use archon_workflow::v2::acceptance_stage::coverage::{
     prd_requirement_texts, supplementary_id, supplementary_requirement,
 };
 use archon_workflow::{WorkflowLlmClient, WorkflowResult, WorkflowStore, poll_v2_run_control};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use super::exec::StageContext;
 use crate::command::workflow_task_set::executability::{
@@ -228,6 +226,9 @@ pub(super) async fn author_owed(
         Ok(scope) => scope,
         Err(error) => return Ok(Err(error)),
     };
+    if let Err(error) = scope.use_run_decisions(site.store, site.run_id) {
+        return Ok(Err(error));
+    }
     scope.repository_root = site.context.repository.clone();
     scope.baseline = baseline_of(site);
     if let Some(binding) = &site.context.binding {

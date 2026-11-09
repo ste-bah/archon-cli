@@ -56,37 +56,39 @@ fn message_after(lines: &[&str], at: usize) -> String {
 
 /// `path` out of `path:line:col[...]`, when two numbers follow it.
 fn location_path(location: &str) -> Option<&str> {
-    let mut parts = location.split(':');
-    let path = parts.next()?.trim();
-    let line = parts.next()?;
-    let col = parts.next()?;
+    let (path_line, col) = location.rsplit_once(':')?;
+    let (path, line) = path_line.rsplit_once(':')?;
     let numeric = |text: &str| !text.is_empty() && text.chars().all(|c| c.is_ascii_digit());
     (!path.is_empty() && numeric(line) && numeric(col.trim())).then_some(path)
 }
 
-/// Absolute paths and temporary names replaced, so two runs of one failure
-/// in different directories read alike.
-fn normalised(text: &str) -> String {
-    text.split_whitespace()
-        .map(|word| {
-            let bare = word.trim_matches(|c: char| "\"'`()[],;".contains(c));
-            if bare.starts_with('/') || bare.contains(".tmp") || bare.contains("/tmp/") {
-                "<path>"
-            } else {
-                word
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+/// Normalize duration tokens and hex addresses, preserving identifiers and paths.
+pub(super) fn normalised(text: &str) -> String {
+    super::super::test_baseline_parse::mask_run_values(text)
+        .trim()
+        .to_string()
 }
 
-/// `test_id`'s failure signature: every panic's location and first message
-/// line, normalised; empty when the output shows no panic of it (a failure
+/// `test_id`'s failure signature: every panic's location and message
+/// lines, normalized; empty when the output shows no panic of it (a failure
 /// the host cannot compare, which therefore never matches).
+#[cfg(test)]
 pub(crate) fn signature(output: &str, test_id: &str) -> String {
+    signature_at(output, test_id, Path::new(""))
+}
+
+pub(crate) fn signature_at(output: &str, test_id: &str, root: &Path) -> String {
+    let root_pattern = super::super::test_baseline_parse::identity_root_pattern(root);
+    let normalize = |text: &str| {
+        let text = root_pattern.as_ref().map_or_else(
+            || text.to_string(),
+            |pattern| pattern.replace_all(text, "${before}<root>/").into_owned(),
+        );
+        normalised(&text)
+    };
     panics(output, test_id)
         .into_iter()
-        .map(|(location, message)| format!("{} | {}", normalised(&location), normalised(&message)))
+        .map(|(location, message)| format!("{} | {}", normalize(&location), normalize(&message)))
         .collect::<Vec<_>>()
         .join(" || ")
 }
@@ -97,7 +99,20 @@ pub(crate) fn panic_files(output: &str, test_id: &str, workdir: &Path) -> Vec<St
     let mut files: Vec<String> = panics(output, test_id)
         .into_iter()
         .filter_map(|(location, _)| location_path(&location).map(str::to_string))
-        .filter(|path| !path.starts_with('/') && workdir.join(path).is_file())
+        .filter_map(|path| {
+            let path = archon_write_plan::lexical_path::portable(&path);
+            let relative = if archon_write_plan::lexical_path::rooted(&path) {
+                std::iter::once(workdir.to_path_buf())
+                    .chain(std::fs::canonicalize(workdir).ok())
+                    .find_map(|root| {
+                        archon_write_plan::lexical_path::under_root(&path, &root.to_string_lossy())
+                    })?
+            } else {
+                path.trim_start_matches("./").to_string()
+            };
+            (!relative.split('/').any(|part| part == "..") && workdir.join(&relative).is_file())
+                .then_some(relative)
+        })
         .collect();
     files.sort();
     files.dedup();

@@ -1,0 +1,10 @@
+{
+  "kind": "real recording",
+  "command": [
+    "go",
+    "test",
+    "./..."
+  ],
+  "exit_code": 1,
+  "input": "package proof\nfunc add() int { return missing }\n"
+}

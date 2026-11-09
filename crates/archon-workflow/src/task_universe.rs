@@ -32,4 +32,6 @@ pub use task_universe_b::*;
 
 #[path = "task_universe_parsing.rs"]
 pub mod parsing;
-use parsing::{merge_project_capabilities, parse_task_file};
+use parsing::merge_project_capabilities;
+#[cfg(test)]
+use parsing::parse_task_file;

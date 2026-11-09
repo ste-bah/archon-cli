@@ -21,7 +21,9 @@ fn real_task_path() -> std::path::PathBuf {
 fn real_universe() -> WorkflowV2TaskUniverse {
     let path = real_task_path();
     let raw = std::fs::read_to_string(&path).expect("read fixture task file");
-    let task = parse_task_file(&path, &raw).expect("fixture task file parses");
+    let mut task = parse_task_file(&path, &raw).expect("fixture task file parses");
+    let (_site, search_path) = crate::task_universe::focused_commands::site_tests::command_site();
+    task.freeze_focused_commands(path.parent().unwrap(), &search_path);
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),

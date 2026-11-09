@@ -48,6 +48,7 @@ async fn send_planner_notification(
     })
 }
 
+#[cfg(test)]
 pub(crate) async fn plan_live(
     store: &WorkflowStore,
     task: &str,
@@ -56,13 +57,36 @@ pub(crate) async fn plan_live(
     generated_config: &GeneratedWorkflowConfig,
     learning: &LearningConfig,
 ) -> Result<WorkflowScriptPlan> {
-    let task_universe = extract_task_universe_for_generated_run(task)?;
-    if let Some(task_universe) = task_universe {
+    plan_live_with_path(store, task, llm, ui_sink, generated_config, learning, None).await
+}
+
+pub(crate) async fn plan_live_with_path(
+    store: &WorkflowStore,
+    task: &str,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
+    generated_config: &GeneratedWorkflowConfig,
+    learning: &LearningConfig,
+    toolchain_path: Option<&std::ffi::OsStr>,
+) -> Result<WorkflowScriptPlan> {
+    let task_universe =
+        archon_workflow::task_universe::extract_task_universe_for_generated_run_with_path(
+            task, None,
+        )?;
+    if let Some(mut task_universe) = task_universe {
         // Issue-55: a task set that records its repository is implemented
         // against that repository; a contradiction refuses before any run
         // directory exists.
         let target_repository_root =
             resolve_target_repository(task, Some(&task_universe))?.target_repository_root;
+        if let Some(root) = target_repository_root.as_deref() {
+            for entry in &mut task_universe.tasks {
+                entry.freeze_focused_commands(
+                    std::path::Path::new(root),
+                    toolchain_path.unwrap_or(std::ffi::OsStr::new("")),
+                );
+            }
+        }
         let governed_learning_context = recent_generated_learning_context(store, 8);
         send_planner_notification(
             &ui_sink,

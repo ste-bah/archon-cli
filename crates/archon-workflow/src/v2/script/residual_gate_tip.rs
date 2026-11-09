@@ -35,7 +35,9 @@ use std::path::Path;
 use super::super::super::{WorkflowV2CallRecord, WorkflowV2ResultStore};
 use super::super::superseded::HostRuns;
 use super::super::{Residual, residuals_of};
-use crate::v2::write::test_baseline_run_base::{Tree, cached, host_runnable};
+use crate::v2::write::test_baseline_run_base::{
+    FrozenCommands, Tree, cached_per_test as cached, host_runnable,
+};
 
 /// What the host's own tip run says of a gap.
 pub(super) enum TipJudgment {
@@ -51,6 +53,7 @@ pub(super) struct TipRuns<'a> {
     host: &'a HostRuns,
     tip: Option<String>,
     records: BTreeMap<String, WorkflowV2CallRecord>,
+    frozen: FrozenCommands,
 }
 
 impl<'a> TipRuns<'a> {
@@ -58,6 +61,7 @@ impl<'a> TipRuns<'a> {
         store: &'a WorkflowV2ResultStore,
         host: &'a HostRuns,
         repository_root: Option<&Path>,
+        universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
     ) -> Self {
         let tip = repository_root.and_then(|root| crate::repository_record::git_head(root).ok());
         let records = store
@@ -71,6 +75,7 @@ impl<'a> TipRuns<'a> {
             host,
             tip,
             records,
+            frozen: FrozenCommands::from_universe(universe),
         }
     }
 
@@ -132,11 +137,17 @@ impl<'a> TipRuns<'a> {
         let at: String = tip.chars().take(9).collect();
         let mut red: Vec<String> = Vec::new();
         for (command, tests) in &owed.by_command {
-            let verdict =
-                cached(self.store, Tree::RunBase, tip, command).filter(|verdict| verdict.ids_kept);
+            if let Err(reason) = self.frozen.check(command) {
+                red.push(format!(
+                    "the host cannot use `{command}` at the final tip: {reason}"
+                ));
+                continue;
+            }
+            let verdict = cached(self.store, Tree::RunBase, tip, command, &self.frozen)
+                .filter(|verdict| verdict.ids_kept);
             let Some(verdict) = verdict else {
                 red.push(format!(
-                    "the host's own run of `{command}` at the final tip {at} gave no verdict (only plain test-runner commands run)"
+                    "no recorded per-test verdict for `{command}` at the final tip {at}"
                 ));
                 continue;
             };
@@ -245,6 +256,7 @@ impl super::ResidualVerdict {
 pub fn tip_owed_commands(
     store: &WorkflowV2ResultStore,
     repository_root: Option<&Path>,
+    universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
 ) -> Vec<String> {
     let host = HostRuns::load(store);
     let stored = store.load_call_records().unwrap_or_default();
@@ -270,9 +282,10 @@ pub fn tip_owed_commands(
             owe(&residual, record);
         }
     }
+    let frozen = FrozenCommands::from_universe(universe);
     commands
         .into_iter()
-        .filter(|command| host_runnable(command))
+        .filter(|command| host_runnable(command, &frozen))
         .collect()
 }
 

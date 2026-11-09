@@ -34,7 +34,7 @@ pub(in crate::v2::script::residual_plan) fn noop_round_world(
         &["config", "user.name", "t"],
         &["config", "user.email", "t@example.invalid"],
         &["add", "."],
-        &["commit", "-qm", "tip"],
+        &["commit", "--allow-empty", "-qm", "tip"],
     ] {
         git(w.root(), args);
     }
@@ -79,6 +79,8 @@ pub(in crate::v2::script::residual_plan) fn tip_run(
         &w.store,
         Tree::RunBase,
         &HostRunVerdict {
+            verbatim: true,
+            per_test_verdict: true,
             command: B_TESTS.into(),
             commit: tip.into(),
             exit_code: Some(if failing.is_empty() { 0 } else { 101 }),
@@ -103,6 +105,8 @@ fn tip_run_ids(
         &w.store,
         Tree::RunBase,
         &HostRunVerdict {
+            verbatim: true,
+            per_test_verdict: true,
             command: command.into(),
             commit: tip.into(),
             exit_code: Some(if failing.is_empty() { 0 } else { 101 }),
@@ -133,7 +137,10 @@ fn an_agent_gap_another_landing_fixed_is_answered_at_the_tip_only_when_corrobora
     let w = package_world();
     let (calls, tip) = noop_round_world(&w);
     let gate = || residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-    assert_eq!(tip_owed_commands(&w.store, Some(w.root())), [B_TESTS]);
+    assert_eq!(
+        tip_owed_commands(&w.store, Some(w.root()), Some(&w.universe)),
+        [B_TESTS]
+    );
     // Green at the tip, but a verifier agent recorded it and no later
     // accepted verifier corroborates: a test run alone never answers it.
     tip_run(&w, &tip, &[], &[RED]);
@@ -191,6 +198,7 @@ fn a_gap_its_rounds_verifier_kept_open_is_never_answered_at_the_tip() {
     let round = third(&w).rounds[0].clone();
     pause();
     let mut judge = round_verdict(
+        &w,
         &round,
         "verification-wave-review-verify-residual-8",
         3,
@@ -222,9 +230,14 @@ fn a_gap_its_rounds_verifier_kept_open_is_never_answered_at_the_tip() {
 /// tip verdict keeps the gap standing.
 #[test]
 fn an_idless_red_command_the_recorder_saw_stays_owed_at_the_tip() {
-    let w = package_world();
-    let (calls, tip) = noop_round_world(&w);
     const LINT: &str = "cargo clippy -p b -- -D warnings";
+    let mut w = package_world();
+    w.universe.tasks[1].focused_tests.push(LINT.into());
+    w.universe.tasks[1]
+        .focused_commands
+        .get_or_insert_default()
+        .push(LINT.into());
+    let (calls, tip) = noop_round_world(&w);
     let red: crate::v2::write::test_baseline::BranchBaseline = serde_json::from_value(json!({
         "schema_version": 1, "stage_id": "verification-wave-review-verify-residual-6",
         "branch_id": "verification-wave-review-verify-residual-6-0", "base_commit": "c",
@@ -253,7 +266,7 @@ fn an_idless_red_command_the_recorder_saw_stays_owed_at_the_tip() {
     assert!(
         gate.blocking.iter().any(|b| b.contains("gap-regression")
             && b.contains(LINT)
-            && b.contains("gave no verdict")),
+            && b.contains("no recorded per-test verdict")),
         "{gate:#?}"
     );
 }
@@ -272,7 +285,7 @@ fn a_restatement_is_never_judged_at_the_tip() {
     corroborate(&w);
     tip_run(&w, &tip, &[], &[RED]);
     let host = super::super::super::superseded::HostRuns::load(&w.store);
-    let runs = super::TipRuns::load(&w.store, &host, Some(w.root()));
+    let runs = super::TipRuns::load(&w.store, &host, Some(w.root()), Some(&w.universe));
     let recorder = w
         .store
         .load_call_record("verification-wave-review-verify-residual-6")
@@ -300,6 +313,7 @@ fn a_host_routed_gap_is_answered_by_the_tip_run_alone() {
     ));
     pause();
     let verify = round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -339,7 +353,10 @@ fn a_host_routed_gap_is_answered_by_the_tip_run_alone() {
         second_slot(),
         third_slot(),
     ];
-    assert!(tip_owed_commands(&w.store, Some(w.root())).contains(&B_TESTS.to_string()));
+    assert!(
+        tip_owed_commands(&w.store, Some(w.root()), Some(&w.universe))
+            .contains(&B_TESTS.to_string())
+    );
     tip_run(&w, &tip, &[], &[RED]);
     let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
     assert!(
@@ -376,7 +393,7 @@ fn a_gap_owing_no_test_is_not_answered_at_the_tip() {
         gate.blocking.iter().any(|b| b.contains("gap-b-lane")),
         "{gate:#?}"
     );
-    assert!(tip_owed_commands(&w.store, Some(w.root())).is_empty());
+    assert!(tip_owed_commands(&w.store, Some(w.root()), Some(&w.universe)).is_empty());
 }
 
 /// An agent that records a gap under the host's own id prefix gets agent

@@ -231,7 +231,7 @@ pub fn residual_verdict(
         })
         .collect();
     let host = HostRuns::load(store);
-    let tip = TipRuns::load(store, &host, repository_root);
+    let tip = TipRuns::load(store, &host, repository_root, universe);
     let mut weighed = BTreeSet::new();
     let standing: Vec<(Residual, String, bool)> = standing
         .into_iter()

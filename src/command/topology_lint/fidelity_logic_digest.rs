@@ -123,6 +123,11 @@ pub const FILES: &[&str] = &[
 #[cfg_attr(not(test), allow(dead_code, reason = "read by the guard test"))]
 pub const EXCLUDED: &[(&str, &str)] = &[
     (
+        "src/command/topology_lint/fidelity_entry.rs",
+        "captures the site command path and delegates evaluation; does not inspect \
+         critic replies or decide whether a critic verdict is accepted",
+    ),
+    (
         "src/command/topology_lint/fidelity.rs",
         "builds each question's data (obligation text, cluster tasks and their texts, \
          skeleton section) and reads standings after reuse; all of that data is in the \

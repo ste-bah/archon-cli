@@ -11,17 +11,9 @@ const TESTS: &str = "crates/shared/src/store_tests.rs";
 const STALE: &str = "store::tests::stale";
 const LIB: &str = "cargo test -p shared --lib";
 
-/// The Issue-117 world plus a package the host can resolve test ids in.
-pub(super) fn package_world() -> World {
-    let w = world();
-    std::fs::write(
-        w.root().join("crates/shared/Cargo.toml"),
-        "[package]\nname = \"shared\"\n",
-    )
-    .unwrap();
-    std::fs::write(w.root().join(TESTS), "//\n").unwrap();
-    w
-}
+#[path = "residual_second_pass_fixture.rs"]
+mod fixture;
+pub(super) use fixture::package_world;
 
 /// A first-pass round: an accepted verifier's gap on the store file.
 pub(super) fn first_round(w: &World, severity: &str) -> (WorkflowV2CallRecord, PlannedRound) {
@@ -78,6 +70,7 @@ pub(super) fn round_call(
 /// A verifier of `round` the host refused over `red` (the shape of
 /// wf-0ddadd81's round-3 verifier), or accepted recording `gaps`.
 pub(super) fn round_verdict(
+    w: &World,
     round: &PlannedRound,
     id: &str,
     pass: u64,
@@ -91,7 +84,9 @@ pub(super) fn round_verdict(
         WorkflowV2Status::NeedsReview
     };
     let mut verdict = record(round_call(round, id, "verify", pass), status, &tasks, gaps);
-    verdict.result.data["outcomes"][0]["result"]["data"] = json!({"baseline_red_tests": red});
+    let commit = crate::repository_record::git_head(w.root()).unwrap();
+    verdict.result.data["outcomes"][0]["result"]["data"] =
+        json!({"baseline_red_tests": red, "judged_commit": commit});
     verdict.result.data["outcomes"][0]["result"]["commands_run"] =
         json!([{"kind": "test", "command": LIB, "status": "failed", "output_summary": "7 failed"}]);
     verdict
@@ -109,6 +104,7 @@ fn a_refused_rounds_red_tests_outside_its_scope_get_one_second_pass_round() {
     let (_, first) = first_round(&w, "medium");
     let before: Vec<String> = w.plan().rounds.iter().map(|r| r.key.clone()).collect();
     w.save(&round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -125,8 +121,8 @@ fn a_refused_rounds_red_tests_outside_its_scope_get_one_second_pass_round() {
     let round = &plan.rounds[0];
     assert_eq!(round.kind, RoundKind::Expansion);
     assert!(round.key.ends_with("p2") && round.key != first.key);
-    // The refused round again, whole: its own file and gap, plus the test's
-    // file (its parent module's is the round's own store file).
+    // The refused round again, whole: its own file and gap, plus the located
+    // test file. The new gap names only that file, without parent inference.
     assert_eq!(ids(&round.files), [STORE, TESTS]);
     assert_eq!(ids(&round.tasks), ["TASK-A"]);
     let carried: Vec<&str> = round.residuals.iter().map(|g| g.id.as_str()).collect();
@@ -134,7 +130,7 @@ fn a_refused_rounds_red_tests_outside_its_scope_get_one_second_pass_round() {
     let gap = &round.residuals[1];
     assert!(gap.id.starts_with(REFUSED_RED_GAP_ID), "{}", gap.id);
     assert!(gap.description.contains(STALE), "{}", gap.description);
-    assert_eq!(gap.files, [STORE, TESTS]);
+    assert_eq!(gap.files, [TESTS]);
 }
 
 /// A first-pass round with a HIGH gap whose verifier the host refused over
@@ -150,6 +146,7 @@ fn refused_then_retried(w: &World, verify: WorkflowV2Status) -> Vec<WorkflowV2Ho
     ));
     std::thread::sleep(std::time::Duration::from_millis(5));
     let verify1 = round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -232,6 +229,7 @@ fn a_red_test_inside_the_refused_rounds_scope_is_its_own_failure_and_retried_who
     let first = w.plan().rounds[0].clone();
     assert_eq!(ids(&first.files), [STORE, TESTS]);
     w.save(&round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -252,6 +250,7 @@ fn a_host_red_gap_on_any_verdict_and_a_new_high_gap_of_a_round_are_planned() {
     let host_gap =
         format!("`{STALE}` in {TESTS} implicating {TESTS}, {STORE}: red at the run base");
     w.save(&round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -314,6 +313,12 @@ fn the_second_pass_is_uncapped_and_never_reads_its_own_rounds() {
                 ..Default::default()
             });
     }
+    for args in [
+        ["add", "."].as_slice(),
+        ["commit", "-qm", "gap files"].as_slice(),
+    ] {
+        crate::write_coordinator::worktree_isolation::run_git(args, w.root()).unwrap();
+    }
     let (_, first) = first_round(&w, "medium");
     let gaps: Vec<(String, String)> = (0..6)
         .map(|n| {
@@ -328,6 +333,7 @@ fn the_second_pass_is_uncapped_and_never_reads_its_own_rounds() {
         .map(|(id, text)| (id.as_str(), "high", text.as_str()))
         .collect();
     w.save(&round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -342,6 +348,7 @@ fn the_second_pass_is_uncapped_and_never_reads_its_own_rounds() {
     // nothing: its records are never this pass's population.
     let keys: Vec<String> = plan.rounds.iter().map(|r| r.key.clone()).collect();
     w.save(&round_verdict(
+        &w,
         &plan.rounds[0],
         "verification-wave-review-verify-residual-9",
         2,
@@ -366,6 +373,7 @@ fn the_gate_judges_second_pass_rounds_and_plans_no_third() {
     std::thread::sleep(std::time::Duration::from_millis(5));
     // The first round's verifier accepted, recording a NEW high gap.
     let verify1 = round_verdict(
+        &w,
         &first,
         "verification-wave-review-verify-residual-4",
         1,
@@ -409,6 +417,7 @@ fn the_gate_judges_second_pass_rounds_and_plans_no_third() {
     std::thread::sleep(std::time::Duration::from_millis(5));
     // Its verifier accepts, and records another high gap: no third pass.
     let verify2 = round_verdict(
+        &w,
         &round,
         "verification-wave-review-verify-residual-6",
         2,
@@ -461,34 +470,5 @@ fn the_gate_judges_second_pass_rounds_and_plans_no_third() {
     );
 }
 
-#[test]
-fn a_retry_is_granted_every_file_the_hosts_judged_run_saw_its_test_fail_in() {
-    use crate::v2::write::test_baseline_run_base::{HostRunVerdict, Tree, cache};
-    let w = package_world();
-    let extra = "crates/shared/src/fixtures.rs";
-    std::fs::write(w.root().join(extra), "//\n").unwrap();
-    let (_, first) = first_round(&w, "high");
-    let mut judge = round_verdict(
-        &first,
-        "verification-wave-review-verify-residual-4",
-        1,
-        &[STALE],
-        &[],
-    );
-    judge.result.data["outcomes"][0]["result"]["data"]["judged_commit"] = json!("judged");
-    w.save(&judge);
-    cache(
-        &w.store,
-        Tree::Judged,
-        &HostRunVerdict {
-            command: LIB.into(),
-            commit: "judged".into(),
-            exit_code: Some(101),
-            failing_tests: vec![STALE.into()],
-            failure_files: [(STALE.to_string(), vec![extra.to_string()])].into(),
-            ..Default::default()
-        },
-    );
-    let retry = second(&w).rounds[0].clone();
-    assert_eq!(ids(&retry.files), [extra, STORE, TESTS]);
-}
+#[path = "residual_second_pass_location_tests.rs"]
+mod location_tests;

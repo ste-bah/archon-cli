@@ -11,10 +11,15 @@ use crate::v2::WorkflowV2ResultStore;
 
 /// A command shaped like a cargo run of package `app` that reports `tests`
 /// as failed and exits red.
-fn red(command: &str, tests: &[&str]) -> String {
+fn red(command: &str, tests: &[&str], location: Option<&str>) -> String {
     let lines: String = tests
         .iter()
-        .map(|test| format!("test {test} ... FAILED\\n"))
+        .map(|test| {
+            let frame = location
+                .map(|path| format!(r"thread \047{test}\047 panicked at {path}:1:1:\nboom\n"))
+                .unwrap_or_default();
+            format!(r"test {test} ... FAILED\n{frame}")
+        })
         .collect();
     format!(": {command} ; printf '{lines}'; exit 101")
 }
@@ -37,16 +42,21 @@ async fn an_integration_failure_lands_on_its_test_file_and_is_ignored_when_that_
     let (canonical, ws) = repository(temp.path());
     std::fs::create_dir_all(ws.join("tests")).unwrap();
     std::fs::write(ws.join("tests/gates.rs"), "// integration\n").unwrap();
-    let base = head(&canonical);
+    crate::write_coordinator::worktree_isolation::run_git(&["add", "."], &ws).unwrap();
+    crate::write_coordinator::worktree_isolation::run_git(&["commit", "-qm", "test input"], &ws)
+        .unwrap();
+    let base = head(&ws);
     let command = red(
         "cargo nextest run -p app --test gates",
         &["current_artifact_integrity_is_required"],
+        Some("tests/gates.rs"),
     );
 
     // Nobody forbids the file: it is the task's, and it is the TEST file —
     // not `src/lib.rs`, which is what the crate-root fallback used to give.
     let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
     let ctx = WaveBaselineContext {
+        repository_root: &canonical,
         store: &store,
         dispatch: &Host,
         universe: None,
@@ -99,6 +109,7 @@ async fn a_test_id_no_file_can_be_resolved_for_is_unowned_and_not_this_tasks_obl
     let base = head(&canonical);
     let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
     let ctx = WaveBaselineContext {
+        repository_root: &canonical,
         store: &store,
         dispatch: &Host,
         universe: None,
@@ -107,7 +118,7 @@ async fn a_test_id_no_file_can_be_resolved_for_is_unowned_and_not_this_tasks_obl
         inputs_digest: None,
         parallelism: 1,
     };
-    let command = red("cargo test -p app", &["nowhere::at_all", "bare_id"]);
+    let command = red("cargo test -p app", &["nowhere::at_all", "bare_id"], None);
     let records = establish_wave(&ctx, &[request(&command, &[], &ws)]).await;
     let record = &records[0];
     assert_eq!(record.commands[0].failing_tests.len(), 2);
@@ -143,6 +154,7 @@ async fn an_item_the_shell_cannot_find_is_a_non_command_not_an_obligation() {
     let base = head(&canonical);
     let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
     let ctx = WaveBaselineContext {
+        repository_root: &canonical,
         store: &store,
         dispatch: &Host,
         universe: None,

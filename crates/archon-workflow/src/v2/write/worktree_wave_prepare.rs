@@ -136,6 +136,7 @@ pub(super) async fn prepare_worktree_wave(
         .collect();
     let baselines = super::test_baseline_wave::establish_wave(
         &super::test_baseline_wave::WaveBaselineContext {
+            repository_root: canonical_root,
             store: v2_store,
             dispatch,
             universe: task_universe,

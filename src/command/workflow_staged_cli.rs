@@ -43,6 +43,9 @@ pub(super) async fn handle_staged_task_set_lint(
     let result = async {
         let resume = staged_set_gate_resume(&mut std::io::stderr());
         let mode = config.workflow.gate_mode;
+        let policy = crate::command::acceptance_check_policy::from_config(config)?;
+        let site_path =
+            crate::command::acceptance_check_policy::captured_command_path(policy.as_ref());
         if mode == archon_core::config::GateMode::Off {
             return Err(anyhow!(
                 "gate_mode=off must return before staged task-set lint"
@@ -82,15 +85,16 @@ pub(super) async fn handle_staged_task_set_lint(
             })
             .await
             .map_err(anyhow::Error::new);
-        let evaluation = match crate::command::topology_lint::evaluate_lint_with_fidelity_resumable(
-            cwd, &source, mode, client, &waivers, &resume,
-        )
-        .await
-        {
-            Ok(evaluation) => evaluation,
-            Err(error) => task_set_error::body_input_finding(&error)
-                .unwrap_or_else(|| task_set_error::gate_error_evaluation(&error)),
-        };
+        let evaluation =
+            match crate::command::topology_lint::evaluate_lint_with_fidelity_resumable_at_path(
+                cwd, &source, mode, client, &waivers, &resume, &site_path,
+            )
+            .await
+            {
+                Ok(evaluation) => evaluation,
+                Err(error) => task_set_error::body_input_finding(&error)
+                    .unwrap_or_else(|| task_set_error::gate_error_evaluation(&error)),
+            };
         let staging_root = gate_envelope
             .parent()
             .ok_or_else(|| anyhow!("staged task-set envelope has no parent"))?;
@@ -137,6 +141,9 @@ pub(super) async fn handle_staged_task_file_lint(
 ) -> Result<()> {
     let result = async {
         let mode = config.workflow.gate_mode;
+        let policy = crate::command::acceptance_check_policy::from_config(config)?;
+        let site_path =
+            crate::command::acceptance_check_policy::captured_command_path(policy.as_ref());
         if mode == archon_core::config::GateMode::Off {
             return Err(anyhow!(
                 "gate_mode=off must return before staged task-file lint"
@@ -211,40 +218,41 @@ pub(super) async fn handle_staged_task_file_lint(
             .and_then(|name| name.to_str())
             .ok_or_else(|| anyhow!("candidate TASK path has no UTF-8 file name"))?
             .to_string();
-        let mut evaluation = match crate::command::topology_lint::evaluate_task_file_candidate(
-            cwd, &path, &candidate, mode,
-        ) {
-            Ok(evaluation) => evaluation,
-            Err(error) => {
-                let fallback_subject = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("task-file");
-                let Some(evaluation) = crate::command::workflow_gate::task_body_input_finding(
-                    &error,
-                    crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
-                    fallback_subject,
-                ) else {
-                    return Err(error);
-                };
-                let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
-                    staging_root,
-                    gate_envelope,
-                    call_id,
-                    "land-task-body",
-                    evaluation,
-                    Vec::new(),
-                )?;
-                println!("{}", serde_json::to_string(&manifest)?);
-                return Ok(());
-            }
-        };
+        let mut evaluation =
+            match crate::command::topology_lint::evaluate_task_file_candidate_at_path(
+                cwd, &path, &candidate, mode, &site_path,
+            ) {
+                Ok(evaluation) => evaluation,
+                Err(error) => {
+                    let fallback_subject = path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .unwrap_or("task-file");
+                    let Some(evaluation) = crate::command::workflow_gate::task_body_input_finding(
+                        &error,
+                        crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
+                        fallback_subject,
+                    ) else {
+                        return Err(error);
+                    };
+                    let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
+                        staging_root,
+                        gate_envelope,
+                        call_id,
+                        "land-task-body",
+                        evaluation,
+                        Vec::new(),
+                    )?;
+                    println!("{}", serde_json::to_string(&manifest)?);
+                    return Ok(());
+                }
+            };
         if let Ok(raw) = std::str::from_utf8(&candidate) {
-            evaluation
-                .findings
-                .extend(crate::command::requirement_trace::body_claim_findings(
-                    cwd, &path, raw,
-                ));
+            evaluation.findings.extend(
+                crate::command::requirement_trace::body_claim_findings_at_path(
+                    cwd, &path, raw, &site_path,
+                ),
+            );
         }
         // Whatever the host removed is recorded, a wrapper pair included.
         if let Some(packaging) = &packaging {
