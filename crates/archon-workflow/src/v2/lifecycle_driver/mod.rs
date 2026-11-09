@@ -221,3 +221,8 @@ pub(crate) fn terminal_marker_requires_report_fallback(status: Option<WorkflowV2
 pub(crate) fn is_terminal_gate_reroute(error: &WorkflowError) -> bool {
     error.to_string().contains(TERMINAL_GATE_REROUTE_MARKER)
 }
+
+pub(crate) mod verify_contract_route;
+
+#[cfg(test)]
+mod verify_contract_route_tests;

@@ -1,6 +1,8 @@
+#[cfg(unix)]
 use super::*;
 
 /// Candidate data paths `entry` names, relative to its working directory.
+#[cfg(unix)]
 pub(crate) fn named_inputs(
     entry: &AcceptanceCriterion,
     project: &Path,

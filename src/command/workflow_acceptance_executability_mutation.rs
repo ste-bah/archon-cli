@@ -23,7 +23,7 @@ mod operational;
 pub(super) use marker_protocol::Markers;
 #[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
 mod wrapper_script;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) use wrapper_script::wrap;
 #[path = "workflow_acceptance_executability_mutation_inline.rs"]
 mod inline;
@@ -98,7 +98,7 @@ pub(in crate::command::workflow_task_set) struct InputDiscovery {
     pub(in crate::command::workflow_task_set) candidates: Vec<CandidateDiagnostic>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn input_discovery(
     entry: &AcceptanceCriterion,
     project: &Path,
@@ -476,7 +476,7 @@ pub(super) fn mutated(
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_mutation_test_helpers.rs"]
 mod test_helpers;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use test_helpers::named_inputs;
 
 #[cfg(all(test, unix))]

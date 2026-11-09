@@ -283,6 +283,8 @@ impl AcceptanceRoundRecordV1 {
 
 #[path = "acceptance_coverage.rs"]
 pub mod coverage;
+#[path = "inspection_items.rs"]
+pub mod inspection;
 #[path = "acceptance_progress.rs"]
 pub mod progress;
 

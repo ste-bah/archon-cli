@@ -1,0 +1,5 @@
+{
+  "kind": "evidence",
+  "artifact_path": "out/<id>.json",
+  "typed_verifier_command": "true"
+}

@@ -154,3 +154,16 @@ fn commands_boolean_is_legacy_only_even_for_null_typed_marker() {
         assert!(!command_execution_stage(&request(input.clone())));
     }
 }
+
+#[test]
+fn typed_required_tools_grants_shell_after_real_context_projection() {
+    for entry in ["bash", "BASH", "shell"] {
+        let spec = WorkflowSpec::from_yaml(&format!("schema: archon.workflow.v1\nname: typed-tools\ntask: inspect\nstages:\n- id: inspect\n  kind: agent\n  required_tools: {entry}\n")).unwrap();
+        assert_eq!(spec.stages[0].required_tools, [entry]);
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::project(dir.path());
+        let run = store.create_run(spec).unwrap();
+        let input = crate::context::stage_input(&store, &run, &run.spec.stages[0]).unwrap();
+        assert!(command_execution_stage(&request(input)));
+    }
+}

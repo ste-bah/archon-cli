@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "deliverable contract declares typed_verifier_command against artifact_path 'out/<id>.json', which carries an unexpanded template token <id>; a typed verifier is handed one concrete path and cannot expand it; deliverable contract artifact_path 'out/<id>.json' carries an unexpanded template token <id> with no instance binding, so the gate can neither pass nor fail against it. Declare instance_artifact_field together with instance_source_path (or registry_path) and instance_source_records_field (or registry_records_field) so every instance is named by a source entry, or declare min_instances >= 1 so the expansion is a claim that can fail."
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "typed_verifier_command requires isolated command execution, deferred in R2a"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": ""
+  },
+  "recorded_with": "Python 3.11.17"
+}

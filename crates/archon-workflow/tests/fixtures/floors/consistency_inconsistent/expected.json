@@ -1,0 +1,17 @@
+{
+  "native": {
+    "findings": [
+      "declared deliverable is internally inconsistent: overall=passed with 1 failed check(s)"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"failures\": [\n    \"declared deliverable is internally inconsistent: overall=passed with 1 failed check(s)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

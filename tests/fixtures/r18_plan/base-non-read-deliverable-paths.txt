@@ -1,0 +1,11 @@
+.archon/trading-lab/strategies/AHDM-v1/strategy-spec.json
+crates/archon-trading/src/coverage.rs
+crates/archon-trading/src/data_lake.rs
+crates/archon-trading/src/data_store/migration.rs
+crates/archon-trading/src/lib.rs
+crates/archon-trading/src/providers/openbb_polygon.rs
+crates/archon-trading/src/providers/stooq.rs
+crates/archon-trading/src/providers/yfinance.rs
+crates/archon-trading/tests/nfr_gates.rs
+registry-migration-report.json
+src/command/trading_backtest.rs

@@ -169,6 +169,10 @@ fn split_qualified(name: &str) -> Option<(&str, &str)> {
 
 pub(crate) fn explicitly_permitted_tools(project_root: &Path) -> BTreeSet<String> {
     let configs = archon_mcp::config::load_merged_configs(project_root).unwrap_or_default();
+    permitted_in(&configs)
+}
+
+fn permitted_in(configs: &[ServerConfig]) -> BTreeSet<String> {
     let mut tools = BTreeSet::new();
     for config in configs {
         for (name, risk) in &config.tool_policy.tool_permissions {
@@ -186,6 +190,21 @@ pub(crate) fn explicitly_permitted_tools(project_root: &Path) -> BTreeSet<String
     tools
 }
 
+/// Strict project input; user-wide configuration never changes this verdict.
+pub(crate) fn project_permitted_tools(
+    project_root: &Path,
+) -> Result<(std::path::PathBuf, BTreeSet<String>), String> {
+    let path = project_root.join(".mcp.json");
+    let mut configs = archon_mcp::config::load_config_file(&path)
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+    configs.retain(|config| !config.disabled);
+    Ok((path, permitted_in(&configs)))
+}
+
 #[cfg(test)]
 #[path = "workflow_mcp_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_prd_tools_tests.rs"]
+mod prd_tools_tests;

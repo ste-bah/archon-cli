@@ -2,7 +2,7 @@ use super::hermetic::{Unrun, data_digest, data_digest_scoped};
 use super::*;
 
 /// The state of the project data the site copies, for `tree`.
-pub(super) fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<String>, Unrun> {
+pub(crate) fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<String>, Unrun> {
     let mut states = probe.data_states.lock().expect("data states lock");
     if let Some(state) = states.get(&tree.repository) {
         return Ok(state.clone());

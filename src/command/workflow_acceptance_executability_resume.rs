@@ -20,7 +20,8 @@ const SCHEMA: u32 = 7;
 
 #[path = "workflow_acceptance_executability_resume_files.rs"]
 mod result_files;
-use result_files::{write_archive, write_owner_only};
+use result_files::write_archive;
+pub(super) use result_files::write_owner_only;
 
 pub(super) type SavePredicate = Arc<dyn Fn(&CheckResult) -> bool + Send + Sync>;
 
@@ -63,14 +64,14 @@ impl HostProbe {
     }
 
     /// Bound every check by `secs` instead of its site's own limit.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn with_check_cap(mut self, secs: u64) -> Self {
         self.check_cap_secs = secs;
         self
     }
 
     /// Stand for a new process: verdicts come only from disk.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn without_process_memo(mut self) -> Self {
         self.process_memo = false;
         self
@@ -162,7 +163,7 @@ impl HostProbe {
     /// The hooks one observation (or copy) of `keys` (id to memo key) runs
     /// under: the budget's allowance per check, and each verdict saved as
     /// it finishes, its key pushed to `written`.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn observe_hooks(
         &self,
         keys: &BTreeMap<String, String>,
@@ -240,12 +241,11 @@ impl HostProbe {
             return;
         };
         for key in written.drain(..) {
-            if let Some(path) = store.path(&key) {
-                if store.preserve_replaced(&path)
-                    && std::fs::rename(path.with_extension("provisional"), &path).is_ok()
-                {
-                    self.resume.progress.saved(false);
-                }
+            if let Some(path) = store.path(&key)
+                && store.preserve_replaced(&path)
+                && std::fs::rename(path.with_extension("provisional"), &path).is_ok()
+            {
+                self.resume.progress.saved(false);
             }
         }
     }

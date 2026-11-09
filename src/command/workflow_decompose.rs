@@ -1,5 +1,5 @@
 //! First-class launcher for the immutable engine-native decomposition run.
-
+use super::workflow_decompose_prd_tools::validate_prd_launch_input;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -122,7 +122,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         config,
     )?;
     let (prd_bytes, prd_digest, acceptance_criteria) =
-        super::workflow_task_set::validate_prd_input(&prd_path)?;
+        validate_prd_launch_input(&prd_path, &project_root)?;
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let starting_binary_revision = crate::command::workflow_test_seams::binary_revision();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;

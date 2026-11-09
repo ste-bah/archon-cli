@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "a registry status is not allowed"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "a registry status is not allowed"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 1,\n  \"failures\": [\n    \"a registry status is not allowed\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

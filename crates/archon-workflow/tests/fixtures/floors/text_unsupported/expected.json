@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "unsupported declared artifact_format: other"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "unsupported declared artifact_format: other"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"failures\": [\n    \"unsupported declared artifact_format: other\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

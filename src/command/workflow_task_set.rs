@@ -31,7 +31,7 @@ mod acceptance_reply_diagnostics;
 #[path = "workflow_acceptance_coverage_gate.rs"]
 pub(crate) mod coverage_gate;
 #[path = "workflow_task_set_findings.rs"]
-mod findings;
+pub(crate) mod findings;
 #[path = "workflow_judge_incremental.rs"]
 mod incremental;
 #[path = "workflow_task_set_judge.rs"]
@@ -309,7 +309,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
     })?;
     let host_unproven_reason = probed.host_unproven_reason.clone();
     // Issue 328: the lock records the tree the checks were proven on.
-    let baseline_commit = (probed.baseline.as_ref()).map(|runs| runs.commit.clone());
+    let baseline = findings::baseline_results(&probed, &contract);
     // Issue 275: nor is one whose failure there is its own setup breaking a
     // rule a correct implementation keeps: it could never pass.
     let probed = passability::judge_baseline_failures(
@@ -338,7 +338,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
         freeze_mode,
         &contract,
         probed,
-        baseline_commit,
+        baseline,
         candidate_digest,
     )?;
     // A staged probe may leave checks unproven. Build every finding first so
@@ -472,21 +472,21 @@ pub(crate) mod passability_tests_support;
 #[cfg(test)]
 #[path = "workflow_task_set_tests.rs"]
 mod tests;
-
 #[cfg(all(test, unix))]
 pub(crate) use findings::tests::outside_set;
+#[cfg(test)]
+pub(crate) use publish::crash_publish;
 #[cfg(test)]
 pub(crate) use publish::fail_after_rename;
 #[cfg(test)]
 pub(crate) use publish::reader_test_step;
+#[cfg(all(test, unix))]
+pub(crate) use publish::stick_next_commit;
 #[cfg(test)]
 pub(crate) use publish::take_synced_dirs;
 #[cfg(test)]
-pub(crate) use publish::{crash_publish, stick_next_commit};
-#[cfg(test)]
 #[path = "workflow_task_set_read_race_tests.rs"]
 mod read_race_tests;
-
 #[path = "workflow_task_set_site_paths.rs"]
 mod site_paths;
 use site_paths::project_relative;

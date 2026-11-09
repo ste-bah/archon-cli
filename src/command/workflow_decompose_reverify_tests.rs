@@ -150,13 +150,16 @@ pub(super) struct Fixture {
 }
 
 pub(super) fn fixture() -> Fixture {
+    fixture_with_prd(PRD)
+}
+pub(super) fn fixture_with_prd(prd_text: &str) -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().canonicalize().unwrap();
     let prd = project.join("prds/PRD-X.md");
     let task_root = project.join("tasks/PRD-X");
     std::fs::create_dir_all(prd.parent().unwrap()).unwrap();
     std::fs::create_dir_all(&task_root).unwrap();
-    std::fs::write(&prd, PRD).unwrap();
+    std::fs::write(&prd, prd_text).unwrap();
     assert!(
         std::process::Command::new("git")
             .args(["init", "-q"])
@@ -483,3 +486,6 @@ async fn defective_body_is_a_finding_that_pauses_and_creates_a_ledger() {
         subject["findings"].as_array().unwrap().len()
     );
 }
+
+#[path = "workflow_decompose_reverify_prd_tools_tests.rs"]
+mod prd_tools_tests;

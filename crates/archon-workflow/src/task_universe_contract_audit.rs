@@ -172,7 +172,7 @@ pub fn contract_defects(
 }
 
 /// Authoring policy supplied by the host alongside the input context.
-pub const DELIVERABLE_CONTRACT_RULE: &str = "Each deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path. Optional string fields must be concrete and nonblank; omit unused fields. A present verifier must be falsifiable even with a floor or binding.";
+pub const DELIVERABLE_CONTRACT_RULE: &str = "Each deliverable contract needs min_instances >= 1, or a falsifiable typed_verifier_command, or a complete instance-source binding (instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field). Prefer min_instances: 1 for a contract naming one concrete artifact path. Optional string fields must be concrete and nonblank; omit unused fields. A present verifier must be falsifiable even with a floor or binding. List in implements the ids from this task's implements that this deliverable carries.";
 
 /// Field grouping shared with the authoring prompt (checked in tests).
 pub const INSTANCE_SOURCE_FIELDS: &str = "instance_artifact_field, instance_source_path or registry_path, and instance_source_records_field or registry_records_field";

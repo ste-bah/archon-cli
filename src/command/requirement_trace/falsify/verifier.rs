@@ -124,12 +124,12 @@ pub(super) enum Ran {
 /// promptly, long enough that polling costs nothing next to a compile.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
     run_with_policy(cwd, argv, timeout, None)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn run_with_policy(
     cwd: &Path,
     argv: &[String],

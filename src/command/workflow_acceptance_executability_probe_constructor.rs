@@ -21,6 +21,7 @@ impl HostProbe {
             regression_guards: Mutex::new(BTreeMap::new()),
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
+            baseline_passes: Mutex::new(BTreeSet::new()),
             baseline_failures: Mutex::new(BTreeMap::new()),
             test_inventories: Mutex::new(BTreeMap::new()),
             reuse_audit: Mutex::new(BTreeMap::new()),
@@ -116,7 +117,7 @@ impl HostProbe {
         Self::for_task_set_with_limits(project, tasks_root, resource_limits).with_resume(resume)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn new(project: PathBuf, repository: PathBuf, site: Site) -> Self {
         Self::new_with_limits(
             project,
@@ -140,7 +141,7 @@ impl HostProbe {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn for_task_set(project: &std::path::Path, tasks_root: &std::path::Path) -> Self {
         Self::for_task_set_with_limits(
             project,

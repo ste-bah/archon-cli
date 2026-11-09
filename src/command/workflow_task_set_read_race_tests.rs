@@ -45,6 +45,7 @@ fn freeze_reauthored(project: &Path, tasks: &Path, ids: &[&str]) {
     let digest = content_digest(&bytes);
     std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), bytes).unwrap();
     let lock = AcceptanceLock {
+        baseline_results: Default::default(),
         algorithm: "blake3".into(),
         digest: digest.clone(),
         gate: stamp(),

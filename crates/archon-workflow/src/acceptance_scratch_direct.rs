@@ -219,23 +219,20 @@ fn with_withheld_note(mut result: CheckResult, withheld: &BTreeSet<String>) -> C
 }
 
 /// Evaluate a declarative floor (a `Floor` check with no verifier command) at
-/// the site: in-process when its predicates are evaluable, otherwise as the
-/// host-generated predicate command — the same two paths the scratch observer
-/// takes for a nested verifier's prerequisites. Always a verdict, never a
-/// deferral: an acceptance check that cannot be evaluated is not a pass.
+/// the site, using the native predicates also used for nested prerequisites.
 pub async fn evaluate_floor_direct(
     site: &DirectSite,
     acceptance_id: &str,
     floor: &crate::task_universe::WorkflowV2DeliverableContract,
-    cancel: Arc<AtomicBool>,
+    _cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<CheckResult> {
     site.validate()?;
     let roots = crate::v2::deliverable_contract::ContractRoots::project_only(
         site.project.to_string_lossy(),
     );
     let facts = crate::collect_declarative_floor_facts(&roots, floor)?;
-    match crate::evaluate_declarative_floor(floor, &facts) {
-        crate::DeclarativeFloorEvaluation::Passed => Ok(CheckResult {
+    match crate::evaluate_floor_predicates(floor, &facts) {
+        crate::FloorVerdict::Passed => Ok(CheckResult {
             verdict_streams: Default::default(),
             fault: None,
             classification: None,
@@ -247,7 +244,7 @@ pub async fn evaluate_floor_direct(
             operational_error: None,
             environment_note: None,
         }),
-        crate::DeclarativeFloorEvaluation::Failed { findings } => Ok(CheckResult {
+        crate::FloorVerdict::Failed { findings } => Ok(CheckResult {
             verdict_streams: Default::default(),
             fault: None,
             classification: None,
@@ -259,16 +256,6 @@ pub async fn evaluate_floor_direct(
             operational_error: None,
             environment_note: None,
         }),
-        crate::DeclarativeFloorEvaluation::Deferred { .. } => {
-            let generated = crate::acceptance_world::AuthorizedCommand::floor_prerequisites(
-                &site.project,
-                floor,
-            )?;
-            let (_home, environment, withheld) = site.prepare()?;
-            let at = site.command_site(environment, None);
-            let result = super::process::run_at(&at, acceptance_id, &generated, cancel).await?;
-            Ok(with_withheld_note(result, &withheld))
-        }
     }
 }
 

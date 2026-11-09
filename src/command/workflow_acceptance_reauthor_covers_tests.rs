@@ -75,7 +75,7 @@ async fn covered_requirement_text_refutation_drops_id_and_owes_supplementary_wit
         archon_workflow::task_set_contract::FreezeGateMode::Enforce,
         &after,
         Vec::new(),
-        None,
+        None.into(),
         String::new(),
     )
     .unwrap();

@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 pub struct ContractRoots {
     project: String,
     repository: Option<String>,
+    additional: Vec<String>,
 }
 
 impl ContractRoots {
@@ -40,7 +41,27 @@ impl ContractRoots {
         Self {
             project,
             repository,
+            additional: Vec::new(),
         }
+    }
+
+    pub fn from_ordered(roots: impl IntoIterator<Item = String>) -> Option<Self> {
+        let mut roots = roots.into_iter();
+        let project = roots.next()?;
+        let mut bound = Self::project_only(project);
+        for root in roots {
+            if !bound
+                .ordered()
+                .any(|existing| same_directory(existing, &root))
+            {
+                if bound.repository.is_none() {
+                    bound.repository = Some(root);
+                } else {
+                    bound.additional.push(root);
+                }
+            }
+        }
+        Some(bound)
     }
 
     pub fn project_only(project: impl Into<String>) -> Self {
@@ -57,7 +78,9 @@ impl ContractRoots {
 
     /// Every root, in resolution order.
     pub fn ordered(&self) -> impl Iterator<Item = &str> {
-        std::iter::once(self.project.as_str()).chain(self.repository.as_deref())
+        std::iter::once(self.project.as_str())
+            .chain(self.repository.as_deref())
+            .chain(self.additional.iter().map(String::as_str))
     }
 
     /// Where a declared path lives: absolute paths as written; a relative path

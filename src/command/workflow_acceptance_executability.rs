@@ -1,22 +1,16 @@
 //! Executability gate for authored acceptance checks.
-//!
 //! The judge weighs whether a check PROVES its criterion; it never runs it.
-//! A check whose own script crashes (a helper called with the wrong
-//! arguments, a syntax error) is judged accepted, published, and then fails
+//! A check whose own script crashes can be published and then fail
 //! every acceptance round without ever asserting anything — and that failure
 //! used to be routed to the implementing tasks, which cannot edit the
 //! contract. So before an authored or re-authored check is published, the
-//! host runs it once, at the site the acceptance stage would run it (the
-//! `[workflow.acceptance_execution]` scratch observation when configured,
-//! otherwise the live target repository), against the current tree, and
-//! classifies the outcome with
-//! [`archon_workflow::acceptance_check_crash::classify_check_run`]:
+//! host runs it at the same site as the acceptance stage (the
+//! configured scratch observation, otherwise the live target repository), and
+//! classifies its execution:
 //!
-//! * passed, or failed with the check's own assertion signal: publishable —
-//!   the product may genuinely be failing;
+//! * passed, or failed with an assertion signal: publishable;
 //! * crashed in its own code: a finding for the author, like a judge
-//!   refutation, and the bounded re-author loop runs again.
-//!
+//!   refutation; bounded re-authoring runs again.
 //! A freeze (before any run) never executes authored scripts in the live
 //! repository: it probes in the hermetic scratch site when one is
 //! configured, and otherwise in the probe's own hermetic copy of the tree
@@ -25,7 +19,6 @@
 //! cannot be captured runs nothing at all. A check whose text names a live
 //! root by its absolute path is refused before it runs: a copy cannot keep
 //! it off the live tree.
-//!
 //! Batch O (A4, A5): a probe given a pre-implementation baseline
 //! ([`HostProbe::with_baseline`]; a freeze-time probe carries the task
 //! set's own) also proves each check CAN fail: it runs the check on the tree
@@ -250,6 +243,7 @@ pub(crate) struct HostProbe {
     baseline: Option<baseline::Baseline>,
     /// How each check that failed there failed (Issue 275).
     test_inventories: Mutex<BTreeMap<String, Option<Vec<String>>>>,
+    baseline_passes: Mutex<BTreeSet<String>>,
     baseline_failures: Mutex<BTreeMap<String, hermetic::CheckEvidence>>,
     reuse_audit: Mutex<BTreeMap<String, ReuseAudit>>,
     /// The tree the checks being repaired ran on, and how each fared there.
@@ -294,7 +288,8 @@ pub(crate) use baseline::{
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
 mod hermetic;
-pub(crate) use hermetic::CheckEvidence;
+#[allow(unused_imports)] #[rustfmt::skip]
+pub(crate) use hermetic::{BaseCopy, CheckEvidence, materialise_base_copy, run_refs_in_copy, prove_breakage, BreakageRequest, BreakageReport, MIN_DEADLINE_SECS};
 #[path = "workflow_acceptance_executability_mutation.rs"]
 pub(crate) mod mutation;
 pub(crate) fn named_inputs(
@@ -310,7 +305,7 @@ mod probe;
 mod prove;
 #[path = "workflow_acceptance_executability_repairs.rs"]
 mod repairs;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use repairs::test_unproven_after_repairs;
 #[path = "workflow_acceptance_executability_resume.rs"]
 mod resume;
@@ -322,6 +317,7 @@ mod silent_strike;
 mod sites;
 #[path = "workflow_acceptance_executability_verdict.rs"]
 mod verdict;
+pub(crate) use verdict::missing_site_program as missing_typed_program;
 #[path = "workflow_acceptance_executability_verdict_shell.rs"]
 mod verdict_shell;
 
@@ -329,7 +325,7 @@ mod verdict_shell;
 pub(crate) mod test_inventory;
 pub(crate) use mutation::CANNOT_FAIL;
 pub(crate) use sites::repository_tree_contains;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use verdict::HOST_PATH;
 pub(crate) use verdict::{Context as CheckSite, unresolved_on_path};
 
@@ -491,3 +487,11 @@ pub(super) fn diagnostic_repository(project: &Path, tasks: &Path) -> Result<Path
         _ => Ok(root),
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_baseline_outcome_tests.rs"]
+mod baseline_outcome_tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_floor_tests.rs"]
+mod floor_tests;

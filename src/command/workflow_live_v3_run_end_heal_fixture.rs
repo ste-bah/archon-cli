@@ -103,6 +103,7 @@ pub(super) fn fixture() -> Fixture {
     let acceptance_digest =
         content_digest(&write(task_root.join(ACCEPTANCE_CONTRACT_FILE), &contract));
     let lock = AcceptanceLock {
+        baseline_results: Default::default(),
         algorithm: "blake3".into(),
         digest: acceptance_digest.clone(),
         gate: stamp(),
@@ -125,6 +126,7 @@ pub(super) fn fixture() -> Fixture {
     };
     let skeleton_digest = content_digest(&write(task_root.join(TASK_SKELETON_FILE), &skeleton));
     let skeleton_lock = TaskSkeletonLock {
+        classification: None,
         algorithm: "blake3".into(),
         digest: skeleton_digest.clone(),
         acceptance_digest: acceptance_digest.clone(),

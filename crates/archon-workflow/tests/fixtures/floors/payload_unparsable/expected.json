@@ -1,0 +1,21 @@
+{
+  "native": {
+    "findings": [
+      "payload cannot be parsed as json: <root-0>/payload.json: expected value at line 1 column 1",
+      "a payload has no records",
+      "a payload field is constant or absent: x"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 3,\n  \"failures\": [\n    \"payload cannot be parsed as json: /Volumes/Externalwork/archon-cli/archon-cli/.claude/worktrees/fix-572-s7/crates/archon-workflow/tests/fixtures/floors/payload_unparsable/roots/0/payload.json: Expecting value: line 1 column 1 (char 0)\",\n    \"a payload has no records\",\n    \"a payload field is constant or absent: x\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

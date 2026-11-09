@@ -183,6 +183,7 @@ fn test_stage(
         max_parallelism: None,
         item_kind: None,
         filter: None,
+        required_tools: Vec::new(),
         extra: BTreeMap::new(),
     }
 }

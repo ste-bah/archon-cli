@@ -193,3 +193,36 @@ fn project_mcp_root_is_only_the_host_root() {
         }
     }
 }
+
+#[test]
+fn typed_required_tools_still_binds_permitted_mcp_after_context_projection() {
+    for entry in ["fetch", "mcp__sample__fetch", "mcp_action:fetch"] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".mcp.json"),
+            r#"{"mcpServers":{"sample":{"toolPolicy":{"toolPermissions":{"fetch":"safe"}}}}}"#,
+        )
+        .unwrap();
+        let spec = archon_workflow::WorkflowSpec::from_yaml(&format!("schema: archon.workflow.v1\nname: tools\ntask: inspect\nstages:\n- id: inspect\n  kind: agent\n  required_tools: {entry}\n")).unwrap();
+        let store = archon_workflow::WorkflowStore::project(dir.path());
+        let run = store.create_run(spec).unwrap();
+        let mut input =
+            archon_workflow::context::stage_input(&store, &run, &run.spec.stages[0]).unwrap();
+        input["project_artifact_root"] = json!(dir.path());
+        let stage = archon_workflow::StageRunRequest {
+            run_id: run.id.clone(),
+            stage_id: "inspect".into(),
+            stage_kind: archon_workflow::StageKind::Agent,
+            agent: None,
+            task: "inspect".into(),
+            attempt: 1,
+            provider_tier: ProviderTier::Researcher,
+            depends_on: vec![],
+            input,
+        };
+        assert!(
+            crate::command::workflow_live::workflow_live_mcp::allowed_mcp_tools(&stage)
+                .contains(&"mcp__sample__fetch".to_owned())
+        );
+    }
+}

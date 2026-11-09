@@ -1,0 +1,29 @@
+{
+  "kind": "evidence",
+  "artifact_path": "artifact.json",
+  "required_universe": true,
+  "universe_fields": [
+    "axis"
+  ],
+  "cells_field": "cells",
+  "cell_identity_fields": [
+    "id"
+  ],
+  "registry_path": "registry.json",
+  "registry_records_field": "records",
+  "registry_key_fields": [
+    "id"
+  ],
+  "data_kind": "record_series",
+  "payload_path_field": "p",
+  "required_fields": [
+    "x"
+  ],
+  "non_constant_fields": [
+    "x"
+  ],
+  "series_value_fields": [
+    "x"
+  ],
+  "series_overlap_min_rows": 2
+}

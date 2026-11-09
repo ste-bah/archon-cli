@@ -373,7 +373,7 @@ pub fn series_project(rows: Vec<serde_json::Value>) -> (tempfile::TempDir, serde
 }
 
 pub fn verifier_stdout(project: &tempfile::TempDir, contract: &serde_json::Value) -> String {
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -445,7 +445,7 @@ fn records_dated_to_a_closed_session_are_rejected() {
     contract["closed_weekdays"] = serde_json::json!([5, 6]);
     contract["closed_dates"] = serde_json::json!(["2024-01-01"]);
     let stdout = verifier_stdout(&project, &contract);
-    assert!(stdout.contains("when the venue was closed"), "{stdout}");
+    assert!(stdout.contains("when the source was closed"), "{stdout}");
 }
 
 /// Run a generated verifier by piping it to the shell's stdin.
@@ -454,18 +454,5 @@ fn records_dated_to_a_closed_session_are_rejected() {
 /// and Windows truncates any command line beyond 32,767 characters, severing
 /// the heredoc mid-statement. stdin has no such limit.
 fn run_verifier_script(command: &str) -> std::process::Output {
-    use std::io::Write as _;
-    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn verifier");
-    child
-        .stdin
-        .take()
-        .expect("verifier stdin")
-        .write_all(command.as_bytes())
-        .expect("write verifier script");
-    child.wait_with_output().expect("execute verifier")
+    crate::v2::deliverable_native_tests::run(command)
 }

@@ -100,6 +100,7 @@ fn frozen_fixture_with_permitted(
     std::fs::write(
         task_root.join(ACCEPTANCE_LOCK_FILE),
         serde_json::to_vec_pretty(&AcceptanceLock {
+            baseline_results: Default::default(),
             algorithm: "blake3".into(),
             digest: acceptance_digest.clone(),
             gate: stamp(),
@@ -136,6 +137,7 @@ fn frozen_fixture_with_permitted(
     std::fs::write(
         task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: skeleton_digest.clone(),
             acceptance_digest: acceptance_digest.clone(),
@@ -406,6 +408,7 @@ fn finalizer_spec() -> WorkflowSpec {
             max_parallelism: None,
             item_kind: None,
             filter: None,
+            required_tools: Vec::new(),
             extra: Default::default(),
         }],
         permissions: Default::default(),

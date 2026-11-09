@@ -264,6 +264,7 @@ impl PreparedAcceptanceFreeze {
         let Some(from) = anchors::anchor(record, &pin_path)? else {
             return Ok(());
         };
+        let contract = self.contract()?;
         let mut files = Vec::new();
         let skeleton = evidence::bound_skeleton(record, &from, &pin_path, &self.tasks_root)?;
         if let Some(skeleton) = &skeleton {
@@ -273,13 +274,13 @@ impl PreparedAcceptanceFreeze {
             let digest = content_digest(&bytes);
             let findings = super::coverage_gate::skeleton_check_findings(
                 &skeleton,
-                &self.contract()?,
+                &contract,
                 &self.tasks_root.join(TASK_SKELETON_FILE),
             );
             if diagnostics {
                 let lines = super::link_diagnostics::emit(
                     &skeleton,
-                    &self.contract()?,
+                    &contract,
                     &self.project_root,
                     &self.tasks_root,
                 );
@@ -288,6 +289,13 @@ impl PreparedAcceptanceFreeze {
             let gate = stamp(self.pin.acceptance_gate.mode, &findings);
             self.findings.extend(findings);
             let lock = TaskSkeletonLock {
+                classification: Some(super::findings::classification(
+                    &self.tasks_root,
+                    &self.project_root,
+                    &skeleton,
+                    &contract,
+                    &self.lock,
+                )),
                 algorithm: "blake3".into(),
                 digest: digest.clone(),
                 acceptance_digest: self.pin.acceptance_digest.clone(),
@@ -301,7 +309,6 @@ impl PreparedAcceptanceFreeze {
                 serde_json::to_vec_pretty(&lock)?,
             ));
         }
-        let contract = self.contract()?;
         let ids = contract
             .acceptance
             .into_iter()

@@ -57,6 +57,43 @@ pub fn ignored_among(repo_root: &Path, paths: &[String]) -> BTreeSet<String> {
         .collect()
 }
 
+/// Checked ignore query: an unavailable answer must not mean untracked.
+pub fn ignored_among_checked(
+    repo_root: &Path,
+    paths: &[String],
+) -> Result<BTreeSet<String>, String> {
+    use std::io::Write;
+    if paths.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let mut child = archon_shell::spawn::command("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["check-ignore", "--stdin", "-z"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let mut input = child.stdin.take().ok_or("ignore query has no input")?;
+    let write = paths.iter().try_for_each(|path| {
+        input.write_all(path.as_bytes())?;
+        input.write_all(&[0])
+    });
+    drop(input);
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !matches!(output.status.code(), Some(0 | 1)) {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().into());
+    }
+    write.map_err(|e| e.to_string())?;
+    Ok(output
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .collect())
+}
+
 /// `paths` less those the repository at `repo_root` ignores.
 pub fn repository_deliverables(repo_root: &Path, paths: Vec<String>) -> Vec<String> {
     let ignored = ignored_among(repo_root, &paths);

@@ -118,6 +118,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
         std::fs::write(
             task_root.join(ACCEPTANCE_LOCK_FILE),
             serde_json::to_vec_pretty(&AcceptanceLock {
+                baseline_results: Default::default(),
                 algorithm: "blake3".into(),
                 digest: acceptance_digest.clone(),
                 gate: stamp(),
@@ -150,6 +151,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
         std::fs::write(
             task_root.join(TASK_SKELETON_LOCK_FILE),
             serde_json::to_vec_pretty(&TaskSkeletonLock {
+                classification: None,
                 algorithm: "blake3".into(),
                 digest: skeleton_digest.clone(),
                 acceptance_digest: acceptance_digest.clone(),

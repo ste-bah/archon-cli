@@ -167,7 +167,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn mutation_plan(
     names: &[String],
     discovery: &mutation::InputDiscovery,

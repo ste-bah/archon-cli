@@ -1,0 +1,27 @@
+{
+  "kind": "evidence",
+  "artifact_path": "artifact.json",
+  "required_universe": true,
+  "universe_fields": [
+    "axis"
+  ],
+  "cells_field": "cells",
+  "cell_identity_fields": [
+    "id"
+  ],
+  "registry_path": "registry.json",
+  "registry_records_field": "records",
+  "registry_key_fields": [
+    "id"
+  ],
+  "validation_status_field": "status",
+  "validation_checks_field": "checks",
+  "validation_check_status_field": "status",
+  "validation_failed_values": [
+    "failed"
+  ],
+  "validation_passed_values": [
+    "passed"
+  ],
+  "validation_path_field": "v"
+}

@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Issue 420 (gap 2): a check that fails before implementation only because
 //! a path it names for its setup lies outside the tree it ran in, and is
 //! absent there, gave no verdict. Each case runs the real command in a real

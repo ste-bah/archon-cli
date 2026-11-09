@@ -1,6 +1,7 @@
 //! #356: observation phases and scratch git calls are bounded by no progress
 //! only; a progressing phase never stops, a stall pauses resumably.
 use super::*;
+#[cfg(unix)]
 use std::path::PathBuf;
 
 fn cancel() -> Arc<AtomicBool> {
@@ -91,6 +92,7 @@ fn issue356_cancellation_still_stops_a_phase() {
 }
 
 /// A repository whose pre-commit hook runs `hook`.
+#[cfg(unix)]
 fn repo_with_hook(hook: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("repo");
@@ -115,6 +117,7 @@ fn repo_with_hook(hook: &str) -> (tempfile::TempDir, PathBuf) {
     }
     (dir, root)
 }
+#[cfg(unix)]
 fn commit(root: &Path, hooks: &Path) -> WorkflowResult<String> {
     let hooks = format!("core.hooksPath={}", hooks.display());
     git(

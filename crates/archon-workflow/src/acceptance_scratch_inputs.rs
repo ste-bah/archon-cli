@@ -25,7 +25,11 @@ pub(crate) fn acceptance_input_excluded(
         ".git",
     ];
     path.starts_with(Path::new(".archon").join(crate::task_set_lineage::PIN_STORE_NAMESPACE))
-        || excludes.iter().any(|e| path.starts_with(e))
+        || excludes.iter().any(|e| {
+            let path = crate::repository_record::normalize_relative(&path.to_string_lossy());
+            let excluded = crate::repository_record::normalize_relative(&e.to_string_lossy());
+            excluded.is_empty() || path == excluded || path.starts_with(&format!("{excluded}/"))
+        })
         || BUILT_IN_ROOTS.iter().any(|root| path.starts_with(root))
         || path.starts_with(".archon/workflows")
         || acceptance_harness_run_state(path)

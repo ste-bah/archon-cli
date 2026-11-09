@@ -75,7 +75,7 @@ fn contract_policy_publication_records_an_own_root_alias_even_if_judged_accepted
         FreezeGateMode::Observe,
         &subject,
         Vec::new(),
-        None,
+        None.into(),
         "candidate".into(),
     )
     .unwrap();

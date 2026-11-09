@@ -99,7 +99,12 @@ fn P5_23_JS_shape_matches_schema() {
             }
         }
     }
-    check(&shape["tasks"][0], &task_schema());
+    let schema = task_schema();
+    check(&shape["tasks"][0], &schema);
+    let implements =
+        &schema["properties"]["deliverable_contracts"]["items"]["properties"]["implements"];
+    assert_eq!(implements["uniqueItems"], json!(true));
+    assert_eq!(implements["items"]["pattern"], json!(r"^\S(.*\S)?$"));
     let dir = tempfile::tempdir().unwrap();
     let records = open(dir.path());
     let mut t = task(1);
@@ -126,8 +131,6 @@ fn P5_24_hint_uses_exact_schema() {
             assert!(
                 fields.get(field.0).is_some()
                     != [
-                        // Deferred from the author hint until host proof is enabled.
-                        "implements",
                         "required_universe",
                         "registry_minimum_count",
                         "series_overlap_min_rows"

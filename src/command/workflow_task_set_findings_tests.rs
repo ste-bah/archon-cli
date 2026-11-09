@@ -6,6 +6,7 @@ use crate::command::workflow_task_set::reauthor::AuthorScope;
 use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
 };
+use archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE;
 
 /// Passes on any tree: it reads nothing.
 const VACUOUS: &str = "python3 -c 'import sys; sys.exit(0)'";
@@ -316,7 +317,8 @@ async fn a_freeze_records_the_baseline_it_proved_on_and_keeps_it() {
         serde_json::to_vec(&prepared.lock).unwrap(),
     )
     .unwrap();
-    let (lock, _) = acceptance_lock_and_pin(&tasks, FreezeGateMode::Enforce, &[], b"{}", None);
+    let (lock, _) =
+        acceptance_lock_and_pin(&tasks, FreezeGateMode::Enforce, &[], b"{}", None.into());
     assert_eq!(lock.baseline_commit.as_deref(), Some(base.as_str()));
 }
 
@@ -325,3 +327,152 @@ async fn a_freeze_records_the_baseline_it_proved_on_and_keeps_it() {
 // unproven check the host still cannot prove; see that file.
 #[path = "workflow_task_set_site_lacks_tests.rs"]
 mod site_lacks_tests;
+
+#[tokio::test]
+async fn s4a_first_freeze_keeps_fresh_outcomes_after_repair_without_a_disk_lock() {
+    use archon_workflow::baseline_results::BaselineOutcome;
+    let (project, _outside, tasks, prd) = outside_set(VACUOUS);
+    let path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
+    let mut contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut kept = contract.acceptance[0].clone();
+    kept.id = "AC-X-002".into();
+    kept.check = archon_workflow::task_set_contract::AcceptanceCheck::Command {
+        command: SOUND.into(),
+        cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    };
+    contract.acceptance.push(kept);
+    std::fs::write(&path, serde_json::to_vec(&contract).unwrap()).unwrap();
+    std::fs::write(&prd, "## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-X-001 | output is valid |\n| AC-X-002 | output is valid |\n").unwrap();
+    assert!(!tasks.join(ACCEPTANCE_LOCK_FILE).exists());
+    let client = Arc::new(ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, SOUND),
+        |_, check| check["command"].as_str() != Some(VACUOUS),
+    ));
+    let scope = AuthorScope::for_task_set_without_cache(project.path(), &tasks, &prd).unwrap();
+    let prepared = prepare_acceptance_freeze_reauthoring(
+        project.path(),
+        &tasks,
+        &prd,
+        GateMode::Enforce,
+        client.clone(),
+        &scope,
+    )
+    .await
+    .unwrap();
+    assert_eq!(client.authored(), 1);
+    assert!(!tasks.join(ACCEPTANCE_LOCK_FILE).exists());
+    let (_, parts) = prepared.into_staged_parts();
+    let (_, bytes) = parts
+        .into_iter()
+        .find(|(name, _)| name == ACCEPTANCE_LOCK_FILE)
+        .unwrap();
+    let lock: AcceptanceLock = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(lock.baseline_results.len(), 1);
+    assert_eq!(
+        lock.baseline_results["AC-X-002"].outcome,
+        BaselineOutcome::Failed
+    );
+    assert!(!lock.baseline_results.contains_key("AC-X-001"));
+}
+
+#[test]
+fn s4a_setup_refusals_drop_outcomes_in_observe_publications() {
+    use archon_workflow::baseline_results::{BaselineOutcome, BaselineResults};
+    let (project, _outside, tasks, prd) = outside_set(SOUND);
+    let contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap())
+            .unwrap();
+    let commit = Some("base".into());
+    let baseline = BaselineResults::observed(
+        commit,
+        &[("AC-X-001".into(), BaselineOutcome::Failed)].into(),
+        &contract,
+    );
+    let control = finish_acceptance(
+        project.path(),
+        &tasks,
+        &prd,
+        &std::fs::read_to_string(&prd).unwrap(),
+        FreezeGateMode::Observe,
+        &contract,
+        Vec::new(),
+        baseline.clone(),
+        "candidate".into(),
+    )
+    .unwrap();
+    assert_eq!(control.lock.baseline_results.len(), 1);
+    let finding = GateFinding::new(
+        GateId::FreezeAcceptance,
+        cannot_pass_prefix("AC-X-001"),
+        "AC-X-001",
+        None,
+        archon_workflow::RemediationScope::CandidateArtifact,
+    );
+    let prepared = finish_acceptance(
+        project.path(),
+        &tasks,
+        &prd,
+        &std::fs::read_to_string(&prd).unwrap(),
+        FreezeGateMode::Observe,
+        &contract,
+        vec![finding],
+        baseline,
+        "candidate".into(),
+    )
+    .unwrap();
+    assert!(prepared.lock.baseline_results.is_empty());
+}
+
+#[test]
+#[should_panic(expected = "serialized acceptance contract is valid")]
+fn s4a_invalid_contract_bytes_do_not_silently_drop_results() {
+    let root = tempfile::tempdir().unwrap();
+    acceptance_lock_and_pin(
+        root.path(),
+        FreezeGateMode::Observe,
+        &[],
+        b"invalid",
+        Some("base".into()).into(),
+    );
+}
+
+#[test]
+fn s4a_passed_outcome_survives_cannot_fail_probe_finding() {
+    use archon_workflow::baseline_results::{BaselineOutcome, BaselineResults};
+    let (project, _outside, tasks, prd) = outside_set(SOUND);
+    let contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap())
+            .unwrap();
+    let baseline = BaselineResults::observed(
+        Some("base".into()),
+        &[("AC-X-001".into(), BaselineOutcome::Passed)].into(),
+        &contract,
+    );
+    let finding = GateFinding::new(
+        GateId::FreezeAcceptance,
+        format!(
+            "check 'AC-X-001': it passed on the pre-implementation tree at abc, {}. advice:",
+            super::executability::CANNOT_FAIL
+        ),
+        "AC-X-001",
+        None,
+        archon_workflow::RemediationScope::CandidateArtifact,
+    );
+    let prepared = finish_acceptance(
+        project.path(),
+        &tasks,
+        &prd,
+        &std::fs::read_to_string(&prd).unwrap(),
+        FreezeGateMode::Observe,
+        &contract,
+        vec![finding],
+        baseline,
+        "candidate".into(),
+    )
+    .unwrap();
+    assert_eq!(
+        prepared.lock.baseline_results["AC-X-001"].outcome,
+        BaselineOutcome::Passed
+    );
+}

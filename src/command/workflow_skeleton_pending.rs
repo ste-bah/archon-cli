@@ -81,6 +81,7 @@ mod tests {
         let bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
         std::fs::write(root.join(TASK_SKELETON_FILE), &bytes).unwrap();
         let lock = TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: content_digest(&bytes),
             acceptance_digest: acceptance_digest.into(),

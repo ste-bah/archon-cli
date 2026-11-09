@@ -306,6 +306,7 @@ mod cited_artifact_binding_tests {
     use super::*;
 
     fn universe_with_contract() -> Value {
+        crate::v2::deliverable_native_tests::initialize();
         serde_json::json!({
             "tasks": [
                 {

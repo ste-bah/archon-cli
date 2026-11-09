@@ -1,0 +1,20 @@
+{
+  "native": {
+    "findings": [
+      "a payload has no records",
+      "a payload field is constant or absent: x"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 2,\n  \"failures\": [\n    \"a payload has no records\",\n    \"a payload field is constant or absent: x\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

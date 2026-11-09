@@ -207,6 +207,7 @@ pub(crate) fn write_chain(
     std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), &bytes).unwrap();
     let digest = content_digest(&bytes);
     let lock = AcceptanceLock {
+        baseline_results: Default::default(),
         algorithm: "blake3".into(),
         digest: digest.clone(),
         gate: stamp(mode, findings),
@@ -256,6 +257,7 @@ pub(crate) fn write_chain(
     std::fs::write(
         tasks.join(TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: skeleton_digest.clone(),
             acceptance_digest: digest.clone(),

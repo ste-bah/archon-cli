@@ -86,7 +86,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
         ));
     }
     let (prd_bytes, prd_digest, acceptance_criteria) =
-        crate::command::workflow_task_set::validate_prd_input(&prd_path)?;
+        validate_prd_launch_input(&prd_path, &project_root)?;
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);

@@ -132,16 +132,16 @@ mod declared_contract_enforcement_tests {
     fn failure_detail(verification: ContractVerification) -> String {
         match verification {
             ContractVerification::Failed(findings, _) => findings.join("; "),
-            ContractVerification::Unavailable(detail) => detail,
+            ContractVerification::Unavailable(detail)
+            | ContractVerification::Unverified(detail) => detail,
             ContractVerification::Passed => panic!("expected the verifier to fail closed"),
         }
     }
 
     #[tokio::test]
     async fn typed_precheck_pass_cannot_mask_a_contract_verifier_failure() {
-        // verification_command chains the typed pre-check AHEAD of the contract
-        // verifier, so a permissive `verified` is printed first. Reading only
-        // the first verdict is what let fabricated artifacts pass as verified.
+        // Every verdict matters, in either order: a permissive first result
+        // must not hide a later failure from the same command output.
         let detail = failure_detail(
             run_contract_verifier(
                 r#"printf '%s\n' '{"status":"verified","verified_cells":3}' '{"status":"failed","failure_count":1,"failures":["close steps are constant"]}'; exit 1"#,
@@ -201,8 +201,10 @@ mod declared_contract_enforcement_tests {
         std::fs::write(&present, r#"{"ok":true}"#).expect("artifact");
 
         // Same contract shape; only the declared artifact differs.
-        let passing = serde_json::json!({"artifact_path": ".archon/demo/present.json"});
-        let failing = serde_json::json!({"artifact_path": ".archon/demo/absent.json"});
+        let passing =
+            serde_json::json!({"kind":"evidence", "artifact_path": ".archon/demo/present.json"});
+        let failing =
+            serde_json::json!({"kind":"evidence", "artifact_path": ".archon/demo/absent.json"});
 
         let mut outcomes = [
             accepted_outcome("verify-passes"),
@@ -243,7 +245,7 @@ mod declared_contract_enforcement_tests {
             "verify-task-ex-001".to_string(),
             (
                 ContractRoots::project_only("/proj"),
-                vec![serde_json::json!({"artifact_path": ".archon/none.json"})],
+                vec![serde_json::json!({"kind":"evidence", "artifact_path": ".archon/none.json"})],
             ),
         )]);
         // Stub the verifier's verdict shape rather than the contract itself:

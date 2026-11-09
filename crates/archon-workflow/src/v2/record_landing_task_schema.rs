@@ -45,6 +45,8 @@ pub fn task_schema() -> Value {
             .expect("contract properties")
             .remove(field);
     }
+    contract["properties"]["implements"]["uniqueItems"] = json!(true);
+    contract["properties"]["implements"]["items"]["pattern"] = json!(r"^\S(.*\S)?$");
     contract["required"] = json!(["kind", "artifact_path"]);
     for field in ["kind", "artifact_path"] {
         contract["properties"][field]["minLength"] = json!(1);
@@ -85,7 +87,7 @@ pub(super) fn task_clause() -> String {
 // Exhaustive construction makes new accepted fields a compile-time hint update.
 fn contract_sample() -> WorkflowV2DeliverableContract {
     WorkflowV2DeliverableContract {
-        implements: Vec::new(),
+        implements: vec![String::new()],
         kind: String::new(),
         artifact_path: String::new(),
         typed_verifier_command: Some(String::new()),

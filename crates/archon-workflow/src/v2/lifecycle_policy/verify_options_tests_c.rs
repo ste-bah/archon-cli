@@ -15,7 +15,7 @@ fn a_venue_with_no_declared_calendar_keeps_every_session() {
     let (project, mut contract) = series_project(rows);
     contract["observed_time_field"] = serde_json::json!("timestamp");
     let stdout = verifier_stdout(&project, &contract);
-    assert!(!stdout.contains("when the venue was closed"), "{stdout}");
+    assert!(!stdout.contains("when the source was closed"), "{stdout}");
 }
 
 /// A markdown deliverable declared as `text` must pass on existence rather
@@ -33,7 +33,7 @@ fn a_textual_deliverable_is_checked_for_presence_not_parsed_as_json() {
         "artifact_path": ".archon/demo/inventory.md",
         "artifact_format": "text"
     });
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -57,7 +57,7 @@ fn a_missing_textual_deliverable_still_fails() {
         "artifact_path": ".archon/demo/absent.md",
         "artifact_format": "text"
     });
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -90,7 +90,7 @@ fn an_undeclared_json_extension_is_still_strictly_parsed() {
         "kind": "thing",
         "artifact_path": ".archon/demo/thing.json"
     });
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -134,7 +134,7 @@ fn a_parameterized_markdown_instance_is_not_parsed_as_json() {
         "instance_source_records_field": "records",
         "instance_artifact_field": "report_path"
     });
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -162,7 +162,7 @@ fn an_unbound_templated_contract_fails_closed_naming_the_token() {
         "kind": "native_dataset_manifest",
         "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json"
     });
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -229,7 +229,7 @@ fn a_bound_template_resolves_to_its_instances() {
         "min_instances": 2
     });
     for contract in [source_bound, glob_bound] {
-        let command = deliverable_contract::verification_command(
+        let command = crate::v2::deliverable_native_tests::command(
             &deliverable_contract::ContractRoots::project_only(
                 project.path().to_str().expect("project path"),
             ),
@@ -268,7 +268,7 @@ fn a_bound_template_below_its_declared_floor_fails() {
         "artifact_path": ".archon/demo/datasets/<dataset-id>/<version>/manifest.json",
         "min_instances": 2
     });
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),
@@ -299,7 +299,7 @@ fn a_missing_parameterized_instance_still_fails() {
         "instance_source_records_field": "records",
         "instance_artifact_field": "report_path"
     });
-    let command = deliverable_contract::verification_command(
+    let command = crate::v2::deliverable_native_tests::command(
         &deliverable_contract::ContractRoots::project_only(
             project.path().to_str().expect("project path"),
         ),

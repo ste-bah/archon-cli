@@ -275,6 +275,7 @@ fn directory_lint_renders_kind_mismatch_as_information_only() {
     std::fs::write(
         tasks.join(TASK_SKELETON_LOCK_FILE),
         serde_json::to_vec_pretty(&archon_workflow::task_skeleton::TaskSkeletonLock {
+            classification: None,
             algorithm: "blake3".into(),
             digest: digest.clone(),
             acceptance_digest: skeleton.acceptance_digest.clone(),

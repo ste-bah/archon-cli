@@ -1,0 +1,20 @@
+{
+  "native": {
+    "findings": [
+      "declared deliverable contains 1 gap record(s)"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "declared deliverable contains 1 gap record(s)",
+      "a required non-empty field failed: missing"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 1,\n  \"failures\": [\n    \"declared deliverable contains 1 gap record(s)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

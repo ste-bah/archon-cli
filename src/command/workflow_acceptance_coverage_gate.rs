@@ -194,9 +194,26 @@ pub(super) async fn pre_implementation_findings_with_limits(
         })
         .chain(unproven)
         .collect();
+    let baseline = probe.take_baseline_runs();
+    let mut baseline_outcomes = std::collections::BTreeMap::new();
+    if let Some(runs) = &baseline {
+        baseline_outcomes.extend(runs.failures.keys().map(|id| {
+            (
+                id.clone(),
+                archon_workflow::baseline_results::BaselineOutcome::Failed,
+            )
+        }));
+        baseline_outcomes.extend(probe.take_baseline_passes().into_iter().map(|id| {
+            (
+                id,
+                archon_workflow::baseline_results::BaselineOutcome::Passed,
+            )
+        }));
+    }
     Ok(PreImplementation {
         findings,
-        baseline: probe.take_baseline_runs(),
+        baseline,
+        baseline_outcomes,
         host_unproven_reason,
     })
 }
@@ -205,11 +222,13 @@ pub(super) async fn pre_implementation_findings_with_limits(
 /// on the baseline failed there.
 pub(crate) struct PreImplementation {
     pub(crate) findings: Vec<GateFinding>,
+    pub(crate) baseline_outcomes:
+        std::collections::BTreeMap<String, archon_workflow::baseline_results::BaselineOutcome>,
     pub(crate) baseline: Option<super::executability::BaselineRuns>,
     pub(crate) host_unproven_reason: Option<String>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) async fn pre_implementation_findings(
     project_root: &Path,
     tasks_root: &Path,

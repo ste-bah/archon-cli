@@ -226,6 +226,17 @@ impl HostProbe {
         std::mem::take(&mut *self.reuse_audit.lock().expect("reuse audit lock"))
     }
 
+    fn passed_on_baseline(&self, id: &str) {
+        self.baseline_passes
+            .lock()
+            .expect("baseline passes lock")
+            .insert(id.to_string());
+    }
+
+    pub(crate) fn take_baseline_passes(&self) -> BTreeSet<String> {
+        std::mem::take(&mut *self.baseline_passes.lock().expect("baseline passes lock"))
+    }
+
     fn failed_on_baseline(&self, result: &super::hermetic::CheckEvidence) {
         (self
             .baseline_failures
@@ -306,7 +317,7 @@ pub(crate) async fn originals(
 
 /// How each of `results` fared, by id. A placeholder's result is never a
 /// verdict of its own ([`Original::Defect`]).
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn originals_now<'a>(
     contract: &AcceptanceContract,
     results: impl IntoIterator<Item = &'a CheckResult>,

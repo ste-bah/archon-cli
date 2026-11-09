@@ -79,6 +79,7 @@ fn stop_pid_file(path: &Path) -> Result<String> {
                 "Removed stale docs index daemon pid file for pid {pid}."
             ))
         }
+        #[cfg(unix)]
         PidOwner::Foreign => {
             fs::remove_file(path).ok();
             Ok(format!(
@@ -168,6 +169,7 @@ enum PidOwner {
     Ours,
     /// A live process this user may not signal. The daemon runs as the user
     /// who started it, so the OS gave its pid to another user's process.
+    #[cfg(unix)]
     Foreign,
 }
 

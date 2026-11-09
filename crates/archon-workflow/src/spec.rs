@@ -59,7 +59,7 @@ pub enum ReducerKind {
     TaskDecomposition,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StageSpec {
     pub id: String,
     pub kind: StageKind,
@@ -95,8 +95,10 @@ pub struct StageSpec {
     pub item_kind: Option<StageKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
-    /// Stage declarations, including `commands: true` or Bash/shell in
-    /// `tools`, `allowed_tools`, or `required_tools`, grant shell access.
+    /// Required calls forwarded to stage policy, including command grants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_tools: Vec<String>,
+    /// Additional stage declarations are forwarded with the typed tool requirements.
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -276,6 +278,27 @@ impl WorkflowSpec {
                     )));
                 }
                 crate::item_filter::validate_filter(&stage.id, filter)?;
+            }
+            crate::spec_stage_compat::validate_tools(stage)?;
+            let mut tools = BTreeSet::new();
+            for entry in &stage.required_tools {
+                let reason = if entry.trim().is_empty() {
+                    Some("empty")
+                } else if !tools.insert(entry) {
+                    Some("duplicate")
+                } else if entry.starts_with("mcp__")
+                    && crate::prd_tools::complete_mcp_tool(entry).is_none()
+                {
+                    Some("incomplete")
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    return Err(WorkflowError::SpecInvalid(format!(
+                        "stage '{}' required_tools entry '{entry}' is {reason}",
+                        stage.id
+                    )));
+                }
             }
             match stage.kind {
                 StageKind::Agent => {}

@@ -1,0 +1,17 @@
+{
+  "native": {
+    "findings": [
+      "declared deliverable contains a null value"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"failures\": []\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

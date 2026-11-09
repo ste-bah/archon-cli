@@ -214,6 +214,7 @@ function skeletonPromptAndShape() {
     kind:'<short stable name for what this task produces>',
     artifact_path:'<path this task produces, exactly as its dependents consume it>',
     min_instances:1,
+    implements:["<id from this task's implements this artifact carries>"],
   });
   assert.deepEqual(shape.tasks[0].depends_on[0].consumes[0], {
     artifact_path:'<path this task reads from that one>',

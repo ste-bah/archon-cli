@@ -60,7 +60,13 @@ test('skeleton retries reference the latest judged candidate; the first prompt p
   // Pin the new condition explicitly; preserve the existing prompt golden.
   const landingRule = 'A call with open findings must make at least one byte-changing landing; a call with an empty task store must land at least one task. The gate then judges the whole set again.';
   assert(out.prompts[0].includes(landingRule));
-  const baseline = out.prompts[0].replace(landingRule, 'Every author call must make at least one byte-changing landing; the gate then judges the whole set again.');
+  // S4a adds exactly the deliverable implements rule sentence and example line.
+  // Assert both additions, then remove them to preserve the existing prompt pin.
+  const implementsRule = " List in implements the ids from this task's implements that this deliverable carries.";
+  const implementsExample = '"implements":["<id from this task\'s implements this artifact carries>"],';
+  assert.equal(out.prompts[0].split(implementsRule).length, 2);
+  assert.equal(out.prompts[0].split(implementsExample).length, 2);
+  const baseline = out.prompts[0].replace(implementsRule, '').replace(implementsExample, '').replace(landingRule, 'Every author call must make at least one byte-changing landing; the gate then judges the whole set again.');
   assert.equal(digest(baseline), 'b43667c9511cc122a61162b4f2b8acc3345ee60c7a4c350c9394d558f8ae4368');
   assert(!out.prompts[0].includes('The previous candidate is in'));
   assert.equal(files.size, 2);

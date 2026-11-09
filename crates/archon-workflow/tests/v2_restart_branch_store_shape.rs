@@ -6,8 +6,11 @@ mod branch_revocation;
 #[path = "support/restart_run.rs"]
 mod restart_run;
 
+#[cfg(unix)]
 use archon_workflow::v2::restart::{invalidate_generated_v2_item, restart_generated_v2_task};
+#[cfg(unix)]
 use branch_revocation::*;
+#[cfg(unix)]
 use restart_run::{generated_run, v2_store};
 
 #[cfg(unix)]

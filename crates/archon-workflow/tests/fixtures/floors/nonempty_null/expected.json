@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "a required non-empty field failed: v"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "a required non-empty field failed: v"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 1,\n  \"failures\": [\n    \"a required non-empty field failed: v\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

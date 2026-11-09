@@ -80,10 +80,10 @@ pub(super) use discard::discard_mutation_evidence;
 
 #[path = "workflow_acceptance_executability_sites_data.rs"]
 mod data;
-use data::data_state;
+pub(super) use data::data_state;
 
 #[path = "workflow_acceptance_executability_sites_reuse.rs"]
-mod reuse;
+pub(super) mod reuse;
 pub(super) use reuse::check_key;
 pub(crate) use reuse::repository_tree_contains;
 
@@ -168,7 +168,7 @@ pub(super) async fn run_at(
                     command,
                     "",
                     &crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
-                        .map_or_else(|| String::new(), |(version, _, _)| version.to_string()),
+                        .map_or_else(String::new, |(version, _, _)| version.to_string()),
                     "site environment",
                 )
                 .reason
@@ -290,18 +290,17 @@ pub(super) async fn run_at(
     let ran = ran.inspect_err(|_| probe.unsave(store.as_ref(), &written))?;
     if let Some(store) = store.as_ref() {
         for evidence in &ran.results {
-            if let Some(key) = pending_keys.get(&evidence.acceptance_id) {
-                if save_predicates
+            if let Some(key) = pending_keys.get(&evidence.acceptance_id)
+                && save_predicates
                     .get(&evidence.acceptance_id)
                     .is_none_or(|predicate| predicate(&evidence.result))
-                {
-                    store.save_evidence(
-                        key,
-                        &evidence.result,
-                        evidence.copy_layout.clone(),
-                        save_predicates.get(&evidence.acceptance_id),
-                    );
-                }
+            {
+                store.save_evidence(
+                    key,
+                    &evidence.result,
+                    evidence.copy_layout.clone(),
+                    save_predicates.get(&evidence.acceptance_id),
+                );
             }
         }
     }
@@ -421,7 +420,7 @@ pub(super) fn scratch_environment(
 
 impl HostProbe {
     /// This probe with `host` as the host's environment.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn with_host_environment(mut self, host: BTreeMap<String, String>) -> Self {
         self.host = host;
         self

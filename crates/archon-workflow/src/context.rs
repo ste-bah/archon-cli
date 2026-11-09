@@ -27,7 +27,7 @@ pub fn stage_input(
         "workflow_task": run.spec.task,
         "stage_task": stage.task,
         "verify_command": stage.verify_command,
-        "stage_extra": stage.extra,
+        "stage_extra": stage_extra(stage),
         "stage_input": stage.input,
         "target_repository_root": root.display().to_string(),
         "dependencies": dependency_context(store, run, &stage.depends_on)?,
@@ -69,7 +69,7 @@ pub fn fanout_input(
         "workflow_task": run.spec.task,
         "stage_task": stage.task,
         "verify_command": stage.verify_command,
-        "stage_extra": stage.extra,
+        "stage_extra": stage_extra(stage),
         "stage_input": stage.input,
         "target_repository_root": target_root.display().to_string(),
         "dependencies": context.get("dependencies").cloned().unwrap_or_else(|| json!([])),
@@ -453,4 +453,12 @@ fn truncate_chars(body: &str, limit: usize) -> String {
     let mut truncated = body.chars().take(limit).collect::<String>();
     truncated.push_str("\n\n[truncated]");
     truncated
+}
+
+fn stage_extra(stage: &StageSpec) -> std::collections::BTreeMap<String, Value> {
+    let mut extra = stage.extra.clone();
+    if !stage.required_tools.is_empty() {
+        extra.insert("required_tools".to_owned(), json!(stage.required_tools));
+    }
+    extra
 }

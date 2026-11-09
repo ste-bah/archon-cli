@@ -282,11 +282,10 @@ pub fn run_script_guarded(
     run_guarded(context, mutability, config, || {
         db.run_script(script, params.clone(), mutability)
             .map_err(|error| anyhow!(render_cozo_error(&error)))
-            .and_then(|rows| {
+            .inspect(|_| {
                 if matches!(mutability, ScriptMutability::Mutable) {
                     progress::record(config);
                 }
-                Ok(rows)
             })
     })
 }
@@ -304,11 +303,10 @@ pub async fn run_script_guarded_async(
     run_guarded_async(context, mutability, config, move || {
         db.run_script(&script, params.clone(), mutability)
             .map_err(|error| anyhow!(render_cozo_error(&error)))
-            .and_then(|rows| {
+            .inspect(|_| {
                 if matches!(mutability, ScriptMutability::Mutable) {
                     progress::record(&progress_config);
                 }
-                Ok(rows)
             })
     })
     .await

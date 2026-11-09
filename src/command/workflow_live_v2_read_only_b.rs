@@ -377,10 +377,11 @@ pub(super) async fn run_read_only_v2_fanout(
     // project's inputs or gave no verdict is re-run alone, then left to the
     // host as an operational error -- no other branch is touched.
     archon_workflow::heap_future::on_heap(|| {
-        archon_workflow::v2::verification::enforce_declared_contracts_watched(
+        archon_workflow::v2::verification::enforce_declared_contracts_classified(
             &mut outcomes,
             &declared_contracts,
             Some(v2_store.run_root()),
+            Some(crate::command::workflow_task_set::executability::missing_typed_program),
         )
     })
     .await;

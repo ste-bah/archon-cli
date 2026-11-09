@@ -431,8 +431,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
                 "audit controls require the operator control boundary"
             ));
         }
-        // Handled in `handle_workflow_command` before conversion; see the note
-        // there on why it has no `CommandAction`.
+        // handle_workflow_command handles these before conversion (see its note).
         WorkflowAction::Lint(WorkflowLintArgs { .. }) => {
             return Err(anyhow!(
                 "workflow lint is handled before action conversion and must not reach it"
@@ -445,9 +444,10 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
             ));
         }
         WorkflowAction::ImportChainHistory(WorkflowImportChainHistoryArgs { .. })
-        | WorkflowAction::ObserveRunEnd(WorkflowObserveRunEndArgs { .. }) => {
+        | WorkflowAction::ObserveRunEnd(WorkflowObserveRunEndArgs { .. })
+        | WorkflowAction::VerifyDeliverable(_) => {
             return Err(anyhow!(
-                "workflow chain history actions are handled before action conversion and must not reach it"
+                "workflow action is handled before action conversion and must not reach it"
             ));
         }
         WorkflowAction::SyncCapabilities(WorkflowSyncCapabilitiesArgs { .. }) => {

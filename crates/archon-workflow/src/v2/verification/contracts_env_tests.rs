@@ -75,7 +75,7 @@ fn fixture() -> Fixture {
 }
 
 fn contract(typed: &str) -> serde_json::Value {
-    serde_json::json!({"artifact_path": ".archon/lab/present.json", "typed_verifier_command": typed})
+    serde_json::json!({"kind":"evidence", "artifact_path": ".archon/lab/present.json", "typed_verifier_command": typed})
 }
 
 /// G2-3c: one branch's verifier changed the project's inputs on every run.
@@ -293,10 +293,9 @@ fn a_thousand_findings_stay_within_budget_and_all_reach_the_evidence_file() {
 
 /// Issue 219 round 3: a verifier whose stdout passes the read cap is cut
 /// with its byte count, and a pass printed before the cut never stands.
-#[cfg(unix)]
 #[tokio::test]
 async fn verifier_output_past_the_cap_is_cut_with_its_byte_count_and_never_passes() {
-    let command = r#"printf '{"status":"verified"}\n'; head -c 2000000 /dev/zero | tr '\0' 'x'"#;
+    let command = r#"printf '{"status":"verified"}\n'; s=x; i=0; while [ "$i" -lt 21 ]; do s="$s$s"; i=$((i+1)); done; printf '%.2000000s' "$s""#;
     match run_contract_verifier_within(command, std::time::Duration::from_secs(60)).await {
         ContractVerification::Failed(findings, _) => {
             let text = findings.join("; ");
@@ -307,7 +306,6 @@ async fn verifier_output_past_the_cap_is_cut_with_its_byte_count_and_never_passe
     }
 }
 
-#[cfg(unix)]
 fn contract_note_case(case: &str, json: &str, exit: i32) {
     if std::env::var("ISSUE_349_CASE").as_deref() != Ok(case) {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -355,7 +353,6 @@ fn contract_note_case(case: &str, json: &str, exit: i32) {
     ));
 }
 
-#[cfg(unix)]
 #[test]
 fn r4_contract_json_failure_exit_one() {
     contract_note_case(
@@ -364,7 +361,6 @@ fn r4_contract_json_failure_exit_one() {
         1,
     );
 }
-#[cfg(unix)]
 #[test]
 fn r4_contract_json_failure_exit_zero() {
     contract_note_case(
@@ -373,7 +369,6 @@ fn r4_contract_json_failure_exit_zero() {
         0,
     );
 }
-#[cfg(unix)]
 #[test]
 fn r4_contract_json_quoted_expectation() {
     contract_note_case(

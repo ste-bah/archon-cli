@@ -226,6 +226,7 @@ fn publish_chain_owned(
 ) -> Result<ReauthorResult> {
     let tasks_root = request.tasks_root;
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
+    // D(i) comes from skeleton deliverables only.
     super::preflight::clear_unvalidated_floor_implements(&mut repaired);
     let contract_bytes = serde_json::to_vec_pretty(&repaired)?;
     let findings = findings::acceptance_findings(
@@ -263,7 +264,15 @@ fn publish_chain_owned(
         verified.acceptance_mode,
         &acceptance_gate_findings,
         &contract_bytes,
-        request.gate.probe.baseline_commit(),
+        findings::carry_baseline_results(
+            tasks_root,
+            request.gate.probe.baseline_commit(),
+            &repaired,
+        )
+        .map(|mut results| {
+            results.outcomes.retain(|id, _| !publish_ids.contains(id));
+            results
+        })?,
     );
     // Obligations are unchanged by a per-check repair, so the operator's
     // recorded waivers still describe this task set.
@@ -320,6 +329,13 @@ fn publish_chain_owned(
         let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
         let digest = content_digest(&skeleton_bytes);
         let skeleton_lock = TaskSkeletonLock {
+            classification: Some(findings::classification(
+                tasks_root,
+                request.project_root,
+                &skeleton,
+                &repaired,
+                &lock,
+            )),
             algorithm: "blake3".into(),
             digest: digest.clone(),
             acceptance_digest: pin.acceptance_digest.clone(),
@@ -458,3 +474,7 @@ mod tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_republish_floor_tests.rs"]
 mod floor_tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_baseline_republish_tests.rs"]
+mod baseline_republish_tests;

@@ -1,0 +1,13 @@
+{
+  "kind": "evidence",
+  "artifact_path": "artifact.json",
+  "validation_status_field": "status",
+  "validation_checks_field": "checks",
+  "validation_check_status_field": "status",
+  "validation_failed_values": [
+    "failed"
+  ],
+  "validation_passed_values": [
+    "passed"
+  ]
+}

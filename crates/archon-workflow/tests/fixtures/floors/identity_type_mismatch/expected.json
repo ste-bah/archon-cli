@@ -1,0 +1,18 @@
+{
+  "native": {
+    "findings": [
+      "missing required cell: [1]",
+      "extra undeclared cell: [\"1\"]"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [],
+    "verdict": "passed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 2,\n  \"failures\": [\n    \"missing required cell: (1,)\",\n    \"extra undeclared cell: ('1',)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

@@ -14,7 +14,9 @@ pub mod acceptance_world;
 pub mod agent_dispatch_port;
 pub mod agent_select;
 pub mod approval;
+pub mod baseline_results;
 pub mod board_port;
+pub mod breakage_proof;
 pub mod bundle;
 mod check_source_cargo;
 pub(crate) mod check_source_chain;
@@ -62,9 +64,11 @@ pub mod obligation_ids;
 mod persistence;
 pub mod planner;
 pub mod policy;
+pub mod prd_tools;
 pub mod stage_write;
 // Issue 342: the probe moved down to the archon-shell leaf; same path here.
 pub use archon_shell::process_liveness;
+pub mod base_snapshot;
 pub mod provider_tiers;
 mod remediation_items;
 pub mod repo_root;
@@ -80,6 +84,7 @@ mod spec_compat;
 mod spec_deser;
 mod spec_inference;
 mod spec_policy;
+mod spec_stage_compat;
 mod spec_work_units;
 pub mod stage;
 pub mod stage_activity;
@@ -165,7 +170,7 @@ pub use v2::{
     DeclarativeFloorEvaluation, DeclarativeFloorFacts, DecompositionAttemptStateV1,
     DecompositionPhase, EnvironmentProfileId, FINALIZATION_RECORD_SCHEMA_VERSION,
     FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION, FIXED_DECOMPOSITION_TEMPLATE_VERSION,
-    FinalizationRecordV1, FixedDecompositionStateV1, FixedRunIdentityV1,
+    FinalizationRecordV1, FixedDecompositionStateV1, FixedRunIdentityV1, FloorVerdict,
     GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
     GateStage, HostCommandRequest, HostCommandResult, HostCommandSubject, ObserverAuthority,
     PREPARED_PUBLICATION_SCHEMA_VERSION, PROJECT_ARTIFACT_POLICY_VERSION,
@@ -193,11 +198,11 @@ pub use v2::{
     WorkflowV2WorkItem, WorkflowV2WorkItemKind, WorkflowV2WriteAssignment, WorkflowV2WriteConflict,
     WorkflowV2WriteItem, WorkflowV2WriteMode, WorkflowV2WritePlan, WorkflowV2WritePlanner,
     WorkflowV2WriteSafetyError, WorkflowV2WriteWave, collect_declarative_floor_facts,
-    declarative_floor_deferral_reason, evaluate_declarative_floor, has_project_artifact_evidence,
-    host_command_call_id, normalize_project_artifact_files, normalize_target_for_repository,
-    normalize_targets_for_repository, observer_eligible, project_artifact_context_from_v2_root,
-    project_artifact_write_admitted, stable_value_hash, validate_changed_files,
-    validate_changed_files_for_repository, verify_fixed_resume_identity,
+    declarative_floor_deferral_reason, evaluate_declarative_floor, evaluate_floor_predicates,
+    has_project_artifact_evidence, host_command_call_id, normalize_project_artifact_files,
+    normalize_target_for_repository, normalize_targets_for_repository, observer_eligible,
+    project_artifact_context_from_v2_root, project_artifact_write_admitted, stable_value_hash,
+    validate_changed_files, validate_changed_files_for_repository, verify_fixed_resume_identity,
 };
 pub use write_coordinator::{
     ItemId, ResourceKey, SerialFallbackReason, TargetFilesSource, WaveId, WriteBoundaryProbe,

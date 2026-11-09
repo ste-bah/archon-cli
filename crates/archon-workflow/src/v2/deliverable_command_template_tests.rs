@@ -128,7 +128,9 @@ fn shell_template_domain_table() {
             "{command}"
         );
         if refused {
-            let (passed, output) = run_verifier(&super::verification_command(&roots, &contract));
+            let (passed, output) = run_verifier(&super::super::deliverable_native_tests::command(
+                &roots, &contract,
+            ));
             assert!(!passed, "{command}: {output}");
             assert!(output.contains(&expected[0].message), "{command}: {output}");
         }

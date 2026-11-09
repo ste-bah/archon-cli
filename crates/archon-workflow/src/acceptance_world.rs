@@ -28,27 +28,9 @@ pub struct AuthorizedCommand {
     cwd: TrustedCwd,
 }
 impl AuthorizedCommand {
-    /// Host-generated predicates from an already authorized floor, never caller text.
-    pub(crate) fn floor_prerequisites(
-        root: &std::path::Path,
-        floor: &crate::task_universe::WorkflowV2DeliverableContract,
-    ) -> WorkflowResult<Self> {
-        let mut floor = floor.clone();
-        floor.typed_verifier_command = None;
-        let raw = serde_json::to_value(floor)?;
-        Ok(Self {
-            bytes: crate::v2::deliverable_contract::verification_command(
-                &crate::v2::deliverable_contract::ContractRoots::project_only(
-                    root.to_string_lossy(),
-                ),
-                &raw,
-            )
-            .into_bytes(),
-            cwd: TrustedCwd::ProjectRoot,
-        })
-    }
     /// A command for runner tests, which drive `run_at` without a contract.
     #[cfg(test)]
+    #[cfg(unix)]
     pub(crate) fn for_test(text: &str, cwd: TrustedCwd) -> Self {
         Self {
             bytes: text.as_bytes().to_vec(),

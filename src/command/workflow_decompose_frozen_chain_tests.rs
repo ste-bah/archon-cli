@@ -495,3 +495,5 @@ mod verification;
 
 #[path = "workflow_decompose_frozen_admission_tests.rs"]
 mod admission;
+#[path = "workflow_decompose_classification_verdict_tests.rs"]
+mod classification_verdict_tests;

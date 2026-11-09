@@ -1,0 +1,21 @@
+{
+  "native": {
+    "findings": [
+      "declared registry records field is not an object",
+      "a has no declared registry record for key a"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "declared registry records field is not an object",
+      "a has no declared registry record for key a"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 2,\n  \"failures\": [\n    \"declared registry records field is not an object\",\n    \"a has no declared registry record for key a\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

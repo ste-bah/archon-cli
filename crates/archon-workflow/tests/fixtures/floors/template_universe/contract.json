@@ -1,0 +1,5 @@
+{
+  "kind": "evidence",
+  "artifact_path": "out/<id>.json",
+  "required_universe": true
+}

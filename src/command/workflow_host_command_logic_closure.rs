@@ -280,7 +280,8 @@ impl Workspace {
         let Some(first) = segs.first() else {
             return Ok(Res::External);
         };
-        let (target, mut at, mut rest): (String, Vec<String>, &[String]) = match first.as_str() {
+        let (mut target, mut at, mut rest): (String, Vec<String>, &[String]) = match first.as_str()
+        {
             "" => match segs.get(1) {
                 Some(name) if self.roots.contains_key(name) => {
                     (name.clone(), Vec::new(), &segs[2..])
@@ -304,7 +305,10 @@ impl Workspace {
         };
         while let Some(name) = rest.first() {
             match self.resolve_name(&target, &at, name) {
-                Some(Res::Module(_, m)) => at = m,
+                Some(Res::Module(k, m)) => {
+                    target = k;
+                    at = m;
+                }
                 Some(res) => return Ok(res),
                 None => {
                     let module = at.join("::");

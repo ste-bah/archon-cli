@@ -6,37 +6,52 @@ use command_template::expansion_only;
 
 pub use super::contract_roots::ContractRoots;
 
+static VERIFIER_PROGRAM: std::sync::OnceLock<Result<std::path::PathBuf, String>> =
+    std::sync::OnceLock::new();
+
+/// Record the executable path once, before any application threads start.
+pub fn set_verifier_program(program: Result<std::path::PathBuf, String>) {
+    let _ = VERIFIER_PROGRAM.set(program);
+}
+
 pub fn verification_command(roots: &ContractRoots, contract: &Value) -> String {
-    if let Some(reason) = template_binding_failure(contract) {
+    // Presence observations are prompt metadata, not declared predicates.
+    let mut declaration = contract.clone();
+    if let Some(fields) = declaration.as_object_mut() {
+        fields.remove("artifact_status");
+    }
+    let contract = &declaration;
+    if let Some(reason) = contract_defect(contract) {
         return fail_closed_command(&reason);
     }
-    // The generated verifier is executed by `sh`, so the roots have to be
-    // written the way a POSIX shell reads them. A native Windows root
-    // (`C:\Users\...`) reaches the shell with its separators consumed as escape
-    // characters, and the verifier then probes a path that does not exist —
-    // reporting a launch-ish failure instead of the "missing or empty" verdict
-    // the caller relies on. Git's sh accepts `C:/Users/...` unchanged.
-    //
-    // Emitted as a JSON array in resolution order (Issue-22): the verifier's
-    // own `resolve()` tries each root and settles on the first that holds the
-    // declared path.
-    let roots_literal = serde_json::to_string(
-        &roots
-            .ordered()
-            .map(|root| root.replace('\\', "/"))
-            .collect::<Vec<_>>(),
-    )
-    .expect("project roots JSON");
-    let contract_json = serde_json::to_string(contract).expect("deliverable contract JSON");
-    let contract_literal =
-        serde_json::to_string(&contract_json).expect("deliverable contract JSON literal");
-    let verifier = VERIFIER
-        .replace("__PROJECT_ROOTS__", &roots_literal)
-        .replace("__CONTRACT_JSON__", &contract_literal);
-    let Some(command) = typed_verification_command(roots, contract) else {
-        return verifier;
+    let program = match VERIFIER_PROGRAM.get() {
+        Some(Ok(program)) => program.to_string_lossy().replace('\\', "/"),
+        Some(Err(error)) => return fail_closed_command(error),
+        None => return fail_closed_command("verifier program has not been recorded at startup"),
     };
-    format!("{command}\n{verifier}")
+    let mut words = vec![program, "workflow".into(), "verify-deliverable".into()];
+    for root in roots.ordered() {
+        words.extend(["--root".into(), root.replace('\\', "/")]);
+    }
+    words.extend(["--contract-json".into(), "-".into()]);
+    let contract = serde_json::to_string(contract).expect("contract value");
+    // Pass the structured input on stdin so argument rewriting cannot alter it.
+    let verifier = format!(
+        "printf '%s' {} | {}",
+        shell_quote(&contract),
+        words
+            .iter()
+            .map(|word| shell_quote(word))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    match typed_verification_command(
+        roots,
+        &serde_json::from_str::<Value>(&contract).expect("contract value"),
+    ) {
+        Some(command) => format!("{verifier} || exit $?\n(\n{command}\n)"),
+        None => verifier,
+    }
 }
 
 pub fn typed_verification_command(roots: &ContractRoots, contract: &Value) -> Option<String> {
@@ -364,8 +379,6 @@ pub fn resolve_contract_path(roots: &ContractRoots, value: Option<&Value>) -> St
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
-
-const VERIFIER: &str = include_str!("deliverable_verifier.sh");
 
 #[cfg(test)]
 #[path = "deliverable_contract_tests.rs"]

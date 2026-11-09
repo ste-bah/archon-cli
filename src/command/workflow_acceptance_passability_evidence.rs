@@ -94,7 +94,7 @@ thread_local! {
 
 /// Treat `value` as the credential `name` on this thread (tests only: the
 /// process environment is shared by every test).
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn test_secret(name: &str, value: &str) {
     TEST_SECRETS.with(|secrets| secrets.borrow_mut().push((name.into(), value.into())));
 }

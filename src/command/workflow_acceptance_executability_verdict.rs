@@ -80,7 +80,7 @@ mod shell_setup;
 mod subcommand;
 #[path = "workflow_acceptance_executability_verdict_which.rs"]
 mod which;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use subcommand::HOST_PATH;
 pub(crate) use subcommand::unresolved_on_path;
 
@@ -126,6 +126,7 @@ pub(crate) struct Context {
 
 #[path = "workflow_acceptance_executability_verdict_requirements.rs"]
 mod requirements;
+pub(crate) use requirements::missing_site_program;
 
 impl Context {
     /// The site environment `environment`, from the site's own context
@@ -240,10 +241,11 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
 /// a program (or a tool's subcommand) that neither the site nor the host
 /// has, [`UnprovenCause::SiteLacks`] for one the site lacks and the host
 /// has; every other run without a verdict is the host's.
-pub(crate) fn no_verdict_cause(
+fn no_verdict_cause_inner(
     command: &str,
     result: &CheckResult,
     at: &Context,
+    include_compile: bool,
 ) -> Option<(String, UnprovenCause)> {
     let host = |why: String| Some((why, UnprovenCause::PermanentHost));
     let classification = classify_check_run(command, result);
@@ -291,6 +293,9 @@ pub(crate) fn no_verdict_cause(
     if matches!(code, 0 | 126 | 127) {
         return None;
     }
+    if !include_compile {
+        return None;
+    }
     let locations = compile_errors(&output(result));
     let builds = commands
         .iter()
@@ -320,14 +325,10 @@ pub(crate) fn may_be_host_failure(result: &CheckResult) -> bool {
     }
 }
 
-fn output(result: &CheckResult) -> String {
-    format!(
-        "{}\n{}",
-        // Issue 544: verdicts read the raw capture when it is kept.
-        String::from_utf8_lossy(result.verdict_stdout()),
-        String::from_utf8_lossy(result.verdict_stderr())
-    )
-}
+#[path = "workflow_acceptance_executability_verdict_causes.rs"]
+mod causes;
+pub(crate) use causes::no_verdict_cause;
+pub(super) use causes::{mutant_cause, output};
 
 /// The first program `commands` start that cannot start: a bare name not on
 /// the search path, or an absolute path that does not exist. A program
@@ -446,7 +447,7 @@ static SPAN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^-->\s+(\S+?):\d+").expect("static pattern"));
 
 /// A source file's interpreter frame: `File "path", line N`, not a program
-/// read from stdin or `-c`.
+/// read from stdin or `-c`. R2 debt: this runtime shape and the syntax names below await S8.
 static SOURCE_FRAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^\s*File "([^"<][^"]*)", line \d+"#).expect("static pattern"));
 
@@ -458,6 +459,9 @@ fn compile_errors(output: &str) -> Vec<String> {
     if ASSERTED.is_match(output) {
         return Vec::new();
     }
+    located_lines(output)
+}
+pub(super) fn located_lines(output: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut header = false;
     for line in output.lines() {

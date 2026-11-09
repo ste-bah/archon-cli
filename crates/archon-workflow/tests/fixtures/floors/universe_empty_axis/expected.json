@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "declared required universe has an empty or non-array axis"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "declared required universe has an empty or non-array axis"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 1,\n  \"failures\": [\n    \"declared required universe has an empty or non-array axis\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

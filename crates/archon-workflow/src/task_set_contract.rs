@@ -138,6 +138,9 @@ pub struct AcceptanceLock {
     /// locks written before it was recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_commit: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub baseline_results:
+        std::collections::BTreeMap<String, crate::baseline_results::BaselineCheckResult>,
 }
 
 pub use crate::task_set_lineage::AcceptancePin;

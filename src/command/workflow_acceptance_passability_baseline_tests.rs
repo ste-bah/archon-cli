@@ -98,6 +98,7 @@ async fn P3_12_other_findings_do_not_defer_passability_judging() {
             &client,
             &mut candidate,
             PreImplementation {
+                baseline_outcomes: Default::default(),
                 findings: vec![probe_finding(root.path())],
                 baseline: Some(runs.clone()),
                 host_unproven_reason: None,
@@ -134,6 +135,7 @@ async fn without_probe_findings_parser_and_model_refutations_are_unchanged() {
             &client,
             &mut contract,
             PreImplementation {
+                baseline_outcomes: Default::default(),
                 findings: Vec::new(),
                 baseline: Some(runs),
                 host_unproven_reason: None,
@@ -249,6 +251,7 @@ async fn P3_16_reverify_call_uses_same_absent_base_setup_rule() {
         &client,
         &mut contract,
         PreImplementation {
+            baseline_outcomes: Default::default(),
             findings: Vec::new(),
             baseline: Some(runs),
             host_unproven_reason: None,

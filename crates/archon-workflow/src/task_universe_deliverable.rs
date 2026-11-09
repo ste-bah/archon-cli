@@ -123,3 +123,14 @@ pub struct WorkflowV2DeliverableContract {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub implements: Vec<String>,
 }
+
+impl WorkflowV2DeliverableContract {
+    /// Normalize only an explicitly declared format, without path inference.
+    pub fn normalized_artifact_format(&self) -> Option<String> {
+        self.artifact_format
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_ascii_lowercase)
+    }
+}

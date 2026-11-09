@@ -18,6 +18,7 @@ struct TargetFixture {
     _temp: tempfile::TempDir,
     policy: crate::acceptance_scratch::ScratchPolicy,
     commit: String,
+    #[cfg(unix)]
     repository: PathBuf,
 }
 
@@ -77,6 +78,7 @@ fn target_fixture(tracked_target: bool) -> TargetFixture {
         _temp: temp,
         policy,
         commit,
+        #[cfg(unix)]
         repository,
     }
 }

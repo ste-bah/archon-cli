@@ -37,7 +37,7 @@ fn fixture_pins_known_572_coverage_gap() {
         FreezeGateMode::Enforce,
         &coverage,
         CONTRACT,
-        None,
+        None.into(),
     );
     std::fs::write(
         tasks.join(ACCEPTANCE_LOCK_FILE),
@@ -131,4 +131,37 @@ fn fixture_pins_known_572_coverage_gap() {
         "TASK-TDL-014",
     ]);
     assert!(unrelated.is_superset(&audited), "full set: {unrelated:#?}");
+}
+
+#[test]
+fn r18_classification_has_no_invented_base_outcomes() {
+    use archon_workflow::v2::requirement_classes::{RequirementClass, classify};
+    let skeleton: TaskSkeleton = serde_json::from_slice(SKELETON).unwrap();
+    let contract: AcceptanceContract = serde_json::from_slice(CONTRACT).unwrap();
+    // Classification needs the full base inventory, including non-read deliverables.
+    let paths: BTreeSet<_> = include_str!("../../tests/fixtures/r18_plan/base-paths.txt")
+        .lines()
+        .chain(
+            include_str!("../../tests/fixtures/r18_plan/base-non-read-deliverable-paths.txt")
+                .lines(),
+        )
+        .collect();
+    let entries = classify(&skeleton, &contract, &Default::default(), |path| {
+        (paths.contains(path), false)
+    });
+    let counts = [
+        RequirementClass::NoCheck,
+        RequirementClass::Missing,
+        RequirementClass::CandidateDone,
+        RequirementClass::NoBaseResult,
+    ]
+    .map(|class| entries.iter().filter(|entry| entry.class == class).count());
+    println!("R18 S4a [no_check, missing, candidate_done, no_base_result]={counts:?}");
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.checks.values().all(Option::is_none))
+    );
+    // Counts are pinned from the fixture, without synthesizing verdicts.
+    assert_eq!(counts, [54, 0, 0, 147]);
 }

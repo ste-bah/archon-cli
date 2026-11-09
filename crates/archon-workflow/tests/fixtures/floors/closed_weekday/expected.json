@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "a payload has 2 record(s) dated when the source was closed (row 0 falls on weekday 5; row 1 falls on weekday 5); an observed series cannot contain them"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "advanced payload, temporal, validation, or cross-series predicates are deferred in the R2a run-end observer"
+    ],
+    "verdict": "deferred"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 1,\n  \"failures\": [\n    \"a payload has 2 record(s) dated when the venue was closed (row 0 falls on weekday 5; row 1 falls on weekday 5); an observed series cannot contain them\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}

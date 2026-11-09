@@ -1,0 +1,19 @@
+{
+  "native": {
+    "findings": [
+      "declared cells field is not an array: cells"
+    ],
+    "verdict": "failed"
+  },
+  "native_before": {
+    "findings": [
+      "declared cells field is not an array: cells"
+    ],
+    "verdict": "failed"
+  },
+  "python": {
+    "exit": 1,
+    "stdout": "{\n  \"status\": \"failed\",\n  \"failure_count\": 2,\n  \"failures\": [\n    \"declared cells field is not an array: cells\",\n    \"missing required cell: ('a',)\"\n  ]\n}\n"
+  },
+  "recorded_with": "Python 3.11.17"
+}
