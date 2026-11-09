@@ -210,3 +210,50 @@ fn baseline_aggregate_counts_are_not_an_unnamed_failure_identity() {
     );
     assert!(failure_identity(output, std::path::Path::new("")).is_some());
 }
+
+#[test]
+fn repository_prefix_spellings_match_on_every_host() {
+    let root = std::path::Path::new(r"\\?\C:\Work\Base");
+    let pattern = identity_root_pattern(root).unwrap();
+    for path in [
+        r"C:\Work\Base\src/case_12.rs",
+        "c:/work/base/src/case_12.rs",
+        r"\\?\c:\work\base\src/case_12.rs",
+        r"C:\Work/Base\src/case_12.rs",
+    ] {
+        assert_eq!(
+            pattern.replace_all(&format!("error: {path}:3:5"), "${before}<root>/"),
+            "error: <root>/src/case_12.rs:3:5",
+            "{path}"
+        );
+    }
+    for other in [
+        r"D:\Work\Base\src/a.rs",
+        "C:/Work/Basement/src/a.rs",
+        "src/case_12.rs",
+    ] {
+        assert!(!pattern.is_match(other), "{other}");
+    }
+    let network =
+        identity_root_pattern(std::path::Path::new(r"\\?\UNC\server\share\base")).unwrap();
+    assert!(network.is_match(r"\\SERVER\share\base\src/a.rs"));
+    assert!(network.is_match(r"\\?\UNC\server\share\base\src/a.rs"));
+    let sensitive = identity_root_pattern(std::path::Path::new("/work/base")).unwrap();
+    assert!(!sensitive.is_match("/WORK/base/src/a.rs"));
+}
+
+#[test]
+fn recorded_failure_identity_masks_native_root_spellings() {
+    let recorded = include_str!("../../../../../tests/fixtures/diagnostic_outputs/rustc-a.txt");
+    let recorded_root = "/private/tmp/s8b-r6-recorded/base";
+    let before = recorded.replace(recorded_root, r"C:\Work\Base");
+    let after = recorded.replace(recorded_root, r"\\?\c:\work\tip");
+    let expected = failure_identity(recorded, std::path::Path::new(recorded_root))
+        .expect("the recorded diagnostic identifies a failure");
+    for (output, root) in [(&before, r"C:\Work\Base"), (&after, r"C:\Work\Tip")] {
+        assert_eq!(
+            failure_identity(output, std::path::Path::new(root)).as_deref(),
+            Some(expected.as_str())
+        );
+    }
+}

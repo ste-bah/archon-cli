@@ -475,3 +475,23 @@ fn run_base_survives_invalid_utf8_event_line() {
     std::fs::write(path, bytes).unwrap();
     assert_eq!(run_base_commit(&store).as_deref(), Some("abc123"));
 }
+
+#[tokio::test]
+async fn the_child_logical_directory_has_a_maskable_repository_prefix() {
+    let temp = tempfile::tempdir().unwrap();
+    let (root, _, host, _) = world(temp.path());
+    let run = super::super::test_baseline_run::run_in_worktree(
+        &host,
+        &root,
+        "printf '%s\\n' \"$PWD\"",
+        None,
+    )
+    .await;
+    assert_eq!(run.exit_code, Some(0), "{run:?}");
+    let pattern = super::super::test_baseline_parse::identity_root_pattern(&root).unwrap();
+    assert!(
+        pattern.is_match(&format!("{}/x", run.output.trim())),
+        "{run:?}; {}",
+        root.display()
+    );
+}

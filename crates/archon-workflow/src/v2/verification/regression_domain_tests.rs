@@ -3,6 +3,18 @@ use super::*;
 
 #[test]
 fn regression_baseline_domain_table() {
+    check_rows(include_str!("regression_domain_rows.txt"));
+}
+
+#[test]
+fn regression_baseline_domain_table_with_crlf() {
+    let rows = include_str!("regression_domain_rows.txt")
+        .replace("\r\n", "\n")
+        .replace('\n', "\r\n");
+    check_rows(&rows);
+}
+
+fn check_rows(rows: &str) {
     let first = include_str!("../../../../../tests/fixtures/diagnostic_outputs/rustc-a.txt")
         .lines()
         .next()
@@ -14,8 +26,9 @@ fn regression_baseline_domain_table() {
     let both = format!("{first}\n{other}");
     let root = std::path::Path::new(first.split_once("/src/").expect("recorded path").0);
     let mut count = 0;
-    for row in include_str!("regression_domain_rows.txt")
-        .split([';', '\n'])
+    for row in rows
+        .lines()
+        .flat_map(|line| line.split(';'))
         .filter(|s| !s.is_empty())
     {
         count += 1;
