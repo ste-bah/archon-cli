@@ -102,6 +102,15 @@ async fn run_unwatched(
             }
         };
     let mut process = environment.tokio_command(archon_shell::resolve_posix_shell());
+    // Keep the child’s logical directory tied to the native repository identity.
+    // Otherwise the shell may choose a mounted alias that diagnostics cannot
+    // relate to the root supplied to the failure parser.
+    if let Ok(root) = std::fs::canonicalize(worktree) {
+        process.env(
+            "PWD",
+            archon_write_plan::lexical_path::portable(&root.to_string_lossy()),
+        );
+    }
     process
         .arg("-c")
         .arg(command)

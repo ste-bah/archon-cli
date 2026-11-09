@@ -127,7 +127,7 @@ fn task(tasks: &Path, id: &str, owns: &str, focused: &str) {
     std::fs::write(
         tasks.join(format!("{id}.md")),
         format!(
-            "# {id}\n\n```yaml\ntask_id: {id}\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{owns}` — exists\n\n## Focused Tests\n\n- {focused}\n"
+            "# {id}\n\n```yaml\ntask_id: {id}\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo, pytest]\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{owns}` — exists\n\n## Focused Tests\n\n- {focused}\n"
         ),
     )
     .unwrap();
@@ -205,6 +205,7 @@ fn only_the_runtime_command_is_checked_for_unowned_files() {
     );
     std::fs::remove_file(tasks.join("TASK-X-003.md")).unwrap();
 
+    // Declared programs are recognized without depending on the machine PATH.
     // A pytest path is also a real command input and must retain the finding.
     task(
         &tasks,

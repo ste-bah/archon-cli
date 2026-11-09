@@ -63,6 +63,7 @@ pub(crate) const SCHEMA_VERSION: u32 = 1;
 /// baseline data it had already been handed, walking every run ever kept on
 /// the machine for 47 and 21 minutes before being killed by hand.
 pub(crate) const ROOT_DIR: &str = "baseline-tests";
+pub(super) const EXECUTION_LOGIC: &str = "execution-logic-3";
 const CACHE_DIR: &str = "cache";
 const FINDINGS_DIR: &str = "findings";
 
@@ -308,7 +309,7 @@ fn cache_path(
         Some(digest) => format!("{command}\0project-inputs:{digest}"),
         None => command.to_string(),
     };
-    let hash = blake3::hash(format!("execution-logic-2\0{key}").as_bytes()).to_hex();
+    let hash = blake3::hash(format!("{EXECUTION_LOGIC}\0{key}").as_bytes()).to_hex();
     root(store)
         .join(CACHE_DIR)
         .join(format!("{}-{}.json", segment(&sha), &hash[..16]))
@@ -475,3 +476,7 @@ mod verification_tests;
 fn path_is_empty(path: &std::path::Path) -> bool {
     path.as_os_str().is_empty()
 }
+
+#[cfg(test)]
+#[path = "test_baseline_cache_key_tests.rs"]
+mod cache_key_tests;

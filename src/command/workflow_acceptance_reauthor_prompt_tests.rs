@@ -47,6 +47,7 @@ fn P1_N10_baseline_note_appears_once_with_guard_template_and_verified_candidates
                 implements: vec!["REQ-A".into()],
                 files_expected_to_change: vec!["src/core.txt".into(), "src/missing.txt".into()],
                 focused_tests: vec!["run tests/guard.txt".into()],
+                focused_commands: Some(vec!["run tests/guard.txt".into()]),
                 ..Default::default()
             },
             WorkflowV2TaskUniverseTask {

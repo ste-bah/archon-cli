@@ -25,7 +25,7 @@ use world::*;
 const DEPLOYED: &str = include_str!("fixtures/v3_primitives_7c9f11a6c.js");
 
 const TESTS: &str = "crates/shared/src/store_tests.rs";
-const STALE: &str = "store::tests::stale";
+const STALE: &str = "crates/shared/src/store_tests.rs::stale";
 const LIB: &str = "cargo test -p shared --lib";
 const HIGH_STORE_GAP: (&str, &str, &str) = (
     "gap-store-version",
@@ -35,7 +35,9 @@ const HIGH_STORE_GAP: (&str, &str, &str) = (
 
 /// The residual world, its store file now a package with a test module.
 fn package_host() -> Rc<Host> {
-    let f = fixture();
+    let mut f = fixture();
+    // The retry uses only freeze-authorized commands and explicit file evidence.
+    f.universe.as_mut().unwrap().tasks[0].focused_commands = Some(vec![LIB.into()]);
     std::fs::write(
         f.repo.join("crates/shared/Cargo.toml"),
         "[package]\nname = \"shared\"\n",

@@ -27,11 +27,16 @@ fn live_workflow_prompt_advertises_write_capable_contract() {
         "execution prompt must keep focused verification language-agnostic"
     );
     assert!(
-        source.contains("pytest path/to/test.py::test_name")
-            && source.contains("./gradlew :module:test --tests")
-            && source.contains("go test ./pkg -run TestName"),
-        "live execution prompt must give non-Cargo focused-test examples"
+        source.contains("Run declared `verify_command` and Focused Tests commands exactly as declared; never widen a declared command."),
+        "execution prompt must preserve the project's declared commands verbatim"
     );
+    assert!(
+        source.contains("When no command is declared, choose the narrowest available test file, target, module, package, class, or test id"),
+        "execution prompt must explain focused selection without fixed tool examples"
+    );
+    for example in ["cargo test", "pytest", "./gradlew", "go test", "mvn", "npm"] {
+        assert!(!source.contains(example), "fixed tool example: {example}");
+    }
     assert!(
         source.contains("Shape the workflow to the task"),
         "planner prompt must prefer task-shaped workflows over fixed pipelines"

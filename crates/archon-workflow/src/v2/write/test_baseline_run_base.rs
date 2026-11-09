@@ -127,7 +127,9 @@ pub(crate) fn run_base_commit(store: &WorkflowV2ResultStore) -> Option<String> {
 
 fn verdict_path(store: &WorkflowV2ResultStore, tree: Tree, commit: &str, command: &str) -> PathBuf {
     let sha: String = commit.chars().take(12).collect();
-    let hash = blake3::hash(format!("execution-logic-2\0{command}").as_bytes()).to_hex();
+    let hash =
+        blake3::hash(format!("{}\0{command}", super::test_baseline::EXECUTION_LOGIC).as_bytes())
+            .to_hex();
     store
         .root()
         .join("baseline-tests")

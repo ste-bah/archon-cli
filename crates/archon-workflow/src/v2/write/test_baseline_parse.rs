@@ -438,9 +438,21 @@ pub(crate) fn identity_root_pattern(root: &std::path::Path) -> Option<regex::Reg
     for root in roots {
         let raw = root.to_string_lossy();
         let portable = archon_write_plan::lexical_path::portable(&raw);
-        for spelling in [raw.as_ref(), portable.as_str()] {
-            spellings.insert(regex::escape(spelling.trim_end_matches(['/', '\\'])));
-        }
+        let path = portable.trim_end_matches('/');
+        let escaped = path
+            .split('/')
+            .map(regex::escape)
+            .collect::<Vec<_>>()
+            .join(r"[/\\]");
+        let drive = path.as_bytes().get(1) == Some(&b':');
+        let pattern = if drive {
+            format!(r"(?i:(?:[/\\]{{2}}\?[/\\])?{escaped})")
+        } else if let Some(rest) = escaped.strip_prefix(r"[/\\][/\\]") {
+            format!(r"(?i:[/\\]{{2}}(?:\?[/\\]UNC[/\\])?{rest})")
+        } else {
+            escaped
+        };
+        spellings.insert(pattern);
     }
     let prefixes = spellings.into_iter().collect::<Vec<_>>().join("|");
     Some(
