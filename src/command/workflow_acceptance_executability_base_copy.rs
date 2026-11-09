@@ -10,6 +10,9 @@ pub(crate) struct BaseCopy {
     commit: String,
 }
 impl BaseCopy {
+    pub(crate) fn root(&self) -> &Path {
+        &self.copy.root
+    }
     pub(crate) fn repository(&self) -> &Path {
         &self.copy.repository
     }

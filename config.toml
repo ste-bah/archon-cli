@@ -1400,6 +1400,14 @@ gate_mode = "observe"
 # <tasks>/repository.lock, which the implementation run reads.
 # repository_root = "/path/to/code-repository"
 
+# Breaker author and judge call limits per pair and per freeze.
+[workflow.breaker_calls]
+# Limits accept "unlimited"; 0 is rejected.
+# Maximum calls for one task and requirement in a freeze.
+per_pair = 32
+# Maximum calls across the entire freeze.
+global = 256
+
 # Mandatory semantic repository audit. Each limit accepts a positive integer
 # or the exact string "unlimited". These are defaults, not fixed ceilings.
 [workflow.repository_audit]

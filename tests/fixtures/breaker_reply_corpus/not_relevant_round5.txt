@@ -1,0 +1,1 @@
+{"verdict":"not_relevant","quote":"keeps the good value","reason":"The diff touches file 'unrelated', which is not part of the requirement's scope; no behaviour from the requirement is exercised by the change or shown failing in the output."}

@@ -140,3 +140,59 @@ pub(crate) fn site_uses_build_cache(project_root: &Path, tasks_root: &Path) -> b
         .flatten()
         .is_some()
 }
+
+#[allow(dead_code)]
+pub(crate) fn for_base_copy(
+    copy: &super::super::executability::BaseCopy,
+    prd_path: &Path,
+    task_root: &Path,
+    task_universe: archon_workflow::task_universe::WorkflowV2TaskUniverse,
+) -> AuthorScope {
+    AuthorScope {
+        prd_path: prd_path.into(),
+        project_root: copy.project().into(),
+        repository_root: copy.repository().into(),
+        task_universe,
+        task_root: task_root.into(),
+        baseline: Some(super::super::executability::Baseline {
+            origin: super::super::executability::BaselineOrigin::RecordedBase,
+            commit: copy.commit().into(),
+            repository: copy.repository().into(),
+        }),
+        project_input_excludes: Vec::new(),
+        build_cache: false,
+    }
+}
+#[allow(dead_code)]
+pub(crate) fn confined_read_roots(
+    scope: &AuthorScope,
+    copy_root: &Path,
+) -> Result<Vec<String>, String> {
+    let canonical = |p: &Path| archon_shell::paths::canonicalize(p).map_err(|e| e.to_string());
+    let root = canonical(copy_root)?;
+    for (field, path) in [
+        ("repository_root", &scope.repository_root),
+        ("project_root", &scope.project_root),
+    ] {
+        if !canonical(path)?.starts_with(&root) {
+            return Err(format!(
+                "acceptance author scope: {field} {} lies outside the base copy {}",
+                path.display(),
+                copy_root.display()
+            ));
+        }
+    }
+    let roots = scope.read_roots()?;
+    for path in &roots {
+        if Path::new(path) != scope.prd_path && !canonical(Path::new(path))?.starts_with(&root) {
+            return Err(format!(
+                "acceptance author scope: read_root {path} lies outside the base copy {}",
+                copy_root.display()
+            ));
+        }
+    }
+    Ok(roots)
+}
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_base_scope_tests.rs"]
+mod base_scope_tests;

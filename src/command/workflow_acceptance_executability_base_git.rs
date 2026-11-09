@@ -37,6 +37,13 @@ impl IsolatedGit {
         }))
     }
     pub(super) fn output(&self, args: &[&std::ffi::OsStr]) -> Result<std::process::Output, Unrun> {
+        let mut command = self.command();
+        command
+            .args(args)
+            .output()
+            .map_err(|error| Unrun::error(error.into(), "running isolated copy operation".into()))
+    }
+    pub(super) fn command(&self) -> std::process::Command {
         let mut command = archon_shell::spawn::command("git");
         for (name, _) in std::env::vars_os() {
             if name
@@ -48,15 +55,10 @@ impl IsolatedGit {
             }
         }
         let hooks = format!("core.hooksPath={}", self.template.display());
-        let output = command
+        command
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", &self.configuration)
-            .args(["-c", &hooks, "-c", "core.longpaths=true"])
-            .args(args)
-            .output()
-            .map_err(|error| {
-                Unrun::error(error.into(), "running isolated copy operation".into())
-            })?;
-        Ok(output)
+            .args(["-c", &hooks, "-c", "core.longpaths=true"]);
+        command
     }
 }

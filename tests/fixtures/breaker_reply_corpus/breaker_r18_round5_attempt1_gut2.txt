@@ -1,0 +1,1 @@
+{"find":"pub fn data_root(&self) -> PathBuf {\n        self.root.join(\".archon/trading-lab/data\")\n    }","key":"crates/archon-trading/src/data_store.rs","replace":"pub fn data_root(&self) -> PathBuf {\n        self.root.join(\".archon/data\")\n    }"}

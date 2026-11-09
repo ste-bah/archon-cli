@@ -28,7 +28,13 @@ pub(crate) struct BreakageReport {
     pub proofs: BreakageProofs,
     pub store: Option<PathBuf>,
 }
-fn refusal(probe: &HostProbe, req: &BreakageRequest<'_>) -> Option<&'static str> {
+pub(super) fn breakage_refusal(
+    probe: &HostProbe,
+    req: &BreakageRequest<'_>,
+) -> Option<&'static str> {
+    if probe.check_bound_secs() < 2 {
+        return Some("invalid_time_cap");
+    }
     let c = req.classification;
     if !matches!(probe.site, Site::Hermetic) {
         return Some("proof_site_unavailable");
@@ -165,7 +171,7 @@ pub(crate) async fn prove_breakage(probe: &HostProbe, req: BreakageRequest<'_>) 
             checks,
         });
     }
-    if let Some(code) = refusal(probe, &req) {
+    if let Some(code) = breakage_refusal(probe, &req) {
         summary.refusals.push(code.into());
     }
     let whole = summary.refusals.iter().any(|c| !c.starts_with("m-"));
@@ -336,3 +342,6 @@ mod decide_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_breakage_tests.rs"]
 mod tests;
+
+#[path = "workflow_acceptance_breaker.rs"]
+pub(crate) mod breaker;

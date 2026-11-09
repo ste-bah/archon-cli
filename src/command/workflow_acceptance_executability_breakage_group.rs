@@ -35,7 +35,14 @@ pub(super) async fn execute(
     let digest = check_digest(&entry.check);
     let mut items = Vec::new();
     for mutant in mutants {
-        let key = store::keys(probe, req.contract, id, &mutant.patch_digest()).await;
+        let key = store::keys(
+            probe,
+            req.contract,
+            id,
+            &mutant.patch_digest(),
+            req.min_deadline_secs,
+        )
+        .await;
         let cacheable = key.is_some();
         let (control, key) = key.unwrap_or_else(|| {
             once(summary, "cache_unavailable");

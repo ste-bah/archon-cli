@@ -17,6 +17,7 @@ pub mod approval;
 pub mod baseline_results;
 pub mod board_port;
 pub mod breakage_proof;
+pub mod breaker_verdict;
 pub mod bundle;
 mod check_source_cargo;
 pub(crate) mod check_source_chain;

@@ -210,3 +210,38 @@ fn prefixed_advisory_locations_are_not_build_errors() {
         }
     }
 }
+
+#[test]
+fn literal_sbt_kotlin_and_go_diagnostics_never_false_kill() {
+    for text in [
+        "[error] /x/A.scala:3:5: not found: value f",
+        "[ERROR] /x/A.scala:3:5: not found: value f",
+        "e: file:///x/A.kt:3:5 Unresolved reference: f",
+        "./a.go:5:2: undefined: f",
+    ] {
+        assert!(
+            matches!(
+                decide::decide(&result(text, Some(1)), 1, false, 2, &|_| None, &|| None),
+                RunOutcome::Unviable { located } if located.iter().any(|l| l.class == LocatedClass::Unresolved)
+            ),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn uri_advisory_prefixes_are_not_error_locations() {
+    for text in [
+        "w: file:///x/A.kt:3:5 deprecated",
+        "W: file:///x/A.kt:3:5 deprecated",
+        "i: file:///x/A.kt:3:5 progress",
+    ] {
+        assert!(
+            matches!(
+                decide::decide(&result(text, Some(1)), 1, false, 2, &|_| None, &|| None),
+                RunOutcome::Killed { .. }
+            ),
+            "{text}"
+        );
+    }
+}

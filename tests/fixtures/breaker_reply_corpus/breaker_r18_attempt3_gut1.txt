@@ -1,0 +1,3 @@
+```json
+{"key":"crates/archon-trading/src/data_store.rs","find":"    pub fn data_root(&self) -> PathBuf {\n        self.root.join(\".archon/trading-lab/data\")\n    }","replace":"    pub fn data_root(&self) -> PathBuf {\n        PathBuf::new()\n    }"}
+```

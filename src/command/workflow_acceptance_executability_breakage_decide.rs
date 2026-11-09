@@ -4,10 +4,14 @@ use archon_workflow::breakage_proof::{Located, LocatedClass, RunOutcome};
 use regex::Regex;
 use std::sync::LazyLock;
 static COLUMN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(?:\[[A-Z]+\]\s+)?(?P<path>(?:[A-Za-z]:)?[^\s:()]+):(?P<line>\d+):(?P<col>\d+)(?::|\s+-\s+|\s)").expect("static pattern")
+    Regex::new(r"^(?:(?i:\[[a-z]+\])\s+)?(?P<path>(?:[A-Za-z]:)?[^\s:()]+):(?P<line>\d+):(?P<col>\d+)(?::|\s+-\s+|\s)").expect("static pattern")
 });
 static BRACKET: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(?:\[[A-Z]+\]\s+)?(?P<path>(?:[A-Za-z]:)?[^\s:()\[\]]+):?[\[(](?P<line>\d+),(?P<col>\d+)[\])]:?\s*").expect("static pattern")
+    Regex::new(r"^(?:(?i:\[[a-z]+\])\s+)?(?P<path>(?:[A-Za-z]:)?[^\s:()\[\]]+):?[\[(](?P<line>\d+),(?P<col>\d+)[\])]:?\s*").expect("static pattern")
+});
+static URI: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[eE]:\s+(?P<path>file://[^\s]+?):(?P<line>\d+):(?P<col>\d+)(?::|\s)")
+        .expect("static pattern")
 });
 // R2 debt: this parse-stop frame is one runtime's shape; review in S8.
 static STOP: LazyLock<Regex> = LazyLock::new(|| {
@@ -65,7 +69,7 @@ pub(super) fn locations(
         })
         .collect();
     for line in text.lines() {
-        for form in [&*COLUMN, &*BRACKET, &*STOP] {
+        for form in [&*COLUMN, &*BRACKET, &*URI, &*STOP] {
             let Some(c) = form.captures(line) else {
                 continue;
             };
@@ -92,13 +96,21 @@ pub(super) fn locations(
             {
                 continue;
             }
-            let explicit = prefix.eq_ignore_ascii_case("error")
-                || ["error", "fatal"]
-                    .iter()
-                    .any(|w| word.eq_ignore_ascii_case(w));
-            if let Some((path, class)) = resolve(&c["path"])
-                .or_else(|| explicit.then(|| (c["path"].into(), LocatedClass::Unresolved)))
+            // A numeric-only prefix is a time, not a file location.
+            if c["path"].bytes().all(|b| b.is_ascii_digit())
+                && !c
+                    .get(0)
+                    .expect("matched capture")
+                    .as_str()
+                    .trim_end()
+                    .ends_with(':')
+                && resolve(&c["path"]).is_none()
             {
+                continue;
+            }
+            {
+                let (path, class) = resolve(&c["path"])
+                    .unwrap_or_else(|| (c["path"].into(), LocatedClass::Unresolved));
                 let located = Located {
                     path,
                     line: c["line"].parse().unwrap_or(0),

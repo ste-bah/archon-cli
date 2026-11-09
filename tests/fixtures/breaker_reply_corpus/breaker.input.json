@@ -1,0 +1,7 @@
+{
+  "files": {
+    "value": "value() { printf good; }\nvalue\n"
+  },
+  "id": "REQ-VALUE-001",
+  "text": "It keeps the good value for every input."
+}

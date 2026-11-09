@@ -1,0 +1,1 @@
+{"mutants":[{"kind":"behaviour","breaks":"keeps the good value for every input","edits":[{"key":"value","find":"printf good","replace":"printf bad"}]},{"kind":"behaviour","breaks":"keeps the good value","edits":[{"key":"value","find":"printf good;","replace":"printf good"}]}]}

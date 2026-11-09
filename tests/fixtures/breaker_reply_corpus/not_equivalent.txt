@@ -1,0 +1,1 @@
+{"verdict":"not_equivalent","reason":"The script changes from outputting good to bad, so the observable result differs for the covered input."}

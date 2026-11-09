@@ -40,24 +40,44 @@ pub(super) async fn keys(
     contract: &AcceptanceContract,
     id: &str,
     patch_digest: &str,
+    min_deadline_secs: u64,
 ) -> Option<(String, String)> {
     let inputs = run::inputs(probe);
     let (contract, id, patch_digest) = (contract.clone(), id.to_string(), patch_digest.to_string());
-    tokio::task::spawn_blocking(move || key_pair(&inputs, &contract, &id, &patch_digest))
-        .await
-        .ok()?
+    tokio::task::spawn_blocking(move || {
+        key_pair(&inputs, &contract, &id, &patch_digest, min_deadline_secs)
+    })
+    .await
+    .ok()?
 }
 fn key_pair(
     probe: &HostProbe,
     contract: &AcceptanceContract,
     id: &str,
     patch_digest: &str,
+    min_deadline_secs: u64,
 ) -> Option<(String, String)> {
     let tree = probe.baseline.as_ref()?;
     let data = sites::data_state(probe, tree).ok()?;
     let memo = sites::reuse::memo_key(probe, tree, &data, contract, id)?;
-    let control = content_digest(&serde_json::to_vec(&(BREAKAGE_LOGIC, memo)).ok()?);
-    let run = content_digest(format!("{control}\0{patch_digest}").as_bytes());
+    let control = content_digest(
+        &serde_json::to_vec(&(
+            BREAKAGE_LOGIC,
+            memo,
+            probe.check_bound_secs(),
+            min_deadline_secs,
+        ))
+        .ok()?,
+    );
+    let run = content_digest(
+        &serde_json::to_vec(&(
+            &control,
+            patch_digest,
+            probe.check_bound_secs(),
+            min_deadline_secs,
+        ))
+        .ok()?,
+    );
     Some((control, run))
 }
 pub(super) fn reusable(outcome: &RunOutcome) -> bool {
@@ -152,4 +172,29 @@ pub(super) fn output(probe: &HostProbe, result: &CheckResult) -> Vec<u8> {
         bytes.extend(redactor.redact_bytes(&stream[stream.len().saturating_sub(32 * 1024)..]));
     }
     bytes
+}
+
+pub(super) fn evidence_text(
+    report: &BreakageReport,
+    run: &MutantRun,
+) -> Result<(String, Option<String>), String> {
+    evidence_text_at(report.store.as_deref(), run)
+}
+pub(super) fn evidence_text_at(
+    root: Option<&Path>,
+    run: &MutantRun,
+) -> Result<(String, Option<String>), String> {
+    let read = |text: &str| match root {
+        None => Ok(text.to_string()),
+        Some(root) if !archon_workflow::base_snapshot::outside_key(text) => {
+            std::fs::read(root.join(key_path(text)))
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .map_err(|e| e.to_string())
+        }
+        Some(_) => Err("evidence_path_outside_store".into()),
+    };
+    Ok((
+        read(&run.evidence.patch)?,
+        run.evidence.output.as_deref().map(read).transpose()?,
+    ))
 }

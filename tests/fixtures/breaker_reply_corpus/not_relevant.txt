@@ -1,0 +1,1 @@
+{"verdict":"not_relevant","quote":"keeps the good value","reason":"The diff modifies an unrelated file's constant from 0 to 1, and the failing output shows only that unrelated expectation failing; no evidence links it to the stated value-keeping behaviour."}

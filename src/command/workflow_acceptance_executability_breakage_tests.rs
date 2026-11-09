@@ -4,7 +4,7 @@ use archon_workflow::baseline_results::{BaselineOutcome, BaselineResults};
 use archon_workflow::repository_record::{RepositoryRecordV1, RepositoryTree};
 use archon_workflow::task_skeleton::TaskSkeleton;
 use archon_workflow::v2::requirement_classes::classify;
-fn git(root: &Path, args: &[&str]) -> String {
+pub(super) fn git(root: &Path, args: &[&str]) -> String {
     let out = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(root)
@@ -18,16 +18,16 @@ fn git(root: &Path, args: &[&str]) -> String {
     );
     String::from_utf8(out.stdout).unwrap().trim().into()
 }
-struct Fixture {
-    source: tempfile::TempDir,
-    parent: tempfile::TempDir,
-    contract: AcceptanceContract,
-    lock: AcceptanceLock,
-    classes: RequirementClassification,
-    mutants: MutantSet,
+pub(super) struct Fixture {
+    pub(super) source: tempfile::TempDir,
+    pub(super) parent: tempfile::TempDir,
+    pub(super) contract: AcceptanceContract,
+    pub(super) lock: AcceptanceLock,
+    pub(super) classes: RequirementClassification,
+    pub(super) mutants: MutantSet,
 }
 impl Fixture {
-    fn new(command: &str) -> Self {
+    pub(super) fn new(command: &str) -> Self {
         let source = tempfile::tempdir().unwrap();
         let parent = tempfile::tempdir().unwrap();
         git(source.path(), &["init", "-q"]);
@@ -100,7 +100,7 @@ impl Fixture {
         }
     }
     #[cfg(unix)]
-    fn probe(&self, persist: bool) -> HostProbe {
+    pub(super) fn probe(&self, persist: bool) -> HostProbe {
         let mut probe = HostProbe::new(
             self.source.path().into(),
             self.source.path().into(),
@@ -112,7 +112,7 @@ impl Fixture {
         probe
     }
     #[cfg(unix)]
-    async fn prove(&self, probe: &HostProbe, budget: u64) -> BreakageReport {
+    pub(super) async fn prove(&self, probe: &HostProbe, budget: u64) -> BreakageReport {
         prove_breakage(
             probe,
             BreakageRequest {
@@ -127,10 +127,10 @@ impl Fixture {
         )
         .await
     }
-    fn snapshot(&self) -> &BaseSnapshot {
+    pub(super) fn snapshot(&self) -> &BaseSnapshot {
         self.classes.base_snapshot.as_ref().unwrap()
     }
-    fn copy(&self) -> BaseCopy {
+    pub(super) fn copy(&self) -> BaseCopy {
         materialise_base_copy(
             self.parent.path(),
             self.source.path(),
@@ -331,3 +331,6 @@ mod engine_cases;
 mod io_cases;
 #[path = "workflow_acceptance_executability_breakage_patch_tests.rs"]
 mod patch_cases;
+
+#[path = "workflow_acceptance_executability_breakage_resolution_tests.rs"]
+mod resolution_cases;
