@@ -46,7 +46,7 @@ async function bodyPathsAreRepositoryRootRelative() {
  const h=harness(1);
  await h.context.workflow(h.w);
  assert(h.bodyPrompts.length>0);
- assert(h.bodyPrompts.every(prompt=>prompt.includes('Every path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.')));
+ assert(h.bodyPrompts.every(prompt=>prompt.includes('Every path and every file::test locator anywhere in this body is relative to the repository root, never to a nested source directory.')));
 }
 
 async function boundedPool() {
