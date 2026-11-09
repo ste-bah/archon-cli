@@ -256,8 +256,10 @@ fn verification_input_stamps_project_relative_artifacts_into_canonical_fields() 
 
     assert_eq!(requirements[0], dataset_root_ref);
     assert_eq!(requirements[1], registry_ref);
-    assert!(focused.contains(&dataset_root_ref));
-    assert!(focused.contains(&registry_ref));
+    // Stored destinations keep native roots; shell references use forward slashes.
+    let shell_ref = |path: &str| path.replace('\\', "/").replace('\'', "'\"'\"'");
+    assert!(focused.contains(&shell_ref(&dataset_root_ref)));
+    assert!(focused.contains(&shell_ref(&registry_ref)));
     assert!(!focused.contains("Inspect .archon/"));
     assert_eq!(
         std::fs::read_dir(dataset_root)

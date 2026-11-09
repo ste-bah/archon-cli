@@ -30,6 +30,7 @@ pub struct AuthorizedCommand {
 impl AuthorizedCommand {
     /// A command for runner tests, which drive `run_at` without a contract.
     #[cfg(test)]
+    #[cfg(unix)]
     pub(crate) fn for_test(text: &str, cwd: TrustedCwd) -> Self {
         Self {
             bytes: text.as_bytes().to_vec(),

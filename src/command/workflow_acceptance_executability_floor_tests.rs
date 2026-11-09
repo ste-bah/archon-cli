@@ -1,8 +1,10 @@
 use super::*;
+#[cfg(unix)]
 use archon_workflow::task_set_contract::{
     AcceptanceCheck, AcceptanceContract, AcceptanceCriterion, GapPolicy, JudgeDecision,
     JudgeVerdict, PrdIdentity,
 };
+#[cfg(unix)]
 use std::io::Write;
 
 #[cfg(unix)]

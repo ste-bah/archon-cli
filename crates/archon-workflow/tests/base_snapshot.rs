@@ -55,7 +55,15 @@ fn tree(root: &Path, base: &str) -> RepositoryTree {
 fn tracked_live_states_nested_keys_and_literal_objects() {
     let root = repo();
     let root = root.path();
-    for key in ["same", "modified", "deleted", "dir/file", "literal[*]"] {
+    for key in [
+        "same",
+        "modified",
+        "deleted",
+        "dir/file",
+        // A wildcard filename is legal only on Unix.
+        #[cfg(unix)]
+        "literal[*]",
+    ] {
         write(root, key, b"base");
     }
     let base = commit(root);
@@ -73,6 +81,7 @@ fn tracked_live_states_nested_keys_and_literal_objects() {
             "deleted",
             "dir",
             "dir/file",
+            #[cfg(unix)]
             "literal[*]",
         ],
     )
@@ -83,6 +92,7 @@ fn tracked_live_states_nested_keys_and_literal_objects() {
         ("deleted", LiveState::Missing),
         ("dir", LiveState::Modified),
         ("dir/file", LiveState::Same),
+        #[cfg(unix)]
         ("literal[*]", LiveState::Same),
     ] {
         let SnapshotEntry::Tracked {
@@ -391,6 +401,9 @@ fn scratch_excludes_ignored_deliverables_and_keeps_sibling_input() {
     roots.cleanup().unwrap();
 }
 
+// Reading a directory as an excludes file fails on Unix. The same query
+// does not fail on Git for Windows, so it cannot simulate an unavailable answer.
+#[cfg(unix)]
 #[test]
 fn failed_ignore_query_is_unknown_for_each_live_key() {
     let root = repo();

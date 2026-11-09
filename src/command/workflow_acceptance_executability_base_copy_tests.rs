@@ -412,8 +412,12 @@ fn gitlink_placeholders_and_absent_paths_stay_out_of_the_copy() {
             &format!("160000,{old},sub"),
         ],
     );
-    write(source, "literal[*]", b"base");
-    git(source, &["add", "literal[*]"]);
+    // Windows forbids wildcard filenames; keep the gitlink and absent cases everywhere.
+    #[cfg(unix)]
+    {
+        write(source, "literal[*]", b"base");
+        git(source, &["add", "literal[*]"]);
+    }
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink("tracked", source.join("link")).unwrap();
@@ -427,6 +431,7 @@ fn gitlink_placeholders_and_absent_paths_stay_out_of_the_copy() {
         "absent",
         "absent-dir",
         "ignored/absent",
+        #[cfg(unix)]
         "literal[*]",
     ];
     let evidence = snapshot(source, &base, &keys);
@@ -435,6 +440,7 @@ fn gitlink_placeholders_and_absent_paths_stay_out_of_the_copy() {
     for key in &keys[..5] {
         assert!(!copy.project().join(key).exists(), "{key}");
     }
+    #[cfg(unix)]
     assert_eq!(
         std::fs::read(copy.project().join("literal[*]")).unwrap(),
         b"base"
