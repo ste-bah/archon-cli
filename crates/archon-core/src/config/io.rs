@@ -34,6 +34,12 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
         "file",
         &mut config.workflow.repository_audit.sources,
     );
+    record_breaker_sources(
+        &toml::from_str(&content)?,
+        &path,
+        "file",
+        &mut config.workflow.breaker_calls.sources,
+    );
     validate(&config)?;
     warn_incoherent_permissions(&config, &path);
     warn_obsolete_write_call_time_budget(&content, &path);
@@ -54,6 +60,12 @@ pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, Conf
         &path,
         "file",
         &mut config.workflow.repository_audit.sources,
+    );
+    record_breaker_sources(
+        &toml::from_str(&content)?,
+        &path,
+        "file",
+        &mut config.workflow.breaker_calls.sources,
     );
     validate(&config)?;
     warn_incoherent_permissions(&config, &path);

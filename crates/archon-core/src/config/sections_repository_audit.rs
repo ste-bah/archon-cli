@@ -30,7 +30,7 @@ impl<'de> Deserialize<'de> for AuditLimit {
             type Value = AuditLimit;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 f.write_str(
-                    "a positive integer representable in milliseconds or the string \"unlimited\"",
+                    "a positive integer within the supported range or the string \"unlimited\"",
                 )
             }
             fn visit_u64<E: de::Error>(self, n: u64) -> Result<Self::Value, E> {
@@ -38,7 +38,7 @@ impl<'de> Deserialize<'de> for AuditLimit {
                 // arithmetic representation bound, not an operational budget.
                 if n == 0 || n > (i64::MAX as u64) / 1000 {
                     return Err(E::custom(
-                        "audit limit must be positive and representable in milliseconds",
+                        "limit must be positive and within the supported range",
                     ));
                 }
                 Ok(AuditLimit::Finite(n))

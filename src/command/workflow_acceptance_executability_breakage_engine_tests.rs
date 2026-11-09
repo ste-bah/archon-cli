@@ -443,7 +443,7 @@ async fn deadline_five_parallel_repetitions() {
 }
 
 #[tokio::test]
-async fn explicit_errors_from_an_inner_directory_are_unresolved_not_kills() {
+async fn explicit_errors_from_an_inner_directory_resolve_without_kills() {
     for diagnostic in [
         "a.ts:3:5 - error TS2304: missing",
         "[ERROR] a.java:[5,10] cannot find symbol",
@@ -455,7 +455,7 @@ async fn explicit_errors_from_an_inner_directory_are_unresolved_not_kills() {
         let f = Fixture::new(&command);
         let r = f.prove(&f.probe(false), 10).await;
         assert!(!r.proofs.runs.is_empty());
-        assert!(r.proofs.runs.values().all(|r| matches!(&r.outcome, RunOutcome::Unviable { located } if located.iter().all(|l| l.class == LocatedClass::Unresolved))), "{:?}", r.proofs);
+        assert!(r.proofs.runs.values().all(|r| matches!(&r.outcome, RunOutcome::Unviable { located } if located.iter().all(|l| l.class == LocatedClass::CheckNamed))), "{:?}", r.proofs);
     }
 }
 

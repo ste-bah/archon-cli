@@ -1,0 +1,7 @@
+The function that implements the requirement "Trading Data Lake v1 must use the existing root `.archon/trading-lab/data`" is `TradingDataLake::data_root`, which defines the canonical data root as `<project root>/.archon/trading-lab/data`:
+
+```json
+{"key":"crates/archon-trading/src/data_store.rs","find":"    pub fn data_root(&self) -> PathBuf {\n        self.root.join(\".archon/trading-lab/data\")\n    }\n","replace":"    pub fn data_root(&self) -> PathBuf {\n        self.root.clone()\n    }\n"}
+```
+
+`replace` is the smallest body that still type-checks and runs (`data_root` still returns a `PathBuf`), with the stated behaviour — resolving the data root to the `.archon/trading-lab/data` subtree — removed: it now returns the project root itself.

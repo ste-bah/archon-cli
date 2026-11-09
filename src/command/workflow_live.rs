@@ -64,6 +64,7 @@ mod workflow_live_shape_apply;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
+pub(crate) use workflow_live_v2::EXACT_TOOL_POLICY_MARKER;
 #[cfg(test)]
 pub(crate) use workflow_live_v2::execute_fixed_decomposition_v2_run;
 #[cfg(test)]

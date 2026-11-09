@@ -1,0 +1,1 @@
+{"verdict":"not_relevant","quote":"keeps the good value","reason":"The diff touches only a file unrelated to value handling and the failing output does not show the stated value behaviour failing."}

@@ -1,0 +1,1 @@
+{"verdict":"not_equivalent","reason":"A covered input gives a different result: 'printf good' and 'printf bad' produce different outputs for the same input."}

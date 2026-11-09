@@ -219,6 +219,8 @@ mod owner;
 pub(crate) use breakage::{BreakageReport, BreakageRequest, MIN_DEADLINE_SECS, prove_breakage};
 #[path = "workflow_acceptance_executability_base_git.rs"]
 mod base_git;
+#[path = "workflow_acceptance_breaker_view.rs"]
+pub(crate) mod breaker_view;
 
 #[path = "workflow_acceptance_executability_copy_create.rs"]
 mod create;

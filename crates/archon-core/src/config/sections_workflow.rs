@@ -28,6 +28,7 @@ pub enum GateMode {
 #[derive(Default)]
 pub struct WorkflowRuntimeConfig {
     pub repository_audit: RepositoryAuditConfig,
+    pub breaker_calls: BreakerCallLimits,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_execution: Option<AcceptanceExecutionConfig>,
     pub generated: GeneratedWorkflowConfig,
@@ -333,5 +334,60 @@ impl Default for AutoExtractionConfig {
             enabled: true,
             every_n_turns: 5,
         }
+    }
+}
+
+/// Completion limits for each pair and the entire freeze.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BreakerCallLimits {
+    pub per_pair: AuditLimit,
+    pub global: AuditLimit,
+    #[serde(skip)]
+    pub sources: std::collections::BTreeMap<String, serde_json::Value>,
+}
+impl Default for BreakerCallLimits {
+    fn default() -> Self {
+        let value: toml::Value = toml::from_str(include_str!("../../../../config.toml"))
+            .expect("embedded configuration");
+        let limits = &value["workflow"]["breaker_calls"];
+        Self {
+            per_pair: limits["per_pair"]
+                .clone()
+                .try_into()
+                .expect("embedded per-pair limit"),
+            global: limits["global"]
+                .clone()
+                .try_into()
+                .expect("embedded global limit"),
+            sources: Default::default(),
+        }
+    }
+}
+pub(crate) fn record_breaker_sources(
+    value: &toml::Value,
+    path: &std::path::Path,
+    layer: &str,
+    sources: &mut std::collections::BTreeMap<String, serde_json::Value>,
+) {
+    for field in ["per_pair", "global"] {
+        if value
+            .get("workflow")
+            .and_then(|w| w.get("breaker_calls"))
+            .and_then(|s| s.get(field))
+            .is_some()
+        {
+            sources.insert(field.into(), serde_json::json!({"key":format!("workflow.breaker_calls.{field}"),"path":path,"layer":layer}));
+        }
+    }
+}
+
+impl BreakerCallLimits {
+    pub fn resolved_sources(&self) -> std::collections::BTreeMap<String, serde_json::Value> {
+        let mut sources = self.sources.clone();
+        for field in ["per_pair", "global"] {
+            sources.entry(field.into()).or_insert_with(||serde_json::json!({"layer":"default","key":format!("workflow.breaker_calls.{field}")}));
+        }
+        sources
     }
 }

@@ -177,6 +177,7 @@ pub fn load_layered_config(
 
     // Start with an empty table and merge each layer on top
     let mut merged = Value::Table(toml::map::Map::new());
+    let mut breaker_sources = std::collections::BTreeMap::new();
     let mut audit_sources = std::collections::BTreeMap::new();
     let mut obsolete_write_budget = Vec::new();
 
@@ -185,6 +186,12 @@ pub fn load_layered_config(
     for info in &active_layers {
         let value = read_and_parse_toml(&info.path)?;
         validate_audit_layer(&info.path, &value)?;
+        crate::config::record_breaker_sources(
+            &value,
+            &info.path,
+            &info.layer.to_string(),
+            &mut breaker_sources,
+        );
         crate::config::record_audit_sources(
             &value,
             &info.path,
@@ -201,6 +208,7 @@ pub fn load_layered_config(
     if let Some(path) = settings_path {
         let value = read_and_parse_toml(path)?;
         validate_audit_layer(path, &value)?;
+        crate::config::record_breaker_sources(&value, path, "settings", &mut breaker_sources);
         crate::config::record_audit_sources(&value, path, "settings", &mut audit_sources);
         if crate::config::sets_obsolete_write_call_time_budget(&value) {
             obsolete_write_budget.push(path.display().to_string());
@@ -214,6 +222,7 @@ pub fn load_layered_config(
         .map_err(|e: toml::de::Error| ConfigError::ParseError(e))?;
 
     config.workflow.repository_audit.sources = audit_sources;
+    config.workflow.breaker_calls.sources = breaker_sources;
     validate(&config)?;
     // Printed, not logged: startup loads this before logging is set up, so a
     // log line here would never reach the user (#213: the legacy key loads
@@ -250,6 +259,18 @@ fn read_and_parse_toml(path: &Path) -> Result<Value, ConfigError> {
 }
 
 fn validate_audit_layer(path: &Path, value: &Value) -> Result<(), ConfigError> {
+    if let Some(limits) = value.get("workflow").and_then(|w| w.get("breaker_calls")) {
+        let _: crate::config::BreakerCallLimits =
+            limits
+                .clone()
+                .try_into()
+                .map_err(|error: toml::de::Error| {
+                    ConfigError::ValidationError(format!(
+                        "workflow.breaker_calls in {}: {error}",
+                        path.display()
+                    ))
+                })?;
+    }
     if let Some(audit) = value
         .get("workflow")
         .and_then(|workflow| workflow.get("repository_audit"))

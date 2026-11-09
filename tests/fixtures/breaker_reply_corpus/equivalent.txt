@@ -1,0 +1,1 @@
+{"verdict":"equivalent","reason":"printf with the format '%s' and a single literal argument 'good' writes good exactly like the bare-word format string, with no conversion specifiers or backslash escapes in either case."}

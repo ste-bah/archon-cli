@@ -1,0 +1,1 @@
+{"verdict":"relevant","quote":"keeps the good value","reason":"The change makes value print 'load-failure' instead of 'good', and the output shows the shell cannot find 'load-failure', so the stated behaviour fails."}

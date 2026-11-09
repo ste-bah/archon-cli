@@ -1,0 +1,1 @@
+{"verdict":"equivalent","reason":"Both versions print good with a trailing newline; printf %s good preserves the same observable output."}

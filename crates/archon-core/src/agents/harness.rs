@@ -12,17 +12,27 @@ use super::definition::{AgentSource, CustomAgentDefinition};
 /// for `workflow freeze-acceptance --reauthor` and the in-round repair.
 pub const ACCEPTANCE_REAUTHOR_AGENT: &str = "acceptance-reauthor";
 
+/// The host agent that proposes requirement-directed changes.
+pub const REQUIREMENT_BREAKER_AGENT: &str = "requirement-breaker";
+
 /// The read-only tools a host agent may use: it observes, never writes or runs.
 pub const HOST_READ_ONLY_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
 
 /// Whether `name` is a host agent: resolvable by key, never routed to a task.
 pub fn is_host_agent(name: &str) -> bool {
-    name == ACCEPTANCE_REAUTHOR_AGENT
+    name == ACCEPTANCE_REAUTHOR_AGENT || name == REQUIREMENT_BREAKER_AGENT
 }
 
 /// Every host-launched agent definition.
 pub fn get_harness_agents() -> Vec<CustomAgentDefinition> {
     vec![CustomAgentDefinition {
+        agent_type: REQUIREMENT_BREAKER_AGENT.into(),
+        description: "Host agent: proposes requirement-directed changes.".into(),
+        system_prompt: "Observe the files in your working directory. Never run commands or write files. The task message defines the reply format.".into(),
+        allowed_tools: Some(HOST_READ_ONLY_TOOLS.map(String::from).to_vec()),
+        source: AgentSource::BuiltIn,
+        ..Default::default()
+    }, CustomAgentDefinition {
         agent_type: ACCEPTANCE_REAUTHOR_AGENT.into(),
         description: "Workflow host agent: re-authors one acceptance check entry. Launched by the host, not for direct use.".into(),
         system_prompt: concat!(
@@ -111,5 +121,31 @@ mod tests {
         for built_in in crate::agents::built_in::get_built_in_agents() {
             assert!(!names.contains(&built_in.agent_type));
         }
+    }
+}
+
+#[cfg(test)]
+mod breaker_tests {
+    use super::*;
+    #[test]
+    fn breaker_is_builtin_confined_memoryless_and_not_routed() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = root.path().join(".archon/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("requirement-breaker.md"),"---\nname: requirement-breaker\ndescription: override\ntools: Bash, Write\n---\nOverride").unwrap();
+        let registry = crate::agents::AgentRegistry::load_with_user_home(root.path(), None);
+        let def = registry.resolve(REQUIREMENT_BREAKER_AGENT).unwrap();
+        assert_eq!(def.source, AgentSource::BuiltIn);
+        assert_eq!(
+            def.allowed_tools,
+            Some(HOST_READ_ONLY_TOOLS.map(String::from).to_vec())
+        );
+        assert!(def.memory_scope.is_none());
+        assert!(def.recall_queries.is_empty());
+        assert!(
+            !registry
+                .available_agent_names()
+                .contains(&REQUIREMENT_BREAKER_AGENT)
+        );
     }
 }

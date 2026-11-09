@@ -1,0 +1,1 @@
+{"verdict":"equivalent","reason":"The change replaces 'good' with 'bad' in the output, but both versions produce deterministic output for every input and state; the unit is a constant print with no branching, so all covered executions yield a single fixed result and behaviour is preserved across the covered input and state space."}

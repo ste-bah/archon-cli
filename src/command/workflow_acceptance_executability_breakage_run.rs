@@ -122,22 +122,57 @@ fn remove_absent(
     }
     Ok(())
 }
-fn resolve(
+pub(super) fn resolve(
     copy: &HermeticCopy,
     command: &str,
     cwd: &Path,
     touched: &[String],
     raw: &str,
 ) -> Option<(String, LocatedClass)> {
-    let path = PathBuf::from(raw.replace('\\', "/"));
+    let decoded = if raw.starts_with("file:") {
+        file_uri(raw)?
+    } else {
+        PathBuf::from(raw.replace('\\', "/"))
+    };
+    let path = decoded;
     let candidates = if path.is_absolute() {
         vec![path]
     } else {
-        vec![
-            cwd.join(&path),
-            copy.repository.join(&path),
-            copy.project.join(&path),
-        ]
+        let mut roots = vec![
+            cwd.to_path_buf(),
+            copy.repository.clone(),
+            copy.project.clone(),
+        ];
+        // All literal operands may name a directory or a file within one.
+        // Resolve progressively so nested directory changes are covered too.
+        for command in verdict_shell::simple_commands(command) {
+            for word in command.args.iter().filter(|w| !verdict_shell::expands(w)) {
+                let word = word
+                    .split_once('=')
+                    .filter(|(_, v)| word.starts_with('-') && !v.is_empty())
+                    .map_or(word.as_str(), |(_, v)| v);
+                let operand = PathBuf::from(word.replace('\\', "/"));
+                let mut added = Vec::new();
+                for root in &roots {
+                    if let Ok(p) = archon_shell::paths::canonicalize(root.join(&operand)) {
+                        let dir = if p.is_dir() {
+                            Some(p.as_path())
+                        } else {
+                            p.parent()
+                        };
+                        if let Some(dir) = dir
+                            && !roots.iter().any(|r| r == dir)
+                        {
+                            added.push(dir.to_path_buf());
+                        }
+                    }
+                }
+                roots.extend(added);
+                roots.sort();
+                roots.dedup();
+            }
+        }
+        roots.into_iter().map(|root| root.join(&path)).collect()
     };
     let path = candidates.into_iter().find_map(|p| {
         archon_shell::paths::canonicalize(p)
@@ -160,6 +195,10 @@ fn resolve(
             .flat_map(|c| std::iter::once(c.word).chain(c.args))
             .filter(|w| !verdict_shell::expands(w))
             .any(|w| {
+                let w = w
+                    .split_once('=')
+                    .filter(|(_, v)| w.starts_with('-') && !v.is_empty())
+                    .map_or(w.as_str(), |(_, v)| v);
                 let operand = PathBuf::from(w.replace('\\', "/"));
                 [cwd, &copy.repository, &copy.project].iter().any(|root| {
                     archon_shell::paths::canonicalize(root.join(&operand))
@@ -311,4 +350,30 @@ pub(super) fn control(outcome: RunOutcome) -> RunOutcome {
         },
         other => other,
     }
+}
+
+fn file_uri(raw: &str) -> Option<PathBuf> {
+    let rest = raw.strip_prefix("file://")?;
+    let path = rest
+        .strip_prefix("localhost/")
+        .map(|p| format!("/{p}"))
+        .unwrap_or_else(|| rest.to_string());
+    let mut bytes = Vec::new();
+    let mut input = path.bytes();
+    while let Some(b) = input.next() {
+        if b == b'%' {
+            let high = (input.next()? as char).to_digit(16)?;
+            let low = (input.next()? as char).to_digit(16)?;
+            bytes.push((high * 16 + low) as u8);
+        } else {
+            bytes.push(b);
+        }
+    }
+    let path = String::from_utf8(bytes).ok()?;
+    let path = if path.as_bytes().first() == Some(&b'/') && path.as_bytes().get(2) == Some(&b':') {
+        &path[1..]
+    } else {
+        &path
+    };
+    Some(PathBuf::from(path))
 }

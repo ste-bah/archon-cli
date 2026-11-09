@@ -1,0 +1,3 @@
+```json
+{"find":"value() { printf good; }\nvalue","key":"value","replace":"value() { :; }\nvalue"}
+```

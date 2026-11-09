@@ -10,6 +10,8 @@ use archon_workflow::task_set_contract::{
 use archon_workflow::task_skeleton::TaskSkeletonLock;
 use std::collections::BTreeMap;
 use std::path::Path;
+#[path = "workflow_decompose_status_breaker.rs"]
+mod breaker;
 pub(super) fn render(project: &Path, task: &Path) -> String {
     match read(project, task) {
         Ok(s) => s,
@@ -52,6 +54,11 @@ fn read(project: &Path, task: &Path) -> Result<String> {
         .join(archon_workflow::base_snapshot::key_path(FREEZE_CACHE_DIR))
         .join("breakage")
         .join(commit);
+    let (breaker, fresh_verdicts) = if safe {
+        breaker::render(&dir, &acceptance, &classification)
+    } else {
+        (String::new(), false)
+    };
     let path = dir
         .join(digest.get(..16).unwrap_or(""))
         .join("summary.json");
@@ -66,9 +73,12 @@ fn read(project: &Path, task: &Path) -> Result<String> {
     };
     let Some(bytes) = bytes else {
         return Ok(format!(
-            "breakage: proofs=none estimate_runs={estimate} runs_executed=0 runs_reused=0 stale=false\n"
+            "breakage: proofs=none estimate_runs={estimate} runs_executed=0 runs_reused=0 stale=false\n{breaker}"
         ));
     };
+    if fresh_verdicts {
+        return Ok(format!("breakage: estimate_runs={estimate}\n{breaker}"));
+    }
     let proofs: BreakageProofs = serde_json::from_slice(&bytes).context("parsing proofs")?;
     anyhow::ensure!(
         proofs.schema == BREAKAGE_SCHEMA,
@@ -94,6 +104,7 @@ fn read(project: &Path, task: &Path) -> Result<String> {
         "breakage: proofs=recorded estimate_runs={estimate} runs_executed={} runs_reused={} {counts} stale={stale}\n",
         summary.runs_executed, summary.runs_reused
     );
+    out.push_str(&breaker);
     for pair in summary.entries {
         let kills = if pair.counted_kills.is_empty() {
             "-".into()

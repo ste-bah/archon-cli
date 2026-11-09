@@ -34,6 +34,7 @@ use archon_workflow::v2::call_data::{
 #[path = "workflow_live_v2_client.rs"]
 mod workflow_live_v2_client;
 
+pub(crate) use workflow_live_v2_client::EXACT_TOOL_POLICY_MARKER;
 use workflow_live_v2_client::LiveV2AgentClient;
 
 use archon_workflow::v2::write::run_write_capable_v2_fanout;

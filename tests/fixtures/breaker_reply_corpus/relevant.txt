@@ -1,0 +1,1 @@
+{"verdict":"relevant","quote":"keeps the good value","reason":"The change alters value() to print bad instead of good, and the output confirms the wrong value: expected good, got bad."}
