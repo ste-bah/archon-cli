@@ -130,10 +130,7 @@ pub(super) fn evaluate_postcondition_locked(
             skeleton
                 .tasks
                 .iter()
-                .map(|task| HostCommandSubject {
-                    task_id: task.task_id.clone(),
-                    file_name: task.file_name.clone(),
-                })
+                .map(HostCommandSubject::from_frozen)
                 .collect(),
             CommandPostconditionEvaluation {
                 satisfied: true,
@@ -163,10 +160,7 @@ pub(super) fn evaluate_postcondition_locked(
         let satisfied =
             archon_workflow::task_skeleton::compare_frozen_task(&task, frozen).is_empty();
         return Ok((
-            vec![HostCommandSubject {
-                task_id: frozen.task_id.clone(),
-                file_name: frozen.file_name.clone(),
-            }],
+            vec![HostCommandSubject::from_frozen(frozen)],
             CommandPostconditionEvaluation {
                 satisfied,
                 summary: "authoritative landed body postcondition evaluated".into(),
@@ -188,10 +182,7 @@ pub(super) fn evaluate_postcondition_locked(
         skeleton
             .tasks
             .iter()
-            .map(|task| HostCommandSubject {
-                task_id: task.task_id.clone(),
-                file_name: task.file_name.clone(),
-            })
+            .map(HostCommandSubject::from_frozen)
             .collect(),
         CommandPostconditionEvaluation {
             satisfied,

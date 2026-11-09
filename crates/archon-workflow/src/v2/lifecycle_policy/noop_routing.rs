@@ -21,6 +21,8 @@ pub enum NoopProofExhaustionRoute {
 pub fn reclassify_inventory_contradicted_noops(
     contract: &LifecycleContract<'_>,
     inventory: &Value,
+    already: &BTreeSet<String>,
+    completed: &BTreeSet<String>,
 ) -> (Value, BTreeSet<String>) {
     let gaps = inventory_values(inventory, "residual_gaps");
     let task_coverage = inventory_values(inventory, "task_coverage");
@@ -28,6 +30,35 @@ pub fn reclassify_inventory_contradicted_noops(
     let items = support::array(inventory.get("items"))
         .into_iter()
         .map(|item| {
+            let missing: Vec<_> = contract
+                .canonical_ids_for(&item)
+                .into_iter()
+                .filter(|id| {
+                    !already.contains(id)
+                        && !completed.contains(id)
+                        && contract.task_universe.tasks.iter().any(|t| {
+                            t.canonical_task_id == *id
+                                && t.requirement_states.values().any(|s| s == "missing")
+                        })
+                })
+                .collect();
+            let protected_missing = contract.canonical_ids_for(&item).iter().any(|id| {
+                (already.contains(id) || completed.contains(id))
+                    && contract.task_universe.tasks.iter().any(|t| {
+                        t.canonical_task_id == *id
+                            && t.requirement_states.values().any(|s| s == "missing")
+                    })
+            });
+            if support::work_type_for(&item) == "verified_noop"
+                && protected_missing
+                && missing.is_empty()
+            {
+                return item;
+            }
+            if support::work_type_for(&item) == "verified_noop" && !missing.is_empty() {
+                reclassified_ids.extend(missing.iter().cloned());
+                return implementation_item(contract, &item, missing, "missing_requirement", &gaps);
+            }
             if support::work_type_for(&item) != "verified_noop"
                 || !noop_item_has_authoritative_acceptance_criteria(contract, &item)
                 || !inventory_contradicts_noop(contract, &item, &gaps, &task_coverage)

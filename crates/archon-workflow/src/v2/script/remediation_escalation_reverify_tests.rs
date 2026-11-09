@@ -425,6 +425,7 @@ fn only_an_exactly_named_declared_file_moves_a_regular_round() {
         schema_version: "t".into(),
         source_roots: vec![],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-B".into(),
             files_expected_to_change: vec!["src/b/methods.rs".into()],
             shared_append_target_files: vec!["src/z.rs".into()],

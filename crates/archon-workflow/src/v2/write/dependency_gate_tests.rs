@@ -3,6 +3,7 @@ use crate::task_universe::WorkflowV2TaskUniverseTask;
 
 fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, deps: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         dependency_ids: deps.iter().map(|d| d.to_string()).collect(),

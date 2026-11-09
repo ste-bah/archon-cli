@@ -5,6 +5,7 @@ use crate::task_universe::{
 
 fn task(id: &str, verifier: Option<&str>) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         source_path: format!("/tmp/{id}.md"),
         deliverable_contracts: vec![WorkflowV2DeliverableContract {
@@ -126,6 +127,7 @@ fn an_absent_task_universe_does_not_refuse_anything() {
 
 fn task_with_floor(id: &str, min_instances: usize) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         source_path: format!("/tmp/{id}.md"),
         deliverable_contracts: vec![WorkflowV2DeliverableContract {

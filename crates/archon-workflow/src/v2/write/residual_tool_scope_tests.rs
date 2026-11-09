@@ -10,6 +10,7 @@ fn universe() -> WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-A".into(),
             source_path: "tasks/TASK-A.md".into(),
             files_expected_to_change: vec!["src/lane.rs".into(), "scripts/view.pine".into()],

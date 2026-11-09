@@ -126,6 +126,8 @@ fn host_command_target_changes_identity_while_legacy_identity_stays_stable() {
     let tokens = BTreeMap::new();
     let legacy = host_command_call_id("land-task-body", "catalog", "rev", &tokens, b"body");
     let target = HostCommandSubject {
+        host_record_digest: None,
+        requirement_states: Default::default(),
         task_id: "TASK-X-010".into(),
         file_name: "TASK-X-010.md".into(),
     };

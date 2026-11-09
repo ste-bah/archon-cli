@@ -10,6 +10,9 @@ pub fn default_config_path() -> PathBuf {
 /// Validate an `ArchonConfig`, returning `ConfigError::ValidationError` on
 /// any invalid field values.
 pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
+    if matches!(config.workflow.proof.max_runs_per_attempt, 1 | 2) {
+        return Err(ConfigError::ValidationError("max_runs_per_attempt must be 0 (proof disabled) or at least 3: one mutant run needs a pre and a post control".into()));
+    }
     for (name, path) in [
         ("tools.cache_root", &config.tools.cache_root),
         ("tools.scratch_root", &config.tools.scratch_root),

@@ -262,6 +262,8 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
                 committed_at: "2026-10-09T00:00:00Z".into(),
             }),
             subjects: vec![archon_workflow::HostCommandSubject {
+                host_record_digest: None,
+                requirement_states: Default::default(),
                 task_id: "TASK-A".into(),
                 file_name: "TASK-A.md".into(),
             }],

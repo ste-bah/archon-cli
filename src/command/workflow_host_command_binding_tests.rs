@@ -2,14 +2,14 @@
 //! refused with that subject's parse cause, through the shape refusal, so the
 //! author gets a repair it can act on. A body that names no subject keeps the
 //! binding refusal.
-use archon_workflow::{HostCommandRequest, HostCommandSubject, RemediationScope};
-
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
 use super::workflow_host_command_exec::{FixedHostCommandExecutor, WorkflowHostCommandExecutor};
 use super::workflow_host_command_exec_tests::{context, seed_frozen_chain, seed_frozen_subjects};
-
+use archon_workflow::{HostCommandRequest, HostCommandSubject, RemediationScope};
 fn frozen_with_owned_fields() -> archon_workflow::task_skeleton::FrozenTask {
     archon_workflow::task_skeleton::FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: "TASK-X-010".into(),
         file_name: "TASK-X-010.md".into(),
@@ -23,7 +23,6 @@ fn frozen_with_owned_fields() -> archon_workflow::task_skeleton::FrozenTask {
         deliverable_contracts: Vec::new(),
     }
 }
-
 #[test]
 fn frozen_frontmatter_is_stamped_and_differences_are_reported_without_values() {
     let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# Body\n";
@@ -39,7 +38,6 @@ fn frozen_frontmatter_is_stamped_and_differences_are_reported_without_values() {
     assert!(stamped.contains("# Body"));
     assert!(!notes.iter().any(|note| note.contains("TASK-X-001")));
 }
-
 #[test]
 fn frozen_frontmatter_omissions_are_stamped() {
     let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\nrequired_env_keys: []\nrequired_tools: []\n```\n";
@@ -387,6 +385,8 @@ async fn target_mismatch_is_refused_and_names_candidate_and_target() {
     );
     let mut request = HostCommandRequest::new("land-task-body", Some(whole("TASK-X-011"))).unwrap();
     request.target = Some(HostCommandSubject {
+        host_record_digest: None,
+        requirement_states: Default::default(),
         task_id: "TASK-X-010".into(),
         file_name: "TASK-X-010.md".into(),
     });
@@ -420,6 +420,8 @@ fn target_match_binds_the_requested_frozen_subject() {
     );
     let mut request = HostCommandRequest::new("land-task-body", Some(whole("TASK-X-011"))).unwrap();
     request.target = Some(HostCommandSubject {
+        host_record_digest: None,
+        requirement_states: Default::default(),
         task_id: "TASK-X-011".into(),
         file_name: "TASK-X-011.md".into(),
     });
@@ -491,3 +493,6 @@ fn body_cannot_override_frozen_deliverable_contracts() {
 
 #[path = "workflow_host_command_status_tests.rs"]
 mod status_tests;
+
+#[path = "workflow_host_command_binding_states_tests.rs"]
+mod state_tests;

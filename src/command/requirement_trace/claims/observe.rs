@@ -21,7 +21,7 @@ use regex::Regex;
 pub(super) struct BodyLine {
     pub(super) text: String,
     pub(super) section: String,
-    /// Inside the leading metadata fence: never an observable line.
+    /// Host-owned metadata: never an observable line.
     pub(super) metadata: bool,
 }
 
@@ -97,7 +97,12 @@ pub(super) fn body_lines(raw: &str) -> Vec<BodyLine> {
         {
             section = heading.trim().to_ascii_lowercase();
         }
-        lines.push(line(text, &section, fence == Some(true)));
+        lines.push(line(
+            text,
+            &section,
+            fence == Some(true)
+                || trimmed.starts_with(archon_workflow::requirement_state::CLASSIFICATION_PREFIX),
+        ));
     }
     lines
 }

@@ -186,6 +186,7 @@ pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![
             archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -195,6 +196,7 @@ pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
                 ..Default::default()
             },
             archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: vec!["T010".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),

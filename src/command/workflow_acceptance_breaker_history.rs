@@ -8,32 +8,30 @@ pub(super) fn load(ctx: &Context<'_>) -> Option<ProofVerdicts> {
         record["snapshots"][format!("{}:{}", p.task_id, p.id)]
             == pair_snapshot(ctx, &p.task_id, &p.id)
     });
-    if let Some(root) = &ctx.store {
-        if let Some(base) = record["base"]
+    if let Some(root) = &ctx.store
+        && let Some(base) = record["base"]
             .as_str()
             .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        {
-            let source = root.parent()?.join(base);
-            for pair in &previous.entries {
-                for key in pair.patch_keys.values().chain(
-                    pair.survivors
-                        .iter()
-                        .flat_map(|s| std::iter::once(&s.patch).chain(s.output.iter())),
-                ) {
-                    if archon_workflow::base_snapshot::outside_key(key) {
-                        continue;
+    {
+        let source = root.parent()?.join(base);
+        for pair in &previous.entries {
+            for key in pair.patch_keys.values().chain(
+                pair.survivors
+                    .iter()
+                    .flat_map(|s| std::iter::once(&s.patch).chain(s.output.iter())),
+            ) {
+                if archon_workflow::base_snapshot::outside_key(key) {
+                    continue;
+                }
+                let dest = root.join(archon_workflow::base_snapshot::key_path(key));
+                if !dest.exists()
+                    && let Ok(bytes) =
+                        std::fs::read(source.join(archon_workflow::base_snapshot::key_path(key)))
+                {
+                    if let Some(parent) = dest.parent() {
+                        let _ = std::fs::create_dir_all(parent);
                     }
-                    let dest = root.join(archon_workflow::base_snapshot::key_path(key));
-                    if !dest.exists()
-                        && let Ok(bytes) = std::fs::read(
-                            source.join(archon_workflow::base_snapshot::key_path(key)),
-                        )
-                    {
-                        if let Some(parent) = dest.parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        let _ = std::fs::write(dest, bytes);
-                    }
+                    let _ = std::fs::write(dest, bytes);
                 }
             }
         }
@@ -58,6 +56,7 @@ pub(super) fn restore(
                             Verdict::DoneCandidate
                                 | Verdict::JudgeUnavailable
                                 | Verdict::BudgetExhausted
+                                | Verdict::HostUnrun
                         ))
             }) {
                 pair.attempts.extend(
@@ -297,4 +296,32 @@ fn missing(pair: &mut PairVerdict, id: &str, reason: &str) {
         },
         refusals: vec![format!("survivor_dropped: {id}: {reason}")],
     });
+}
+
+pub(super) fn save_pending(
+    ctx: &mut Context<'_>,
+    pairs: &mut [PairVerdict],
+    mutants: &[SuppliedMutant],
+) {
+    let Some(root) = &ctx.store else {
+        return;
+    };
+    for mutant in mutants {
+        let id = mutant.mutant_id();
+        let key = format!("mutants/{id}.patch");
+        match super::super::store::atomic(&root.join(&key), mutant.patch.as_bytes()) {
+            Ok(()) => {
+                if let Some(pair) = pairs
+                    .iter_mut()
+                    .find(|p| p.task_id == mutant.task_id && p.id == mutant.requirement_id)
+                {
+                    pair.patch_keys.insert(id, key);
+                }
+            }
+            Err(error) => ctx
+                .verdicts
+                .refusals
+                .push(format!("pending_mutant_not_saved:{id}:{error}")),
+        }
+    }
 }

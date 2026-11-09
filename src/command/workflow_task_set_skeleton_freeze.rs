@@ -59,7 +59,7 @@ pub(super) fn prepare_with_diagnostics(
     mode: GateMode,
     candidate: Vec<u8>,
     diagnostics: fn(&TaskSkeleton, &AcceptanceContract, &Path, &Path),
-    stamp: fn(
+    stamp_fn: fn(
         FreezeGateMode,
         &[GateFinding],
     ) -> archon_workflow::task_set_contract::FreezeGateStamp,
@@ -123,12 +123,14 @@ pub(super) fn prepare_with_diagnostics(
     // the author's mistake: tagged, it returns as a finding the next attempt
     // can act on instead of ending the run as a host malfunction.
     let mut skeleton: TaskSkeleton = CandidateRejected::tag(
-        serde_json::from_slice(&candidate)
+        archon_workflow::task_skeleton::read_candidate(&candidate)
             .with_context(|| format!("parsing {}", skeleton_path.display())),
     )?;
     // Discard authored completion; diagnostic classification grants no completion credit.
     for task in &mut skeleton.tasks {
         task.status = None;
+        task.requirement_states.clear();
+        task.proven_done.clear();
     }
     skeleton
         .acceptance_digest
@@ -187,7 +189,7 @@ pub(super) fn prepare_with_diagnostics(
         &skeleton,
         &contract,
     ));
-    let stamp = stamp(freeze_mode, &findings);
+    let stamp = stamp_fn(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
     let digest = content_digest(&skeleton_bytes);
     let lock = TaskSkeletonLock {
@@ -207,6 +209,7 @@ pub(super) fn prepare_with_diagnostics(
         acceptance_digest: pin.acceptance_digest.clone(),
     };
     Ok(PreparedSkeletonFreeze {
+        stamp_fn,
         tasks_root: tasks_root.to_path_buf(),
         pin_path,
         skeleton_bytes,

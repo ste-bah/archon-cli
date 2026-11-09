@@ -5,6 +5,7 @@ fn test_universe() -> crate::task_universe::WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-X-001".to_string(),
             aliases: Vec::new(),
             source_path: "/tmp/TASK-X-001.md".to_string(),

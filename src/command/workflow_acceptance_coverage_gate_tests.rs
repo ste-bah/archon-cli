@@ -112,6 +112,8 @@ fn new_roles_are_diagnostics_while_covers_remains_validated() {
 fn a_task_no_check_answers_for_goes_back_to_the_skeleton() {
     let contract = contract(vec![entry("AC-AB-001", &["REQ-AB-001"])]);
     let task = |id: &str, implements: &[&str]| FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: id.into(),
         file_name: format!("{id}.md"),

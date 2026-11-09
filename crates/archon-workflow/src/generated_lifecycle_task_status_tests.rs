@@ -283,3 +283,47 @@ fn ready_ids(items: &[serde_json::Value]) -> Vec<String> {
     ids.sort();
     ids
 }
+
+#[test]
+fn kept_requirement_status_prevents_rebuilding_and_lists_literal_reason() {
+    let kept = task_file("TASK-TDL-001", "kept", "[]").replace(
+        "implements: []",
+        "implements: ['item']\nrequirement_states: {item: undecided}",
+    );
+    let (temp, result) = universe_of(&[
+        ("TASK-TDL-001-kept.md", kept),
+        (
+            "TASK-TDL-010-downstream.md",
+            task_file("TASK-TDL-010", "blocked", "['TASK-TDL-001']"),
+        ),
+    ]);
+    let universe = result.unwrap();
+    let skeleton:crate::task_skeleton::TaskSkeleton=serde_json::from_value(serde_json::json!({"schema_version":1,"acceptance_digest":"anchor","tasks":[{"task_id":"TASK-TDL-001","file_name":"TASK-TDL-001-kept.md","implements":["item"],"requirement_states":{"item":{"state":"undecided","reason":"weak_test"}},"status":"kept"}]})).unwrap();
+    fs::write(
+        temp.path()
+            .join(crate::task_set_contract::TASK_SKELETON_FILE),
+        serde_json::to_vec_pretty(&skeleton).unwrap(),
+    )
+    .unwrap();
+    let contract = support::LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: None,
+    };
+    assert_eq!(
+        ready_ids(&support::ready_items_from(
+            &contract,
+            &items_for(&universe),
+            &BTreeSet::new()
+        )),
+        vec!["TASK-TDL-010".to_string()]
+    );
+    let notice = contract.declared_status_notice().unwrap();
+    assert_eq!(
+        notice["frozen_requirement_states"]["kept"][0],
+        "TASK-TDL-001"
+    );
+    assert_eq!(
+        notice["frozen_requirement_states"]["undecided"][0]["reason"],
+        "weak_test"
+    );
+}

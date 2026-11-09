@@ -135,6 +135,7 @@ fn a_declared_root_elsewhere_on_disk_is_watched_and_reverted() {
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-X".into(),
             artifact_requirements: vec![elsewhere.join("summary.json").display().to_string()],
             ..Default::default()

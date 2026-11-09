@@ -128,6 +128,8 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
         )
         .unwrap();
         let frozen = |id: &str, implements: &[&str]| FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: id.into(),
             file_name: format!("{id}.md"),
@@ -183,6 +185,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
         std::fs::write(pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
     }
     let task = |id: &str, implements: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: task_root.join(format!("{id}.md")).display().to_string(),
         implements: implements.iter().map(|s| s.to_string()).collect(),

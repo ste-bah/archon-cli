@@ -39,6 +39,7 @@ fn universe(own: &[&str]) -> WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-A".into(),
             source_path: "tasks/TASK-A.md".into(),
             focused_commands: Some(vec![LIB.into(), "cargo test -p app --test it".into()]),

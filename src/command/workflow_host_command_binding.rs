@@ -212,6 +212,7 @@ pub(crate) fn stamp_frozen_frontmatter(
         "title",
         "complexity",
         "status",
+        "requirement_states",
         "depends_on",
         "blocks",
         "implements",
@@ -235,6 +236,14 @@ pub(crate) fn stamp_frozen_frontmatter(
     }
     let mut notes = Vec::new();
     stamp_owned_fields(map, frozen, &mut notes)?;
+    let states: std::collections::BTreeMap<String, String> = frozen
+        .requirement_states
+        .iter()
+        .map(|(id, d)| (id.clone(), d.state.as_str().into()))
+        .collect();
+    if !states.is_empty() || map.contains_key("requirement_states") {
+        stamp_typed_field(map, "requirement_states", &states, &mut notes)?;
+    }
     if let Some(status) = &frozen.status {
         stamp_typed_field(map, "status", status, &mut notes)?;
     } else if archon_workflow::task_universe::task_status::declared_status_is_complete(
@@ -252,14 +261,15 @@ pub(crate) fn stamp_frozen_frontmatter(
     result.push('\n');
     result.push_str(stamped_yaml.trim_end_matches('\n'));
     result.push('\n');
-    result.push_str(&candidate[close..]);
+    result.push_str(&candidate[close..close + 3]);
+    result.push_str(&states::body(&candidate[close + 3..], &states));
     Ok((result, notes))
 }
 
 // This declaration drives both stamping and remediation ownership.
 macro_rules! frozen_fields {
     ($($field:ident: $ty:ty),+ $(,)?) => {
-        pub(crate) const HOST_STAMPED_FIELDS: &[&str] = &[$(stringify!($field)),+];
+        pub(crate) const HOST_STAMPED_FIELDS: &[&str] = &["requirement_states", $(stringify!($field)),+];
         fn stamp_owned_fields(
             map: &mut serde_json::Map<String, serde_json::Value>,
             frozen: &archon_workflow::task_skeleton::FrozenTask,
@@ -377,3 +387,6 @@ fn unclosed_frontmatter(block: &str, candidate: &str) -> Option<String> {
         "the ```yaml frontmatter block is not closed; the answer ends at char {ends} with '{tail}'"
     ))
 }
+
+#[path = "workflow_host_command_binding_states.rs"]
+mod states;

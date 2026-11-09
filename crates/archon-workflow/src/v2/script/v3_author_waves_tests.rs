@@ -3,6 +3,7 @@ use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
 fn task(id: &str, deps: &[&str], writes: &[&str]) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         dependency_ids: deps.iter().map(|d| d.to_string()).collect(),
         files_expected_to_change: writes.iter().map(|w| w.to_string()).collect(),

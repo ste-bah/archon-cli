@@ -295,6 +295,7 @@ pub(super) fn placeholder_task_universe() -> crate::task_universe::WorkflowV2Tas
         source_roots: Vec::new(),
         tasks: vec![
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-X-020".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-X-020.md".to_string(),
@@ -304,6 +305,7 @@ pub(super) fn placeholder_task_universe() -> crate::task_universe::WorkflowV2Tas
                 ..Default::default()
             },
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-X-130".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-X-130.md".to_string(),

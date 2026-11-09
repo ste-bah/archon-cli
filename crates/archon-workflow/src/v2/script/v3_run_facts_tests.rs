@@ -215,6 +215,7 @@ fn a_repeated_call_keeps_its_last_position_and_invalidated_records_are_absent() 
 fn writable_tasks_are_those_declaring_a_file() {
     let task = |id: &str, files: &[&str], shared: &[&str]| {
         crate::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: id.into(),
             files_expected_to_change: files.iter().map(|s| s.to_string()).collect(),
             shared_append_target_files: shared.iter().map(|s| s.to_string()).collect(),

@@ -21,6 +21,7 @@ fn completion_claim_request_gets_authoritative_universe_without_mutating_executi
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["project-tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-1".to_string(),
             acceptance_criteria: vec!["completion acceptance detail".to_string()],
             deliverable_contracts: vec![WorkflowV2DeliverableContract {
@@ -75,6 +76,7 @@ fn completion_claim_transport_retry_gets_authoritative_universe_once() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["project-tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-1".to_string(),
             acceptance_criteria: vec!["retry acceptance detail".to_string()],
             ..Default::default()
@@ -115,6 +117,7 @@ fn completion_claim_decoy_universe_does_not_suppress_authoritative_universe() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["project-tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-1".to_string(),
             acceptance_criteria: vec!["authoritative acceptance".to_string()],
             ..Default::default()

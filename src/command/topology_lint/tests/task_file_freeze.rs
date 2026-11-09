@@ -58,6 +58,8 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
         schema_version: 1,
         acceptance_digest: acceptance_digest.clone(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010-body.md".into(),

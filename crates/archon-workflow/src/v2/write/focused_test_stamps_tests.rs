@@ -6,6 +6,7 @@ use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions}
 
 fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, tests: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         focused_commands: Some(tests.iter().map(|t| t.to_string()).collect()),
         focused_tests: tests.iter().map(|t| t.to_string()).collect(),

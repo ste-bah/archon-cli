@@ -64,6 +64,22 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
         String::from_utf8_lossy(&output.stdout)
     );
     assert!(root.join("tasks/PRD-X/task-skeleton.json").exists());
+    let lock: archon_workflow::task_skeleton::TaskSkeletonLock =
+        serde_json::from_slice(&fs::read(root.join("tasks/PRD-X/task-skeleton.lock")).unwrap())
+            .unwrap();
+    let candidate_done_pairs = lock
+        .classification
+        .unwrap()
+        .entries
+        .iter()
+        .filter(|e| {
+            e.class == archon_workflow::v2::requirement_classes::RequirementClass::CandidateDone
+        })
+        .count();
+    assert_eq!(
+        candidate_done_pairs, 0,
+        "the offline provider has no breaker reply path"
+    );
     assert!(root.join("tasks/PRD-X/TASK-X-010.md").exists());
     assert!(root.join("tasks/PRD-X/TASK-X-020.md").exists());
     let judge_requests = project.provider.requests.snapshot();
@@ -97,8 +113,6 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
         covered > 0,
         "real judge requests include covered requirement text"
     );
-    let actual = final_snapshot(&project, &[]);
-    snapshot::assert_golden_snapshot(&serde_json::to_value(&actual).unwrap());
     let counts = project.provider.counts.snapshot();
     let requests = project.provider.requests.snapshot();
     assert!(
@@ -122,6 +136,8 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
     }
     assert_no_unknown_prompts(&project.provider);
     assert_golden_requests(&project.provider.requests.per_call());
+    let actual = final_snapshot(&project, &[]);
+    snapshot::assert_golden_snapshot(&serde_json::to_value(&actual).unwrap());
     progress("golden", "passed");
 }
 

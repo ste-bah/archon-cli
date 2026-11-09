@@ -264,15 +264,12 @@ fn publish_chain_owned(
         verified.acceptance_mode,
         &acceptance_gate_findings,
         &contract_bytes,
-        findings::carry_baseline_results(
+        baseline_results::observed_for_republish(
             tasks_root,
-            request.gate.probe.baseline_commit(),
+            request.gate.probe,
             &repaired,
-        )
-        .map(|mut results| {
-            results.outcomes.retain(|id, _| !publish_ids.contains(id));
-            results
-        })?,
+            publish_ids,
+        )?,
     );
     // Obligations are unchanged by a per-check repair, so the operator's
     // recorded waivers still describe this task set.
@@ -308,7 +305,7 @@ fn publish_chain_owned(
     )];
     if let Some(mut skeleton) = verified.skeleton.clone() {
         if let Some(extension) = extension {
-            extension.claim_new_obligations(&mut skeleton);
+            extension.claim_new_obligations(&mut skeleton, &repaired);
         }
         // The skeleton's content is unchanged; only the acceptance digest it
         // binds moves, so the skeleton gate re-runs over it here instead of in
@@ -316,8 +313,19 @@ fn publish_chain_owned(
         skeleton
             .acceptance_digest
             .clone_from(&pin.acceptance_digest);
+        let classification = findings::classification(
+            tasks_root,
+            request.project_root,
+            &skeleton,
+            &repaired,
+            &lock,
+        );
+        if let Some(extension) = extension {
+            states::extend(&mut skeleton, &classification, &extension.new_obligations);
+        }
+        archon_workflow::task_skeleton::refresh_done_proofs(&mut skeleton, &repaired);
         validate_skeleton(&skeleton, &pin.acceptance_digest)?;
-        let skeleton_findings = findings::skeleton_findings(
+        let mut skeleton_findings = findings::skeleton_findings(
             tasks_root,
             &verified.canonical_prd,
             &verified.prd_text,
@@ -325,17 +333,15 @@ fn publish_chain_owned(
             &verified.pin_path,
             &skeleton,
         )?;
+        if let Some(extension) = extension {
+            let routed = extension.take_unowned_findings(&mut skeleton_findings);
+            gates.push((GateId::FreezeSkeleton, FreezeGateMode::Observe, routed));
+        }
         let stamp = gate_stamp(verified.skeleton_mode, &skeleton_findings);
         let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
         let digest = content_digest(&skeleton_bytes);
         let skeleton_lock = TaskSkeletonLock {
-            classification: Some(findings::classification(
-                tasks_root,
-                request.project_root,
-                &skeleton,
-                &repaired,
-                &lock,
-            )),
+            classification: Some(classification),
             algorithm: "blake3".into(),
             digest: digest.clone(),
             acceptance_digest: pin.acceptance_digest.clone(),
@@ -478,3 +484,9 @@ mod floor_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_baseline_republish_tests.rs"]
 mod baseline_republish_tests;
+
+#[path = "workflow_acceptance_republish_results.rs"]
+mod baseline_results;
+
+#[path = "workflow_acceptance_republish_states.rs"]
+mod states;

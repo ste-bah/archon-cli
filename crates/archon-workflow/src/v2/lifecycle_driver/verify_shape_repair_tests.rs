@@ -27,6 +27,7 @@ fn universe() -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: ALLOWED_TASK.to_string(),
             source_path: "tasks/TASK-TDL-010.md".to_string(),
             ..WorkflowV2TaskUniverseTask::default()

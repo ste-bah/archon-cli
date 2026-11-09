@@ -413,6 +413,7 @@ mod structured_consumption_tests {
     #[test]
     fn complete_structured_consumption_ignores_unrelated_paths_in_prose() {
         let mut task = WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-X-010".into(),
             source_path: "TASK-X-010.md".into(),
             dependencies: vec![archon_workflow::task_skeleton::FrozenDependency {

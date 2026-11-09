@@ -39,7 +39,7 @@ pub(super) fn breakage_refusal(
         return Some("invalid_time_cap");
     }
     let c = req.classification;
-    if !matches!(probe.site, Site::Hermetic) {
+    if !matches!(probe.site, Site::Hermetic | Site::Scratch(_)) {
         return Some("proof_site_unavailable");
     }
     if c.error.is_some() {
@@ -239,3 +239,7 @@ mod tests;
 
 #[path = "workflow_acceptance_breaker.rs"]
 pub(crate) mod breaker;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_breakage_landing_tests.rs"]
+mod landing_tests;

@@ -13,6 +13,7 @@ use crate::task_universe::{
 
 fn contracted(id: &str) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         source_path: format!("/tmp/{id}.md"),
         deliverable_contracts: vec![WorkflowV2DeliverableContract {
@@ -26,6 +27,7 @@ fn contracted(id: &str) -> WorkflowV2TaskUniverseTask {
 
 fn uncontracted(id: &str) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         source_path: format!("/tmp/{id}.md"),
         ..Default::default()

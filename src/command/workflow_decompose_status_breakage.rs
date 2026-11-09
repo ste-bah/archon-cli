@@ -181,6 +181,7 @@ mod tests {
         )]
         .into();
         let mut snapshot = BaseSnapshot {
+            landing_verified: Default::default(),
             commit: acceptance.baseline_commit.clone().unwrap(),
             digest: String::new(),
             entries: [(

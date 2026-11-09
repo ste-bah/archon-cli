@@ -34,38 +34,9 @@ const B_FILE: &str = "crates/b/src/lib.rs";
 const A_FIX: &str = "review-remediate-task-a-1-1";
 const A_VERDICT: &str = "verification-wave-review-verify-task-a-1-2";
 
-/// A remediation as the acceptance stage routes it: its units name the
-/// observation they fix (`observedBy`). The first round's failing check,
-/// already observed.
-fn script(rounds: u32, with_b: bool, b_targets: &[&str]) -> String {
-    script_routed(rounds, with_b, b_targets, true)
-}
-
-fn script_routed(rounds: u32, with_b: bool, b_targets: &[&str], routed: bool) -> String {
-    let observed = if routed {
-        "observedBy: ['acceptance-contract-run-1'], "
-    } else {
-        ""
-    };
-    let mut findings = vec![json!({"id": "gate", "canonical_task_ids": ["TASK-A"],
-        "severity": "high", "claim": "register only real data"})];
-    if with_b {
-        findings.push(json!({"id": "doc", "canonical_task_ids": ["TASK-B"],
-            "severity": "medium", "claim": "document it"}));
-    }
-    format!(
-        r#"export const meta = {{ name: 'refused', description: 'd', phases: [] }}
-const tasks = [
-  {{ id: 'TASK-A', file: 'tasks/TASK-A.md', targetFiles: ['{A_FILE}'] }},
-  {{ id: 'TASK-B', file: 'tasks/TASK-B.md', targetFiles: {b} }},
-]
-const byId = (id) => tasks.find((t) => t.id === id) || {{}}
-return await remediateFindings({findings}, {{ {observed}maxRounds: {rounds}, taskFileFor: (id) => byId(id).file, targetFilesFor: (id) => byId(id).targetFiles }})
-"#,
-        b = json!(b_targets),
-        findings = json!(findings),
-    )
-}
+#[path = "support/write_wave_refused_script.rs"]
+mod script_support;
+use script_support::{script, script_routed};
 
 fn project_root(f: &Fixture) -> PathBuf {
     PathBuf::from(
@@ -123,6 +94,7 @@ fn fixture(scratch: &Path, b_owns: &[&str]) -> Fixture {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, serde_json::to_vec(&metadata).unwrap()).unwrap();
     let task = |id: &str, owns: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: owns.iter().map(|f| f.to_string()).collect(),

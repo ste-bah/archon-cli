@@ -195,7 +195,31 @@ fn v3_landing_records_preserve_all_record_binding_fields() {
     let parse = |v: Value| {
         serde_json::from_value::<archon_workflow::task_skeleton::TaskSkeleton>(v).unwrap()
     };
-    assert_eq!(parse(candidate).tasks, parse(frozen).tasks);
+    let mut expected = parse(candidate);
+    for task in &mut expected.tasks {
+        assert!(task.requirement_states.is_empty());
+        assert!(task.proven_done.is_empty());
+        assert!(task.status.is_none());
+        // Author-owned bindings remain identical; the host alone adds these states.
+        for id in &task.implements {
+            let (state, reason) = if ["C-X-001", "C-X-002", "C-X-003"].contains(&id.as_str()) {
+                (
+                    archon_workflow::requirement_state::RequirementState::Inspection,
+                    "inspection_pending",
+                )
+            } else {
+                (
+                    archon_workflow::requirement_state::RequirementState::Missing,
+                    "all_checks_fail_on_base",
+                )
+            };
+            task.requirement_states.insert(
+                id.clone(),
+                archon_workflow::requirement_state::RequirementDecision::new(state, reason),
+            );
+        }
+    }
+    assert_eq!(expected.tasks, parse(frozen).tasks);
     let requests = p.provider.requests.snapshot();
     let first = requests.iter().find(|r| r.role == "skeleton").unwrap();
     let request: Value = serde_json::from_str(&first.prompt).unwrap();

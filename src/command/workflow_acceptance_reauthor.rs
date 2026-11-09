@@ -174,6 +174,7 @@ pub(crate) async fn reauthor_partial_with_cache(
     let _ = gate.probe.take_unproven();
     // How the frozen checks failed on the baseline is not their repairs'.
     let _ = gate.probe.take_baseline_runs();
+    let _ = gate.probe.take_baseline_observations();
     // Issue 275: a replacement is held to the requirements it covers.
     let prd_text = std::fs::read_to_string(&scope.prd_path)
         .with_context(|| format!("reading the PRD {}", scope.prd_path.display()))?;

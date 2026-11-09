@@ -285,7 +285,7 @@ fn classifier_presence_error_does_not_claim_missing_or_candidate_done() {
         );
         assert_eq!(
             entries[0].deliverables[0].error.as_deref(),
-            Some("deliverable_presence_error")
+            Some("outside repository")
         );
         assert!(!entries[0].passing_check_without_deliverable);
     }

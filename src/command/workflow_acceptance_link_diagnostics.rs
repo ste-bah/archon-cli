@@ -1,4 +1,4 @@
-//! Observations only: these values never enter publication state.
+//! Link diagnostics remain observational; the shared read-set helper also supports proof decisions.
 use super::executability::mutation::{ExclusionReason, input_discovery_for_check};
 use super::*;
 use archon_workflow::repository_record::{RepositoryRecordV1, RepositoryTree};
@@ -122,6 +122,55 @@ fn evaluate(
     result
 }
 
+/// Compare the same unquoted read set used by the link diagnostics with D(i).
+pub(crate) fn reads_deliverable(
+    check: &archon_workflow::task_set_contract::AcceptanceCriterion,
+    deliverables: &[archon_workflow::v2::requirement_classes::DeliverablePresence],
+    project: &Path,
+    repository: &Path,
+) -> bool {
+    let project = project
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| project.to_path_buf());
+    let repository = repository
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| repository.to_path_buf());
+    let root = match check.check {
+        AcceptanceCheck::Command {
+            cwd: TrustedCwd::RepoRoot,
+            ..
+        } => &repository,
+        _ => &project,
+    };
+    let discovery = input_discovery_for_check(check, &project, &repository, None);
+    discovery
+        .candidates
+        .iter()
+        .filter(|c| confirmed_candidate(c, &discovery.unconfirmed_reads))
+        .map(|c| &c.path)
+        .chain(&discovery.unshaped_missing)
+        .chain(&discovery.absolute_reads)
+        .map(|p| absolute(root, p))
+        .any(|path| {
+            deliverables.iter().any(|d| {
+                let owned = absolute(&repository, &d.artifact_path);
+                path.starts_with(&owned) || owned.starts_with(&path)
+            })
+        })
+}
+
+fn confirmed_candidate(
+    candidate: &super::executability::mutation::CandidateDiagnostic,
+    unconfirmed: &[String],
+) -> bool {
+    !unconfirmed.contains(&candidate.path)
+        && !candidate.message_mention
+        && !candidate.written_ancestor
+        && candidate.exclusion != Some(ExclusionReason::CheckWritesPathInText)
+}
+
 fn discover(
     skeleton: &TaskSkeleton,
     contract: &AcceptanceContract,
@@ -159,12 +208,7 @@ fn discover(
         let paths = discovery
             .candidates
             .into_iter()
-            .filter(|candidate| {
-                !discovery.unconfirmed_reads.contains(&candidate.path)
-                    && !candidate.message_mention
-                    && !candidate.written_ancestor
-                    && candidate.exclusion != Some(ExclusionReason::CheckWritesPathInText)
-            })
+            .filter(|candidate| confirmed_candidate(candidate, &discovery.unconfirmed_reads))
             .map(|candidate| candidate.path)
             .chain(discovery.unshaped_missing)
             .chain(discovery.absolute_reads)

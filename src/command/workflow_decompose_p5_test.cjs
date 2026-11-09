@@ -139,3 +139,24 @@ test('contract rule comes from the host and missing policy is explicit', () => {
   delete ctx.args.deliverableContractRule;
   assert.throws(() => ctx.skeletonPolicy([]).prompt(), /host did not supply deliverableContractRule/);
 });
+test('host keys are omitted from canonical entries and skeleton author seeds', () => {
+  const ctx = context();
+  const task = {task_id:'TASK-X-001', file_name:'TASK-X-001.md', implements:['item']};
+  const owned = {...task,status:'kept',requirement_states:{item:{state:'undecided'}},proven_done:[{patch:'private evidence'}]};
+  assert.equal(ctx.frozenTaskEntries([task]).get(task.task_id),ctx.frozenTaskEntries([owned]).get(task.task_id));
+  assert.deepEqual(JSON.parse(ctx.skeletonLandingSeed(JSON.stringify({tasks:[owned]}))).tasks,[task]);
+  assert.equal(ctx.frozenTaskEntries([null]),null);
+  assert.deepEqual(JSON.parse(ctx.skeletonLandingSeed('{"tasks":[null]}')).tasks,[null]);
+});
+test('a changed host record is restamped despite unchanged authored fields', async () => {
+  const ctx=context(), task={task_id:'TASK-X-001',file_name:'TASK-X-001.md',implements:['item']};
+  const prior={taskId:task.task_id,fileName:task.file_name,requirementStates:{item:'undecided'},hostRecordDigest:'before'};
+  const nextSubject={...prior,hostRecordDigest:'after'},old={},next={subjects:[nextSubject]};
+  ctx.args.frozenChain={acceptance:true,skeleton:true,subjects:[prior],bodies:[task.file_name],tasks:[task]};
+  ctx.__old=old;ctx.__next=next;ctx.__task=task;
+  vm.runInContext('SKELETON_TASKS.set(__old,frozenTaskEntries([__task])); SKELETON_TASKS.set(__next,frozenTaskEntries([__task]));',ctx);
+  ctx.authorCandidate=async()=>next;
+  let restamped=[];ctx.authorBodies=async(_w,rows)=>{restamped=rows.map(row=>row[0].taskId);};
+  await ctx.reauthorSkeleton({}, {outcome:old,subjects:[prior]},new Map(),[],[],1);
+  assert.deepEqual(restamped,[task.task_id]);
+});

@@ -6,6 +6,7 @@ use crate::v2::script::{WorkflowV2HostCall, WorkflowV2HostOptions, WorkflowV2Wri
 
 fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: files.iter().map(|f| format!("`{f}` -- the lane")).collect(),

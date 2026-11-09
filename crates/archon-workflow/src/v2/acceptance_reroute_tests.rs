@@ -18,6 +18,7 @@ fn repo(files: &[&str]) -> tempfile::TempDir {
 
 fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, owns: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: owns.iter().map(|f| f.to_string()).collect(),

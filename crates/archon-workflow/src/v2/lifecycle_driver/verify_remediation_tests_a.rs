@@ -5,6 +5,7 @@ pub(crate) fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) 
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-010".to_string(),
             aliases: Vec::new(),
             source_path: "tasks/TASK-TDL-010.md".to_string(),
@@ -352,6 +353,7 @@ fn d46_execution_retry_is_scheduled_even_when_write_inventory_is_empty() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-060".to_string(),
             aliases: Vec::new(),
             source_path: "tasks/TASK-TDL-060.md".to_string(),

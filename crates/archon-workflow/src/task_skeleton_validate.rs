@@ -31,6 +31,7 @@ fn skeleton_validation_defects(
         defects.push(ValidationDefect::new("empty_task_set", "skeleton", "tasks",
             "task skeleton examined zero tasks; add every future TASK entry before running `workflow freeze-skeleton`"));
     }
+    defects.extend(super::states::defects(skeleton));
     let mut ids = BTreeSet::new();
     let mut files = BTreeSet::new();
     for (index, task) in skeleton.tasks.iter().enumerate() {

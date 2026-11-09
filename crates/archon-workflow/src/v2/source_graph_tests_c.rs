@@ -285,6 +285,7 @@ pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -294,6 +295,7 @@ pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
                 ..Default::default()
             },
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: vec!["T010".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
@@ -312,6 +314,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -321,6 +324,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 ..Default::default()
             },
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: vec!["T010".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
@@ -330,6 +334,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 ..Default::default()
             },
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-020".to_string(),
                 aliases: vec!["T020".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-020.md".to_string(),
@@ -339,6 +344,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 ..Default::default()
             },
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-050".to_string(),
                 aliases: vec!["T050".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-050.md".to_string(),
@@ -348,6 +354,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 ..Default::default()
             },
             crate::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-070".to_string(),
                 aliases: vec!["T070".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-070.md".to_string(),

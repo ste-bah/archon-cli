@@ -32,6 +32,7 @@ fn instances(path: &str, min: usize) -> WorkflowV2DeliverableContract {
 
 fn task(id: &str, contracts: Vec<WorkflowV2DeliverableContract>) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         // A path that does not exist: `shell_token_paths` returns empty rather
         // than failing, which is what keeps these tests about the contracts.
@@ -345,6 +346,8 @@ fn skeleton_and_body_share_every_contract_refusal() {
             schema_version: 1,
             acceptance_digest: "digest".into(),
             tasks: vec![FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: "TASK-X-010".into(),
                 file_name: "TASK-X-010.md".into(),

@@ -5,6 +5,7 @@ const REPO: &str = "/repo";
 
 fn task(task_id: &str, declared: &[&str]) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: task_id.to_string(),
         files_expected_to_change: declared.iter().map(|entry| (*entry).to_string()).collect(),
         ..Default::default()

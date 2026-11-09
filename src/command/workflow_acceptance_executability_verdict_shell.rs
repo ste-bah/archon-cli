@@ -110,28 +110,39 @@ pub(super) fn expands(word: &str) -> bool {
 
 /// The words of each simple command of `text`, quotes removed.
 pub(super) fn lex(text: &str) -> Vec<Vec<String>> {
-    lex_with_heredocs(text, |_, _| {})
+    lex_with_heredocs(text, |_, _| {}, |_, _| {})
 }
 
 /// Blank heredoc data before splitting shell control flow, using the lexer's ranges.
 pub(super) fn without_heredoc_bodies(text: &str) -> String {
     let mut chars: Vec<char> = text.chars().collect();
-    lex_with_heredocs(text, |start, end| {
-        for c in &mut chars[start..end] {
-            if *c != '\n' {
-                *c = ' ';
+    lex_with_heredocs(
+        text,
+        |start, end| {
+            for c in &mut chars[start..end] {
+                if *c != '\n' {
+                    *c = ' ';
+                }
             }
-        }
-    });
+        },
+        |_, _| {},
+    );
     chars.into_iter().collect()
 }
 
-fn lex_with_heredocs(text: &str, mut skipped: impl FnMut(usize, usize)) -> Vec<Vec<String>> {
+fn lex_with_heredocs(
+    text: &str,
+    mut skipped: impl FnMut(usize, usize),
+    mut observed: impl FnMut(&str, bool),
+) -> Vec<Vec<String>> {
     let chars: Vec<char> = text.chars().collect();
     let (mut commands, mut words, mut word) = (Vec::new(), Vec::new(), String::new());
     let mut heredocs: Vec<(String, bool)> = Vec::new();
     let mut at = 0;
-    let end_word = |word: &mut String, words: &mut Vec<String>| {
+    let mut quoted = false;
+    let mut end_word = |word: &mut String, words: &mut Vec<String>, quoted: &mut bool| {
+        observed(word, *quoted);
+        *quoted = false;
         if !word.is_empty() {
             words.push(std::mem::take(word));
         }
@@ -147,6 +158,7 @@ fn lex_with_heredocs(text: &str, mut skipped: impl FnMut(usize, usize)) -> Vec<V
                 continue;
             }
             '\'' => {
+                quoted = true;
                 let close = (at + 1..chars.len()).find(|&i| chars[i] == '\'');
                 let stop = close.unwrap_or(chars.len());
                 word.extend(&chars[at + 1..stop]);
@@ -154,6 +166,7 @@ fn lex_with_heredocs(text: &str, mut skipped: impl FnMut(usize, usize)) -> Vec<V
                 continue;
             }
             '"' => {
+                quoted = true;
                 at += 1;
                 while at < chars.len() && chars[at] != '"' {
                     if chars[at] == '\\' && at + 1 < chars.len() {
@@ -196,7 +209,7 @@ fn lex_with_heredocs(text: &str, mut skipped: impl FnMut(usize, usize)) -> Vec<V
                 if word.chars().all(|c| c.is_ascii_digit()) {
                     word.clear();
                 } else {
-                    end_word(&mut word, &mut words);
+                    end_word(&mut word, &mut words, &mut quoted);
                 }
                 while chars
                     .get(at)
@@ -216,7 +229,7 @@ fn lex_with_heredocs(text: &str, mut skipped: impl FnMut(usize, usize)) -> Vec<V
                 continue;
             }
             '\n' | ';' | '&' | '|' | '(' | ')' | '`' => {
-                end_word(&mut word, &mut words);
+                end_word(&mut word, &mut words, &mut quoted);
                 if !words.is_empty() {
                     commands.push(std::mem::take(&mut words));
                 }
@@ -229,19 +242,19 @@ fn lex_with_heredocs(text: &str, mut skipped: impl FnMut(usize, usize)) -> Vec<V
                 continue;
             }
             '$' if chars.get(at + 1) == Some(&'(') => {
-                end_word(&mut word, &mut words);
+                end_word(&mut word, &mut words, &mut quoted);
                 if !words.is_empty() {
                     commands.push(std::mem::take(&mut words));
                 }
                 at += 2;
                 continue;
             }
-            c if c.is_whitespace() => end_word(&mut word, &mut words),
+            c if c.is_whitespace() => end_word(&mut word, &mut words, &mut quoted),
             c => word.push(c),
         }
         at += 1;
     }
-    end_word(&mut word, &mut words);
+    end_word(&mut word, &mut words, &mut quoted);
     if !words.is_empty() {
         commands.push(words);
     }
@@ -307,4 +320,18 @@ mod tests {
         );
         assert_eq!(programs("$RUNNER check"), vec![None]);
     }
+}
+
+pub(crate) fn quoted_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    lex_with_heredocs(
+        text,
+        |_, _| {},
+        |word, quoted| {
+            if quoted {
+                words.push(word.to_string());
+            }
+        },
+    );
+    words
 }

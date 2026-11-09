@@ -24,6 +24,7 @@ async fn a_landing_that_edits_the_frozen_contract_is_rejected_even_when_declared
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-001".into(),
             source_path: "tasks/TASK-001.md".into(),
             files_expected_to_change: vec![

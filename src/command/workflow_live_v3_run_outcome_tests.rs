@@ -147,6 +147,7 @@ fn decide(run: &Run, summary: WorkflowV2ScriptSummary) -> WorkflowV2ScriptSummar
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: TASK.into(),
             files_expected_to_change: vec!["src/g.rs".into()],
             ..Default::default()
@@ -262,6 +263,7 @@ async fn a_regression_holds_a_closed_run_and_a_pre_existing_failure_is_listed() 
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: TASK.into(),
             files_expected_to_change: vec!["src/g.rs".into()],
             ..Default::default()

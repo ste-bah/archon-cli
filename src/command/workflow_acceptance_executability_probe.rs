@@ -1,11 +1,9 @@
 //! The host probe itself: run each check at the site, then hold it to the
 //! trees it must be proven on (see the parent module docs).
-
 use super::*;
 use crate::command::workflow_task_set::live_root;
 #[path = "workflow_acceptance_executability_stalled_tree.rs"]
 mod stalled_tree;
-
 impl HostProbe {
     #[cfg(all(test, unix))]
     pub(super) fn inject_prove_run(&self, run: repairs::TreeRun, markers: mutation::Markers) {
@@ -481,6 +479,9 @@ impl ExecutabilityProbe for HostProbe {
         std::mem::take(&mut *self.unproven.lock().expect("unproven lock"))
     }
 
+    fn take_baseline_observations(&self) -> super::BaselineObservations {
+        self.drain_baseline_observations()
+    }
     fn take_baseline_runs(&self) -> Option<BaselineRuns> {
         self.baseline_runs()
     }
@@ -495,6 +496,4 @@ impl ExecutabilityProbe for HostProbe {
 #[path = "workflow_acceptance_executability_reverify.rs"]
 mod reverify;
 
-pub(super) fn direct_fallback_note() -> &'static str {
-    "it is proven on the hermetic trees when a pre-implementation tree exists; otherwise unproven"
-}
+pub(super) use super::probe_constructor::direct_fallback_note;

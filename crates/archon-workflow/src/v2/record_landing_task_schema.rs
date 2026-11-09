@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 
 pub fn task_schema() -> Value {
     let sample = FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: String::new(),
         file_name: String::new(),

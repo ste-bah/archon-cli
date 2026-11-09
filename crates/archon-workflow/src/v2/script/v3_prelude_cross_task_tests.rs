@@ -166,6 +166,7 @@ async fn the_prelude_and_the_rule_key_a_host_normalised_finding_identically() {
         tasks: ["TASK-A", "TASK-B"]
             .iter()
             .map(|id| WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: (*id).into(),
                 ..Default::default()
             })

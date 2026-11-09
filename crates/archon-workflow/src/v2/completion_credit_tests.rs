@@ -198,6 +198,7 @@ fn universe() -> WorkflowV2TaskUniverse {
         tasks: ["TASK-ONE", "TASK-TWO", "TASK-BLOCKED", "TASK-MISSING"]
             .into_iter()
             .map(|id| WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: id.to_string(),
                 aliases: Vec::new(),
                 source_path: format!("tasks/{id}.md"),

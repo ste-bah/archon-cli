@@ -239,6 +239,7 @@ fn a_command_cannot_resolve_an_unlocated_module_id() {
 
 fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: files.iter().map(|f| f.to_string()).collect(),

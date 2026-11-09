@@ -274,6 +274,7 @@ mod tests {
             schema_version: "test".to_string(),
             source_roots: vec![tasks.display().to_string()],
             tasks: vec![WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-ABC-001".to_string(),
                 aliases: Vec::new(),
                 source_path: tasks.join("TASK-ABC-001.md").display().to_string(),

@@ -124,6 +124,10 @@ impl CommandCapabilityCatalog {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostCommandSubject {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_record_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub requirement_states: std::collections::BTreeMap<String, String>,
     pub task_id: String,
     pub file_name: String,
 }
@@ -222,5 +226,32 @@ mod serialization_tests {
             observed_json.get("observedOnly"),
             Some(&serde_json::json!(true))
         );
+    }
+}
+
+impl HostCommandSubject {
+    pub fn from_frozen(task: &crate::task_skeleton::FrozenTask) -> Self {
+        Self {
+            task_id: task.task_id.clone(),
+            file_name: task.file_name.clone(),
+            requirement_states: task
+                .requirement_states
+                .iter()
+                .map(|(id, d)| (id.clone(), d.state.as_str().into()))
+                .collect(),
+            host_record_digest: (!task.requirement_states.is_empty()
+                || !task.proven_done.is_empty()
+                || task.status.is_some())
+            .then(|| {
+                crate::task_set_contract::content_digest(
+                    &serde_json::to_vec(&(
+                        &task.status,
+                        &task.requirement_states,
+                        &task.proven_done,
+                    ))
+                    .expect("serializable host record"),
+                )
+            }),
+        }
     }
 }

@@ -419,11 +419,16 @@ function inheritAcceptanceCovers(entry, prior) {
   }
 }
 
+function skeletonEntryWithoutHostFields(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  const { status, requirement_states, proven_done, ...task } = entry; return task;
+}
 // Verified frozen stages can carry host-read entries without an authored candidate.
 function skeletonLandingSeed(previous) {
-  if (parsedSkeletonCandidate(previous)) return previous;
+  if (parsedSkeletonCandidate(previous)) { const seed = JSON.parse(previous);
+    seed.tasks = seed.tasks.map(skeletonEntryWithoutHostFields); return JSON.stringify(seed); }
   const tasks = CURRENT_SKELETON_TASKS || frozenChain().tasks;
-  return tasks ? JSON.stringify({ schema_version: 1, acceptance_digest: "", tasks: [...tasks.values()].map(text => JSON.parse(text)) }) : null;
+  return tasks ? JSON.stringify({ schema_version: 1, acceptance_digest: "", tasks: [...tasks.values()].map(text => skeletonEntryWithoutHostFields(JSON.parse(text))) }) : null;
 }
 
 // Candidate-artifact refusals never become setup inputs for the next author.

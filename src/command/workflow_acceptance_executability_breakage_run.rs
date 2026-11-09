@@ -10,7 +10,7 @@ pub(super) fn inputs(probe: &HostProbe) -> HostProbe {
         None,
         probe.resource_limits.clone(),
     );
-    inputs.site = Site::Hermetic;
+    inputs.site = probe.site.clone();
     inputs.task_root = probe.task_root.clone();
     inputs.host = probe.host.clone();
     inputs.baseline = probe.baseline.clone();
@@ -43,8 +43,13 @@ pub(super) async fn materialise(
         anchor.snapshot.clone(),
         work.to_path_buf(),
     );
+    let policy = if let Site::Scratch(binding) = &probe.site {
+        Some(binding.policy.clone())
+    } else {
+        None
+    };
     blocking(move || {
-        materialise_base_copy(
+        base_copy::materialise_base_copy_with_policy(
             &parent,
             &repository,
             &project,
@@ -53,9 +58,16 @@ pub(super) async fn materialise(
             &snapshot.commit,
             &work.join("build-output"),
             Some(&work.join("base.git")),
+            policy.as_ref(),
         )
         .map(Arc::new)
-        .map_err(patch::host)
+        .map_err(|error| {
+            if error.0 == "control_mismatch" {
+                decide::unrun("control_mismatch", &error.0)
+            } else {
+                patch::host(error)
+            }
+        })
     })
     .await
 }
@@ -75,7 +87,10 @@ fn remove_absent(
     live_project: &Path,
 ) -> Result<(), RunOutcome> {
     for (key, entry) in &snapshot.entries {
-        if matches!(entry, SnapshotEntry::Tracked { .. }) || skip_copy_entry(key, entry) {
+        if matches!(entry, SnapshotEntry::Tracked { .. })
+            || snapshot.landing_verified.contains_key(key)
+            || skip_copy_entry(key, entry)
+        {
             continue;
         }
         let relative = key_path(key);

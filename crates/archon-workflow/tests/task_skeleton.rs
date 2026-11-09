@@ -68,6 +68,8 @@ fn skeleton(acceptance_digest: &str) -> TaskSkeleton {
         schema_version: 1,
         acceptance_digest: acceptance_digest.into(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010-body.md".into(),
@@ -136,6 +138,7 @@ fn full_chain_binds_both_exact_files_to_the_host_pin() {
 fn frozen_fields_compare_structurally_not_by_yaml_formatting() {
     let frozen = skeleton("acceptance").tasks.remove(0);
     let task = WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: frozen.task_id.clone(),
         source_path: format!("/tmp/{}", frozen.file_name),
         dependencies: frozen.depends_on.clone(),
@@ -182,6 +185,8 @@ fn skeleton_set_validation_refuses_unowned_and_dangling_ids() {
     );
 
     value.tasks.push(FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: "TASK-X-001".into(),
         file_name: "TASK-X-001-base.md".into(),
@@ -203,6 +208,8 @@ fn skeleton_set_validation_refuses_unknown_claims_but_allows_shared_ownership() 
     value.tasks[0].depends_on.clear();
     value.tasks[0].implements = vec!["AC-X-001".into(), "REQ-X-999".into()];
     value.tasks.push(FrozenTask {
+        requirement_states: Default::default(),
+        proven_done: Default::default(),
         status: None,
         task_id: "TASK-X-020".into(),
         file_name: "TASK-X-020-other.md".into(),
@@ -258,6 +265,8 @@ fn skeleton_set_validation_refuses_cycles_and_contradictory_ordering() {
         acceptance_digest: "acceptance".into(),
         tasks: vec![
             FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: "TASK-X-001".into(),
                 file_name: "TASK-X-001-base.md".into(),
@@ -272,6 +281,8 @@ fn skeleton_set_validation_refuses_cycles_and_contradictory_ordering() {
                 deliverable_contracts: Vec::new(),
             },
             FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: "TASK-X-010".into(),
                 file_name: "TASK-X-010-body.md".into(),
@@ -351,6 +362,8 @@ fn dangling_reference_does_not_hide_an_independent_cycle() {
         acceptance_digest: "acceptance".into(),
         tasks: vec![
             FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: "TASK-X-001".into(),
                 file_name: "TASK-X-001-dangling.md".into(),
@@ -361,6 +374,8 @@ fn dangling_reference_does_not_hide_an_independent_cycle() {
                 deliverable_contracts: Vec::new(),
             },
             FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: "TASK-X-010".into(),
                 file_name: "TASK-X-010-cycle.md".into(),
@@ -375,6 +390,8 @@ fn dangling_reference_does_not_hide_an_independent_cycle() {
                 deliverable_contracts: Vec::new(),
             },
             FrozenTask {
+                requirement_states: Default::default(),
+                proven_done: Default::default(),
                 status: None,
                 task_id: "TASK-X-020".into(),
                 file_name: "TASK-X-020-cycle.md".into(),

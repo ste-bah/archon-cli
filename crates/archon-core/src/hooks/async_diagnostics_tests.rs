@@ -1,5 +1,7 @@
 use super::{AsyncHookDiagnostic, AsyncHookDiagnosticStore};
+#[cfg(unix)]
 use crate::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
+#[cfg(unix)]
 use std::path::Path;
 
 #[test]

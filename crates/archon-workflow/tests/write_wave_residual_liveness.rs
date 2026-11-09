@@ -76,6 +76,7 @@ fn fixture() -> Fixture {
     .unwrap();
     std::fs::write(tasks.join("TASK-B.md"), "B's lane.\n").unwrap();
     let task = |id: &str, owns: &str, forbids: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: tasks.join(format!("{id}.md")).display().to_string(),
         files_expected_to_change: vec![owns.into()],

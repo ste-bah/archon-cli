@@ -323,6 +323,8 @@ mod tests {
             acceptance_digest: "d".into(),
             tasks: (1..=70)
                 .map(|n| FrozenTask {
+                    requirement_states: Default::default(),
+                    proven_done: Default::default(),
                     status: None,
                     task_id: format!("TASK-X-{n:03}"),
                     file_name: format!("bad{n}"),

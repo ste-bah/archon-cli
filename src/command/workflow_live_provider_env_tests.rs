@@ -99,12 +99,14 @@ async fn d47_generated_provider_workflow_resolves_one_shared_key_set() {
         source_roots: vec!["tasks".to_string()],
         tasks: vec![
             archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-ALPHA-011".to_string(),
                 source_path: "tasks/TASK-ALPHA-011.md".to_string(),
                 required_env_keys: vec!["POLYGON_API_KEY".to_string()],
                 ..Default::default()
             },
             archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-ALPHA-019".to_string(),
                 source_path: "tasks/TASK-ALPHA-019.md".to_string(),
                 required_env_keys: vec!["OPENBB_API_URL".to_string()],
@@ -165,6 +167,7 @@ async fn generated_requirements_do_not_expand_operator_launch_grants() {
         schema_version: "workflow-v2-task-universe-v1".into(),
         source_roots: vec!["tasks".into()],
         tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-R2-001".into(),
             required_env_keys: vec!["OPENBB_API_URL".into(), "POLYGON_API_KEY".into()],
             ..Default::default()

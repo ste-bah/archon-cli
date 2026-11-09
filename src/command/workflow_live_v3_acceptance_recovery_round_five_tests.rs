@@ -233,6 +233,7 @@ async fn real_resume_recovers_first_freeze_crash_before_approval_and_execution()
         schema_version: "test".into(),
         source_roots: vec![run.set.tasks.display().to_string()],
         tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-F-001".into(),
             implements: vec!["AC-F-001".into()],
             source_path: run.set.tasks.join("TASK-F-001.md").display().to_string(),

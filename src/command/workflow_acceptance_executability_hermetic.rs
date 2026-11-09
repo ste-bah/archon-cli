@@ -227,7 +227,7 @@ mod create;
 
 #[allow(dead_code)]
 #[path = "workflow_acceptance_executability_base_copy.rs"]
-mod base_copy;
+pub(crate) mod base_copy;
 #[allow(unused_imports)]
 pub(crate) use base_copy::{BaseCopy, materialise_base_copy};
 

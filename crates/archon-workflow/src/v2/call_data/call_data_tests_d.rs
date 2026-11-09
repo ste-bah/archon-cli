@@ -13,11 +13,13 @@ fn universe() -> WorkflowV2TaskUniverse {
         source_roots: vec!["project-tasks".to_string()],
         tasks: vec![
             WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-1".to_string(),
                 acceptance_criteria: vec!["the criterion this branch owns".to_string()],
                 ..Default::default()
             },
             WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-2".to_string(),
                 acceptance_criteria: vec!["a criterion belonging to another task".to_string()],
                 ..Default::default()

@@ -73,54 +73,11 @@ fn probe_check_cap_secs(site: &Site) -> u64 {
     }
 }
 
-/// Why the host could not prove a check (F6). Only a program that neither
-/// the check's site nor the host has is the author's to replace; a site
-/// that lacks what the host has is a defect of the site the host built.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum UnprovenCause {
-    /// The host's: its site, its environment or its run. A strike makes
-    /// the same failure its author's after a resume (Issue 328, #356).
-    Host,
-    /// Validation, corruption, or an unclassified host diagnostic.
-    PermanentHost,
-    /// An inconclusive host probe: retried without a strike or author finding.
-    TransientHost,
-    /// The check's site lacks a program (or a tool's subcommand) the host
-    /// has, or the host could not tell: a defect of the site the host
-    /// built, so no strike ever makes it the author's (F6).
-    /// Issue 548: no host repair makes the site provide it, so it goes to
-    /// its author at once, in the same budget, with no strike saved.
-    SiteLacks,
-    /// The check runs a program neither its site nor the host provides.
-    /// Issue 557: no host action makes it available, so it goes to its
-    /// author at once on the probe path too, with no strike saved.
-    ProgramAbsent,
-}
-
-impl UnprovenCause {
-    pub(crate) fn from_class(class: crate::command::workflow_host_fault::Class) -> Self {
-        match class {
-            crate::command::workflow_host_fault::Class::Transient => Self::Host,
-            _ => Self::PermanentHost,
-        }
-    }
-    pub(crate) fn class(self) -> crate::command::workflow_host_fault::Class {
-        match self {
-            Self::Host | Self::TransientHost | Self::SiteLacks => {
-                crate::command::workflow_host_fault::Class::Transient
-            }
-            _ => crate::command::workflow_host_fault::Class::Permanent,
-        }
-    }
-    pub(crate) fn code(self) -> &'static str {
-        match self {
-            Self::Host | Self::TransientHost => "host_transient",
-            Self::SiteLacks => "host_site_lacks",
-            Self::ProgramAbsent => "host_program_absent",
-            Self::PermanentHost => "host_permanent",
-        }
-    }
-}
+#[path = "workflow_acceptance_executability_unproven_cause.rs"]
+mod unproven_cause;
+pub(crate) use unproven_cause::UnprovenCause;
+type BaselineObservations =
+    BTreeMap<(String, String), archon_workflow::baseline_results::BaselineOutcome>;
 
 /// Runs accepted checks once and reports which crashed in their own code.
 #[async_trait]
@@ -163,6 +120,12 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
             .collect()
     }
 
+    /// Observed base outcomes, drained once for the frozen record.
+    fn take_baseline_observations(&self) -> BaselineObservations {
+        BTreeMap::new()
+    }
+    /// How each check that failed on the probe's pre-implementation tree
+    /// failed there, drained by the caller (Issue 275); `None` without one.
     /// How each check that failed on the probe's pre-implementation tree
     /// failed there, drained by the caller (Issue 275); `None` without one.
     fn take_baseline_runs(&self) -> Option<BaselineRuns> {
@@ -208,6 +171,7 @@ impl std::fmt::Display for HostUnproven {
 impl std::error::Error for HostUnproven {}
 
 /// Where a probe runs its checks.
+#[derive(Clone)]
 enum Site {
     /// The `[workflow.acceptance_execution]` hermetic scratch observation.
     Scratch(Box<NativeBinding>),
@@ -244,10 +208,12 @@ pub(crate) struct HostProbe {
     /// How each check that failed there failed (Issue 275).
     test_inventories: Mutex<BTreeMap<String, Option<Vec<String>>>>,
     baseline_passes: Mutex<BTreeSet<String>>,
+    baseline_observations: Mutex<BaselineObservations>,
     baseline_failures: Mutex<BTreeMap<String, hermetic::CheckEvidence>>,
     reuse_audit: Mutex<BTreeMap<String, ReuseAudit>>,
     /// The tree the checks being repaired ran on, and how each fared there.
     failed_tree: Mutex<Option<baseline::FailedTree>>,
+    /// Hermetic copies made, for tests.
     #[cfg(test)]
     injected_prove_run: Mutex<Option<(repairs::TreeRun, mutation::Markers)>>,
     /// Where the probe's own hermetic copies are made.
@@ -287,7 +253,7 @@ pub(crate) use baseline::{
 };
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
-mod hermetic;
+pub(crate) mod hermetic;
 #[allow(unused_imports)] #[rustfmt::skip]
 pub(crate) use hermetic::{BaseCopy, CheckEvidence, materialise_base_copy, run_refs_in_copy, prove_breakage, BreakageRequest, BreakageReport, MIN_DEADLINE_SECS};
 #[path = "workflow_acceptance_executability_mutation.rs"]
@@ -319,7 +285,7 @@ mod sites;
 mod verdict;
 pub(crate) use verdict::missing_site_program as missing_typed_program;
 #[path = "workflow_acceptance_executability_verdict_shell.rs"]
-mod verdict_shell;
+pub(crate) mod verdict_shell;
 
 #[path = "workflow_acceptance_test_inventory.rs"]
 pub(crate) mod test_inventory;
@@ -480,7 +446,7 @@ mod verdict_probe_tests;
 mod verdict_probe_tests_b;
 
 /// Resolve the same repository selection used by the freeze probe.
-pub(super) fn diagnostic_repository(project: &Path, tasks: &Path) -> Result<PathBuf, String> {
+pub(crate) fn diagnostic_repository(project: &Path, tasks: &Path) -> Result<PathBuf, String> {
     let (site, root) = sites::freeze_site(project, tasks);
     match site {
         Site::Unavailable(reason) => Err(reason.0),

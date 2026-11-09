@@ -81,6 +81,7 @@ fn world() -> Fixture {
     git(&f.repo, &["add", "."]);
     git(&f.repo, &["commit", "-qm", "crate"]);
     let task = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         files_expected_to_change: files.iter().map(|f| (*f).to_string()).collect(),
         ..Default::default()

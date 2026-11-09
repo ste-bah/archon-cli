@@ -39,7 +39,7 @@ pub(crate) mod judge;
 #[path = "workflow_judge_store.rs"]
 mod judge_store;
 #[path = "workflow_acceptance_link_diagnostics.rs"]
-mod link_diagnostics;
+pub(crate) mod link_diagnostics;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
 #[path = "workflow_acceptance_passability.rs"]
@@ -48,39 +48,9 @@ pub(crate) mod passability;
 mod preflight;
 use judge::{gate_stamp, predecessor_findings};
 
-/// Issue 495: the site path rule the first author and every publication
-/// apply, held to a contract already published. Each refused check id maps
-/// to the rule's own finding text.
-pub(crate) fn site_path_refusals(
-    contract: &AcceptanceContract,
-    project_root: &Path,
-    tasks_root: &Path,
-) -> Result<std::collections::BTreeMap<String, String>> {
-    let mut refusals = std::collections::BTreeMap::<String, String>::new();
-    for finding in preflight::rooted_policy_findings(contract, project_root, tasks_root)? {
-        if !finding
-            .identity
-            .as_ref()
-            .is_some_and(|identity| identity.code == "unavailable_site_path")
-        {
-            continue;
-        }
-        let id = finding
-            .field
-            .split('.')
-            .next()
-            .unwrap_or_default()
-            .to_string();
-        refusals
-            .entry(id)
-            .and_modify(|text| {
-                text.push_str("; ");
-                text.push_str(&finding.message);
-            })
-            .or_insert(finding.message);
-    }
-    Ok(refusals)
-}
+#[path = "workflow_task_set_site_refusals.rs"]
+mod site_refusals;
+pub(crate) use site_refusals::site_path_refusals;
 
 pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
     let canonical = tasks_root
@@ -125,6 +95,8 @@ pub(crate) struct PreparedAcceptanceFreeze {
 
 #[derive(Debug)]
 pub(crate) struct PreparedSkeletonFreeze {
+    stamp_fn:
+        fn(FreezeGateMode, &[GateFinding]) -> archon_workflow::task_set_contract::FreezeGateStamp,
     tasks_root: PathBuf,
     pin_path: PathBuf,
     skeleton_bytes: Vec<u8>,
@@ -413,6 +385,8 @@ pub(crate) fn publish_acceptance_freeze(
     Ok(prepared.result)
 }
 
+#[path = "workflow_task_set_decisions.rs"]
+pub(crate) mod decisions;
 #[path = "workflow_task_set_skeleton_freeze.rs"]
 mod skeleton_freeze;
 #[cfg(test)]

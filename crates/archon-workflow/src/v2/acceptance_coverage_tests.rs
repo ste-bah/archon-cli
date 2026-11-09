@@ -137,6 +137,7 @@ fn a_task_is_answered_for_through_a_check_id_or_a_covered_requirement() {
         vec!["TASK-C", "TASK-D"]
     );
     let task = |id: &str, implements: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         implements: implements.iter().map(|s| s.to_string()).collect(),

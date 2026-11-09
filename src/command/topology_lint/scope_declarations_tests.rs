@@ -6,6 +6,7 @@ use super::*;
 
 fn task(owns: &[&str], forbids: &[&str]) -> WorkflowV2TaskUniverseTask {
     WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: "TASK-X-001".into(),
         files_expected_to_change: owns.iter().map(|f| f.to_string()).collect(),
         files_forbidden_to_change: forbids.iter().map(|f| f.to_string()).collect(),

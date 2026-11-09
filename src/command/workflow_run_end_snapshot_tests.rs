@@ -11,6 +11,7 @@ fn task_universe(task_root: &std::path::Path) -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".into(),
         source_roots: vec![task_root.display().to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-EX-001".into(),
             source_path: task_root.join("TASK-EX-001.md").display().to_string(),
             ..WorkflowV2TaskUniverseTask::default()

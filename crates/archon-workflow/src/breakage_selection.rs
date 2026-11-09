@@ -98,6 +98,9 @@ pub fn keys(
             let key = snapshot_path_key(root, &d.artifact_path);
             match snapshot.entries.get(&key) {
                 Some(SnapshotEntry::Tracked { kind, .. }) => Some((key, *kind)),
+                _ if d.landing_verified && snapshot.landing_verified.contains_key(&key) => {
+                    Some((key, SnapshotKind::Blob))
+                }
                 _ => None,
             }
         })

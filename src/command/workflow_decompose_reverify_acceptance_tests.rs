@@ -125,6 +125,8 @@ fn a_failed_check_without_an_implementing_task_keeps_the_check_as_subject() {
         schema_version: 1,
         acceptance_digest: "digest".into(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010.md".into(),
@@ -148,6 +150,8 @@ fn only_checks_needing_remediation_produce_task_subjects() {
         schema_version: 1,
         acceptance_digest: "digest".into(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-X-010".into(),
             file_name: "TASK-X-010.md".into(),

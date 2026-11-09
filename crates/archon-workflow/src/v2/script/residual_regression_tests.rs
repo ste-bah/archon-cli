@@ -45,6 +45,7 @@ fn universe() -> WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-A".into(),
             focused_commands: Some(vec![LIB.into()]),
             focused_tests: vec![LIB.into()],

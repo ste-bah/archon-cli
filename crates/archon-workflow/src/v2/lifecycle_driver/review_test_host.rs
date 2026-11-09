@@ -92,6 +92,7 @@ pub(crate) fn one_task_universe() -> WorkflowV2TaskUniverse {
         schema_version: "1".to_string(),
         source_roots: vec!["tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-001".to_string(),
             source_path: "tasks/TASK-001.md".to_string(),
             title: Some("the task under review".to_string()),

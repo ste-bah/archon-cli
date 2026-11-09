@@ -66,6 +66,7 @@ fn d70_artifact_only_work_without_declared_contract_is_repairable() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-EX-001".to_string(),
             source_path: "tasks/TASK-EX-001.md".to_string(),
             acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
@@ -100,6 +101,7 @@ fn d70_declared_contract_allows_artifact_only_ownership() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-EX-001".to_string(),
             source_path: "tasks/TASK-EX-001.md".to_string(),
             acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],

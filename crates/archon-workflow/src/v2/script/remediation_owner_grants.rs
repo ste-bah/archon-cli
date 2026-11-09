@@ -285,6 +285,7 @@ mod tests {
             std::fs::write(target, "").unwrap();
         }
         let task = |id: &str, owns: &str| WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: id.into(),
             files_expected_to_change: vec![owns.into()],
             ..Default::default()

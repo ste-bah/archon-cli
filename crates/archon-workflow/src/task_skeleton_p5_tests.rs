@@ -6,6 +6,8 @@ fn skeleton() -> TaskSkeleton {
         schema_version: 1,
         acceptance_digest: "digest".into(),
         tasks: vec![FrozenTask {
+            requirement_states: Default::default(),
+            proven_done: Default::default(),
             status: None,
             task_id: "TASK-X-001".into(),
             file_name: "TASK-X-001.md".into(),
@@ -115,6 +117,7 @@ fn P5_21_legacy_frozen_sets_normalize() {
     frozen.implements = vec![" REQ-X-001 ".into(), "REQ-X-001".into(), "".into()];
     frozen.source_sections = vec!["0".into(), "0".into()];
     let body = WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: frozen.task_id.clone(),
         source_path: frozen.file_name.clone(),
         implements: vec!["REQ-X-001".into()],

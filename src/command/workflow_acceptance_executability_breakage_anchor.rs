@@ -46,7 +46,7 @@ pub(crate) async fn prove_anchored(
     mut refusals: Vec<String>,
 ) -> AnchoredReport {
     let prior_len = refusals.len();
-    if matches!(probe.site, Site::Scratch(_)) {
+    if matches!(&probe.site, Site::Scratch(binding) if binding.policy.validate().is_err()) {
         refusals.push("proof_site_unavailable".into());
     }
     if probe.baseline_commit().as_deref() != Some(anchor.commit) {

@@ -8,6 +8,7 @@ fn two_task_universe() -> WorkflowV2TaskUniverse {
         tasks: ["TASK-TDL-020", "TASK-TDL-030"]
             .into_iter()
             .map(|id| WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: id.to_string(),
                 source_path: format!("tasks/{id}.md"),
                 acceptance_criteria: vec!["Criterion one.".to_string()],

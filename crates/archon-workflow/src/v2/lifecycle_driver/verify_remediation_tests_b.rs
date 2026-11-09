@@ -168,6 +168,7 @@ fn d63_retriage_retries_survive_generated_outcome_ids_and_remain_distinct() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-080".to_string(),
             aliases: Vec::new(),
             source_path: "tasks/TASK-TDL-080.md".to_string(),
@@ -324,6 +325,7 @@ fn d22_verification_remediation_source_items_satisfy_graph_contract() {
         source_roots: Vec::new(),
         tasks: vec![
             WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-050".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-TDL-050.md".to_string(),
@@ -333,6 +335,7 @@ fn d22_verification_remediation_source_items_satisfy_graph_contract() {
                 ..Default::default()
             },
             WorkflowV2TaskUniverseTask {
+                requirement_states: Default::default(),
                 canonical_task_id: "TASK-TDL-030".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-TDL-030.md".to_string(),

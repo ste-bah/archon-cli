@@ -10,8 +10,11 @@ use std::path::Path;
 
 pub(super) fn render(task_root: &Path) -> String {
     match read(task_root) {
-        Ok(text) => text,
-        Err(error) => format!("classification: unreadable ({error:#})\n"),
+        Ok(text) => format!("{text}{}", states::render(task_root)),
+        Err(error) => format!(
+            "classification: unreadable ({error:#})\n{}",
+            states::render(task_root)
+        ),
     }
 }
 
@@ -178,6 +181,7 @@ mod tests {
         .unwrap();
         acceptance.baseline_commit = Some("base".into());
         let mut snapshot = BaseSnapshot {
+            landing_verified: Default::default(),
             commit: "base".into(),
             digest: String::new(),
             entries: [
@@ -325,3 +329,6 @@ mod tests {
         );
     }
 }
+
+#[path = "workflow_decompose_status_states.rs"]
+mod states;

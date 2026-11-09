@@ -79,6 +79,7 @@ pub mod repository_audit;
 pub mod repository_record;
 mod request;
 pub mod requirement_inventory;
+pub mod requirement_state;
 pub mod run;
 pub mod runner;
 mod source_context;

@@ -298,6 +298,7 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
       throw new Error(`re-frozen skeleton dropped frozen task ${kept.taskId} (${kept.fileName}); a re-author may add implements and tasks, never remove one`);
     }
   }
+  const priorHostStates = new Map(chain.subjects.map(s => [s.taskId, JSON.stringify([s.requirementStates || {}, s.hostRecordDigest])]));
   chain.outcome = outcome;
   chain.subjects = outcome.subjects;
   const next = SKELETON_TASKS.get(outcome);
@@ -308,7 +309,7 @@ async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings, repair
   const skeletonSubjects = new Set(groupFindingsBySubject(findings, chain.subjects).map(([file]) => file));
   const onDisk = frozenChain().bodies;
   const dependencies = changedDependencySubjects(prior, next);
-  const reached = (subject) => dependencies.has(subject.taskId) || !prior || !next
+  const reached = (subject) => priorHostStates.get(subject.taskId) !== JSON.stringify([subject.requirementStates || {}, subject.hostRecordDigest]) || dependencies.has(subject.taskId) || !prior || !next
     || !(bodies.has(subject.fileName) || onDisk.has(subject.fileName))
     || grouped.has(subject.fileName) || skeletonSubjects.has(subject.fileName) || !prior.has(subject.taskId)
     || prior.get(subject.taskId) !== next.get(subject.taskId);
@@ -382,7 +383,9 @@ function frozenTaskEntries(tasks) {
       ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
       : JSON.stringify(value);
   const entries = new Map();
-  for (const task of tasks) {
+  for (const entry of tasks) {
+    if (!entry || typeof entry !== "object") return null;
+    const { status, requirement_states, proven_done, ...task } = entry;
     if (!task || typeof task.task_id !== "string") return null;
     entries.set(task.task_id, canonical(normal(task)));
   }

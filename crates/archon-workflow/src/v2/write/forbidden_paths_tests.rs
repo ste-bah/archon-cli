@@ -24,6 +24,7 @@ use crate::{WorkflowV2FileRecord, WorkflowV2Result, WorkflowV2Status};
 
 fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, forbidden: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_forbidden_to_change: forbidden.iter().map(|f| f.to_string()).collect(),
@@ -337,6 +338,7 @@ fn the_conflict_gap_names_the_declared_paths_and_is_silent_without_overlap() {
 #[test]
 fn an_escalated_round_lifts_only_its_exact_declared_blocker_files() {
     let task = |id: &str, owns: &[&str], forbidden: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: owns.iter().map(|f| f.to_string()).collect(),

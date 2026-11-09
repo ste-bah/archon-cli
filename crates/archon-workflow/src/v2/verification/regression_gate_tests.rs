@@ -13,6 +13,7 @@ fn universe(commands: &[&str]) -> WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-S".into(),
             source_path: "tasks/TASK-S.md".into(),
             files_expected_to_change: vec!["src/shared_tests.rs".into()],

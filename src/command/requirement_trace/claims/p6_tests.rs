@@ -256,3 +256,32 @@ fn P6_5_outside_only_claim_preserves_forbidden_conflict_refutations() {
         trace.report
     );
 }
+
+#[test]
+fn host_classification_is_metadata_and_never_supplies_an_authored_claim() {
+    let prefix = archon_workflow::requirement_state::CLASSIFICATION_PREFIX;
+    for classification in [
+        format!(
+            "{prefix} done: QX-001; to implement: none; kept, not rebuilt: none; inspection: none."
+        ),
+        format!(
+            "  {prefix} done: none; to implement: QX-001; kept, not rebuilt: none; inspection: none."
+        ),
+    ] {
+        let raw = body(
+            "QX-001",
+            &format!("{classification}\nWork is described here."),
+        );
+        assert!(early(&raw).iter().any(|f| {
+            f.text
+                .contains("never names QX-001 outside its implements list")
+        }));
+        assert!(!run(&[("TASK-X-010", &raw)]).findings.is_empty());
+        let authored = body(
+            "QX-001",
+            &format!("{classification}\nQX-001 restricts this work."),
+        );
+        assert!(early(&authored).is_empty());
+        assert!(run(&[("TASK-X-010", &authored)]).findings.is_empty());
+    }
+}

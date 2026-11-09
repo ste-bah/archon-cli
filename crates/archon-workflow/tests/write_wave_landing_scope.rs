@@ -155,6 +155,7 @@ async fn a_file_the_stamp_names_as_another_items_claim_refuses_the_branch_at_lan
 fn owners(f: &mut Fixture, own_extra: &str) {
     use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
     let task = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         files_expected_to_change: files.iter().map(|f| (*f).to_string()).collect(),
         ..Default::default()

@@ -59,6 +59,7 @@ pub(super) fn world() -> World {
     )
     .unwrap();
     let task = |id: &str, owns: &str| WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
         files_expected_to_change: vec![owns.into()],

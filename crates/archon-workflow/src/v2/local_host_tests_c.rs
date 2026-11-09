@@ -129,6 +129,7 @@ pub(super) fn task_universe_080() -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-080".to_string(),
             aliases: vec!["T080".to_string()],
             source_path: "/tmp/tasks/TASK-TDL-080.md".to_string(),
@@ -146,6 +147,7 @@ pub(super) fn task_universe_010() -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-010".to_string(),
             aliases: vec!["T010".to_string()],
             source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),

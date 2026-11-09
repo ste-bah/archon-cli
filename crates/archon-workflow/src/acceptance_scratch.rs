@@ -11,7 +11,7 @@ mod control;
 mod direct;
 pub use direct::{
     DIRECT_DEFAULT_OUTPUT_BYTES, DIRECT_DEFAULT_TIMEOUT_SECS, DirectSite, evaluate_floor_direct,
-    run_check_direct, run_check_direct_with_plan,
+    run_check_direct, run_check_direct_bounded, run_check_direct_with_plan,
 };
 #[path = "acceptance_scratch_inputs.rs"]
 mod inputs;

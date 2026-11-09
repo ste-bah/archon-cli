@@ -124,6 +124,7 @@ mod tests {
         .unwrap();
         lock.digest = "a".repeat(64);
         let mut snapshot = archon_workflow::base_snapshot::BaseSnapshot {
+            landing_verified: Default::default(),
             commit: "base".into(),
             entries: BTreeMap::new(),
             digest: String::new(),

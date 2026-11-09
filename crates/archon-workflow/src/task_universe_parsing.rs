@@ -161,6 +161,7 @@ pub fn parse_task_file_with_path(
         title: metadata_string(&metadata, "title"),
         complexity: metadata_string(&metadata, "complexity"),
         status: metadata_string(&metadata, "status"),
+        requirement_states: requirement_states(&metadata)?,
         // Required above, so an empty vector here means the author wrote
         // `implements: []` — a task answerable for no requirement — and never
         // that the key was missing.
@@ -266,7 +267,7 @@ fn yaml_block(raw: &str) -> Option<String> {
 mod metadata;
 use metadata::{
     metadata_dependencies, metadata_string, metadata_strings, require_string_or_string_list,
-    require_string_or_string_list_or_null,
+    require_string_or_string_list_or_null, requirement_states,
 };
 
 /// Union `.archon/project.json` into one task — **environment keys only**.

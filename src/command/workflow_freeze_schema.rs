@@ -111,6 +111,8 @@ pub(super) const TASK: ObjectShape = ObjectShape {
         defaulted("source_sections", STRINGS),
         defaulted("deliverable_contracts", List(&Object(&DELIVERABLE))),
         optional("status", &Any),
+        optional("requirement_states", &Any),
+        optional("proven_done", &Any),
     ],
 };
 const COMMAND: ObjectShape = ObjectShape {

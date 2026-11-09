@@ -18,6 +18,7 @@ use super::*;
 
 fn task(id: &str, notes: &[&str]) -> crate::task_universe::WorkflowV2TaskUniverseTask {
     crate::task_universe::WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: id.to_string(),
         source_path: format!("/prd/TASK-{id}.md"),
         acceptance_criteria: vec![format!("{id} must be provably done")],

@@ -9,6 +9,7 @@ fn contract() -> (WorkflowV2TaskUniverse, Value) {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-001".to_string(),
             source_path: "tasks/TASK-TDL-001.md".to_string(),
             title: Some("Data Lake Gap Audit".to_string()),
@@ -177,6 +178,7 @@ fn refuted_noop_waits_for_dependencies_before_implementation() {
     universe.tasks.insert(
         0,
         WorkflowV2TaskUniverseTask {
+            requirement_states: Default::default(),
             canonical_task_id: "TASK-TDL-000".to_string(),
             source_path: "tasks/TASK-TDL-000.md".to_string(),
             acceptance_criteria: vec!["Prerequisite is complete.".to_string()],
@@ -285,6 +287,7 @@ fn transport_failure_does_not_reclassify_noop_as_implementation() {
 fn mixed_noop_failures_reclassify_only_the_task_with_a_semantic_gap() {
     let (mut universe, fixture) = contract();
     universe.tasks.push(WorkflowV2TaskUniverseTask {
+        requirement_states: Default::default(),
         canonical_task_id: "TASK-TDL-002".to_string(),
         source_path: "tasks/TASK-TDL-002.md".to_string(),
         artifact_requirements: vec!["project/artifacts/second.json".to_string()],
@@ -335,7 +338,12 @@ fn inventory_task_coverage_contradiction_skips_noop_proof() {
         "status": "partial"
     }]);
 
-    let (inventory, ids) = reclassify_inventory_contradicted_noops(&contract, &inventory);
+    let (inventory, ids) = reclassify_inventory_contradicted_noops(
+        &contract,
+        &inventory,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
     let items = support::array(inventory.get("items"));
 
     assert!(ids.contains("TASK-TDL-001"));
@@ -355,7 +363,12 @@ fn inventory_artifact_gap_contradiction_skips_noop_proof() {
         "description": "project/artifacts/gap-audit-current.json is incomplete"
     }]);
 
-    let (inventory, ids) = reclassify_inventory_contradicted_noops(&contract, &inventory);
+    let (inventory, ids) = reclassify_inventory_contradicted_noops(
+        &contract,
+        &inventory,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
     let items = support::array(inventory.get("items"));
 
     assert!(ids.contains("TASK-TDL-001"));
@@ -370,8 +383,12 @@ fn canary_inventory_family_gap_contradiction_skips_noop_proof() {
         target_repository_root: Some("/repo"),
     };
 
-    let (inventory, ids) =
-        reclassify_inventory_contradicted_noops(&contract, &fixture["inventory"]);
+    let (inventory, ids) = reclassify_inventory_contradicted_noops(
+        &contract,
+        &fixture["inventory"],
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
     let items = support::array(inventory.get("items"));
 
     assert!(ids.contains("TASK-TDL-001"));
@@ -391,9 +408,17 @@ fn unrelated_inventory_gap_does_not_demote_noop_claim() {
         "description": "An unrelated operator note is missing."
     }]);
 
-    let (inventory, ids) = reclassify_inventory_contradicted_noops(&contract, &inventory);
+    let (inventory, ids) = reclassify_inventory_contradicted_noops(
+        &contract,
+        &inventory,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
     let items = support::array(inventory.get("items"));
 
     assert!(ids.is_empty());
     assert_eq!(items[0]["work_type"], "verified_noop");
 }
+
+#[path = "noop_routing_requirement_tests.rs"]
+mod requirement_tests;
