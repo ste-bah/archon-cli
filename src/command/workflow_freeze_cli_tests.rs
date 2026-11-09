@@ -3,10 +3,18 @@
 
 use super::*;
 
+fn staged_production_source() -> String {
+    [
+        include_str!("workflow_freeze_cli.rs"),
+        include_str!("workflow_freeze_skeleton_cli.rs"),
+    ]
+    .map(|source| source.split("#[cfg(test)]").next().unwrap())
+    .join("\n")
+}
+
 #[test]
 fn staged_client_construction_and_both_freezes_report_operational_faults() {
-    let whole = include_str!("workflow_freeze_cli.rs");
-    let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
+    let source = staged_production_source();
     for command in ["freeze-acceptance", "freeze-skeleton"] {
         let reported = source
             .split("return report_operational_failure(")
@@ -19,8 +27,8 @@ fn staged_client_construction_and_both_freezes_report_operational_faults() {
     }
     assert_eq!(
         source.matches("return report_operational_failure(").count(),
-        3,
-        "client construction and both staged paths report operationally rather than exiting non-zero"
+        4,
+        "acceptance client/preparation and skeleton preparation/proof each report operational faults"
     );
 }
 
@@ -59,10 +67,7 @@ fn authored_incomplete_freeze_stages_the_script_operational_envelope() {
 
 #[test]
 fn both_json_staged_paths_refuse_the_candidate_instead_of_failing_the_run() {
-    let whole = include_str!("workflow_freeze_cli.rs");
-    // Only the production half counts: this module's own literals would
-    // otherwise satisfy the assertion about the code it is checking.
-    let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
+    let source = staged_production_source();
     for (command, gate) in [
         ("freeze-acceptance", "GateId::FreezeAcceptance"),
         ("freeze-skeleton", "GateId::FreezeSkeleton"),
@@ -79,10 +84,8 @@ fn both_json_staged_paths_refuse_the_candidate_instead_of_failing_the_run() {
             "{command} must refuse a malformed candidate through the findings channel"
         );
     }
-    // Acceptance refuses twice — once for a candidate that will not parse and
-    // once for one the freeze itself rejects — so the total is a floor, not
-    // a fixed number. What must hold is that no candidate problem leaves by
-    // any other exit.
+    // Both paths refuse unreadable candidates directly and typed preparation
+    // rejections through the defect adapter. Neither is an operational fault.
     assert!(
         source.matches("return refuse_candidate_artifact(").count() >= 2,
         "every JSON staged path routes candidate problems through the findings channel"
@@ -417,4 +420,68 @@ fn staged_skeleton_resume_saves_progress_with_the_catalog_budget() {
         String::from_utf8(output).unwrap(),
         format!("{}\n", resume.progress.line())
     );
+}
+
+#[test]
+fn authored_host_fields_accept_and_discard_null_and_arbitrary_values() {
+    use serde_json::json;
+    for echo in [
+        json!(null),
+        json!(false),
+        json!(17),
+        json!("echo"),
+        json!([null, {"arbitrary": true}]),
+        json!({"arbitrary": [0, false]}),
+    ] {
+        let value = json!({"schema_version":1,"acceptance_digest":"d", "tasks":[{
+            "task_id":"TASK-X-001","file_name":"TASK-X-001.md",
+            "status":echo,"requirement_states":echo,"proven_done":echo
+        }]});
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let envelope = root.path().join("gate-envelope.json");
+        let staged = StagedArgs {
+            staging_root: root.path(),
+            gate_envelope: &envelope,
+            call_id: "call",
+        };
+        assert!(
+            defects::refuse_element_shapes(
+                root.path(),
+                staged,
+                (
+                    "freeze-skeleton",
+                    crate::command::workflow_gate::GateId::FreezeSkeleton,
+                    "skeleton"
+                ),
+                &bytes,
+                &defects::TASK_SHAPE
+            )
+            .is_none()
+        );
+        let candidate = archon_workflow::task_skeleton::read_candidate(&bytes).unwrap();
+        let task = &candidate.tasks[0];
+        assert!(task.status.is_none());
+        assert!(task.requirement_states.is_empty());
+        assert!(task.proven_done.is_empty());
+    }
+}
+
+#[test]
+fn authored_host_completion_echoes_never_grant_completion() {
+    for status in ["done", "kept"] {
+        let value = serde_json::json!({"schema_version":1,"acceptance_digest":"d","tasks":[{
+            "task_id":"TASK-X-001","file_name":"TASK-X-001.md", "status":status,
+            "requirement_states":{"item":{"state":"done","reason":"authored"}},
+            "proven_done":[{"id":"item","kind":"breakage","check_id":"check",
+                "check_digest":"digest","base_commit":"base"}]
+        }]});
+        let candidate =
+            archon_workflow::task_skeleton::read_candidate(&serde_json::to_vec(&value).unwrap())
+                .unwrap();
+        let task = &candidate.tasks[0];
+        assert!(task.status.is_none());
+        assert!(task.requirement_states.is_empty());
+        assert!(task.proven_done.is_empty());
+    }
 }

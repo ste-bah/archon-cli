@@ -73,8 +73,30 @@ pub(super) fn task() -> Value {
         ordering_only: true,
     };
     serde_json::to_value(FrozenTask {
-        requirement_states: Default::default(),
-        proven_done: Default::default(),
+        requirement_states: [(
+            "item".into(),
+            archon_workflow::requirement_state::RequirementDecision {
+                state: archon_workflow::requirement_state::RequirementState::Done,
+                reason: "proved".into(),
+                notes: vec!["evidence".into()],
+            },
+        )]
+        .into(),
+        proven_done: vec![archon_workflow::requirement_state::DoneProof {
+            id: "item".into(),
+            kind: archon_workflow::requirement_state::DoneKind::Breakage,
+            check_id: "check".into(),
+            check_digest: "digest".into(),
+            base_commit: "base".into(),
+            mutant_id: Some("mutant".into()),
+            body_gut_mutant_id: Some("gut".into()),
+            patch_digest: Some("patch-digest".into()),
+            patch: Some("patch".into()),
+            output_tail: Some("output".into()),
+            output_digest: Some("output-digest".into()),
+            literals: vec!["literal".into()],
+            evidence_truncated: false,
+        }],
         status: Some("done".into()),
         task_id: "TASK-X-002".into(),
         file_name: "TASK-X-002.md".into(),
@@ -235,7 +257,10 @@ pub(super) fn positional_samples() -> Vec<(bool, Value)> {
         ["REQ-1", "REQ-2"],
         ["7", "7.1"],
         [positional_contract(), positional_contract()],
-        "done"
+        "done",
+        {"item": ["done", "proved", ["evidence"]]},
+        [["item", "breakage", "check", "digest", "base", "mutant", "gut",
+          "patch-digest", "patch", "output", "output-digest", ["literal"], false]]
     ]);
     let judgment = json!(["accepted", "none", "reason", "call", {"arbitrary":[0,null,false]}]);
     let entry = |check: Value| {

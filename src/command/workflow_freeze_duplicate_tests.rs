@@ -54,7 +54,8 @@ fn raw_outcome(bytes: &[u8], shape: &ElementShape) -> Result<(), String> {
             .to_string()
     };
     if matches!(shape, ElementShape::Tasks) {
-        serde_json::from_slice::<TaskSkeleton>(bytes)
+        let bytes = task_candidate_bytes(bytes);
+        serde_json::from_slice::<TaskSkeleton>(&bytes)
             .map(drop)
             .map_err(text)
     } else {

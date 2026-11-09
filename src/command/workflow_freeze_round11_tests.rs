@@ -24,10 +24,19 @@ fn entry() -> Value {
 fn legacy(entry: Value) -> Value {
     json!({"schema_version":1,"prd":{"path":"","digest":""},"gap_policy":{},"acceptance":[entry]})
 }
+fn task_candidate_bytes(bytes: &[u8]) -> Vec<u8> {
+    archon_workflow::task_skeleton::read_candidate(bytes)
+        .ok()
+        .and_then(|value| serde_json::to_vec(&value).ok())
+        .unwrap_or_else(|| bytes.to_vec())
+}
 fn accepts(value: &Value, shape: &ElementShape) -> bool {
     let bytes = serde_json::to_vec(value).unwrap();
     if matches!(shape, ElementShape::Tasks) {
-        serde_json::from_slice::<TaskSkeleton>(&bytes).is_ok()
+        // Match the production candidate reader and subsequent typed refusal.
+        let bytes = task_candidate_bytes(&bytes);
+        crate::command::workflow_freeze_candidate::candidate_refusal::<TaskSkeleton>(&bytes)
+            .is_none()
     } else {
         acceptance_candidate_for_validation(&bytes)
             .ok()
