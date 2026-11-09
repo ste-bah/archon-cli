@@ -87,14 +87,16 @@ async fn base_output_is_private_and_regular_copy_stays_warm() {
     let f = Fixture::new("test -f value && env");
     let p = f.probe(false);
     let base = Arc::new(f.copy());
-    let req = BreakageRequest {
+    let req = Anchor {
         contract: &f.contract,
         chain_digest: &f.lock.digest,
-        lock: &f.lock,
-        classification: &f.classes,
-        mutants: &f.mutants,
+        commit: &f.snapshot().commit,
+        snapshot: f.snapshot(),
+        pairs: Vec::new(),
+        mutants: f.mutants.mutants.clone(),
         max_runs: 10,
         min_deadline_secs: 1,
+        store_root: None,
     };
     let (outcome, output, _) = run::observe(&p, &req, &base, "check", &[], None).await;
     assert!(

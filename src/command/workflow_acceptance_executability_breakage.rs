@@ -4,8 +4,11 @@ use archon_workflow::baseline_results::{check_digest, results_digest};
 use archon_workflow::breakage_proof::{selection, *};
 use archon_workflow::task_set_contract::AcceptanceLock;
 use archon_workflow::v2::requirement_classes::RequirementClassification;
+#[path = "workflow_acceptance_executability_breakage_anchor.rs"]
+pub(crate) mod anchor;
 #[path = "workflow_acceptance_executability_breakage_decide.rs"]
 mod decide;
+use anchor::{Anchor, AnchoredPair};
 #[path = "workflow_acceptance_executability_breakage_group.rs"]
 mod group;
 #[path = "workflow_acceptance_executability_breakage_patch.rs"]
@@ -57,57 +60,6 @@ pub(super) fn breakage_refusal(
     }
     None
 }
-async fn prepare(probe: &HostProbe, work: &Path, commit: &str) -> Result<(), RunOutcome> {
-    let (parent, work, repository, commit) = (
-        probe.copy_parent.clone(),
-        work.to_path_buf(),
-        probe.repository.clone(),
-        commit.to_string(),
-    );
-    run::blocking(move || {
-        base_copy::baseline_available(&repository, &commit).map_err(patch::host)?;
-        std::fs::create_dir_all(&parent).map_err(|e| decide::unrun("host_io", &e.to_string()))?;
-        owner::write(&work).map_err(patch::host)?;
-        std::fs::create_dir_all(work.join("patches"))
-            .map_err(|e| decide::unrun("host_io", &e.to_string()))?;
-        std::fs::create_dir_all(work.join("build-output"))
-            .map_err(|e| decide::unrun("host_io", &e.to_string()))?;
-        let git = base_git::IsolatedGit::new(&work).map_err(patch::host)?;
-        let transport = work.join("base.git");
-        let format = base_copy::output(&repository, &["rev-parse", "--show-object-format"])
-            .map_err(patch::host)?;
-        let format = format!("--object-format={}", format.trim());
-        git.run(&[
-            "init".as_ref(),
-            "--bare".as_ref(),
-            "--quiet".as_ref(),
-            format.as_ref(),
-            transport.as_os_str(),
-        ])
-        .map_err(patch::host)?;
-        let top = base_copy::output(&repository, &["rev-parse", "--show-toplevel"])
-            .map_err(patch::host)?;
-        let result = git
-            .output(&[
-                "-C".as_ref(),
-                transport.as_os_str(),
-                "fetch".as_ref(),
-                "--no-tags".as_ref(),
-                "--depth=1".as_ref(),
-                top.trim().as_ref(),
-                commit.as_ref(),
-            ])
-            .map_err(patch::host)?;
-        if !result.status.success() {
-            return Err(decide::unrun(
-                "baseline_fetch_failed",
-                &String::from_utf8_lossy(&result.stderr),
-            ));
-        }
-        Ok(())
-    })
-    .await
-}
 pub(crate) async fn prove_breakage(probe: &HostProbe, req: BreakageRequest<'_>) -> BreakageReport {
     let mut proofs = BreakageProofs {
         schema: BREAKAGE_SCHEMA,
@@ -130,19 +82,33 @@ pub(crate) async fn prove_breakage(probe: &HostProbe, req: BreakageRequest<'_>) 
         refusals: Vec::new(),
         entries: Vec::new(),
     };
-    let (mutants, codes) = match selection::validate(req.mutants, req.lock, req.classification) {
+    let validated = if req.lock.baseline_commit.is_none() && req.mutants.schema == BREAKAGE_SCHEMA {
+        Err("mutant_commit_mismatch")
+    } else {
+        selection::validate(
+            req.mutants,
+            req.lock.baseline_commit.as_deref().unwrap_or_default(),
+            &req.classification
+                .entries
+                .iter()
+                .map(|e| (e.task_id.clone(), e.id.clone()))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let (mutants, codes) = match validated {
         Ok(v) => v,
         Err(e) => (Vec::new(), vec![e.into()]),
     };
     summary.refusals.extend(codes);
-    let mut groups: BTreeMap<String, Vec<SuppliedMutant>> = BTreeMap::new();
+    let mut pairs = Vec::new();
     for entry in &req.classification.entries {
         let checks = selection::passing_checks(entry, req.contract, req.lock);
         let countable = req
             .classification
             .base_snapshot
             .as_ref()
-            .is_some_and(|s| !selection::keys(entry, s, &probe.repository, false).is_empty());
+            .map(|s| selection::keys(entry, s, &probe.repository, false))
+            .unwrap_or_default();
         let supplied: Vec<_> = mutants
             .iter()
             .filter(|m| m.task_id == entry.task_id && m.requirement_id == entry.id)
@@ -150,24 +116,24 @@ pub(crate) async fn prove_breakage(probe: &HostProbe, req: BreakageRequest<'_>) 
             .collect();
         let state = if checks.is_empty() {
             ProofState::NoPassingCheck
-        } else if !countable {
+        } else if countable.is_empty() {
             ProofState::NoCountableDeliverable
         } else if supplied.is_empty() {
             ProofState::NoMutants
         } else {
-            for id in &checks {
-                groups
-                    .entry(id.clone())
-                    .or_default()
-                    .extend(supplied.clone());
-            }
             ProofState::NoViableMutant
         };
-        summary.entries.push(RequirementProof {
+        pairs.push(AnchoredPair {
+            countable,
+            shared: req
+                .classification
+                .base_snapshot
+                .as_ref()
+                .map(|s| selection::keys(entry, s, &probe.repository, true))
+                .unwrap_or_default(),
             task_id: entry.task_id.clone(),
             id: entry.id.clone(),
-            state,
-            counted_kills: Vec::new(),
+            state: (state != ProofState::NoViableMutant).then_some(state),
             checks,
         });
     }
@@ -176,12 +142,9 @@ pub(crate) async fn prove_breakage(probe: &HostProbe, req: BreakageRequest<'_>) 
     }
     let whole = summary.refusals.iter().any(|c| !c.starts_with("m-"));
     if whole {
-        for pair in &mut summary.entries {
-            if matches!(
-                pair.state,
-                ProofState::NoViableMutant | ProofState::NoMutants
-            ) {
-                pair.state = ProofState::HostUnrun;
+        for pair in &mut pairs {
+            if pair.state.is_none() || pair.state == Some(ProofState::NoMutants) {
+                pair.state = Some(ProofState::HostUnrun);
             }
         }
     }
@@ -199,102 +162,33 @@ pub(crate) async fn prove_breakage(probe: &HostProbe, req: BreakageRequest<'_>) 
     {
         summary.refusals.push("proofs_unreadable".into());
     }
-    let work = probe
-        .copy_parent
-        .join(format!("{COPY_PREFIX}breakage-{}", uuid::Uuid::new_v4()));
-    let parent = probe.copy_parent.clone();
-    match run::blocking(move || Ok(sweep(&parent))).await {
-        Ok(failures) => summary.refusals.extend(failures),
-        Err(e) => summary.refusals.push(format!("{e:?}")),
-    }
-    if !whole && !groups.is_empty() {
-        let prepared = prepare(probe, &work, &proofs.base_commit).await;
-        for (id, mut mutants) in groups {
-            mutants.sort_by_key(|m| (m.task_id.clone(), m.requirement_id.clone(), m.mutant_id()));
-            group::execute(
-                probe,
-                &req,
-                &id,
-                mutants,
-                &work,
-                root.as_deref(),
-                &prepared,
-                &mut proofs,
-                &mut summary,
-            )
-            .await;
-        }
-        let remove = work.clone();
-        if let Err(e) =
-            run::blocking(move || owner::remove(&remove).map_err(|e| decide::unrun("host_io", &e)))
-                .await
-        {
-            summary
-                .refusals
-                .push(format!("work_dir_not_removed: {} ({e:?})", work.display()));
-        }
-    }
-    for pair in &mut summary.entries {
-        if pair.state != ProofState::NoViableMutant {
-            continue;
-        }
-        let runs: Vec<_> = proofs
-            .runs
-            .values()
-            .filter(|r| r.task_id == pair.task_id && r.requirement_id == pair.id)
-            .collect();
-        pair.counted_kills = runs
-            .iter()
-            .filter(|r| r.counted)
-            .map(|r| r.mutant_id.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        pair.state = if runs
-            .iter()
-            .any(|r| r.counted && r.kind == MutantKind::Behaviour)
-        {
-            ProofState::BehaviourKill
-        } else if runs.iter().any(|r| r.counted) {
-            ProofState::BodyGutKillOnly
-        } else if runs
-            .iter()
-            .any(|r| matches!(r.outcome, RunOutcome::BudgetExhausted))
-        {
-            ProofState::BudgetExhausted
-        } else if runs.iter().any(|r| {
-            matches!(
-                r.outcome,
-                RunOutcome::Unrun { ref code, .. } if code != "control_mismatch" && code != "zero_work"
-            ) || matches!(r.outcome, RunOutcome::NoExitStatus)
-        }) || proofs.controls.values().any(|c| {
-            pair.checks.contains(&c.check_id)
-                && [&c.pre, c.post.as_ref().unwrap_or(&c.pre)]
-                    .into_iter()
-                    .any(|o| {
-                        matches!(o, RunOutcome::Unrun { code, .. } if code != "control_mismatch" && code != "zero_work")
-                            || matches!(o, RunOutcome::NoExitStatus)
-                    })
-        }) {
-            ProofState::HostUnrun
-        } else if pair.checks.iter().all(|c| {
-            !proofs
-                .controls
-                .values()
-                .any(|r| &r.check_id == c && r.stable())
-        }) {
-            ProofState::Unverified
-        } else if runs.iter().any(|r| {
-            matches!(r.outcome, RunOutcome::Survived { .. })
-                && !runs.iter().any(|other| {
-                    other.mutant_id == r.mutant_id
-                        && matches!(other.outcome, RunOutcome::Killed { .. })
-                })
-        }) {
-            ProofState::SurvivorsOnly
-        } else {
-            ProofState::NoViableMutant
+    if let Some(snapshot) = &req.classification.base_snapshot {
+        let anchor = Anchor {
+            contract: req.contract,
+            chain_digest: req.chain_digest,
+            commit: &snapshot.commit,
+            snapshot,
+            pairs,
+            mutants,
+            max_runs: req.max_runs,
+            min_deadline_secs: req.min_deadline_secs,
+            store_root: root.clone(),
         };
+        let prior = std::mem::take(&mut summary.refusals);
+        let report = if whole {
+            anchor::execute(probe, anchor, prior).await
+        } else {
+            anchor::prove_anchored(probe, anchor, prior).await
+        };
+        proofs.controls = report.controls;
+        proofs.runs = report.runs;
+        summary.entries = report.entries;
+        summary.refusals = report.refusals;
+        summary.runs_executed = report.runs_executed;
+        summary.runs_reused = report.runs_reused;
+    } else {
+        summary.entries = pairs.into_iter().map(AnchoredPair::proof).collect();
+        anchor::sweep_copies(probe, &mut summary.refusals).await;
     }
     proofs.summary = Some(summary);
     if let Some(path) = root

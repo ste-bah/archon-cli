@@ -11,13 +11,13 @@ use std::path::Path;
 
 pub fn validate(
     set: &MutantSet,
-    lock: &AcceptanceLock,
-    classes: &RequirementClassification,
+    commit: &str,
+    pairs: &[(String, String)],
 ) -> Result<(Vec<SuppliedMutant>, Vec<String>), &'static str> {
     if set.schema != BREAKAGE_SCHEMA {
         return Err("mutant_set_schema");
     }
-    if Some(&set.base_commit) != lock.baseline_commit.as_ref() {
+    if set.base_commit != commit {
         return Err("mutant_commit_mismatch");
     }
     let mut accepted = Vec::new();
@@ -27,7 +27,7 @@ pub fn validate(
     for m in &set.mutants {
         let pair = (&m.task_id, &m.requirement_id);
         let quota = quotas.entry((pair, m.kind)).or_insert(0);
-        let code = if !classes.entries.iter().any(|e| (&e.task_id, &e.id) == pair) {
+        let code = if !pairs.iter().any(|(task, id)| (task, id) == pair) {
             Some("mutant_unknown_pair")
         } else if m.patch.len() > 256 * 1024 {
             Some("patch_too_large")

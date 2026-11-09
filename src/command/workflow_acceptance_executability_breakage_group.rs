@@ -16,7 +16,7 @@ fn once(summary: &mut ProofSummary, code: &str) {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute(
     probe: &HostProbe,
-    req: &BreakageRequest<'_>,
+    req: &Anchor<'_>,
     id: &str,
     mutants: Vec<SuppliedMutant>,
     work: &Path,
@@ -99,14 +99,9 @@ pub(super) async fn execute(
     let mut poisoned = false;
     let mut tainted = false;
     let mut observed_control = false;
-    let snapshot = req
-        .classification
-        .base_snapshot
-        .as_ref()
-        .expect("validated snapshot");
     if uncached && req.max_runs.saturating_sub(summary.runs_executed) >= 2 {
         let materialised = match prepared {
-            Ok(()) => run::materialise(probe, snapshot, work).await,
+            Ok(()) => run::materialise(probe, req, work).await,
             Err(e) => Err(e.clone()),
         };
         match materialised {
@@ -166,18 +161,12 @@ pub(super) async fn execute(
                 }
             };
             let pair = req
-                .classification
-                .entries
+                .pairs
                 .iter()
                 .find(|e| e.task_id == item.mutant.task_id && e.id == item.mutant.requirement_id)
                 .expect("validated pair");
             let countable = touched.is_some_and(|paths| {
-                selection::attribution(
-                    &paths,
-                    &selection::keys(pair, snapshot, &probe.repository, false),
-                    &selection::keys(pair, snapshot, &probe.repository, true),
-                )
-                .is_none()
+                selection::attribution(&paths, &pair.countable, &pair.shared).is_none()
             });
             ranks.insert(item.key.clone(), !countable);
         }
@@ -245,7 +234,7 @@ pub(super) async fn execute(
             {
                 summary.refusals.push(decide::refusal(&e));
             }
-            match run::materialise(probe, snapshot, work).await {
+            match run::materialise(probe, req, work).await {
                 Ok(c) => {
                     let owned = c.clone();
                     match run::blocking(move || patch::inventory(owned.copy())).await {
@@ -392,8 +381,7 @@ pub(super) async fn execute(
             &control
         };
         let pair = req
-            .classification
-            .entries
+            .pairs
             .iter()
             .find(|e| e.task_id == record.task_id && e.id == record.requirement_id)
             .expect("validated pair");
@@ -405,11 +393,7 @@ pub(super) async fn execute(
                     NotCounted::ControlMismatch
                 })
             } else {
-                selection::attribution(
-                    &record.touched,
-                    &selection::keys(pair, snapshot, &probe.repository, false),
-                    &selection::keys(pair, snapshot, &probe.repository, true),
-                )
+                selection::attribution(&record.touched, &pair.countable, &pair.shared)
             };
             record.counted = record.not_counted.is_none();
         }
